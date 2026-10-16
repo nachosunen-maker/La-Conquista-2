@@ -1,0 +1,6 @@
+{
+  "name": "La Conquista - Estrategia Medieval",
+  "description": "Juego de estrategia medieval: gobierna tu reino, gestiona la población, entrena tropas, investiga tecnologías, negocia en el parlamento y conquista el mundo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

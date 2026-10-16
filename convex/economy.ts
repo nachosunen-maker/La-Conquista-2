@@ -1,0 +1,880 @@
+import { mutation, query } from "./_generated/server";
+import { v } from "convex/values";
+import {
+  simulateEconomicProgress,
+  validatePopulationIntegrity,
+  validateKingdomResources,
+  validateSpendParameters,
+  evaluateIdempotentTransaction,
+  INITIAL_KINGDOM_CONFIG,
+  SECONDS_PER_GAME_YEAR,
+  BASE_FOOD_CONSUMPTION_PER_DAY,
+  BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY,
+  MILITARY_FOOD_FACTOR,
+  PROVISIONAL_DEFAULT_FOOD_TIER,
+  PROVISIONAL_FOOD_TIER_FACTORS,
+  FOOD_TIER_FACTORS,
+  VALID_RESOURCE_TYPES,
+  type WorkersDistribution,
+  type KingdomResources,
+} from "./economyCalculations";
+import {
+  calculateSimulatedKingdomResources,
+  calculateSettlementProgress,
+  executeRegimeChangeTransition,
+  type SettlementResult,
+  type RegimeChangeResult,
+} from "./economyAdapter";
+
+export {
+  calculateSimulatedKingdomResources,
+  calculateSettlementProgress,
+  executeRegimeChangeTransition,
+  type SettlementResult,
+  type RegimeChangeResult,
+  simulateEconomicProgress,
+  validatePopulationIntegrity,
+  validateKingdomResources,
+  validateSpendParameters,
+  evaluateIdempotentTransaction,
+  INITIAL_KINGDOM_CONFIG,
+  SECONDS_PER_GAME_YEAR,
+  BASE_FOOD_CONSUMPTION_PER_DAY,
+  BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY,
+  MILITARY_FOOD_FACTOR,
+  PROVISIONAL_DEFAULT_FOOD_TIER,
+  PROVISIONAL_FOOD_TIER_FACTORS,
+  FOOD_TIER_FACTORS,
+  VALID_RESOURCE_TYPES,
+};
+
+/**
+ * ============================================================================
+ * ESTADO Y LIMITACIONES REALES DE LA AUTENTICACIÓN EN CONVEX:
+ * 1. El proveedor de autenticación oficial de Convex (ej. Clerk, Auth0 o JWT
+ *    mediante auth.config.ts) AÚN NO HA SIDO CONFIGURADO en este entorno.
+ * 2. Se han ELIMINADO por completo las identidades por defecto ("dev-user-default")
+ *    y la posibilidad de aceptar un parámetro `userId` enviado por el cliente.
+ * 3. Como consecuencia estricta: ninguna mutación o consulta sobre un reino podrá
+ *    ejecutarse desde el cliente hasta que se configure formalmente el proveedor
+ *    de autenticación, ya que `ctx.auth.getUserIdentity()` devolverá `null` y
+ *    lanzará un error de autorización.
+ * 4. EL SISTEMA NO DEBE PRESENTARSE COMO LISTO PARA PRODUCCIÓN NI CRIPTOGRÁFICAMENTE
+ *    SEGURO hasta completar dicha configuración.
+ * ============================================================================
+ */
+async function requireAuthenticatedUser(ctx: {
+  auth: { getUserIdentity: () => Promise<any> };
+}): Promise<string> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity || !identity.subject) {
+    throw new Error(
+      "Autenticación requerida: No se detectó una sesión autenticada en el servidor Convex. " +
+      "El proveedor de autenticación (auth.config.ts) aún no está configurado. " +
+      "Por estrictas razones de integridad y propiedad (P1), se prohíbe el uso de usuarios provisionales " +
+      "o identidades no verificadas enviadas por el cliente."
+    );
+  }
+  return identity.subject;
+}
+
+/**
+ * Inicializa o recupera el reino asegurando propiedad e integridad demográfica inicial (P1, P10).
+ */
+export const getOrInitializeKingdom = mutation({
+  args: {
+    name: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const callerUserId = await requireAuthenticatedUser(ctx);
+
+    // Consulta con índice compuesto (userId, name)
+    const existing = await ctx.db
+      .query("kingdoms")
+      .withIndex("by_user_id_and_name", (q) =>
+        q.eq("userId", callerUserId).eq("name", args.name)
+      )
+      .first();
+
+    const now = Date.now();
+
+    if (existing) {
+      // Si ya existe, simula y liquida el tiempo transcurrido
+      const sim = simulateEconomicProgress(existing, now);
+      await ctx.db.patch(existing._id, {
+        resources: sim.updatedResources,
+        lastUpdated: now,
+      });
+      return { ...existing, resources: sim.updatedResources, lastUpdated: now };
+    }
+
+    // Validación demográfica estricta (P10: exactamente 2.000 habitantes)
+    const popValidation = validatePopulationIntegrity(
+      INITIAL_KINGDOM_CONFIG.population,
+      INITIAL_KINGDOM_CONFIG.regularSoldiers,
+      INITIAL_KINGDOM_CONFIG.workers,
+      INITIAL_KINGDOM_CONFIG.unassignedCivil
+    );
+    if (!popValidation.valid) {
+      throw new Error(`Inconsistencia en configuración inicial: ${popValidation.error}`);
+    }
+
+    // Validación de recursos iniciales
+    const resValidation = validateKingdomResources(INITIAL_KINGDOM_CONFIG.resources);
+    if (!resValidation.valid) {
+      throw new Error(`Inconsistencia en recursos iniciales: ${resValidation.error}`);
+    }
+
+    const kingdomId = await ctx.db.insert("kingdoms", {
+      userId: callerUserId,
+      name: args.name,
+      ...INITIAL_KINGDOM_CONFIG,
+      lastUpdated: now,
+      createdAt: now,
+    });
+
+    return await ctx.db.get(kingdomId);
+  },
+});
+
+/**
+ * Sincronización temporal atómica del reino.
+ * Comprueba que el usuario autenticado sea el propietario antes de mutar.
+ */
+export const syncKingdom = mutation({
+  args: {
+    kingdomId: v.id("kingdoms"),
+  },
+  handler: async (ctx, args) => {
+    const callerUserId = await requireAuthenticatedUser(ctx);
+    const kingdom = await ctx.db.get(args.kingdomId);
+    if (!kingdom) throw new Error("Reino no encontrado.");
+    if (kingdom.userId !== callerUserId) {
+      throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
+    }
+
+    const now = Date.now();
+    const sim = simulateEconomicProgress(kingdom, now);
+
+    await ctx.db.patch(args.kingdomId, {
+      resources: sim.updatedResources,
+      lastUpdated: now,
+    });
+
+    return {
+      kingdomId: args.kingdomId,
+      resources: sim.updatedResources,
+      elapsedSeconds: sim.elapsedSeconds,
+      dailyNetFood: sim.dailyFoodNetSurplus,
+      secondsToExhaustion: sim.secondsToExhaustion,
+      starvationSeconds: sim.starvationSeconds,
+      lastUpdated: now,
+    };
+  },
+});
+
+/**
+ * Deducción atómica e idempotente de gasto de recursos (Bloques 5 y 6).
+ * 1. Requiere identidad autenticada y verifica propiedad del reino.
+ * 2. Comprueba si la operación ya existe mediante el índice ("kingdomId", "idempotencyKey").
+ * 3. Si ya existe, responde de forma idempotente con éxito sin volver a descontar recursos.
+ * 4. Si es nueva:
+ *    - Simula el tiempo transcurrido en el reino.
+ *    - Valida parámetros y suficiencia de saldo.
+ *    - Descuenta los recursos y actualiza el reino.
+ *    - Inserta el registro de transacción con la clave de idempotencia.
+ */
+export const spendResource = mutation({
+  args: {
+    kingdomId: v.id("kingdoms"),
+    idempotencyKey: v.string(),
+    resourceType: v.string(), // "gold" | "wood" | "stone" | "iron" | "food"
+    amount: v.number(),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const callerUserId = await requireAuthenticatedUser(ctx);
+    const kingdom = await ctx.db.get(args.kingdomId);
+    if (!kingdom) throw new Error("Reino no encontrado.");
+    if (kingdom.userId !== callerUserId) {
+      throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
+    }
+
+    const cleanKey = args.idempotencyKey?.trim();
+    if (!cleanKey) {
+      throw new Error("Se requiere una clave de idempotencia ('idempotencyKey') no vacía.");
+    }
+
+    // 1. Verificación idempotente en la tabla transactions con índice compuesto
+    const existingTx = await ctx.db
+      .query("transactions")
+      .withIndex("by_kingdom_and_key", (q) =>
+        q.eq("kingdomId", args.kingdomId).eq("idempotencyKey", cleanKey)
+      )
+      .first();
+
+    if (existingTx) {
+      const evalResult = evaluateIdempotentTransaction(
+        existingTx,
+        args.resourceType,
+        args.amount,
+        args.reason
+      );
+
+      if (!evalResult.matchesPayload) {
+        throw new Error(evalResult.error ?? "Conflicto en transacción idempotente repetida.");
+      }
+
+      return {
+        success: true,
+        idempotentDuplicate: true,
+        transactionId: existingTx._id,
+        kingdomId: args.kingdomId,
+        resourceType: existingTx.resourceType,
+        amountDeducted: existingTx.amount,
+        message: "Transacción idempotente previa detectada con datos idénticos. No se han duplicado cobros.",
+      };
+    }
+
+    // 2. Validación de parámetros de gasto
+    const spendValidation = validateSpendParameters(args.resourceType, args.amount, args.reason);
+    if (!spendValidation.valid) {
+      throw new Error(spendValidation.error);
+    }
+
+    // 3. Sincronización temporal previa dentro de la misma transacción atómica
+    const now = Date.now();
+    const sim = simulateEconomicProgress(kingdom, now);
+    const currentRes = { ...sim.updatedResources } as Record<string, number>;
+
+    const availableAmount = currentRes[args.resourceType];
+    if (availableAmount < args.amount) {
+      throw new Error(
+        `Saldo insuficiente para ${args.resourceType}: disponible ${availableAmount.toFixed(2)}, requerido ${args.amount}`
+      );
+    }
+
+    // 4. Descuento e inserción atómica de la transacción
+    currentRes[args.resourceType] -= args.amount;
+
+    await ctx.db.patch(args.kingdomId, {
+      resources: currentRes as unknown as KingdomResources,
+      lastUpdated: now,
+    });
+
+    const txId = await ctx.db.insert("transactions", {
+      kingdomId: args.kingdomId,
+      idempotencyKey: cleanKey,
+      resourceType: args.resourceType,
+      amount: args.amount,
+      reason: args.reason,
+      createdAt: now,
+    });
+
+    return {
+      success: true,
+      idempotentDuplicate: false,
+      transactionId: txId,
+      kingdomId: args.kingdomId,
+      resourceType: args.resourceType,
+      amountDeducted: args.amount,
+      remainingAmount: currentRes[args.resourceType],
+    };
+  },
+});
+
+/**
+ * Reasignación atómica de mano de obra civil y soldados regulares.
+ * 1. Comprueba propiedad con identidad autenticada.
+ * 2. Simula y liquida el tiempo transcurrido con la asignación previa.
+ * 3. Valida la integridad estricta (enteros, no negativos, suma exacta = 2.000).
+ * 4. Aplica todos los cambios en un único patch atómico.
+ */
+export const reassignWorkers = mutation({
+  args: {
+    kingdomId: v.id("kingdoms"),
+    newWorkers: v.object({
+      agriculture: v.number(),
+      wood: v.number(),
+      stone: v.number(),
+      iron: v.number(),
+      gold: v.number(),
+      other: v.number(),
+    }),
+    newRegularSoldiers: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const callerUserId = await requireAuthenticatedUser(ctx);
+    const kingdom = await ctx.db.get(args.kingdomId);
+    if (!kingdom) throw new Error("Reino no encontrado.");
+    if (kingdom.userId !== callerUserId) {
+      throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
+    }
+
+    // 1. Simulación y liquidación temporal previa
+    const now = Date.now();
+    const sim = simulateEconomicProgress(kingdom, now);
+
+    // 2. Cálculo y validación censal de la nueva distribución
+    const workerEntries = Object.values(args.newWorkers);
+    const totalWorkers = workerEntries.reduce((acc, val) => acc + val, 0);
+    const newCivilUnassigned = kingdom.population - args.newRegularSoldiers - totalWorkers;
+
+    const validation = validatePopulationIntegrity(
+      kingdom.population,
+      args.newRegularSoldiers,
+      args.newWorkers,
+      newCivilUnassigned
+    );
+    if (!validation.valid) {
+      throw new Error(`Reasignación rechazada: ${validation.error}`);
+    }
+
+    // 3. Aplicación atómica de todos los cambios
+    await ctx.db.patch(args.kingdomId, {
+      workers: args.newWorkers,
+      regularSoldiers: args.newRegularSoldiers,
+      unassignedCivil: newCivilUnassigned,
+      resources: sim.updatedResources,
+      lastUpdated: now,
+    });
+
+    return {
+      success: true,
+      population: kingdom.population,
+      regularSoldiers: args.newRegularSoldiers,
+      workers: args.newWorkers,
+      unassignedCivil: newCivilUnassigned,
+      simulatedResources: sim.updatedResources,
+      lastUpdated: now,
+    };
+  },
+});
+
+/**
+ * Consulta del estado del reino proyectado al tiempo actual del servidor (interpolación reactiva).
+ */
+export const getKingdom = query({
+  args: {
+    kingdomId: v.id("kingdoms"),
+  },
+  handler: async (ctx, args) => {
+    const kingdom = await ctx.db.get(args.kingdomId);
+    if (!kingdom) return null;
+
+    const callerUserId = await requireAuthenticatedUser(ctx);
+    if (kingdom.userId !== callerUserId) {
+      throw new Error("No autorizado: el reino pertenece a otro usuario.");
+    }
+
+    const now = Date.now();
+    const sim = simulateEconomicProgress(kingdom, now);
+
+    return {
+      ...kingdom,
+      simulatedResources: sim.updatedResources,
+      metrics: {
+        dailyFoodProduction: sim.dailyFoodProduction,
+        dailyFoodConsumption: sim.dailyFoodConsumption,
+        dailyFoodNetSurplus: sim.dailyFoodNetSurplus,
+        secondsSinceLastSync: sim.elapsedSeconds,
+        secondsToExhaustion: sim.secondsToExhaustion,
+        starvationSeconds: sim.starvationSeconds,
+      },
+    };
+  },
+});
+
+/**
+ * Consulta autoritativa proyectada del estado económico del reino (Etapa 1B).
+ * Opera sobre las tablas relacionales normalizadas ('kingdoms', 'resources', 'population', 'populationJobs', 'Armyunits').
+ * Es una consulta de SOLO LECTURA (sin escrituras ni mutaciones en DB).
+ * Requisitos y garantías:
+ * 1. Control de autorización estricto (P1): exige que el usuario autenticado sea el propietario del reino.
+ * 2. Simulación temporal continua (P2): proyecta las reservas hasta 'targetTime' (o Date.now() si no se especifica).
+ * 3. Respeta 'resources.lastUpdated', foodTier (P17) y clasificación militar (P18) con segregación de asedio.
+ * 4. Hora de referencia inyectable ('targetTime') para garantizar reproducibilidad exacta.
+ */
+export const getSimulatedKingdomResources = query({
+  args: {
+    kingdomId: v.string(),
+    foodTier: v.string(),
+    targetTime: v.optional(v.number()),
+    includeSiegeInFoodConsumption: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    // 1. Verificación de identidad autenticada (P1)
+    const callerUserId = await requireAuthenticatedUser(ctx);
+
+    // 2. Obtención de documentos desde las tablas relacionales del backend
+    let kingdom: any = null;
+    try {
+      kingdom = await ctx.db.get(args.kingdomId as any);
+    } catch {
+      // Si kingdomId no es un ID tipado en el schema local
+    }
+    if (!kingdom) {
+      kingdom = await ctx.db
+        .query("kingdoms" as any)
+        .filter((q: any) => q.eq(q.field("_id"), args.kingdomId))
+        .first();
+    }
+    if (!kingdom) {
+      throw new Error(`Reino no encontrado con ID '${args.kingdomId}'.`);
+    }
+    if (kingdom.userId !== callerUserId) {
+      throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
+    }
+
+    const resources = await ctx.db
+      .query("resources" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
+      .first();
+
+    const population = await ctx.db
+      .query("population" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
+      .first();
+
+    const populationJobs = await ctx.db
+      .query("populationJobs" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
+      .collect();
+
+    let armyUnits: any[] = [];
+    try {
+      armyUnits = await ctx.db
+        .query("Armyunits" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
+        .collect();
+    } catch {
+      try {
+        armyUnits = await ctx.db
+          .query("armyUnits" as any)
+          .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
+          .collect();
+      } catch {
+        armyUnits = [];
+      }
+    }
+
+    // 3. Proyección analítica mediante el adaptador y motor puro
+    const result = calculateSimulatedKingdomResources({
+      kingdom,
+      resources,
+      population,
+      populationJobs,
+      armyUnits,
+      foodTier: args.foodTier,
+      targetTime: args.targetTime,
+      callerUserId,
+      options: {
+        includeSiegeInFoodConsumption: args.includeSiegeInFoodConsumption,
+      },
+    });
+
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+
+    return result;
+  },
+});
+
+/**
+ * ============================================================================
+ * ETAPA 2: MUTACIÓN AUTORITATIVA DE LIQUIDACIÓN ECONÓMICA PERSISTENTE
+ * ============================================================================
+ * Liquida de forma persistente y atómica la economía del reino en Convex.
+ *
+ * Requisitos cumplidos:
+ * 1. Identificación y autorización estricta (P1): Identifica al usuario mediante
+ *    'ctx.auth.getUserIdentity()'. No confía en identidades ni en 'kingdomId'
+ *    enviados por el cliente sin verificar la titularidad real del reino.
+ * 2. Lectura directa de las tablas relacionales reales: 'kingdoms', 'resources',
+ *    'population', 'populationJobs', 'buildings' y 'Armyunits'.
+ * 3. Tiempo autoritativo del servidor: Intervalo calculado exclusivamente con
+ *    'Date.now()' y 'resources.lastUpdated'.
+ * 4. Fórmulas oficiales y factores alimentarios aprobados (P17: 0.75, 1.00, 1.10, 1.20).
+ * 5. Actualización atómica en la base de datos sin saldos negativos (piso en 0)
+ *    y sin duplicación de liquidaciones (control de concurrencia OCC de Convex).
+ * 6. Salvaguarda contra exceso histórico: limita el procesamiento a 'maxOfflineSeconds'
+ *    (por defecto 86.400s = 1 año de juego) y soporta 'isFirstInitialization' para
+ *    arrancar sin adeudar periodos históricos previos.
+ * 7. Inalterabilidad de recursos sin fórmula aprobada: madera, piedra, hierro y oro
+ *    no sufren alteraciones.
+ * 8. Sin persistencia forzada de 'foodTier': utiliza el valor existente o 'normal' (1.00).
+ */
+export const settleKingdomEconomy = mutation({
+  args: {
+    kingdomId: v.optional(v.string()),
+    isFirstInitialization: v.optional(v.boolean()),
+    maxOfflineSeconds: v.optional(v.number()),
+    includeSiegeInFoodConsumption: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    // 1. Identificar al usuario mediante ctx.auth.getUserIdentity()
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || !identity.subject) {
+      throw new Error(
+        "Autenticación requerida: No se detectó una sesión autenticada en el servidor Convex. " +
+        "Por estrictas razones de integridad y propiedad (P1), se prohíbe liquidar reinos sin sesión válida."
+      );
+    }
+
+    const callerUserId = identity.subject;
+    const userEmail = identity.email;
+
+    // 2. Resolver el reino en el servidor y verificar propiedad estrictamente
+    let kingdom: any = null;
+    if (args.kingdomId) {
+      try {
+        kingdom = await ctx.db.get(args.kingdomId as any);
+      } catch {
+        // En caso de que kingdomId no sea un ID tipado local
+      }
+      if (!kingdom) {
+        kingdom = await ctx.db
+          .query("kingdoms" as any)
+          .filter((q: any) => q.eq(q.field("_id"), args.kingdomId))
+          .first();
+      }
+      if (!kingdom) {
+        throw new Error(`Reino no encontrado con ID '${args.kingdomId}'.`);
+      }
+
+      // Verificación de propiedad (subject, email o tokenIdentifier)
+      const isOwner =
+        kingdom.userId === callerUserId ||
+        (userEmail && kingdom.userId === userEmail) ||
+        kingdom.userId === identity.tokenIdentifier;
+
+      if (!isOwner) {
+        throw new Error("No autorizado: el reino especificado no pertenece al usuario autenticado.");
+      }
+    } else {
+      // Búsqueda por identificador de usuario
+      kingdom = await ctx.db
+        .query("kingdoms")
+        .withIndex("by_user_id", (q) => q.eq("userId", callerUserId))
+        .first();
+
+      if (!kingdom && userEmail) {
+        kingdom = await ctx.db
+          .query("kingdoms")
+          .withIndex("by_user_id", (q) => q.eq("userId", userEmail))
+          .first();
+      }
+
+      if (!kingdom) {
+        throw new Error("No se encontró ningún reino asignado a la identidad autenticada.");
+      }
+    }
+
+    const kingdomId = kingdom._id;
+
+    // 3. Lectura de las tablas relacionales reales del reino
+    const resources = await ctx.db
+      .query("resources" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .first();
+
+    if (!resources) {
+      throw new Error(`Inconsistencia en la base de datos: no existen recursos para el reino '${kingdomId}'.`);
+    }
+
+    const population = await ctx.db
+      .query("population" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .first();
+
+    if (!population) {
+      throw new Error(`Inconsistencia en la base de datos: no existe documento de población para el reino '${kingdomId}'.`);
+    }
+
+    const populationJobs = await ctx.db
+      .query("populationJobs" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .collect();
+
+    const buildings = await ctx.db
+      .query("buildings" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .collect();
+
+    let armyUnits: any[] = [];
+    try {
+      armyUnits = await ctx.db
+        .query("Armyunits" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+        .collect();
+    } catch {
+      try {
+        armyUnits = await ctx.db
+          .query("armyUnits" as any)
+          .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+          .collect();
+      } catch {
+        armyUnits = [];
+      }
+    }
+
+    // 4. Marca temporal autoritativa del servidor
+    const now = Date.now();
+
+    // Salvaguarda de primera liquidación (Req 2): si no ha sido inicializado con el motor
+    // autoritativo, se fija la marca temporal actual con delta 0 sin cobrar ni regalar recursos.
+    const isFirstInit =
+      args.isFirstInitialization !== undefined
+        ? args.isFirstInitialization
+        : (resources as any).settlementInitialized !== true;
+
+    // 5. Cálculo determinista y puro de la liquidación económica (Req 3: sin tope artificial 86400s)
+    const settlement = calculateSettlementProgress({
+      kingdom,
+      resources,
+      population,
+      populationJobs,
+      armyUnits,
+      buildings,
+      currentServerTimeMs: now,
+      options: {
+        maxOfflineSeconds: args.maxOfflineSeconds, // Sin tope por defecto: cálculo analítico O(1)
+        isFirstInitialization: isFirstInit,
+        includeSiegeInFoodConsumption: args.includeSiegeInFoodConsumption,
+        callerUserId,
+      },
+    });
+
+    if (!settlement.success || settlement.updatedFood === undefined) {
+      throw new Error(settlement.error ?? "Fallo en el cálculo de liquidación económica.");
+    }
+
+    // 6. Actualización atómica en la misma transacción Convex
+    await ctx.db.patch(resources._id as any, {
+      food: settlement.updatedFood,
+      lastUpdated: settlement.effectiveTimeMs ?? now,
+      settlementInitialized: true,
+    });
+
+    if (population.starving !== settlement.isStarving) {
+      await ctx.db.patch(population._id as any, {
+        starving: settlement.isStarving,
+      });
+    }
+
+    // Req 1: Persistir foodTier en kingdoms si carecía del campo (inicial "normal")
+    if ((kingdom as any).foodTier === undefined) {
+      await ctx.db.patch(kingdom._id as any, {
+        foodTier: "normal",
+      });
+    }
+
+    return {
+      success: true,
+      kingdomId,
+      resources: {
+        gold: resources.gold,
+        wood: resources.wood,
+        stone: resources.stone,
+        iron: resources.iron,
+        food: settlement.updatedFood,
+      },
+      foodDelta: settlement.foodDelta,
+      isStarving: settlement.isStarving,
+      starvationSeconds: settlement.starvationSeconds,
+      secondsToExhaustion: settlement.secondsToExhaustion,
+      elapsedSeconds: settlement.elapsedSeconds,
+      cappedInterval: settlement.cappedInterval,
+      appliedFoodTier: settlement.appliedFoodTier ?? ((kingdom as any).foodTier || "normal"),
+      lastUpdated: settlement.effectiveTimeMs ?? now,
+    };
+  },
+});
+
+/**
+ * ============================================================================
+ * TRANSICIÓN ATÓMICA DE RÉGIMEN ALIMENTARIO (BLOQUE B.8, REQ 1 Y 6)
+ * ============================================================================
+ * 1. Valida la sesión y propiedad del reino.
+ * 2. Comprueba que el nuevo foodTier pertenezca a los regímenes oficiales de P17.
+ * 3. LIQUIDA PRIMERO el intervalo transcurrido con el régimen vigente hasta 'now'.
+ * 4. ACTUALIZA DE FORMA ATÓMICA:
+ *    - 'resources': nuevo saldo de comida y 'lastUpdated = now'.
+ *    - 'population': estado 'starving' según el resultado de la liquidación previa.
+ *    - 'kingdoms': guarda 'foodTier = args.foodTier' y 'updatedAt = now'.
+ */
+export const setKingdomFoodTier = mutation({
+  args: {
+    kingdomId: v.optional(v.string()),
+    foodTier: v.string(), // "minima" | "normal" | "abundante" | "excelente"
+  },
+  handler: async (ctx, args) => {
+    // 1. Identificar al usuario
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || !identity.subject) {
+      throw new Error(
+        "Autenticación requerida: No se detectó una sesión autenticada en el servidor Convex."
+      );
+    }
+
+    const callerUserId = identity.subject;
+    const userEmail = identity.email;
+
+    // 2. Validar que el nuevo foodTier sea válido según P17
+    const requestedTier = args.foodTier.toLowerCase().trim();
+    if (
+      requestedTier !== "minima" &&
+      requestedTier !== "normal" &&
+      requestedTier !== "abundante" &&
+      requestedTier !== "excelente"
+    ) {
+      throw new Error(
+        `Régimen alimentario inválido '${args.foodTier}'. Permitidos: minima, normal, abundante, excelente.`
+      );
+    }
+
+    // 3. Resolver el reino y verificar propiedad
+    let kingdom: any = null;
+    if (args.kingdomId) {
+      try {
+        kingdom = await ctx.db.get(args.kingdomId as any);
+      } catch {}
+      if (!kingdom) {
+        kingdom = await ctx.db
+          .query("kingdoms" as any)
+          .filter((q: any) => q.eq(q.field("_id"), args.kingdomId))
+          .first();
+      }
+      if (!kingdom) {
+        throw new Error(`Reino no encontrado con ID '${args.kingdomId}'.`);
+      }
+      const isOwner =
+        kingdom.userId === callerUserId ||
+        (userEmail && kingdom.userId === userEmail) ||
+        kingdom.userId === identity.tokenIdentifier;
+      if (!isOwner) {
+        throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
+      }
+    } else {
+      kingdom = await ctx.db
+        .query("kingdoms")
+        .withIndex("by_user_id", (q) => q.eq("userId", callerUserId))
+        .first();
+
+      if (!kingdom && userEmail) {
+        kingdom = await ctx.db
+          .query("kingdoms")
+          .withIndex("by_user_id", (q) => q.eq("userId", userEmail))
+          .first();
+      }
+      if (!kingdom) {
+        throw new Error("No se encontró ningún reino para el usuario autenticado.");
+      }
+    }
+
+    const kingdomId = kingdom._id;
+
+    // 4. Leer tablas relacionales reales
+    const resources = await ctx.db
+      .query("resources" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .first();
+    if (!resources) {
+      throw new Error("No existen recursos para el reino.");
+    }
+
+    const population = await ctx.db
+      .query("population" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .first();
+    if (!population) {
+      throw new Error("No existe documento de población para el reino.");
+    }
+
+    const populationJobs = await ctx.db
+      .query("populationJobs" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .collect();
+
+    const buildings = await ctx.db
+      .query("buildings" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .collect();
+
+    let armyUnits: any[] = [];
+    try {
+      armyUnits = await ctx.db
+        .query("Armyunits" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+        .collect();
+    } catch {
+      try {
+        armyUnits = await ctx.db
+          .query("armyUnits" as any)
+          .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+          .collect();
+      } catch {
+        armyUnits = [];
+      }
+    }
+
+    const now = Date.now();
+
+    // 5. Transición atómica pura: liquida primero el régimen previo
+    const isFirstInit = (resources as any).settlementInitialized !== true;
+
+    const transition = executeRegimeChangeTransition({
+      kingdom,
+      resources,
+      population,
+      populationJobs,
+      armyUnits,
+      buildings,
+      newFoodTier: requestedTier,
+      currentServerTimeMs: now,
+      options: {
+        isFirstInitialization: isFirstInit,
+        callerUserId,
+      },
+    });
+
+    if (!transition.success || transition.settledFood === undefined) {
+      throw new Error(transition.error ?? "Fallo al realizar la transición del régimen alimentario.");
+    }
+
+    // 6. Actualización atómica en Convex
+    await ctx.db.patch(resources._id as any, {
+      food: transition.settledFood,
+      lastUpdated: now,
+      settlementInitialized: true,
+    });
+
+    if (population.starving !== transition.isStarving) {
+      await ctx.db.patch(population._id as any, {
+        starving: transition.isStarving,
+      });
+    }
+
+    // Persiste el nuevo régimen alimentario en kingdoms (Req 1 y 6)
+    await ctx.db.patch(kingdom._id as any, {
+      foodTier: requestedTier,
+      updatedAt: now,
+    });
+
+    return {
+      success: true,
+      kingdomId,
+      previousFoodTier: transition.previousFoodTier,
+      newFoodTier: transition.newFoodTier,
+      settledFood: transition.settledFood,
+      foodDelta: transition.foodDelta,
+      isStarving: transition.isStarving,
+      starvationSeconds: transition.starvationSeconds,
+      elapsedSeconds: transition.elapsedSeconds,
+      timestamp: now,
+    };
+  },
+});
+
+

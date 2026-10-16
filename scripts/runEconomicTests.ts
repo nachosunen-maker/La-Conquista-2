@@ -1,0 +1,41 @@
+import { runEconomicValidationTests, type TestResult } from "../convex/economyPureTests";
+
+console.log("================================================================================");
+console.log("LA CONQUISTA — BATERÍA DE PRUEBAS MATEMÁTICAS Y DE REGLAS ECONÓMICAS");
+console.log("================================================================================\n");
+
+const startTime = Date.now();
+const results: TestResult[] = runEconomicValidationTests();
+const durationMs = Date.now() - startTime;
+
+let passedCount = 0;
+let failedCount = 0;
+
+for (let i = 0; i < results.length; i++) {
+  const result = results[i];
+  const statusLabel = result.passed ? "\x1b[32m[APROBADO]\x1b[0m" : "\x1b[31m[FALLIDO]\x1b[0m";
+  if (result.passed) {
+    passedCount++;
+  } else {
+    failedCount++;
+  }
+  console.log(`${statusLabel} (${result.category})`);
+  console.log(`  Prueba:  ${result.test}`);
+  console.log(`  Detalle: ${result.details}\n`);
+}
+
+console.log("--------------------------------------------------------------------------------");
+console.log(`RESUMEN FINAL:`);
+console.log(`  Total de pruebas:     ${results.length}`);
+console.log(`  Pruebas superadas:    ${passedCount}`);
+console.log(`  Pruebas fallidas:     ${failedCount}`);
+console.log(`  Tiempo de ejecución:  ${durationMs} ms`);
+console.log("--------------------------------------------------------------------------------");
+
+if (failedCount === 0) {
+  console.log("\x1b[32m  TODAS LAS PRUEBAS MATEMÁTICAS Y DE INTEGRIDAD HAN SIDO SUPERADAS.\x1b[0m");
+  process.exit(0);
+} else {
+  console.log("\x1b[31m  SE HAN DETECTADO FALLOS EN LA BATERÍA DE PRUEBAS.\x1b[0m");
+  process.exit(1);
+}
