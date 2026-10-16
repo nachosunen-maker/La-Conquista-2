@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { isKingdomOwner } from "./kingdomAccess";
 import {
   simulateEconomicProgress,
   validatePopulationIntegrity,
@@ -78,6 +79,56 @@ async function requireAuthenticatedUser(ctx: {
   return identity.subject;
 }
 
+function isWorkersDistribution(value: unknown): value is WorkersDistribution {
+  if (!value || typeof value !== "object") return false;
+  const workers = value as Record<keyof WorkersDistribution, unknown>;
+  return (["agriculture", "wood", "stone", "iron", "gold", "other"] as const).every(
+    (job) => Number.isInteger(workers[job]) && (workers[job] as number) >= 0
+  );
+}
+
+function requireLegacyEconomyState(kingdom: {
+  population?: number;
+  regularSoldiers?: number;
+  workers?: WorkersDistribution;
+  unassignedCivil?: number;
+  resources?: KingdomResources;
+  foodTier?: string;
+  lastUpdated?: number;
+}) {
+  const { population, regularSoldiers, workers, unassignedCivil, resources, lastUpdated } = kingdom;
+  if (
+    !Number.isInteger(population) || population! < 0 ||
+    !Number.isInteger(regularSoldiers) || regularSoldiers! < 0 ||
+    !isWorkersDistribution(workers) ||
+    !Number.isInteger(unassignedCivil) || unassignedCivil! < 0 ||
+    typeof lastUpdated !== "number" || !Number.isFinite(lastUpdated) || lastUpdated <= 0
+  ) {
+    throw new Error("El reino no contiene un estado económico agregado completo para esta operación.");
+  }
+
+  const populationValidation = validatePopulationIntegrity(
+    population!, regularSoldiers!, workers, unassignedCivil!
+  );
+  if (!populationValidation.valid) {
+    throw new Error(`Estado económico agregado incoherente: ${populationValidation.error}`);
+  }
+  if (!resources || !validateKingdomResources(resources).valid) {
+    throw new Error("El reino no contiene saldos agregados válidos para esta operación.");
+  }
+
+  return {
+    ...kingdom,
+    population: population!,
+    regularSoldiers: regularSoldiers!,
+    workers,
+    unassignedCivil: unassignedCivil!,
+    resources,
+    foodTier: kingdom.foodTier ?? "normal",
+    lastUpdated,
+  };
+}
+
 /**
  * Inicializa o recupera el reino asegurando propiedad e integridad demográfica inicial (P1, P10).
  */
@@ -100,7 +151,8 @@ export const getOrInitializeKingdom = mutation({
 
     if (existing) {
       // Si ya existe, simula y liquida el tiempo transcurrido
-      const sim = simulateEconomicProgress(existing, now);
+      const state = requireLegacyEconomyState(existing);
+      const sim = simulateEconomicProgress(state, now);
       await ctx.db.patch(existing._id, {
         resources: sim.updatedResources,
         lastUpdated: now,
@@ -154,7 +206,8 @@ export const syncKingdom = mutation({
     }
 
     const now = Date.now();
-    const sim = simulateEconomicProgress(kingdom, now);
+    const state = requireLegacyEconomyState(kingdom);
+    const sim = simulateEconomicProgress(state, now);
 
     await ctx.db.patch(args.kingdomId, {
       resources: sim.updatedResources,
@@ -244,7 +297,8 @@ export const spendResource = mutation({
 
     // 3. Sincronización temporal previa dentro de la misma transacción atómica
     const now = Date.now();
-    const sim = simulateEconomicProgress(kingdom, now);
+    const state = requireLegacyEconomyState(kingdom);
+    const sim = simulateEconomicProgress(state, now);
     const currentRes = { ...sim.updatedResources } as Record<string, number>;
 
     const availableAmount = currentRes[args.resourceType];
@@ -313,15 +367,16 @@ export const reassignWorkers = mutation({
 
     // 1. Simulación y liquidación temporal previa
     const now = Date.now();
-    const sim = simulateEconomicProgress(kingdom, now);
+    const state = requireLegacyEconomyState(kingdom);
+    const sim = simulateEconomicProgress(state, now);
 
     // 2. Cálculo y validación censal de la nueva distribución
     const workerEntries = Object.values(args.newWorkers);
     const totalWorkers = workerEntries.reduce((acc, val) => acc + val, 0);
-    const newCivilUnassigned = kingdom.population - args.newRegularSoldiers - totalWorkers;
+    const newCivilUnassigned = state.population - args.newRegularSoldiers - totalWorkers;
 
     const validation = validatePopulationIntegrity(
-      kingdom.population,
+      state.population,
       args.newRegularSoldiers,
       args.newWorkers,
       newCivilUnassigned
@@ -341,7 +396,7 @@ export const reassignWorkers = mutation({
 
     return {
       success: true,
-      population: kingdom.population,
+      population: state.population,
       regularSoldiers: args.newRegularSoldiers,
       workers: args.newWorkers,
       unassignedCivil: newCivilUnassigned,
@@ -368,7 +423,8 @@ export const getKingdom = query({
     }
 
     const now = Date.now();
-    const sim = simulateEconomicProgress(kingdom, now);
+    const state = requireLegacyEconomyState(kingdom);
+    const sim = simulateEconomicProgress(state, now);
 
     return {
       ...kingdom,
@@ -498,9 +554,8 @@ export const getSimulatedKingdomResources = query({
  * 4. Fórmulas oficiales y factores alimentarios aprobados (P17: 0.75, 1.00, 1.10, 1.20).
  * 5. Actualización atómica en la base de datos sin saldos negativos (piso en 0)
  *    y sin duplicación de liquidaciones (control de concurrencia OCC de Convex).
- * 6. Salvaguarda contra exceso histórico: limita el procesamiento a 'maxOfflineSeconds'
- *    (por defecto 86.400s = 1 año de juego) y soporta 'isFirstInitialization' para
- *    arrancar sin adeudar periodos históricos previos.
+ * 6. Procesa el intervalo offline completo; la primera liquidación se ancla al reloj del servidor
+ *    cuando los recursos todavía no tienen settlementInitialized.
  * 7. Inalterabilidad de recursos sin fórmula aprobada: madera, piedra, hierro y oro
  *    no sufren alteraciones.
  * 8. Sin persistencia forzada de 'foodTier': utiliza el valor existente o 'normal' (1.00).
@@ -508,8 +563,6 @@ export const getSimulatedKingdomResources = query({
 export const settleKingdomEconomy = mutation({
   args: {
     kingdomId: v.optional(v.string()),
-    isFirstInitialization: v.optional(v.boolean()),
-    maxOfflineSeconds: v.optional(v.number()),
     includeSiegeInFoodConsumption: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -523,8 +576,6 @@ export const settleKingdomEconomy = mutation({
     }
 
     const callerUserId = identity.subject;
-    const userEmail = identity.email;
-
     // 2. Resolver el reino en el servidor y verificar propiedad estrictamente
     let kingdom: any = null;
     if (args.kingdomId) {
@@ -543,13 +594,7 @@ export const settleKingdomEconomy = mutation({
         throw new Error(`Reino no encontrado con ID '${args.kingdomId}'.`);
       }
 
-      // Verificación de propiedad (subject, email o tokenIdentifier)
-      const isOwner =
-        kingdom.userId === callerUserId ||
-        (userEmail && kingdom.userId === userEmail) ||
-        kingdom.userId === identity.tokenIdentifier;
-
-      if (!isOwner) {
+      if (!isKingdomOwner(kingdom.userId, callerUserId)) {
         throw new Error("No autorizado: el reino especificado no pertenece al usuario autenticado.");
       }
     } else {
@@ -558,13 +603,6 @@ export const settleKingdomEconomy = mutation({
         .query("kingdoms")
         .withIndex("by_user_id", (q) => q.eq("userId", callerUserId))
         .first();
-
-      if (!kingdom && userEmail) {
-        kingdom = await ctx.db
-          .query("kingdoms")
-          .withIndex("by_user_id", (q) => q.eq("userId", userEmail))
-          .first();
-      }
 
       if (!kingdom) {
         throw new Error("No se encontró ningún reino asignado a la identidad autenticada.");
@@ -622,12 +660,8 @@ export const settleKingdomEconomy = mutation({
     // 4. Marca temporal autoritativa del servidor
     const now = Date.now();
 
-    // Salvaguarda de primera liquidación (Req 2): si no ha sido inicializado con el motor
-    // autoritativo, se fija la marca temporal actual con delta 0 sin cobrar ni regalar recursos.
-    const isFirstInit =
-      args.isFirstInitialization !== undefined
-        ? args.isFirstInitialization
-        : (resources as any).settlementInitialized !== true;
+    // El cliente no decide si se omite un intervalo histórico.
+    const isFirstInit = (resources as any).settlementInitialized !== true;
 
     // 5. Cálculo determinista y puro de la liquidación económica (Req 3: sin tope artificial 86400s)
     const settlement = calculateSettlementProgress({
@@ -639,7 +673,6 @@ export const settleKingdomEconomy = mutation({
       buildings,
       currentServerTimeMs: now,
       options: {
-        maxOfflineSeconds: args.maxOfflineSeconds, // Sin tope por defecto: cálculo analítico O(1)
         isFirstInitialization: isFirstInit,
         includeSiegeInFoodConsumption: args.includeSiegeInFoodConsumption,
         callerUserId,
@@ -719,8 +752,6 @@ export const setKingdomFoodTier = mutation({
     }
 
     const callerUserId = identity.subject;
-    const userEmail = identity.email;
-
     // 2. Validar que el nuevo foodTier sea válido según P17
     const requestedTier = args.foodTier.toLowerCase().trim();
     if (
@@ -749,11 +780,7 @@ export const setKingdomFoodTier = mutation({
       if (!kingdom) {
         throw new Error(`Reino no encontrado con ID '${args.kingdomId}'.`);
       }
-      const isOwner =
-        kingdom.userId === callerUserId ||
-        (userEmail && kingdom.userId === userEmail) ||
-        kingdom.userId === identity.tokenIdentifier;
-      if (!isOwner) {
+      if (!isKingdomOwner(kingdom.userId, callerUserId)) {
         throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
       }
     } else {
@@ -762,12 +789,6 @@ export const setKingdomFoodTier = mutation({
         .withIndex("by_user_id", (q) => q.eq("userId", callerUserId))
         .first();
 
-      if (!kingdom && userEmail) {
-        kingdom = await ctx.db
-          .query("kingdoms")
-          .withIndex("by_user_id", (q) => q.eq("userId", userEmail))
-          .first();
-      }
       if (!kingdom) {
         throw new Error("No se encontró ningún reino para el usuario autenticado.");
       }

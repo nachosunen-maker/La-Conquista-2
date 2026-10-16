@@ -42,6 +42,7 @@ import {
   type ValidFoodTier 
 } from '../convex/economyAdapter';
 import { useAuth } from './auth';
+import { DEMO_USER_ID } from '../convex/kingdomAccess';
 
 /* ==========================================================================
    TIPOS DEL BACKEND CONVEX Y ESTADO DEL REINO
@@ -107,7 +108,6 @@ interface KingdomFullResponse {
   technologies?: unknown[];
 }
 
-const DEMO_USER_ID = 'guest_g9ai8cz';
 const getKingdomFullQuery = makeFunctionReference<"query">("kingdoms:getKingdomFull");
 const getViewerQuery = makeFunctionReference<"query">("kingdoms:getViewer");
 const settleKingdomEconomyMutation = makeFunctionReference<"mutation">("economy:settleKingdomEconomy");
@@ -350,8 +350,8 @@ function formatSecondsDuration(seconds: number): string {
 function KingdomOverviewContent() {
   const { isAuthenticated, user } = useAuth();
   const [viewDemoKingdom, setViewDemoKingdom] = useState<boolean>(false);
-  const activeUserId = isAuthenticated && !viewDemoKingdom ? (user?.sub ?? DEMO_USER_ID) : DEMO_USER_ID;
-  const isViewingDemo = activeUserId === DEMO_USER_ID;
+  const isViewingDemo = !isAuthenticated || viewDemoKingdom;
+  const activeUserId = isViewingDemo ? DEMO_USER_ID : (user?.sub ?? '');
 
   const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -392,8 +392,14 @@ function KingdomOverviewContent() {
     isAuthenticated &&
     viewer &&
     kingdom &&
-    (kingdom.userId === viewer.subject || (viewer.email && kingdom.userId === viewer.email) || kingdom.userId === user?.sub)
+    viewer.subject === kingdom.userId &&
+    viewer.subject === user?.sub
   );
+  const activeOwnerKey = isOwner && viewer && kingdom
+    ? `${viewer.subject}:${kingdom._id}`
+    : null;
+  const activeOwnerKeyRef = useRef<string | null>(activeOwnerKey);
+  activeOwnerKeyRef.current = activeOwnerKey;
 
   // Estados del selector persistente de régimen (P17 / B.8)
   const [tierSaveStatus, setTierSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -411,9 +417,27 @@ function KingdomOverviewContent() {
     elapsedSeconds: number;
     appliedTier: string;
   } | null>(null);
+  const tierSavedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Control para liquidación automática en primer arranque sin bucles infinitos
   const hasAutoSettledRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setTierSaveStatus('idle');
+    setTierErrorMessage(null);
+    setSettleError(null);
+    setIsSettling(false);
+    setLastSettlement(null);
+    hasAutoSettledRef.current = {};
+    if (tierSavedTimeoutRef.current) clearTimeout(tierSavedTimeoutRef.current);
+    tierSavedTimeoutRef.current = null;
+  }, [activeOwnerKey]);
+
+  useEffect(() => () => {
+    if (tierSavedTimeoutRef.current) clearTimeout(tierSavedTimeoutRef.current);
+    if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
+  }, []);
 
   // Carga inicial del régimen desde kingdom.foodTier con fallback a 'normal' (Requisito 2 / Test 35)
   useEffect(() => {
@@ -440,6 +464,7 @@ function KingdomOverviewContent() {
     }
 
     // Reino propio verificado: mutación persistente en Convex
+    const requestOwnerKey = activeOwnerKey;
     setTierSaveStatus('saving');
     setTierErrorMessage(null);
     try {
@@ -447,17 +472,20 @@ function KingdomOverviewContent() {
         kingdomId: kingdom!._id,
         foodTier: tier,
       });
+      if (activeOwnerKeyRef.current !== requestOwnerKey) return;
       if (res && res.success) {
         setSelectedFoodTier(tier);
         setTierSaveStatus('saved');
         setTierErrorMessage(null);
-        setTimeout(() => {
+        if (tierSavedTimeoutRef.current) clearTimeout(tierSavedTimeoutRef.current);
+        tierSavedTimeoutRef.current = setTimeout(() => {
           setTierSaveStatus(prev => prev === 'saved' ? 'idle' : prev);
         }, 3000);
       } else {
         throw new Error((res as any)?.error || 'Fallo de respuesta al actualizar régimen.');
       }
     } catch (err: any) {
+      if (activeOwnerKeyRef.current !== requestOwnerKey) return;
       // Revertir selector al valor oficial confirmado por el servidor (Test 37)
       const confirmedTier = (kingdom?.foodTier as ValidFoodTier) || 'normal';
       setSelectedFoodTier(confirmedTier);
@@ -470,6 +498,7 @@ function KingdomOverviewContent() {
   const handleSettleEconomy = async () => {
     if (!isOwner || !kingdom) return;
 
+    const requestOwnerKey = activeOwnerKey;
     setIsSettling(true);
     setSettleError(null);
     try {
@@ -477,6 +506,7 @@ function KingdomOverviewContent() {
         kingdomId: kingdom._id,
         includeSiegeInFoodConsumption: includeSiegeInFood,
       });
+      if (activeOwnerKeyRef.current !== requestOwnerKey) return;
       if (res && res.success) {
         setLastSettlement({
           timestamp: res.lastUpdated || Date.now(),
@@ -492,19 +522,21 @@ function KingdomOverviewContent() {
         throw new Error((res as any)?.error || 'Error al procesar la liquidación en Convex.');
       }
     } catch (err: any) {
+      if (activeOwnerKeyRef.current !== requestOwnerKey) return;
       setSettleError(err?.message || 'Error de conexión o autorización al liquidar economía.');
     } finally {
-      setIsSettling(false);
+      if (activeOwnerKeyRef.current === requestOwnerKey) setIsSettling(false);
     }
   };
 
   // Liquidación automática al cargar el reino propio por primera vez en la sesión (sin bucles)
   useEffect(() => {
-    if (isOwner && kingdom && !hasAutoSettledRef.current[kingdom._id]) {
-      hasAutoSettledRef.current[kingdom._id] = true;
+    const settlementKey = activeOwnerKey;
+    if (isOwner && kingdom && settlementKey && !hasAutoSettledRef.current[settlementKey]) {
+      hasAutoSettledRef.current[settlementKey] = true;
       handleSettleEconomy();
     }
-  }, [isOwner, kingdom?._id]);
+  }, [isOwner, kingdom?._id, viewer?.subject]);
 
   // Cálculo de la proyección analítica continua mediante el adaptador puro (solo lectura)
   // Se invoca incondicionalmente para cumplir con las Reglas de Hooks de React
@@ -537,7 +569,8 @@ function KingdomOverviewContent() {
 
   const handleManualRefresh = () => {
     setIsRefreshing(true);
-    setTimeout(() => {
+    if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
+    refreshTimeoutRef.current = setTimeout(() => {
       setIsRefreshing(false);
     }, 600);
   };

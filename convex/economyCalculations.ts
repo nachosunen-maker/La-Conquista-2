@@ -297,7 +297,7 @@ export function simulateEconomicProgress(
   const militaryDailyConsumption = regularSoldiers * (BASE_FOOD_CONSUMPTION_PER_DAY * MILITARY_FOOD_FACTOR) * tierFactor;
   const totalDailyConsumption = civilDailyConsumption + militaryDailyConsumption;
 
-  // 5. Producción agrícola diaria
+  // La tasa aprobada se aplica por agricultor; falta un campo y fórmula aprobados para limitarla por edificios.
   const totalDailyFoodProduction = kingdom.workers.agriculture * BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY;
 
   // 6. Superávit / déficit neto diario

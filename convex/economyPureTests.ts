@@ -20,6 +20,7 @@ import {
   calculateSettlementProgress,
   executeRegimeChangeTransition,
 } from "./economyAdapter";
+import { DEMO_USER_ID, isKingdomOwner, resolveKingdomQueryUserId } from "./kingdomAccess";
 
 /**
  * ============================================================================
@@ -41,6 +42,33 @@ export interface TestResult {
  */
 export function runEconomicValidationTests(): TestResult[] {
   const results: TestResult[] = [];
+
+  // --------------------------------------------------------------------------
+  // ACCESO A REINOS: el subject del servidor autoriza; el cliente solo selecciona demo.
+  // --------------------------------------------------------------------------
+  {
+    let rejectedForeignUser = false;
+    try {
+      resolveKingdomQueryUserId("otro_usuario", "usuario_autenticado");
+    } catch {
+      rejectedForeignUser = true;
+    }
+
+    const passed =
+      resolveKingdomQueryUserId(DEMO_USER_ID) === DEMO_USER_ID &&
+      resolveKingdomQueryUserId("usuario_autenticado", "usuario_autenticado") === "usuario_autenticado" &&
+      rejectedForeignUser &&
+      isKingdomOwner("usuario_autenticado", "usuario_autenticado") &&
+      !isKingdomOwner(DEMO_USER_ID, "usuario_autenticado") &&
+      !isKingdomOwner("usuario_autenticado", undefined);
+
+    results.push({
+      category: "INTEGRACIÓN CONVEX",
+      test: "Acceso: el subject autenticado autoriza el reino propio y la demo permanece solo de lectura",
+      passed,
+      details: `Demo pública de lectura: ${resolveKingdomQueryUserId(DEMO_USER_ID) === DEMO_USER_ID}; usuario ajeno rechazado: ${rejectedForeignUser}; demo modificable: ${isKingdomOwner(DEMO_USER_ID, "usuario_autenticado")}`,
+    });
+  }
 
   // --------------------------------------------------------------------------
   // TEST 1: Proporcionalidad temporal continua en segundos (P2)
@@ -969,6 +997,55 @@ export function runEconomicValidationTests(): TestResult[] {
   }
 
   // --------------------------------------------------------------------------
+  // TEST 21B: balances diarios con los cuatro regímenes oficiales
+  // --------------------------------------------------------------------------
+  {
+    const expectedFoodBalances: Record<string, number> = {
+      minima: 5446.25,
+      normal: 5195,
+      abundante: 5094.5,
+      excelente: 4994,
+    };
+    const foodBalances = Object.entries(expectedFoodBalances).map(([foodTier]) => {
+      const settlement = calculateSettlementProgress({
+        kingdom: { _id: "test_tier_balance", userId: "test_owner", foodTier },
+        resources: {
+          kingdomId: "test_tier_balance",
+          gold: 0,
+          wood: 0,
+          stone: 0,
+          iron: 0,
+          food: 5000,
+          lastUpdated: 1_000_000,
+          settlementInitialized: true,
+        },
+        population: { kingdomId: "test_tier_balance", total: 1000, available: 0 },
+        populationJobs: [
+          { kingdomId: "test_tier_balance", jobType: "agriculture", assignedCount: 600 },
+          { kingdomId: "test_tier_balance", jobType: "mining", assignedCount: 400 },
+        ],
+        armyUnits: [{ kingdomId: "test_tier_balance", unitType: "infanteria", count: 100 }],
+        currentServerTimeMs: 1_000_000 + SECONDS_PER_GAME_YEAR * 1000,
+      });
+      return { foodTier, expected: expectedFoodBalances[foodTier], settlement };
+    });
+    const passed = foodBalances.every(({ expected, settlement }) =>
+      settlement.success &&
+      settlement.elapsedSeconds === SECONDS_PER_GAME_YEAR &&
+      Math.abs((settlement.updatedFood ?? 0) - expected) < 1e-4
+    );
+
+    results.push({
+      category: "MATEMÁTICA / LÓGICA PURA",
+      test: "21B. Saldos de un día real en los cuatro regímenes, incluyendo el 5% de tropas reales",
+      passed,
+      details: foodBalances.map(({ foodTier, expected, settlement }) =>
+        `${foodTier}: ${settlement.updatedFood} (esperado ${expected})`
+      ).join("; "),
+    });
+  }
+
+  // --------------------------------------------------------------------------
   // TEST 22: Constantes oficiales aprobadas de regímenes alimentarios
   // --------------------------------------------------------------------------
   {
@@ -1047,7 +1124,7 @@ export function runEconomicValidationTests(): TestResult[] {
   }
 
   // --------------------------------------------------------------------------
-  // TEST 24: Salvaguarda de exceso histórico (capping temporal a maxOfflineSeconds)
+  // TEST 24: Periodo offline completo sin límite temporal impuesto
   // --------------------------------------------------------------------------
   {
     const kingdom = {
@@ -1070,8 +1147,8 @@ export function runEconomicValidationTests(): TestResult[] {
       available: 0,
     };
     const populationJobs = [
-      { kingdomId: "test_k_24", jobType: "agriculture", assignedCount: 500 },
-      { kingdomId: "test_k_24", jobType: "mining", assignedCount: 500 },
+      { kingdomId: "test_k_24", jobType: "agriculture", assignedCount: 600 },
+      { kingdomId: "test_k_24", jobType: "mining", assignedCount: 400 },
     ];
 
     // Supongamos que han pasado 10 días reales (864.000 segundos)
@@ -1082,22 +1159,20 @@ export function runEconomicValidationTests(): TestResult[] {
       population,
       populationJobs,
       currentServerTimeMs: now,
-      options: {
-        maxOfflineSeconds: 86400, // Límite de salvaguarda de 1 día real (1 año de juego)
-      },
     });
 
     const passed =
       res.success === true &&
-      res.cappedInterval === true &&
-      res.elapsedSeconds === 86400 &&
-      res.effectiveTimeMs === 1_000_000 + 86400 * 1000;
+      res.cappedInterval === false &&
+      res.elapsedSeconds === 864000 &&
+      res.effectiveTimeMs === now &&
+      Math.abs((res.updatedFood ?? 0) - 5000) < 1e-4;
 
     results.push({
       category: "LÍMITES Y ROBUSTEZ",
-      test: "24. Liquidación persistente: salvaguarda de exceso histórico (capping temporal offline a maxOfflineSeconds)",
+      test: "24. Liquidación persistente: procesa diez días offline completos sin tope artificial",
       passed,
-      details: `Intervalo acotado: ${res.cappedInterval}; Segundos procesados: ${res.elapsedSeconds} (esperado 86400 de los 864.000 brutos); Timestamp efectivo: ${res.effectiveTimeMs}`,
+      details: `Intervalo limitado: ${res.cappedInterval}; Segundos: ${res.elapsedSeconds} (esperados 864000); Comida final: ${res.updatedFood} (esperada 5000); Timestamp efectivo: ${res.effectiveTimeMs}`,
     });
   }
 
@@ -1751,11 +1826,9 @@ export function runEconomicValidationTests(): TestResult[] {
     // Firma de getViewer: {}
     const validViewerArgs: Record<string, never> = {};
 
-    // Firma de settleKingdomEconomy: { kingdomId?: string, isFirstInitialization?: boolean, maxOfflineSeconds?: number, includeSiegeInFoodConsumption?: boolean }
+    // Firma de settleKingdomEconomy: { kingdomId?: string, includeSiegeInFoodConsumption?: boolean }
     const validSettleArgs: {
       kingdomId?: string;
-      isFirstInitialization?: boolean;
-      maxOfflineSeconds?: number;
       includeSiegeInFoodConsumption?: boolean;
     } = { kingdomId: "jx74jatng7da8c0bjehpb6c7258fnzqc" };
 

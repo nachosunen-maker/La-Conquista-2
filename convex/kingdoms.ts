@@ -1,5 +1,6 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { resolveKingdomQueryUserId } from "./kingdomAccess";
 
 /**
  * Consulta autoritativa completa del reino para el cliente (Resumen del Reino)
@@ -9,10 +10,13 @@ export const getKingdomFull = query({
     userId: v.string(),
   },
   handler: async (ctx, args) => {
-    // 1. Obtener documento del reino por userId
+    const identity = await ctx.auth.getUserIdentity();
+    const userId = resolveKingdomQueryUserId(args.userId, identity?.subject);
+
+    // Iberia es la única consulta pública; los reinos de usuario usan el subject validado.
     const kingdom = await ctx.db
       .query("kingdoms")
-      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
+      .withIndex("by_user_id", (q) => q.eq("userId", userId))
       .first();
 
     if (!kingdom) {

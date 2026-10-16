@@ -476,11 +476,9 @@ export function calculateSimulatedKingdomResources(
  *    Madera, piedra, hierro y oro quedan rigurosamente inalterados.
  * 4. P17: Respeta foodTier oficial ("normal" por defecto si no está persistido).
  * 5. P18: Respeta factor militar de 1,05 en soldados regulares vivos.
- * 6. Salvaguarda de exceso histórico (Bloque 2, Req 6):
- *    - Si isFirstInitialization: sincroniza lastUpdated al tiempo actual con delta 0.
- *    - Si rawElapsedSeconds > maxOfflineSeconds: aplica tope de intervalo (cappedInterval = true)
- *      para evitar que una liquidación procese meses o años históricos acumulados de golpe.
- * 7. No negatividad estricta: piso en 0 para comida, activando isStarving si se agota.
+ * 6. Primera inicialización: sincroniza lastUpdated al tiempo actual con delta 0.
+ * 7. Procesa el intervalo completo desde lastUpdated, también tras periodos largos offline.
+ * 8. No negatividad estricta: piso en 0 para comida, activando isStarving si se agota.
  */
 export interface RemoteBuildingDoc {
   _id?: string;
@@ -497,8 +495,7 @@ export interface SettlementInput {
   armyUnits?: RemoteArmyUnitDoc[] | null | undefined;
   buildings?: unknown[] | null | undefined;
   currentServerTimeMs: number;
-    options?: {
-    maxOfflineSeconds?: number;
+  options?: {
     isFirstInitialization?: boolean;
     includeSiegeInFoodConsumption?: boolean;
     callerUserId?: string;
@@ -609,21 +606,10 @@ export function calculateSettlementProgress(input: SettlementInput): SettlementR
     };
   }
 
-  // 6. Cálculo del intervalo temporal (Req 3: sin límite artificial por defecto, cálculo analítico O(1))
-  const rawElapsedMs = Math.max(0, now - kingdomState.lastUpdated);
-  const rawElapsedSeconds = rawElapsedMs / 1000;
-
-  let elapsedSeconds = rawElapsedSeconds;
-  let cappedInterval = false;
-  let effectiveTimeMs = now;
-
-  // Solo se aplica límite si el llamador proporciona explícitamente maxOfflineSeconds
-  const maxOffline = input.options?.maxOfflineSeconds;
-  if (typeof maxOffline === "number" && maxOffline > 0 && rawElapsedSeconds > maxOffline) {
-    elapsedSeconds = maxOffline;
-    cappedInterval = true;
-    effectiveTimeMs = kingdomState.lastUpdated + (elapsedSeconds * 1000);
-  }
+  // 6. Procesa todo el tiempo transcurrido; el cálculo es analítico y no iterativo.
+  const effectiveTimeMs = now;
+  const elapsedSeconds = Math.max(0, now - kingdomState.lastUpdated) / 1000;
+  const cappedInterval = false;
 
   // 7. Simulación autoritativa del progreso (analítica exacta sin bucles)
   const sim = simulateEconomicProgress(kingdomState, effectiveTimeMs);
