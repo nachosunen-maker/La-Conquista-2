@@ -23,6 +23,9 @@ import {
   calculateSimulatedKingdomResources,
   calculateSettlementProgress,
   executeRegimeChangeTransition,
+  calculatePopulationJobReassignment,
+  adaptRemoteDocumentsToEconomicState,
+  classifyArmyUnits,
   type SettlementResult,
   type RegimeChangeResult,
 } from "./economyAdapter";
@@ -87,59 +90,165 @@ function isWorkersDistribution(value: unknown): value is WorkersDistribution {
   );
 }
 
-function requireLegacyEconomyState(kingdom: {
-  population?: number;
-  regularSoldiers?: number;
-  workers?: WorkersDistribution;
-  unassignedCivil?: number;
-  resources?: KingdomResources;
-  foodTier?: string;
-  lastUpdated?: number;
-}) {
-  const { population, regularSoldiers, workers, unassignedCivil, resources, lastUpdated } = kingdom;
-  if (
-    !Number.isInteger(population) || population! < 0 ||
-    !Number.isInteger(regularSoldiers) || regularSoldiers! < 0 ||
-    !isWorkersDistribution(workers) ||
-    !Number.isInteger(unassignedCivil) || unassignedCivil! < 0 ||
-    typeof lastUpdated !== "number" || !Number.isFinite(lastUpdated) || lastUpdated <= 0
-  ) {
-    throw new Error("El reino no contiene un estado económico agregado completo para esta operación.");
+async function readRelationalKingdomState(ctx: any, kingdomId: any) {
+  const resources = await ctx.db
+    .query("resources" as any)
+    .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+    .first();
+  const population = await ctx.db
+    .query("population" as any)
+    .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+    .first();
+  const populationJobs = await ctx.db
+    .query("populationJobs" as any)
+    .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+    .collect();
+  const buildings = await ctx.db
+    .query("buildings" as any)
+    .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+    .collect();
+
+  let armyUnits: any[];
+  try {
+    armyUnits = await ctx.db
+      .query("Armyunits" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .collect();
+  } catch {
+    armyUnits = await ctx.db
+      .query("armyUnits" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .collect();
   }
 
+  return { resources, population, populationJobs, armyUnits, buildings };
+}
+
+export async function settleRelationalKingdomEconomy(
+  ctx: any,
+  kingdom: any,
+  callerUserId: string,
+  now: number
+) {
+  const state = await readRelationalKingdomState(ctx, kingdom._id);
+  if (!state.resources) throw new Error("No existen recursos para el reino.");
+  if (!state.population) throw new Error("No existe documento de población para el reino.");
+
+  const settlement = calculateSettlementProgress({
+    kingdom,
+    ...state,
+    currentServerTimeMs: now,
+    options: {
+      isFirstInitialization: state.resources.settlementInitialized !== true,
+      callerUserId,
+    },
+  });
+  if (!settlement.success || settlement.updatedFood === undefined) {
+    throw new Error(settlement.error ?? "Fallo al liquidar la economía relacional.");
+  }
+
+  await ctx.db.patch(state.resources._id, {
+    food: settlement.updatedFood,
+    lastUpdated: settlement.effectiveTimeMs ?? now,
+    settlementInitialized: true,
+  });
+  if (state.population.starving !== settlement.isStarving) {
+    await ctx.db.patch(state.population._id, { starving: settlement.isStarving });
+  }
+
+  return { ...state, settlement };
+}
+
+async function migrateAggregateKingdomState(ctx: any, kingdom: any) {
+  const existing = await readRelationalKingdomState(ctx, kingdom._id);
+  if (existing.resources || existing.population || existing.populationJobs.length > 0 || existing.armyUnits.length > 0) {
+    throw new Error("El reino tiene datos relacionales parciales; requiere conciliación antes de migrar el agregado.");
+  }
+  const { population, regularSoldiers, workers, unassignedCivil, resources } = kingdom;
+  if (
+    !Number.isInteger(population) || population < 0 ||
+    !Number.isInteger(regularSoldiers) || regularSoldiers < 0 ||
+    !isWorkersDistribution(workers) ||
+    !Number.isInteger(unassignedCivil) || unassignedCivil < 0 ||
+    !resources || !validateKingdomResources(resources).valid
+  ) {
+    throw new Error("El reino heredado no contiene un estado demográfico y económico completo para migrar.");
+  }
   const populationValidation = validatePopulationIntegrity(
-    population!, regularSoldiers!, workers, unassignedCivil!
+    population,
+    regularSoldiers,
+    workers,
+    unassignedCivil
   );
   if (!populationValidation.valid) {
-    throw new Error(`Estado económico agregado incoherente: ${populationValidation.error}`);
-  }
-  if (!resources || !validateKingdomResources(resources).valid) {
-    throw new Error("El reino no contiene saldos agregados válidos para esta operación.");
+    throw new Error(`Estado agregado incoherente: ${populationValidation.error}`);
   }
 
+  const now = Date.now();
+  const legacyResources = resources as KingdomResources;
+  await ctx.db.insert("resources" as any, {
+    kingdomId: kingdom._id,
+    ...legacyResources,
+    lastUpdated: typeof kingdom.lastUpdated === "number" ? kingdom.lastUpdated : now,
+    settlementInitialized: typeof kingdom.lastUpdated === "number",
+  });
+  await ctx.db.insert("population" as any, {
+    kingdomId: kingdom._id,
+    total: population,
+    available: unassignedCivil,
+  });
+  for (const [jobType, assignedCount] of Object.entries(workers)) {
+    if (assignedCount > 0) {
+      await ctx.db.insert("populationJobs" as any, {
+        kingdomId: kingdom._id,
+        jobType,
+        assignedCount,
+      });
+    }
+  }
+  if (regularSoldiers > 0) {
+    await ctx.db.insert("Armyunits" as any, {
+      kingdomId: kingdom._id,
+      unitType: "regular",
+      count: regularSoldiers,
+    });
+  }
+}
+
+function legacyKingdomResponse(kingdom: any, state: any) {
+  const adapted = adaptRemoteDocumentsToEconomicState({
+    kingdom,
+    resources: state.resources,
+    population: state.population,
+    populationJobs: state.populationJobs,
+    armyUnits: state.armyUnits,
+    buildings: state.buildings,
+    foodTier: kingdom.foodTier ?? "normal",
+  });
+  if (!adapted.success || !adapted.kingdomState) {
+    throw new Error(adapted.error ?? "No se pudo adaptar el estado relacional del reino.");
+  }
   return {
     ...kingdom,
-    population: population!,
-    regularSoldiers: regularSoldiers!,
-    workers,
-    unassignedCivil: unassignedCivil!,
-    resources,
-    foodTier: kingdom.foodTier ?? "normal",
-    lastUpdated,
+    population: adapted.kingdomState.population,
+    regularSoldiers: adapted.kingdomState.regularSoldiers,
+    workers: adapted.kingdomState.workers,
+    unassignedCivil: adapted.kingdomState.unassignedCivil,
+    resources: {
+      ...adapted.kingdomState.resources,
+      food: state.settlement?.updatedFood ?? state.resources.food,
+    },
+    lastUpdated: state.settlement?.effectiveTimeMs ?? state.resources.lastUpdated,
   };
 }
 
-/**
- * Inicializa o recupera el reino asegurando propiedad e integridad demográfica inicial (P1, P10).
- */
+/** Inicializa o recupera el reino, migrando su estado heredado al modelo relacional. */
 export const getOrInitializeKingdom = mutation({
   args: {
     name: v.string(),
   },
   handler: async (ctx, args) => {
     const callerUserId = await requireAuthenticatedUser(ctx);
-
-    // Consulta con índice compuesto (userId, name)
     const existing = await ctx.db
       .query("kingdoms")
       .withIndex("by_user_id_and_name", (q) =>
@@ -147,52 +256,52 @@ export const getOrInitializeKingdom = mutation({
       )
       .first();
 
-    const now = Date.now();
-
     if (existing) {
-      // Si ya existe, simula y liquida el tiempo transcurrido
-      const state = requireLegacyEconomyState(existing);
-      const sim = simulateEconomicProgress(state, now);
-      await ctx.db.patch(existing._id, {
-        resources: sim.updatedResources,
-        lastUpdated: now,
-      });
-      return { ...existing, resources: sim.updatedResources, lastUpdated: now };
+      const current = await readRelationalKingdomState(ctx, existing._id);
+      if (!current.resources && !current.population && current.populationJobs.length === 0 && current.armyUnits.length === 0) {
+        await migrateAggregateKingdomState(ctx, existing);
+      }
+      const now = Date.now();
+      const settled = await settleRelationalKingdomEconomy(ctx, existing, callerUserId, now);
+      return legacyKingdomResponse(existing, settled);
     }
 
-    // Validación demográfica estricta (P10: exactamente 2.000 habitantes)
-    const popValidation = validatePopulationIntegrity(
-      INITIAL_KINGDOM_CONFIG.population,
-      INITIAL_KINGDOM_CONFIG.regularSoldiers,
-      INITIAL_KINGDOM_CONFIG.workers,
-      INITIAL_KINGDOM_CONFIG.unassignedCivil
-    );
-    if (!popValidation.valid) {
-      throw new Error(`Inconsistencia en configuración inicial: ${popValidation.error}`);
-    }
-
-    // Validación de recursos iniciales
-    const resValidation = validateKingdomResources(INITIAL_KINGDOM_CONFIG.resources);
-    if (!resValidation.valid) {
-      throw new Error(`Inconsistencia en recursos iniciales: ${resValidation.error}`);
-    }
-
+    const now = Date.now();
     const kingdomId = await ctx.db.insert("kingdoms", {
       userId: callerUserId,
       name: args.name,
-      ...INITIAL_KINGDOM_CONFIG,
-      lastUpdated: now,
+      foodTier: INITIAL_KINGDOM_CONFIG.foodTier,
       createdAt: now,
+      updatedAt: now,
     });
-
-    return await ctx.db.get(kingdomId);
+    await ctx.db.insert("resources" as any, {
+      kingdomId,
+      ...INITIAL_KINGDOM_CONFIG.resources,
+      lastUpdated: now,
+      settlementInitialized: false,
+    });
+    await ctx.db.insert("population" as any, {
+      kingdomId,
+      total: INITIAL_KINGDOM_CONFIG.population,
+      available: INITIAL_KINGDOM_CONFIG.unassignedCivil,
+    });
+    for (const [jobType, assignedCount] of Object.entries(INITIAL_KINGDOM_CONFIG.workers)) {
+      if (assignedCount > 0) {
+        await ctx.db.insert("populationJobs" as any, {
+          kingdomId,
+          jobType,
+          assignedCount,
+        });
+      }
+    }
+    const kingdom = await ctx.db.get(kingdomId);
+    if (!kingdom) throw new Error("No se pudo recuperar el reino recién inicializado.");
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
+    return legacyKingdomResponse(kingdom, settled);
   },
 });
 
-/**
- * Sincronización temporal atómica del reino.
- * Comprueba que el usuario autenticado sea el propietario antes de mutar.
- */
+/** Sincroniza recursos persistidos aplicando la liquidación relacional autoritativa. */
 export const syncKingdom = mutation({
   args: {
     kingdomId: v.id("kingdoms"),
@@ -201,42 +310,29 @@ export const syncKingdom = mutation({
     const callerUserId = await requireAuthenticatedUser(ctx);
     const kingdom = await ctx.db.get(args.kingdomId);
     if (!kingdom) throw new Error("Reino no encontrado.");
-    if (kingdom.userId !== callerUserId) {
+    if (!isKingdomOwner(kingdom.userId, callerUserId)) {
       throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
     }
-
-    const now = Date.now();
-    const state = requireLegacyEconomyState(kingdom);
-    const sim = simulateEconomicProgress(state, now);
-
-    await ctx.db.patch(args.kingdomId, {
-      resources: sim.updatedResources,
-      lastUpdated: now,
-    });
-
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, Date.now());
     return {
       kingdomId: args.kingdomId,
-      resources: sim.updatedResources,
-      elapsedSeconds: sim.elapsedSeconds,
-      dailyNetFood: sim.dailyFoodNetSurplus,
-      secondsToExhaustion: sim.secondsToExhaustion,
-      starvationSeconds: sim.starvationSeconds,
-      lastUpdated: now,
+      resources: {
+        gold: settled.resources.gold,
+        wood: settled.resources.wood,
+        stone: settled.resources.stone,
+        iron: settled.resources.iron,
+        food: settled.settlement.updatedFood,
+      },
+      elapsedSeconds: settled.settlement.elapsedSeconds,
+      dailyNetFood: settled.settlement.dailyNetSurplus,
+      secondsToExhaustion: settled.settlement.secondsToExhaustion,
+      starvationSeconds: settled.settlement.starvationSeconds,
+      lastUpdated: settled.settlement.effectiveTimeMs,
     };
   },
 });
 
-/**
- * Deducción atómica e idempotente de gasto de recursos (Bloques 5 y 6).
- * 1. Requiere identidad autenticada y verifica propiedad del reino.
- * 2. Comprueba si la operación ya existe mediante el índice ("kingdomId", "idempotencyKey").
- * 3. Si ya existe, responde de forma idempotente con éxito sin volver a descontar recursos.
- * 4. Si es nueva:
- *    - Simula el tiempo transcurrido en el reino.
- *    - Valida parámetros y suficiencia de saldo.
- *    - Descuenta los recursos y actualiza el reino.
- *    - Inserta el registro de transacción con la clave de idempotencia.
- */
+/** Gasto atómico e idempotente contra los saldos y la tabla de transacciones relacionales. */
 export const spendResource = mutation({
   args: {
     kingdomId: v.id("kingdoms"),
@@ -249,35 +345,26 @@ export const spendResource = mutation({
     const callerUserId = await requireAuthenticatedUser(ctx);
     const kingdom = await ctx.db.get(args.kingdomId);
     if (!kingdom) throw new Error("Reino no encontrado.");
-    if (kingdom.userId !== callerUserId) {
+    if (!isKingdomOwner(kingdom.userId, callerUserId)) {
       throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
     }
+    const cleanKey = args.idempotencyKey.trim();
+    if (!cleanKey) throw new Error("Se requiere una clave de idempotencia ('idempotencyKey') no vacía.");
 
-    const cleanKey = args.idempotencyKey?.trim();
-    if (!cleanKey) {
-      throw new Error("Se requiere una clave de idempotencia ('idempotencyKey') no vacía.");
-    }
-
-    // 1. Verificación idempotente en la tabla transactions con índice compuesto
     const existingTx = await ctx.db
       .query("transactions")
       .withIndex("by_kingdom_and_key", (q) =>
         q.eq("kingdomId", args.kingdomId).eq("idempotencyKey", cleanKey)
       )
       .first();
-
     if (existingTx) {
-      const evalResult = evaluateIdempotentTransaction(
+      const duplicate = evaluateIdempotentTransaction(
         existingTx,
         args.resourceType,
         args.amount,
         args.reason
       );
-
-      if (!evalResult.matchesPayload) {
-        throw new Error(evalResult.error ?? "Conflicto en transacción idempotente repetida.");
-      }
-
+      if (!duplicate.matchesPayload) throw new Error(duplicate.error ?? "Conflicto de idempotencia.");
       return {
         success: true,
         idempotentDuplicate: true,
@@ -285,65 +372,49 @@ export const spendResource = mutation({
         kingdomId: args.kingdomId,
         resourceType: existingTx.resourceType,
         amountDeducted: existingTx.amount,
-        message: "Transacción idempotente previa detectada con datos idénticos. No se han duplicado cobros.",
+        message: "Transacción idempotente previa detectada; no se duplicó el cobro.",
       };
     }
 
-    // 2. Validación de parámetros de gasto
-    const spendValidation = validateSpendParameters(args.resourceType, args.amount, args.reason);
-    if (!spendValidation.valid) {
-      throw new Error(spendValidation.error);
-    }
+    const validation = validateSpendParameters(args.resourceType, args.amount, args.reason);
+    if (!validation.valid) throw new Error(validation.error);
 
-    // 3. Sincronización temporal previa dentro de la misma transacción atómica
-    const now = Date.now();
-    const state = requireLegacyEconomyState(kingdom);
-    const sim = simulateEconomicProgress(state, now);
-    const currentRes = { ...sim.updatedResources } as Record<string, number>;
-
-    const availableAmount = currentRes[args.resourceType];
-    if (availableAmount < args.amount) {
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, Date.now());
+    const currentResources = {
+      gold: settled.resources.gold,
+      wood: settled.resources.wood,
+      stone: settled.resources.stone,
+      iron: settled.resources.iron,
+      food: settled.settlement.updatedFood,
+    } as KingdomResources;
+    if (currentResources[args.resourceType as keyof KingdomResources] < args.amount) {
       throw new Error(
-        `Saldo insuficiente para ${args.resourceType}: disponible ${availableAmount.toFixed(2)}, requerido ${args.amount}`
+        `Saldo insuficiente para ${args.resourceType}: disponible ${currentResources[args.resourceType as keyof KingdomResources].toFixed(2)}, requerido ${args.amount}`
       );
     }
-
-    // 4. Descuento e inserción atómica de la transacción
-    currentRes[args.resourceType] -= args.amount;
-
-    await ctx.db.patch(args.kingdomId, {
-      resources: currentRes as unknown as KingdomResources,
-      lastUpdated: now,
-    });
-
-    const txId = await ctx.db.insert("transactions", {
+    currentResources[args.resourceType as keyof KingdomResources] -= args.amount;
+    await ctx.db.patch(settled.resources._id, currentResources);
+    const transactionId = await ctx.db.insert("transactions", {
       kingdomId: args.kingdomId,
       idempotencyKey: cleanKey,
       resourceType: args.resourceType,
       amount: args.amount,
       reason: args.reason,
-      createdAt: now,
+      createdAt: Date.now(),
     });
-
     return {
       success: true,
       idempotentDuplicate: false,
-      transactionId: txId,
+      transactionId,
       kingdomId: args.kingdomId,
       resourceType: args.resourceType,
       amountDeducted: args.amount,
-      remainingAmount: currentRes[args.resourceType],
+      remainingAmount: currentResources[args.resourceType as keyof KingdomResources],
     };
   },
 });
 
-/**
- * Reasignación atómica de mano de obra civil y soldados regulares.
- * 1. Comprueba propiedad con identidad autenticada.
- * 2. Simula y liquida el tiempo transcurrido con la asignación previa.
- * 3. Valida la integridad estricta (enteros, no negativos, suma exacta = 2.000).
- * 4. Aplica todos los cambios en un único patch atómico.
- */
+/** Mantiene la firma heredada, persistiendo ahora la distribución relacional. */
 export const reassignWorkers = mutation({
   args: {
     kingdomId: v.id("kingdoms"),
@@ -361,47 +432,194 @@ export const reassignWorkers = mutation({
     const callerUserId = await requireAuthenticatedUser(ctx);
     const kingdom = await ctx.db.get(args.kingdomId);
     if (!kingdom) throw new Error("Reino no encontrado.");
-    if (kingdom.userId !== callerUserId) {
+    if (!isKingdomOwner(kingdom.userId, callerUserId)) {
       throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
     }
 
-    // 1. Simulación y liquidación temporal previa
-    const now = Date.now();
-    const state = requireLegacyEconomyState(kingdom);
-    const sim = simulateEconomicProgress(state, now);
-
-    // 2. Cálculo y validación censal de la nueva distribución
-    const workerEntries = Object.values(args.newWorkers);
-    const totalWorkers = workerEntries.reduce((acc, val) => acc + val, 0);
-    const newCivilUnassigned = state.population - args.newRegularSoldiers - totalWorkers;
-
-    const validation = validatePopulationIntegrity(
-      state.population,
-      args.newRegularSoldiers,
-      args.newWorkers,
-      newCivilUnassigned
-    );
-    if (!validation.valid) {
-      throw new Error(`Reasignación rechazada: ${validation.error}`);
+    if (!isWorkersDistribution(args.newWorkers)) {
+      throw new Error("Las asignaciones deben ser enteros no negativos.");
+    }
+    if (!Number.isInteger(args.newRegularSoldiers) || args.newRegularSoldiers < 0) {
+      throw new Error("Los soldados regulares deben ser un entero no negativo.");
     }
 
-    // 3. Aplicación atómica de todos los cambios
-    await ctx.db.patch(args.kingdomId, {
-      workers: args.newWorkers,
-      regularSoldiers: args.newRegularSoldiers,
-      unassignedCivil: newCivilUnassigned,
-      resources: sim.updatedResources,
-      lastUpdated: now,
-    });
+    const current = await readRelationalKingdomState(ctx, kingdom._id);
+    if (!current.population) throw new Error("No existe documento de población para el reino.");
+    const military = classifyArmyUnits(current.armyUnits);
+    if (args.newRegularSoldiers !== military.regularSoldiers) {
+      throw new Error(
+        "La reasignación laboral no puede crear ni retirar tropas; los efectivos se leen de Armyunits."
+      );
+    }
+
+    const legacyJobTypes = Object.keys(args.newWorkers);
+    const existingByType = new Map<string, any>();
+    let totalAssigned = 0;
+    let previousLegacyAssigned = 0;
+    const seenJobTypes = new Set<string>();
+    for (const job of current.populationJobs) {
+      if (typeof job.jobType !== "string") throw new Error("Tipo de oficio persistido inválido.");
+      const normalizedJobType = job.jobType.trim().toLowerCase();
+      if (!normalizedJobType || seenJobTypes.has(normalizedJobType)) {
+        throw new Error(`Hay un tipo de oficio vacío o duplicado ('${job.jobType}').`);
+      }
+      if (!Number.isInteger(job.assignedCount) || job.assignedCount < 0) {
+        throw new Error(`La asignación persistida de '${job.jobType}' no es válida.`);
+      }
+      if (job.kingdomId !== kingdom._id) {
+        throw new Error("Hay una asignación laboral asociada a otro reino.");
+      }
+      seenJobTypes.add(normalizedJobType);
+      totalAssigned += job.assignedCount;
+      if (legacyJobTypes.includes(normalizedJobType)) {
+        previousLegacyAssigned += job.assignedCount;
+        existingByType.set(normalizedJobType, job);
+      }
+    }
+    if (
+      !Number.isInteger(current.population.total) ||
+      !Number.isInteger(current.population.available) ||
+      current.population.total < 0 ||
+      current.population.available < 0 ||
+      totalAssigned + current.population.available + military.regularSoldiers > current.population.total
+    ) {
+      throw new Error("El estado laboral y militar persistido excede el censo disponible.");
+    }
+    const requestedLegacyAssigned = Object.values(args.newWorkers).reduce((sum, count) => sum + count, 0);
+    const available = current.population.available + previousLegacyAssigned - requestedLegacyAssigned;
+    if (available < 0) {
+      throw new Error("No hay suficientes habitantes disponibles para esta reasignación.");
+    }
+    const unchanged = legacyJobTypes.every(
+      (jobType) =>
+        (existingByType.get(jobType)?.assignedCount ?? 0) === args.newWorkers[jobType as keyof WorkersDistribution]
+    ) && current.population.available === available;
+    if (unchanged) {
+      return {
+        success: true,
+        population: current.population.total,
+        regularSoldiers: military.regularSoldiers,
+        workers: args.newWorkers,
+        unassignedCivil: available,
+        changed: false,
+      };
+    }
+
+    const now = Date.now();
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
+    for (const jobType of legacyJobTypes) {
+      const assignedCount = args.newWorkers[jobType as keyof WorkersDistribution];
+      const existingJob = existingByType.get(jobType);
+      if (assignedCount > 0 && existingJob) {
+        await ctx.db.patch(existingJob._id, { assignedCount });
+      } else if (assignedCount > 0) {
+        await ctx.db.insert("populationJobs" as any, {
+          kingdomId: kingdom._id,
+          jobType,
+          assignedCount,
+        });
+      } else if (existingJob) {
+        await ctx.db.delete(existingJob._id);
+      }
+    }
+    await ctx.db.patch(current.population._id, { available });
 
     return {
       success: true,
-      population: state.population,
-      regularSoldiers: args.newRegularSoldiers,
+      population: current.population.total,
+      regularSoldiers: military.regularSoldiers,
       workers: args.newWorkers,
-      unassignedCivil: newCivilUnassigned,
-      simulatedResources: sim.updatedResources,
-      lastUpdated: now,
+      unassignedCivil: available,
+      simulatedResources: {
+        gold: settled.resources.gold,
+        wood: settled.resources.wood,
+        stone: settled.resources.stone,
+        iron: settled.resources.iron,
+        food: settled.settlement.updatedFood,
+      },
+      lastUpdated: settled.settlement.effectiveTimeMs ?? now,
+      changed: true,
+    };
+  },
+});
+
+/**
+ * Reasigna un oficio desde el modelo relacional, liquidando primero el periodo
+ * previo con la distribución anterior en la misma transacción Convex.
+ */
+export const reassignPopulationJob = mutation({
+  args: {
+    kingdomId: v.id("kingdoms"),
+    jobType: v.string(),
+    assignedCount: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const callerUserId = await requireAuthenticatedUser(ctx);
+    const kingdom = await ctx.db.get(args.kingdomId);
+    if (!kingdom) throw new Error("Reino no encontrado.");
+    if (!isKingdomOwner(kingdom.userId, callerUserId)) {
+      throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
+    }
+
+    const current = await readRelationalKingdomState(ctx, kingdom._id);
+    const population = current.population;
+    if (!population) throw new Error("No existe documento de población para el reino.");
+
+    const reassignment = calculatePopulationJobReassignment({
+      populationTotal: population.total,
+      available: population.available,
+      populationJobs: current.populationJobs,
+      jobType: args.jobType,
+      assignedCount: args.assignedCount,
+      kingdomId: kingdom._id,
+    });
+    if (!reassignment.success || !reassignment.jobType ||
+      reassignment.assignedCount === undefined ||
+      reassignment.previousAssignedCount === undefined ||
+      reassignment.available === undefined ||
+      !reassignment.persistence) {
+      throw new Error(reassignment.error ?? "Reasignación de trabajadores inválida.");
+    }
+
+    if (reassignment.persistence.operation === "unchanged") {
+      return {
+        success: true,
+        kingdomId: kingdom._id,
+        jobType: reassignment.jobType,
+        assignedCount: reassignment.assignedCount,
+        available: reassignment.available,
+        changed: false,
+      };
+    }
+
+    const now = Date.now();
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
+    if (reassignment.persistence.operation === "update" && reassignment.persistence.jobId) {
+      await ctx.db.patch(reassignment.persistence.jobId as any, {
+        assignedCount: reassignment.assignedCount,
+      });
+    } else if (reassignment.persistence.operation === "insert") {
+      await ctx.db.insert("populationJobs" as any, {
+        kingdomId: kingdom._id,
+        jobType: reassignment.jobType,
+        assignedCount: reassignment.assignedCount,
+      });
+    } else if (reassignment.persistence.operation === "delete" && reassignment.persistence.jobId) {
+      await ctx.db.delete(reassignment.persistence.jobId as any);
+    } else {
+      throw new Error("No se pudo construir un plan válido para persistir la reasignación.");
+    }
+    await ctx.db.patch(population._id, { available: reassignment.available });
+
+    return {
+      success: true,
+      kingdomId: kingdom._id,
+      jobType: reassignment.jobType,
+      assignedCount: reassignment.assignedCount,
+      available: reassignment.available,
+      settledFood: settled.settlement.updatedFood,
+      lastUpdated: settled.settlement.effectiveTimeMs ?? now,
+      changed: true,
     };
   },
 });
@@ -418,24 +636,61 @@ export const getKingdom = query({
     if (!kingdom) return null;
 
     const callerUserId = await requireAuthenticatedUser(ctx);
-    if (kingdom.userId !== callerUserId) {
+    if (!isKingdomOwner(kingdom.userId, callerUserId)) {
       throw new Error("No autorizado: el reino pertenece a otro usuario.");
     }
 
+    const resources = await ctx.db
+      .query("resources" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+      .first();
+    const population = await ctx.db
+      .query("population" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+      .first();
+    const populationJobs = await ctx.db
+      .query("populationJobs" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+      .collect();
+
+    let armyUnits: any[];
+    try {
+      armyUnits = await ctx.db
+        .query("Armyunits" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+        .collect();
+    } catch {
+      armyUnits = await ctx.db
+        .query("armyUnits" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+        .collect();
+    }
+
     const now = Date.now();
-    const state = requireLegacyEconomyState(kingdom);
-    const sim = simulateEconomicProgress(state, now);
+    const simulation = calculateSimulatedKingdomResources({
+      kingdom,
+      resources,
+      population,
+      populationJobs,
+      armyUnits,
+      foodTier: kingdom.foodTier ?? "normal",
+      targetTime: now,
+      callerUserId,
+    });
+    if (!simulation.success || !simulation.simulatedResources || !simulation.productionAndConsumption) {
+      throw new Error(simulation.error ?? "No se pudo proyectar la economía relacional.");
+    }
 
     return {
       ...kingdom,
-      simulatedResources: sim.updatedResources,
+      simulatedResources: simulation.simulatedResources,
       metrics: {
-        dailyFoodProduction: sim.dailyFoodProduction,
-        dailyFoodConsumption: sim.dailyFoodConsumption,
-        dailyFoodNetSurplus: sim.dailyFoodNetSurplus,
-        secondsSinceLastSync: sim.elapsedSeconds,
-        secondsToExhaustion: sim.secondsToExhaustion,
-        starvationSeconds: sim.starvationSeconds,
+        dailyFoodProduction: simulation.productionAndConsumption.dailyFoodProduction,
+        dailyFoodConsumption: simulation.productionAndConsumption.dailyFoodConsumption,
+        dailyFoodNetSurplus: simulation.productionAndConsumption.dailyFoodNetSurplus,
+        secondsSinceLastSync: simulation.elapsedSeconds,
+        secondsToExhaustion: simulation.exhaustionMetrics?.secondsToExhaustion ?? null,
+        starvationSeconds: simulation.exhaustionMetrics?.starvationSeconds ?? 0,
       },
     };
   },
@@ -897,5 +1152,3 @@ export const setKingdomFoodTier = mutation({
     };
   },
 });
-
-

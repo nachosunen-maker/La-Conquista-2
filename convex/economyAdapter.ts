@@ -21,6 +21,7 @@ import {
   validateKingdomResources,
   simulateEconomicProgress,
 } from "./economyCalculations";
+import { calculateBuildingWorkerCapacity } from "./buildingRules";
 
 /** Representaciones canónicas de los documentos del backend remoto */
 export interface RemoteKingdomDoc {
@@ -33,6 +34,7 @@ export interface RemoteKingdomDoc {
   happiness?: number;
   militaryMorale?: number;
   taxPolicy?: string;
+  foodTier?: string;
   createdAt?: number;
   updatedAt?: number;
 }
@@ -46,6 +48,8 @@ export interface RemoteResourcesDoc {
   iron: number;
   food: number;
   lastUpdated: number;
+  settlementInitialized?: boolean;
+  foodTier?: string;
 }
 
 export interface RemotePopulationDoc {
@@ -62,6 +66,111 @@ export interface RemotePopulationJobDoc {
   kingdomId: string;
   jobType: string;
   assignedCount: number;
+}
+
+export const ASSIGNABLE_POPULATION_JOB_TYPES = [
+  "agriculture",
+  "mining",
+  "construction",
+  "military",
+  "scholars",
+] as const;
+
+export type AssignablePopulationJobType = (typeof ASSIGNABLE_POPULATION_JOB_TYPES)[number];
+
+export interface PopulationJobReassignmentResult {
+  success: boolean;
+  error?: string;
+  jobType?: AssignablePopulationJobType;
+  previousAssignedCount?: number;
+  assignedCount?: number;
+  available?: number;
+  persistence?: {
+    operation: "insert" | "update" | "delete" | "unchanged";
+    jobId?: string;
+  };
+}
+
+export function calculatePopulationJobReassignment(input: {
+  populationTotal: number;
+  available: number;
+  populationJobs: RemotePopulationJobDoc[];
+  jobType: string;
+  assignedCount: number;
+  kingdomId: string;
+}): PopulationJobReassignmentResult {
+  if (!ASSIGNABLE_POPULATION_JOB_TYPES.includes(input.jobType as AssignablePopulationJobType)) {
+    return { success: false, error: `Tipo de oficio no válido: '${input.jobType}'.` };
+  }
+  if (!Number.isInteger(input.populationTotal) || input.populationTotal < 0) {
+    return { success: false, error: "La población total persistida no es válida." };
+  }
+  if (!Number.isInteger(input.available) || input.available < 0) {
+    return { success: false, error: "La población disponible persistida no es válida." };
+  }
+  if (!Number.isInteger(input.assignedCount) || input.assignedCount < 0) {
+    return { success: false, error: "La asignación debe ser un entero no negativo." };
+  }
+
+  const seenJobTypes = new Set<string>();
+  let totalAssigned = 0;
+  let previousAssignedCount = 0;
+  let matchingJobCount = 0;
+  let matchingJobId: string | undefined;
+
+  for (const job of input.populationJobs) {
+    if (typeof job.jobType !== "string") {
+      return { success: false, error: "Hay una asignación laboral sin tipo de oficio válido." };
+    }
+    const normalizedType = job.jobType.trim().toLowerCase();
+    if (!normalizedType || job.kingdomId !== input.kingdomId) {
+      return { success: false, error: "Hay una asignación laboral inválida o asociada a otro reino." };
+    }
+    if (seenJobTypes.has(normalizedType)) {
+      return { success: false, error: `Hay asignaciones duplicadas para el oficio '${job.jobType}'.` };
+    }
+    seenJobTypes.add(normalizedType);
+    if (!Number.isInteger(job.assignedCount) || job.assignedCount < 0) {
+      return { success: false, error: `La asignación persistida de '${job.jobType}' no es válida.` };
+    }
+
+    totalAssigned += job.assignedCount;
+    if (normalizedType === input.jobType) {
+      previousAssignedCount = job.assignedCount;
+      matchingJobCount++;
+      matchingJobId = job._id;
+    }
+  }
+
+  if (totalAssigned + input.available > input.populationTotal) {
+    return { success: false, error: "Las asignaciones laborales exceden la población total persistida." };
+  }
+  if (matchingJobCount > 1) {
+    return { success: false, error: `Hay asignaciones duplicadas para el oficio '${input.jobType}'.` };
+  }
+
+  const available = input.available + previousAssignedCount - input.assignedCount;
+  if (available < 0) {
+    return { success: false, error: "No hay suficientes habitantes disponibles para esta asignación." };
+  }
+  if (totalAssigned - previousAssignedCount + input.assignedCount + available > input.populationTotal) {
+    return { success: false, error: "La reasignación excede la población total del reino." };
+  }
+
+  return {
+    success: true,
+    jobType: input.jobType as AssignablePopulationJobType,
+    previousAssignedCount,
+    assignedCount: input.assignedCount,
+    available,
+    persistence: previousAssignedCount === input.assignedCount
+      ? { operation: "unchanged", jobId: matchingJobId }
+      : input.assignedCount > 0
+        ? matchingJobId
+          ? { operation: "update", jobId: matchingJobId }
+          : { operation: "insert" }
+        : { operation: "delete", jobId: matchingJobId },
+  };
 }
 
 export interface RemoteArmyUnitDoc {
@@ -145,6 +254,7 @@ export interface EconomicAdapterInput {
   population: RemotePopulationDoc | null | undefined;
   populationJobs: RemotePopulationJobDoc[] | null | undefined;
   armyUnits: RemoteArmyUnitDoc[] | null | undefined;
+  buildings?: RemoteBuildingDoc[] | null | undefined;
   foodTier: string; // Parámetro explícito requerido
   options?: {
     includeSiegeInFoodConsumption?: boolean;
@@ -191,7 +301,24 @@ export function adaptRemoteDocumentsToEconomicState(
       error: `Inconsistencia relacional: population.kingdomId (${population.kingdomId}) no coincide con kingdom._id (${targetKingdomId}).`,
     };
   }
-
+  if (input.buildings !== undefined && input.buildings !== null) {
+    const seenBuildingTypes = new Set<string>();
+    for (const building of input.buildings) {
+      if (
+        building.kingdomId !== targetKingdomId ||
+        !building.buildingType.trim() ||
+        !Number.isInteger(building.level) ||
+        building.level < 1 ||
+        building.level > 100
+      ) {
+        return { success: false, error: "Hay un edificio inválido o asociado a otro reino." };
+      }
+      if (seenBuildingTypes.has(building.buildingType)) {
+        return { success: false, error: `Hay edificios duplicados de tipo '${building.buildingType}'.` };
+      }
+      seenBuildingTypes.add(building.buildingType);
+    }
+  }
   // 3. Validación del régimen alimentario explícito (P17)
   if (!isValidFoodTier(foodTier)) {
     return {
@@ -260,7 +387,11 @@ export function adaptRemoteDocumentsToEconomicState(
   };
 
   if (populationJobs && Array.isArray(populationJobs)) {
+    const seenJobTypes = new Set<string>();
     for (const job of populationJobs) {
+      if (typeof job.jobType !== "string") {
+        return { success: false, error: "Hay una asignación laboral sin tipo de oficio válido." };
+      }
       if (typeof job.assignedCount !== "number" || !Number.isInteger(job.assignedCount) || job.assignedCount < 0) {
         return {
           success: false,
@@ -269,6 +400,20 @@ export function adaptRemoteDocumentsToEconomicState(
       }
 
       const jobKey = (job.jobType || "").toLowerCase().trim();
+      if (!jobKey || seenJobTypes.has(jobKey)) {
+        return {
+          success: false,
+          error: `Hay un tipo de oficio vacío o duplicado en populationJobs ('${job.jobType}').`,
+        };
+      }
+      if (job.kingdomId !== targetKingdomId) {
+        return {
+          success: false,
+          error: `Inconsistencia relacional: populationJobs.kingdomId (${job.kingdomId}) no coincide con kingdom._id (${targetKingdomId}).`,
+        };
+      }
+      seenJobTypes.add(jobKey);
+
       switch (jobKey) {
         case "agriculture":
           workers.agriculture += job.assignedCount;
@@ -323,6 +468,13 @@ export function adaptRemoteDocumentsToEconomicState(
     resources: kingdomResources,
     foodTier,
     lastUpdated: resources.lastUpdated,
+    ...(input.buildings !== undefined
+      ? {
+          foodProductionWorkerLimit: input.buildings
+            ? calculateBuildingWorkerCapacity(input.buildings, "granja")
+            : null,
+        }
+      : {}),
     createdAt: kingdom.createdAt,
   };
 
@@ -355,6 +507,7 @@ export interface SimulatedKingdomResourcesInput {
   population: RemotePopulationDoc | null | undefined;
   populationJobs?: RemotePopulationJobDoc[] | null | undefined;
   armyUnits?: RemoteArmyUnitDoc[] | null | undefined;
+  buildings?: RemoteBuildingDoc[] | null | undefined;
   foodTier: string; // Parámetro explícito requerido (P17)
   targetTime?: number; // Hora de referencia inyectable (ms UTC). Si se omite, Date.now()
   callerUserId?: string; // Identificador del usuario que solicita la consulta (P1)
@@ -378,7 +531,9 @@ export interface SimulatedKingdomResourcesResult {
     dailyFoodProduction: number;
     dailyFoodConsumption: number;
     dailyFoodNetSurplus: number;
+    effectiveAgricultureWorkers: number;
   };
+  foodProductionCapacityPending?: boolean;
   exhaustionMetrics?: {
     secondsToExhaustion: number | null;
     starvationSeconds: number;
@@ -414,6 +569,7 @@ export function calculateSimulatedKingdomResources(
     population: input.population,
     populationJobs: input.populationJobs,
     armyUnits: input.armyUnits,
+    buildings: input.buildings,
     foodTier: input.foodTier,
     options: {
       includeSiegeInFoodConsumption: input.options?.includeSiegeInFoodConsumption,
@@ -452,7 +608,9 @@ export function calculateSimulatedKingdomResources(
       dailyFoodProduction: sim.dailyFoodProduction,
       dailyFoodConsumption: sim.dailyFoodConsumption,
       dailyFoodNetSurplus: sim.dailyFoodNetSurplus,
+      effectiveAgricultureWorkers: sim.effectiveAgricultureWorkers,
     },
+    foodProductionCapacityPending: adapterResult.kingdomState.foodProductionWorkerLimit === null,
     exhaustionMetrics: {
       secondsToExhaustion: sim.secondsToExhaustion,
       starvationSeconds: sim.starvationSeconds,
@@ -493,7 +651,7 @@ export interface SettlementInput {
   population: RemotePopulationDoc | null | undefined;
   populationJobs?: RemotePopulationJobDoc[] | null | undefined;
   armyUnits?: RemoteArmyUnitDoc[] | null | undefined;
-  buildings?: unknown[] | null | undefined;
+  buildings?: RemoteBuildingDoc[] | null | undefined;
   currentServerTimeMs: number;
   options?: {
     isFirstInitialization?: boolean;
@@ -558,6 +716,7 @@ export function calculateSettlementProgress(input: SettlementInput): SettlementR
     population: input.population,
     populationJobs: input.populationJobs,
     armyUnits: input.armyUnits,
+    buildings: input.buildings,
     foodTier,
     options: {
       includeSiegeInFoodConsumption: input.options?.includeSiegeInFoodConsumption,
@@ -646,7 +805,7 @@ export interface RegimeChangeInput {
   population: RemotePopulationDoc | null | undefined;
   populationJobs?: RemotePopulationJobDoc[] | null | undefined;
   armyUnits?: RemoteArmyUnitDoc[] | null | undefined;
-  buildings?: unknown[] | null | undefined;
+  buildings?: RemoteBuildingDoc[] | null | undefined;
   newFoodTier: string;
   currentServerTimeMs: number;
   options?: {
@@ -722,5 +881,3 @@ export function executeRegimeChangeTransition(input: RegimeChangeInput): RegimeC
     timestamp: input.currentServerTimeMs,
   };
 }
-
-

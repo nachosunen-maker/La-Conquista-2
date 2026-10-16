@@ -70,6 +70,29 @@ export default defineSchema(
     })
       .index("by_idempotency_key", ["idempotencyKey"])
       .index("by_kingdom_and_key", ["kingdomId", "idempotencyKey"]),
+
+    // Building documents already exist relationally; the observed contract is type + level.
+    buildings: defineTable({
+      kingdomId: v.id("kingdoms"),
+      buildingType: v.string(),
+      level: v.number(),
+    }).index("by_kingdom", ["kingdomId"]),
+
+    // Queue fields are the minimal server-owned lifecycle data needed for timed construction.
+    constructionQueue: defineTable({
+      kingdomId: v.id("kingdoms"),
+      buildingType: v.optional(v.string()),
+      targetLevel: v.optional(v.number()),
+      startedAt: v.optional(v.number()),
+      durationMs: v.optional(v.number()),
+      costs: v.optional(v.object({
+        gold: v.optional(v.number()),
+        wood: v.optional(v.number()),
+        stone: v.optional(v.number()),
+        iron: v.optional(v.number()),
+        food: v.optional(v.number()),
+      })),
+    }).index("by_kingdom", ["kingdomId"]),
   },
   {
     schemaValidation: false,

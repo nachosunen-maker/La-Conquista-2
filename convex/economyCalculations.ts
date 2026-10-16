@@ -9,9 +9,9 @@
 export const SECONDS_PER_GAME_YEAR = 86400; // 1 día real (86.400 s) = 1 año de juego (OFICIAL, P2)
 export const MILITARY_FOOD_FACTOR = 1.05; // Soldados regulares consumen exactamente 5% más (OFICIAL, P18)
 
-// Parámetros de diseño y balance provisional (Bloque 7.1)
-export const BASE_FOOD_CONSUMPTION_PER_DAY = 1.0; // 1 ración diaria / habitante civil (PARÁMETRO PROVISIONAL DE DISEÑO, no establecido por P17)
-export const BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY = 2.0; // 2 raciones / agricultor / día real (PARÁMETRO PROVISIONAL DE DISEÑO 7.1)
+// Tasas aprobadas para esta economía: 1 ración por habitante y 2 por agricultor/día real.
+export const BASE_FOOD_CONSUMPTION_PER_DAY = 1.0;
+export const BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY = 2.0;
 
 /**
  * Regímenes alimentarios: Los cuatro regímenes (mínima, normal, abundante, excelente)
@@ -70,6 +70,7 @@ export interface KingdomState {
   resources: KingdomResources;
   foodTier: "minima" | "normal" | "abundante" | "excelente";
   lastUpdated: number;
+  foodProductionWorkerLimit?: number | null;
   createdAt?: number;
 }
 
@@ -277,6 +278,7 @@ export function simulateEconomicProgress(
     resources: KingdomResources;
     foodTier: string;
     lastUpdated: number;
+    foodProductionWorkerLimit?: number | null;
   },
   currentServerTimeMs: number
 ) {
@@ -288,7 +290,7 @@ export function simulateEconomicProgress(
   // 2. Factor de alimentación: "normal" como referencia provisional de cálculo (= 1.0); otros son propuestas de balance
   const tierFactor = PROVISIONAL_FOOD_TIER_FACTORS[kingdom.foodTier] ?? 1.0;
 
-  // 3. Población civil y soldados regulares
+  // Los puestos laborales no son tropas: solo Armyunits recibe el recargo P18.
   const civilPopulation = Math.max(0, kingdom.population - kingdom.regularSoldiers);
   const regularSoldiers = Math.max(0, kingdom.regularSoldiers);
 
@@ -298,7 +300,12 @@ export function simulateEconomicProgress(
   const totalDailyConsumption = civilDailyConsumption + militaryDailyConsumption;
 
   // La tasa aprobada se aplica por agricultor; falta un campo y fórmula aprobados para limitarla por edificios.
-  const totalDailyFoodProduction = kingdom.workers.agriculture * BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY;
+  const effectiveAgricultureWorkers = kingdom.foodProductionWorkerLimit === undefined
+    ? kingdom.workers.agriculture
+    : kingdom.foodProductionWorkerLimit === null
+      ? 0
+      : Math.min(kingdom.workers.agriculture, kingdom.foodProductionWorkerLimit);
+  const totalDailyFoodProduction = effectiveAgricultureWorkers * BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY;
 
   // 6. Superávit / déficit neto diario
   const netDailyFoodSurplus = totalDailyFoodProduction - totalDailyConsumption;
@@ -334,6 +341,7 @@ export function simulateEconomicProgress(
     elapsedSeconds,
     timeFractionOfDay,
     dailyFoodProduction: totalDailyFoodProduction,
+    effectiveAgricultureWorkers,
     dailyFoodConsumption: totalDailyConsumption,
     dailyFoodNetSurplus: netDailyFoodSurplus,
     secondsToExhaustion,

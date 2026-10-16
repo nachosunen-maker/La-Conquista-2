@@ -15,6 +15,7 @@ import {
 } from "./economyCalculations";
 import {
   adaptRemoteDocumentsToEconomicState,
+  calculatePopulationJobReassignment,
   classifyArmyUnits,
   calculateSimulatedKingdomResources,
   calculateSettlementProgress,
@@ -22,6 +23,7 @@ import {
 } from "./economyAdapter";
 import { DEMO_USER_ID, isKingdomOwner, resolveKingdomQueryUserId } from "./kingdomAccess";
 import { createAggregatePopulationFallback } from "./kingdomReadModel";
+import { runConstructionValidationTests } from "./constructionPureTests";
 
 /**
  * ============================================================================
@@ -1031,7 +1033,7 @@ export function runEconomicValidationTests(): TestResult[] {
     };
     const foodBalances = Object.entries(expectedFoodBalances).map(([foodTier]) => {
       const settlement = calculateSettlementProgress({
-        kingdom: { _id: "test_tier_balance", userId: "test_owner", foodTier },
+        kingdom: { _id: "test_tier_balance", name: "Test", userId: "test_owner", foodTier },
         resources: {
           kingdomId: "test_tier_balance",
           gold: 0,
@@ -1944,8 +1946,311 @@ export function runEconomicValidationTests(): TestResult[] {
     });
   }
 
+  // --------------------------------------------------------------------------
+  // TEST 41: Reasignación relacional, disponibilidad y persistencia resultante
+  // --------------------------------------------------------------------------
+  {
+    const populationJobs = [
+      { _id: "job_agriculture", kingdomId: "k_workers", jobType: "agriculture", assignedCount: 300 },
+      { _id: "job_mining", kingdomId: "k_workers", jobType: "mining", assignedCount: 200 },
+    ];
+    const reassignment = calculatePopulationJobReassignment({
+      populationTotal: 1000,
+      available: 500,
+      populationJobs,
+      kingdomId: "k_workers",
+      jobType: "agriculture",
+      assignedCount: 400,
+    });
+    const release = calculatePopulationJobReassignment({
+      populationTotal: 1000,
+      available: 500,
+      populationJobs,
+      kingdomId: "k_workers",
+      jobType: "agriculture",
+      assignedCount: 250,
+    });
+    const passed =
+      reassignment.success &&
+      reassignment.previousAssignedCount === 300 &&
+      reassignment.assignedCount === 400 &&
+      reassignment.available === 400 &&
+      reassignment.persistence?.operation === "update" &&
+      reassignment.persistence.jobId === "job_agriculture" &&
+      300 + 200 + 500 === 400 + 200 + reassignment.available &&
+      release.success &&
+      release.assignedCount === 250 &&
+      release.available === 550 &&
+      release.persistence?.operation === "update" &&
+      release.available + release.assignedCount + 200 === 1000;
+
+    results.push({
+      category: "INTEGRACIÓN CONVEX",
+      test: "41. Reasignación laboral valida y resultado persistible sincroniza oficio y mano disponible",
+      passed,
+      details: `Persistir agriculture=${reassignment.assignedCount}, available=${reassignment.available}; liberar a ${release.assignedCount} deja ${release.available} disponibles`,
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 42: Rechaza valores inválidos, tipos no admitidos y sobreasignación
+  // --------------------------------------------------------------------------
+  {
+    const base = {
+      populationTotal: 1000,
+      available: 100,
+      populationJobs: [
+        { _id: "job_agriculture", kingdomId: "k_workers", jobType: "agriculture", assignedCount: 400 },
+      ],
+      kingdomId: "k_workers",
+      jobType: "agriculture",
+    };
+    const negative = calculatePopulationJobReassignment({ ...base, assignedCount: -1 });
+    const fractional = calculatePopulationJobReassignment({ ...base, assignedCount: 1.5 });
+    const unavailable = calculatePopulationJobReassignment({ ...base, assignedCount: 501 });
+    const unknownJob = calculatePopulationJobReassignment({
+      ...base,
+      jobType: "invented",
+      assignedCount: 100,
+    });
+    const duplicateJob = calculatePopulationJobReassignment({
+      ...base,
+      populationJobs: [
+        ...base.populationJobs,
+        { kingdomId: "k_workers", jobType: "AGRICULTURE", assignedCount: 10 },
+      ],
+      assignedCount: 400,
+    });
+    const foreignRecord = calculatePopulationJobReassignment({
+      ...base,
+      populationJobs: [
+        { kingdomId: "another_kingdom", jobType: "agriculture", assignedCount: 400 },
+      ],
+      assignedCount: 400,
+    });
+    const overallocatedPopulation = calculatePopulationJobReassignment({
+      ...base,
+      available: 100,
+      populationJobs: [
+        { kingdomId: "k_workers", jobType: "agriculture", assignedCount: 950 },
+      ],
+      assignedCount: 950,
+    });
+    const newJob = calculatePopulationJobReassignment({
+      ...base,
+      jobType: "scholars",
+      assignedCount: 50,
+    });
+    const removeJob = calculatePopulationJobReassignment({
+      ...base,
+      assignedCount: 0,
+    });
+    const passed = [
+      negative,
+      fractional,
+      unavailable,
+      unknownJob,
+      duplicateJob,
+      foreignRecord,
+      overallocatedPopulation,
+    ].every(result => !result.success) &&
+      newJob.persistence?.operation === "insert" &&
+      removeJob.persistence?.operation === "delete" &&
+      removeJob.persistence.jobId === "job_agriculture";
+
+    results.push({
+      category: "LÍMITES Y ROBUSTEZ",
+      test: "42. Rechaza cantidades negativas/fraccionarias, oficio inválido, falta de disponibles y estado duplicado/ajeno",
+      passed,
+      details: `Rechazos: negativo=${!negative.success}, fracción=${!fractional.success}, sin disponibles=${!unavailable.success}, tipo=${!unknownJob.success}, duplicado=${!duplicateJob.success}, reino ajeno=${!foreignRecord.success}, censo excedido=${!overallocatedPopulation.success}; insert=${newJob.persistence?.operation}, delete=${removeJob.persistence?.operation}`,
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 43: La autorización se basa en identidad y propiedad, no en el ID
+  // --------------------------------------------------------------------------
+  {
+    const owner = isKingdomOwner("user_workers", "user_workers");
+    const foreignOwner = isKingdomOwner("user_workers", "intruder");
+    const demoOwner = isKingdomOwner(DEMO_USER_ID, "user_workers");
+    const passed = owner && !foreignOwner && !demoOwner;
+
+    results.push({
+      category: "INTEGRACIÓN CONVEX",
+      test: "43. La reasignación sólo puede ser autorizada por el propietario autenticado; Iberia sigue siendo de solo lectura",
+      passed,
+      details: `Propietario aceptado=${owner}; ajeno rechazado=${!foreignOwner}; demo rechazada=${!demoOwner}`,
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 44: Producción depende del trabajo agrícola y militares civiles no son tropas
+  // --------------------------------------------------------------------------
+  {
+    const adapted = adaptRemoteDocumentsToEconomicState({
+      kingdom: { _id: "k_economy_workers", name: "Test", userId: "u" },
+      resources: {
+        kingdomId: "k_economy_workers",
+        gold: 0,
+        wood: 0,
+        stone: 0,
+        iron: 0,
+        food: 1000,
+        lastUpdated: 1_000_000,
+      },
+      population: { kingdomId: "k_economy_workers", total: 1000, available: 100 },
+      populationJobs: [
+        { kingdomId: "k_economy_workers", jobType: "agriculture", assignedCount: 100 },
+        { kingdomId: "k_economy_workers", jobType: "military", assignedCount: 800 },
+      ],
+      armyUnits: [{ kingdomId: "k_economy_workers", unitType: "infanteria", count: 100 }],
+      foodTier: "normal",
+    });
+    const noFarmers = simulateEconomicProgress(
+      {
+        ...INITIAL_KINGDOM_CONFIG,
+        workers: { ...INITIAL_KINGDOM_CONFIG.workers, agriculture: 0 },
+        lastUpdated: 1_000_000,
+      },
+      1_000_000 + SECONDS_PER_GAME_YEAR * 1000
+    );
+    const staffed = adapted.kingdomState
+      ? simulateEconomicProgress(adapted.kingdomState, 1_000_000 + SECONDS_PER_GAME_YEAR * 1000)
+      : null;
+    const passed =
+      noFarmers.dailyFoodProduction === 0 &&
+      adapted.success &&
+      staffed?.dailyFoodProduction === 200 &&
+      staffed.dailyFoodConsumption === 1005 &&
+      adapted.kingdomState?.regularSoldiers === 100;
+
+    results.push({
+      category: "MATEMÁTICA / LÓGICA PURA",
+      test: "44. Sin agricultores no hay producción gratuita; el oficio militar civil no recibe recargo de tropa",
+      passed,
+      details: `Sin agricultores=${noFarmers.dailyFoodProduction}/día; con 100 agricultores=${staffed?.dailyFoodProduction}/día; consumo=${staffed?.dailyFoodConsumption}/día; tropas reales=${adapted.kingdomState?.regularSoldiers}`,
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 45: Una liquidación repetida no vuelve a contabilizar el mismo intervalo
+  // --------------------------------------------------------------------------
+  {
+    const kingdom = { _id: "k_once", name: "Test", userId: "u" };
+    const population = { kingdomId: "k_once", total: 1000, available: 0 };
+    const populationJobs = [
+      { kingdomId: "k_once", jobType: "agriculture", assignedCount: 600 },
+      { kingdomId: "k_once", jobType: "mining", assignedCount: 400 },
+    ];
+    const first = calculateSettlementProgress({
+      kingdom,
+      resources: {
+        kingdomId: "k_once",
+        gold: 0,
+        wood: 0,
+        stone: 0,
+        iron: 0,
+        food: 1000,
+        lastUpdated: 1_000_000,
+        settlementInitialized: true,
+      },
+      population,
+      populationJobs,
+      currentServerTimeMs: 1_000_000 + SECONDS_PER_GAME_YEAR * 1000,
+    });
+    const second = calculateSettlementProgress({
+      kingdom,
+      resources: {
+        kingdomId: "k_once",
+        gold: 0,
+        wood: 0,
+        stone: 0,
+        iron: 0,
+        food: first.updatedFood ?? 0,
+        lastUpdated: first.effectiveTimeMs ?? 1_000_000,
+        settlementInitialized: true,
+      },
+      population,
+      populationJobs,
+      currentServerTimeMs: first.effectiveTimeMs ?? 1_000_000,
+    });
+    const passed =
+      first.success &&
+      first.updatedFood === 1200 &&
+      first.foodDelta === 200 &&
+      second.success &&
+      second.elapsedSeconds === 0 &&
+      second.foodDelta === 0 &&
+      second.updatedFood === first.updatedFood;
+
+    results.push({
+      category: "INTEGRACIÓN CONVEX",
+      test: "45. Liquidación repetida sobre el mismo timestamp no duplica producción ni consumo",
+      passed,
+      details: `Primera liquidación: ${first.foodDelta}; repetición: ${second.foodDelta}; saldo final: ${second.updatedFood}`,
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 46: Edificios relacionales y capacidad productiva pendiente
+  // --------------------------------------------------------------------------
+  {
+    const projected = calculateSimulatedKingdomResources({
+      kingdom: { _id: "k_building", name: "Test", userId: "u" },
+      resources: {
+        kingdomId: "k_building",
+        gold: 0,
+        wood: 0,
+        stone: 0,
+        iron: 0,
+        food: 1000,
+        lastUpdated: 1_000_000,
+      },
+      population: { kingdomId: "k_building", total: 100, available: 0 },
+      populationJobs: [
+        { kingdomId: "k_building", jobType: "agriculture", assignedCount: 20 },
+        { kingdomId: "k_building", jobType: "mining", assignedCount: 80 },
+      ],
+      armyUnits: [],
+      buildings: [
+        { kingdomId: "k_building", buildingType: "granja", level: 1 },
+      ],
+      foodTier: "normal",
+      targetTime: 1_000_000 + SECONDS_PER_GAME_YEAR * 1000,
+      callerUserId: "u",
+    });
+    const configuredCapacity = simulateEconomicProgress({
+      ...INITIAL_KINGDOM_CONFIG,
+      workers: { ...INITIAL_KINGDOM_CONFIG.workers, agriculture: 20 },
+      foodProductionWorkerLimit: 5,
+      lastUpdated: 1_000_000,
+    }, 1_000_000 + SECONDS_PER_GAME_YEAR * 1000);
+    const unstaffedBuilding = simulateEconomicProgress({
+      ...INITIAL_KINGDOM_CONFIG,
+      workers: { ...INITIAL_KINGDOM_CONFIG.workers, agriculture: 0 },
+      foodProductionWorkerLimit: 50,
+      lastUpdated: 1_000_000,
+    }, 1_000_000 + SECONDS_PER_GAME_YEAR * 1000);
+
+    const passed =
+      projected.success &&
+      projected.foodProductionCapacityPending === true &&
+      projected.productionAndConsumption?.dailyFoodProduction === 0 &&
+      projected.productionAndConsumption.effectiveAgricultureWorkers === 0 &&
+      configuredCapacity.dailyFoodProduction === 10 &&
+      configuredCapacity.effectiveAgricultureWorkers === 5 &&
+      unstaffedBuilding.dailyFoodProduction === 0;
+    results.push({
+      category: "INTEGRACIÓN CONVEX",
+      test: "46. La capacidad edificada limita la producción por trabajador; capacidad pendiente y edificio sin trabajadores no generan producción",
+      passed,
+      details: `Pendiente=${projected.foodProductionCapacityPending}; producción pendiente=${projected.productionAndConsumption?.dailyFoodProduction}; capacidad configurada (fixture)=${configuredCapacity.dailyFoodProduction}/día; granja sin agricultores=${unstaffedBuilding.dailyFoodProduction}/día`,
+    });
+  }
+
+  results.push(...runConstructionValidationTests().map((result) => ({
+    category: "INTEGRACIÓN CONVEX" as const,
+    ...result,
+  })));
   return results;
 }
-
-
-

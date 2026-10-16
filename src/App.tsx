@@ -41,6 +41,7 @@ import {
   VALID_FOOD_TIERS, 
   type ValidFoodTier 
 } from '../convex/economyAdapter';
+import { constructionProgress } from '../convex/buildingRules';
 import { useAuth } from './auth';
 import { DEMO_USER_ID } from '../convex/kingdomAccess';
 
@@ -97,13 +98,54 @@ interface ArmyUnit {
   kingdomId: string;
 }
 
+interface BuildingRecord {
+  _id: string;
+  kingdomId: string;
+  buildingType: string;
+  level: number;
+}
+
+interface ConstructionRecord {
+  _id: string;
+  buildingType?: string;
+  targetLevel?: number;
+  startedAt?: number;
+  durationMs?: number;
+  progressPercent: number | null;
+}
+
+interface ConstructionState {
+  buildings: BuildingRecord[];
+  residentialCapacity: number | null;
+  constructionQueue: ConstructionRecord[];
+  serverTimeMs: number;
+  writable: boolean;
+  availableBuildingTypes: string[];
+  pendingBuildingTypes?: string[];
+  pendingParameters?: readonly string[];
+  catalog?: Record<string, {
+    label: string;
+    costs: Record<string, number> | null;
+    baseDurationMs: number | null;
+    progressionRequirements: Record<string, number> | null;
+    residentialCapacityPerLevel?: number | null;
+    productiveWorkerCapacityPerLevel?: number | null;
+  }>;
+}
+
+function hasConstructionTiming(
+  construction: ConstructionRecord
+): construction is ConstructionRecord & { startedAt: number; durationMs: number } {
+  return typeof construction.startedAt === 'number' && typeof construction.durationMs === 'number';
+}
+
 interface KingdomFullResponse {
   kingdom?: KingdomDoc;
   resources?: ResourcesDoc;
   population?: PopulationDoc | null;
   populationJobs?: PopulationJob[];
   armyUnits?: ArmyUnit[];
-  buildings?: unknown[];
+  buildings?: BuildingRecord[];
   constructionQueue?: unknown[];
   technologies?: unknown[];
 }
@@ -112,6 +154,10 @@ const getKingdomFullQuery = makeFunctionReference<"query">("kingdoms:getKingdomF
 const getViewerQuery = makeFunctionReference<"query">("kingdoms:getViewer");
 const settleKingdomEconomyMutation = makeFunctionReference<"mutation">("economy:settleKingdomEconomy");
 const setKingdomFoodTierMutation = makeFunctionReference<"mutation">("economy:setKingdomFoodTier");
+const reassignPopulationJobMutation = makeFunctionReference<"mutation">("economy:reassignPopulationJob");
+const getConstructionStateQuery = makeFunctionReference<"query">("buildings:getConstructionState");
+const startConstructionMutation = makeFunctionReference<"mutation">("buildings:startConstruction");
+const cancelConstructionMutation = makeFunctionReference<"mutation">("buildings:cancelConstruction");
 
 /* ==========================================================================
    COMPONENTE DE INICIO DE SESIÓN CON GOOGLE IDENTITY SERVICES
@@ -229,6 +275,7 @@ function useConvexConnectionState(): ConnectionStatus {
       return () => {
         unsubscribe();
       };
+
     } catch {
       setStatus('unavailable');
     }
@@ -381,10 +428,18 @@ function KingdomOverviewContent() {
   const population = kingdomData?.population;
   const populationJobs = kingdomData?.populationJobs;
   const armyUnits = kingdomData?.armyUnits;
+  const buildings = kingdomData?.buildings ?? [];
+  const constructionState = useQuery(
+    getConstructionStateQuery,
+    kingdom ? { kingdomId: kingdom._id } : "skip"
+  ) as ConstructionState | undefined;
 
   // Mutaciones autoritativas del Bloque B.8
   const settleKingdomEconomy = useMutation(settleKingdomEconomyMutation);
   const setKingdomFoodTier = useMutation(setKingdomFoodTierMutation);
+  const reassignPopulationJob = useMutation(reassignPopulationJobMutation);
+  const cancelConstruction = useMutation(cancelConstructionMutation);
+  const startConstruction = useMutation(startConstructionMutation);
 
   // Verificación estricta de titularidad en el servidor (P1)
   const isOwner = Boolean(
@@ -401,6 +456,15 @@ function KingdomOverviewContent() {
   const activeOwnerKeyRef = useRef<string | null>(activeOwnerKey);
   activeOwnerKeyRef.current = activeOwnerKey;
 
+  useEffect(() => {
+    if (constructionState) {
+      setConstructionClockAnchor({
+        serverTimeMs: constructionState.serverTimeMs,
+        clientTimeMs: Date.now(),
+      });
+    }
+  }, [constructionState?.serverTimeMs]);
+
   // Estados del selector persistente de régimen (P17 / B.8)
   const [tierSaveStatus, setTierSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [tierErrorMessage, setTierErrorMessage] = useState<string | null>(null);
@@ -408,6 +472,17 @@ function KingdomOverviewContent() {
   // Estados de liquidación autoritativa en Convex
   const [isSettling, setIsSettling] = useState<boolean>(false);
   const [settleError, setSettleError] = useState<string | null>(null);
+  const [savingWorkerJob, setSavingWorkerJob] = useState<string | null>(null);
+  const [workerSaveError, setWorkerSaveError] = useState<string | null>(null);
+  const [workerSaveMessage, setWorkerSaveMessage] = useState<string | null>(null);
+  const [cancellingConstruction, setCancellingConstruction] = useState<string | null>(null);
+  const [startingConstruction, setStartingConstruction] = useState<string | null>(null);
+  const [constructionError, setConstructionError] = useState<string | null>(null);
+  const [constructionMessage, setConstructionMessage] = useState<string | null>(null);
+  const [constructionClockAnchor, setConstructionClockAnchor] = useState<{
+    serverTimeMs: number;
+    clientTimeMs: number;
+  } | null>(null);
   const [lastSettlement, setLastSettlement] = useState<{
     timestamp: number;
     foodDelta: number;
@@ -429,6 +504,9 @@ function KingdomOverviewContent() {
     setSettleError(null);
     setIsSettling(false);
     setLastSettlement(null);
+    setSavingWorkerJob(null);
+    setWorkerSaveError(null);
+    setWorkerSaveMessage(null);
     hasAutoSettledRef.current = {};
     if (tierSavedTimeoutRef.current) clearTimeout(tierSavedTimeoutRef.current);
     tierSavedTimeoutRef.current = null;
@@ -529,6 +607,92 @@ function KingdomOverviewContent() {
     }
   };
 
+  const handleWorkerReassignment = async (
+    event: React.FormEvent<HTMLFormElement>,
+    jobType: string
+  ) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!isOwner || !kingdom) return;
+
+    const rawAssignedCount = new FormData(form).get('assignedCount');
+    const assignedCount = typeof rawAssignedCount === 'string' ? Number(rawAssignedCount) : NaN;
+    if (!Number.isInteger(assignedCount) || assignedCount < 0) {
+      setWorkerSaveError('La asignación debe ser un entero no negativo.');
+      form.reset();
+      return;
+    }
+
+    const requestOwnerKey = activeOwnerKey;
+    setSavingWorkerJob(jobType);
+    setWorkerSaveError(null);
+    setWorkerSaveMessage(null);
+    try {
+      const result = await reassignPopulationJob({
+        kingdomId: kingdom._id,
+        jobType,
+        assignedCount,
+      });
+      if (activeOwnerKeyRef.current !== requestOwnerKey) return;
+      if (!result?.success) {
+        throw new Error('El servidor no confirmó la reasignación.');
+      }
+      setWorkerSaveMessage(
+        `${result.assignedCount} asignados a ${jobLabels[jobType]?.label ?? jobType}; ${result.available} disponibles.`
+      );
+      form.reset();
+    } catch (err: unknown) {
+      if (activeOwnerKeyRef.current !== requestOwnerKey) return;
+      setWorkerSaveError(
+        err instanceof Error ? err.message : 'Error de conexión o autorización al reasignar trabajadores.'
+      );
+      form.reset();
+    } finally {
+      if (activeOwnerKeyRef.current === requestOwnerKey) setSavingWorkerJob(null);
+    }
+  };
+
+  const handleConstructionCancellation = async (construction: ConstructionRecord) => {
+    if (!isOwner || !kingdom || !window.confirm(
+      `¿Cancelar ${construction.buildingType} nivel ${construction.targetLevel}? El servidor devolverá el 50 % de los costes registrados.`
+    )) return;
+
+    setCancellingConstruction(construction._id);
+    setConstructionError(null);
+    setConstructionMessage(null);
+    try {
+      const result = await cancelConstruction({
+        kingdomId: kingdom._id,
+        constructionId: construction._id,
+      });
+      if (!result?.success) throw new Error("El servidor no confirmó la cancelación.");
+      setConstructionMessage("Construcción cancelada; se aplicó el reembolso confirmado por Convex.");
+    } catch (error) {
+      setConstructionError(error instanceof Error ? error.message : "No se pudo cancelar la construcción.");
+    } finally {
+      setCancellingConstruction(null);
+    }
+  };
+
+  const handleConstructionStart = async (buildingType: string) => {
+    if (!isOwner || !kingdom) return;
+    const requestOwnerKey = activeOwnerKey;
+    setStartingConstruction(buildingType);
+    setConstructionError(null);
+    setConstructionMessage(null);
+    try {
+      const result = await startConstruction({ kingdomId: kingdom._id, buildingType });
+      if (activeOwnerKeyRef.current !== requestOwnerKey) return;
+      if (!result?.success) throw new Error("Convex no confirmó el inicio de construcción.");
+      setConstructionMessage(`${result.buildingType}, nivel ${result.targetLevel}, añadido a la cola del servidor.`);
+    } catch (error) {
+      if (activeOwnerKeyRef.current !== requestOwnerKey) return;
+      setConstructionError(error instanceof Error ? error.message : "No se pudo iniciar la construcción.");
+    } finally {
+      if (activeOwnerKeyRef.current === requestOwnerKey) setStartingConstruction(null);
+    }
+  };
+
   // Liquidación automática al cargar el reino propio por primera vez en la sesión (sin bucles)
   useEffect(() => {
     const settlementKey = activeOwnerKey;
@@ -552,6 +716,7 @@ function KingdomOverviewContent() {
       population,
       populationJobs: populationJobs ?? [],
       armyUnits: armyUnits ?? [],
+      buildings,
       foodTier: selectedFoodTier,
       targetTime: clientTime,
       callerUserId: activeUserId,
@@ -559,13 +724,16 @@ function KingdomOverviewContent() {
         includeSiegeInFoodConsumption: includeSiegeInFood,
       },
     });
-  }, [kingdom, resources, population, populationJobs, armyUnits, selectedFoodTier, clientTime, activeUserId, includeSiegeInFood]);
+  }, [kingdom, resources, population, populationJobs, armyUnits, buildings, selectedFoodTier, clientTime, activeUserId, includeSiegeInFood]);
 
   const foodDelta = simulationResult?.success && simulationResult.simulatedResources && resources
     ? simulationResult.simulatedResources.food - resources.food
     : 0;
 
   const dailySurplus = simulationResult?.productionAndConsumption?.dailyFoodNetSurplus ?? 0;
+  const constructionDisplayServerTime = constructionClockAnchor
+    ? constructionClockAnchor.serverTimeMs + (clientTime - constructionClockAnchor.clientTimeMs)
+    : constructionState?.serverTimeMs ?? clientTime;
 
   const handleManualRefresh = () => {
     setIsRefreshing(true);
@@ -639,12 +807,16 @@ function KingdomOverviewContent() {
 
   // Cálculos demográficos confirmados
   const totalPop = population?.total ?? null;
-  const capacityPop = population?.capacity ?? null;
+  const capacityPop = constructionState?.residentialCapacity ?? population?.capacity ?? null;
   const availablePop = population?.available ?? null;
   const isStarving = population?.starving;
 
   // Cálculos de ejército confirmados
   const totalTroops = armyUnits ? armyUnits.reduce((acc, u) => acc + (u.count || 0), 0) : null;
+  const totalAssignedWorkers = populationJobs?.reduce(
+    (total, job) => total + job.assignedCount,
+    0
+  ) ?? null;
 
   // Etiquetas legibles de oficios
   const jobLabels: Record<string, { label: string; color: string; desc: string }> = {
@@ -1152,7 +1324,9 @@ function KingdomOverviewContent() {
                     </span>
                   </div>
                   <p className="text-[10px] text-[#635745]">
-                    {populationJobs?.find(j => j.jobType === 'agriculture')?.assignedCount ?? 0} agricultores activos (2 raciones/d)
+                    {simulationResult.foodProductionCapacityPending
+                      ? 'Capacidad productiva oficial pendiente; producción no calculable.'
+                      : `${populationJobs?.find(j => j.jobType === 'agriculture')?.assignedCount ?? 0} agricultores asignados (2 raciones/d, antes del límite del edificio).`}
                   </p>
                 </div>
 
@@ -1251,9 +1425,11 @@ function KingdomOverviewContent() {
               <div className="bg-[#19150f] p-3 rounded-lg border border-[#2c2419]">
                 <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider mb-0.5">Capacidad</span>
                 <span className="text-lg font-bold text-[#c7beac] font-serif">
-                  {capacityPop !== null ? capacityPop.toLocaleString('es-ES') : 'No disponible'}
+                  {capacityPop !== null ? capacityPop.toLocaleString('es-ES') : 'Pendiente'}
                 </span>
-                <span className="text-[10px] text-[#695d4c] block mt-0.5">plazas en viviendas</span>
+                <span className="text-[10px] text-[#695d4c] block mt-0.5">
+                  {constructionState?.residentialCapacity === null ? 'capacidad oficial por nivel pendiente' : 'plazas en viviendas'}
+                </span>
               </div>
               <div className="bg-[#19150f] p-3 rounded-lg border border-[#2c2419]">
                 <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider mb-0.5">Mano Libre</span>
@@ -1285,35 +1461,109 @@ function KingdomOverviewContent() {
               <h3 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider">
                 Distribución de Oficios Activos
               </h3>
+              <p className="text-[10px] text-[#8e816d]">
+                {totalAssignedWorkers?.toLocaleString('es-ES') ?? 'No disponible'} asignados · {availablePop?.toLocaleString('es-ES') ?? 'No disponible'} disponibles · {totalPop?.toLocaleString('es-ES') ?? 'No disponible'} habitantes
+              </p>
               {populationJobs && populationJobs.length > 0 ? (
                 <div className="space-y-2">
-                  {populationJobs.map((job, idx) => {
-                    const info = jobLabels[job.jobType] || {
-                      label: job.jobType,
-                      color: 'bg-neutral-500',
-                      desc: 'Actividad del reino'
-                    };
-                    const percent = totalPop && totalPop > 0 ? Math.round((job.assignedCount / totalPop) * 100) : 0;
+                  {Object.entries(jobLabels).map(([jobType, info]) => {
+                    const assignedCount = populationJobs.find(
+                      job => job.jobType.trim().toLowerCase() === jobType
+                    )?.assignedCount ?? 0;
+                    const percent = totalPop && totalPop > 0 ? Math.round((assignedCount / totalPop) * 100) : 0;
                     return (
-                      <div key={idx} className="bg-[#18140f] p-2.5 rounded-lg border border-[#2c2419] flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2.5">
+                      <form
+                        key={jobType}
+                        onSubmit={event => handleWorkerReassignment(event, jobType)}
+                        className="bg-[#18140f] p-2.5 rounded-lg border border-[#2c2419] flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
                           <span className={`w-2 h-2 rounded-full ${info.color}`}></span>
-                          <div>
+                          <div className="min-w-0">
                             <span className="font-medium text-[#f0e8d4] block">{info.label}</span>
                             <span className="text-[10px] text-[#786c5a]">{info.desc}</span>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <span className="font-mono font-bold text-[#e6ded0]">{job.assignedCount}</span>
-                          <span className="text-[10px] text-[#8e816d] ml-1.5">({percent}%)</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-mono text-[10px] text-[#8e816d]">({percent}%)</span>
+                          {isOwner ? (
+                            <>
+                              <input
+                                key={`${jobType}-${assignedCount}`}
+                                name="assignedCount"
+                                type="number"
+                                min="0"
+                                step="1"
+                                defaultValue={assignedCount}
+                                aria-label={`Trabajadores asignados a ${info.label}`}
+                                disabled={savingWorkerJob !== null}
+                                className="w-20 rounded border border-[#3b3121] bg-[#100e0b] px-2 py-1 text-right font-mono text-[#e6ded0] disabled:opacity-50"
+                              />
+                              <button
+                                type="submit"
+                                disabled={savingWorkerJob !== null}
+                                className="rounded border border-[#6e5520] px-2 py-1 text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50"
+                              >
+                                {savingWorkerJob === jobType ? 'Guardando…' : 'Guardar'}
+                              </button>
+                            </>
+                          ) : (
+                            <span className="font-mono font-bold text-[#e6ded0]">{assignedCount}</span>
+                          )}
                         </div>
-                      </div>
+                      </form>
                     );
                   })}
+                  {populationJobs.filter(job => !Object.hasOwn(jobLabels, job.jobType)).map(job => (
+                    <div key={job._id ?? job.jobType} className="bg-[#18140f] p-2.5 rounded-lg border border-[#2c2419] flex items-center justify-between text-xs">
+                      <span className="font-medium text-[#f0e8d4]">{jobLabels[job.jobType]?.label ?? job.jobType}</span>
+                      <span className="font-mono font-bold text-[#e6ded0]">{job.assignedCount}</span>
+                    </div>
+                  ))}
                 </div>
               ) : (
-                <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">
-                  No se registraron oficios específicos para la población de este reino.
+                <div className="space-y-2">
+                  <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">
+                    No se registraron asignaciones laborales persistidas.
+                  </p>
+                  {isOwner && Object.entries(jobLabels).map(([jobType, info]) => (
+                    <form
+                      key={jobType}
+                      onSubmit={event => handleWorkerReassignment(event, jobType)}
+                      className="bg-[#18140f] p-2.5 rounded-lg border border-[#2c2419] flex items-center justify-between gap-3 text-xs"
+                    >
+                      <span className="font-medium text-[#f0e8d4]">{info.label}</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          name="assignedCount"
+                          type="number"
+                          min="0"
+                          step="1"
+                          defaultValue={0}
+                          aria-label={`Trabajadores asignados a ${info.label}`}
+                          disabled={savingWorkerJob !== null}
+                          className="w-20 rounded border border-[#3b3121] bg-[#100e0b] px-2 py-1 text-right font-mono text-[#e6ded0] disabled:opacity-50"
+                        />
+                        <button
+                          type="submit"
+                          disabled={savingWorkerJob !== null}
+                          className="rounded border border-[#6e5520] px-2 py-1 text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50"
+                        >
+                          {savingWorkerJob === jobType ? 'Guardando…' : 'Guardar'}
+                        </button>
+                      </div>
+                    </form>
+                  ))}
+                </div>
+              )}
+              {workerSaveError && (
+                <p role="alert" className="text-xs text-rose-400 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5" /> {workerSaveError}
+                </p>
+              )}
+              {workerSaveMessage && (
+                <p role="status" className="text-xs text-emerald-400 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> {workerSaveMessage}
                 </p>
               )}
             </div>
@@ -1406,16 +1656,143 @@ function KingdomOverviewContent() {
         </section>
       </div>
 
-      {/* ====================================================================
-          4. ESTADO DE LOS BLOQUES NO DESPLEGADOS (REGLA DE NO INVENTAR)
-          ==================================================================== */}
-      <section className="bg-[#12100d] border border-[#241e15] rounded-xl p-4 text-xs text-[#8e816d] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Info className="w-4 h-4 text-[#d4af37] flex-shrink-0" />
-          <span>
-            <strong>Próximas Fases:</strong> Edificios, construcción, investigación de tecnologías y desafíos del parlamento se mantienen bloqueados para fases posteriores según especificación.
+      <section className="bg-[#14110d] border border-[#2b2419] rounded-xl p-5 shadow-sm space-y-4">
+        <div className="flex items-center justify-between border-b border-[#241e15] pb-3">
+          <div className="flex items-center gap-2">
+            <Castle className="w-4 h-4 text-[#d4af37]" />
+            <h2 className="text-sm font-serif font-bold uppercase tracking-wider text-[#e6ded0]">Edificios y Construcción</h2>
+          </div>
+          <span className="text-[11px] text-[#8e816d]">
+            {constructionState ? `${constructionState.constructionQueue.length}/2 ranuras ocupadas` : 'Estado no disponible'}
           </span>
         </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider">Edificios persistidos</h3>
+            {constructionState?.buildings.length ? constructionState.buildings.map((building) => (
+              <div key={building._id} className="bg-[#18140f] p-3 rounded-lg border border-[#2c2419] flex justify-between text-xs">
+                <span className="text-[#f0e8d4]">{building.buildingType}</span>
+                <span className="font-mono text-[#d4af37]">Nivel {building.level}</span>
+              </div>
+            )) : (
+              <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">
+                No hay documentos de edificios persistidos para este reino.
+              </p>
+            )}
+            {constructionState?.catalog && (
+              <div className="mt-3 space-y-1.5">
+                <h4 className="text-[10px] font-semibold uppercase tracking-wider text-[#8e816d]">Catálogo observado / configuración</h4>
+                {Object.entries(constructionState.catalog).map(([buildingType, rule]) => {
+                  const missing: string[] = [];
+                  if (rule.costs === null) missing.push('costes');
+                  if (rule.baseDurationMs === null) missing.push('duración base');
+                  if (rule.progressionRequirements === null) missing.push('requisitos de progresión');
+                  const knownCosts = rule.costs
+                    ? Object.entries(rule.costs).map(([resource, amount]) => `${resource}: ${amount}`).join(', ')
+                    : 'sin valores oficiales';
+                  const knownRequirements = rule.progressionRequirements && Object.keys(rule.progressionRequirements).length
+                    ? Object.entries(rule.progressionRequirements).map(([type, level]) => `${type} nivel ${level}`).join(', ')
+                    : rule.progressionRequirements
+                      ? 'ninguno documentado'
+                      : 'pendientes';
+                  const canStart = isOwner &&
+                    constructionState.availableBuildingTypes.includes(buildingType);
+                  return (
+                    <div key={buildingType} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 rounded border border-[#2b2419] bg-[#100e0b] px-2.5 py-2 text-[11px]">
+                      <span className="text-[#c7beac]">
+                        {rule.label} · costes: {knownCosts} · duración base: {rule.baseDurationMs === null ? 'pendiente' : formatSecondsDuration(rule.baseDurationMs / 1000)} · requisitos: {knownRequirements}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {missing.length ? (
+                          <span className="text-amber-300">Inicio bloqueado: falta especificar {missing.join(', ')}.</span>
+                        ) : (
+                          <span className="text-emerald-300">Configuración disponible</span>
+                        )}
+                        {canStart && (
+                          <button
+                            type="button"
+                            onClick={() => handleConstructionStart(buildingType)}
+                            disabled={startingConstruction !== null || constructionState.constructionQueue.length >= 2}
+                            className="rounded border border-[#6e5520] px-2 py-1 text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50"
+                          >
+                            {startingConstruction === buildingType ? 'Encolando…' : 'Construir'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <p className="text-[11px] text-[#8e816d]">
+              Capacidad residencial: {capacityPop === null ? 'sin dato persistido' : capacityPop.toLocaleString('es-ES')}.
+              No se deriva de niveles de edificios mientras falte la fórmula oficial.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider">Cola del servidor</h3>
+            {constructionState?.constructionQueue.length ? constructionState.constructionQueue.map((construction) => {
+              const timingAvailable = hasConstructionTiming(construction);
+              const progress = timingAvailable
+                ? constructionProgress(construction, constructionDisplayServerTime)
+                : null;
+              const remainingSeconds = timingAvailable
+                ? Math.max(0, (construction.startedAt + construction.durationMs - constructionDisplayServerTime) / 1000)
+                : null;
+              const notStarted = timingAvailable && construction.startedAt > constructionDisplayServerTime;
+              const progressLabel = progress === null ? 'Progreso no disponible' : `${Math.floor(progress)} %`;
+              return (
+                <div key={construction._id} className="bg-[#18140f] p-3 rounded-lg border border-[#2c2419] space-y-2">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="text-[#f0e8d4]">{construction.buildingType ?? 'Construcción heredada'} · nivel {construction.targetLevel ?? 'sin dato'}</span>
+                    <span className="font-mono text-[#d4af37]">{progressLabel}</span>
+                  </div>
+                  <p className="text-[11px] text-[#8e816d]">
+                    {remainingSeconds === null
+                      ? 'Tiempo restante no disponible: faltan marcas temporales persistidas.'
+                      : `${notStarted ? 'Comienza en' : 'Tiempo restante'}: ${formatSecondsDuration(remainingSeconds)}`}
+                  </p>
+                  {progress !== null && (
+                    <div className="h-1.5 bg-[#0d0b09] rounded overflow-hidden">
+                      <div className="h-full bg-amber-600" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
+                    </div>
+                  )}
+                  {isOwner && !notStarted && progress !== null && progress < 100 && (
+                    <button
+                      type="button"
+                      onClick={() => handleConstructionCancellation(construction)}
+                      disabled={cancellingConstruction !== null}
+                      className="rounded border border-rose-900/70 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950/40 disabled:opacity-50"
+                    >
+                      {cancellingConstruction === construction._id ? 'Cancelando…' : 'Cancelar (reembolso 50 %)'}
+                    </button>
+                  )}
+                </div>
+              );
+            }) : (
+              <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">
+                No hay construcciones en curso.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded border border-amber-900/40 bg-[#1b160f] p-3 text-xs text-[#c7b99f]">
+          {isOwner
+            ? 'Las obras configuradas usan tiempo del servidor, dos ranuras y +1 % por nivel. Las acciones de catálogo sin costes, duración base o requisitos oficiales siguen bloqueadas.'
+            : 'Consulta de solo lectura. Iberia no puede iniciar ni cancelar construcciones.'}
+          <span className="block mt-1 text-[11px] text-[#8e816d]">
+            Capacidades residencial/productiva y sus requisitos permanecen sin efecto hasta configurarse con valores oficiales.
+          </span>
+        </div>
+        {constructionError && <p role="alert" className="text-xs text-rose-400">{constructionError}</p>}
+        {constructionMessage && <p role="status" className="text-xs text-emerald-400">{constructionMessage}</p>}
+      </section>
+
+      <section className="bg-[#12100d] border border-[#241e15] rounded-xl p-4 text-xs text-[#8e816d] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <span><strong>Otros bloques pendientes:</strong> investigación de tecnologías y desafíos del parlamento.</span>
         <button
           onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
           className="inline-flex items-center gap-1.5 text-xs text-[#c5a059] hover:text-[#e8dfc8] transition-colors flex-shrink-0"

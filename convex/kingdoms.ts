@@ -62,27 +62,16 @@ export const getKingdomFull = query({
       }
     }
 
-    // 6. Edificios
-    let buildings: any[] = [];
-    try {
-      buildings = await ctx.db
-        .query("buildings" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-        .collect();
-    } catch {
-      buildings = [];
-    }
+    // Fallar explícitamente si faltan tablas relacionales requeridas; nunca presentar estado inventado.
+    const buildings = await ctx.db
+      .query("buildings" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .collect();
 
-    // 7. Cola de construcción
-    let constructionQueue: any[] = [];
-    try {
-      constructionQueue = await ctx.db
-        .query("constructionQueue" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-        .collect();
-    } catch {
-      constructionQueue = [];
-    }
+    const constructionQueue = await ctx.db
+      .query("constructionQueue" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
+      .collect();
 
     // 8. Tecnologías
     let technologies: any[] = [];

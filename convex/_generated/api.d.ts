@@ -13,6 +13,7 @@ import type * as economyAdapter from "../economyAdapter.js";
 import type * as economyCalculations from "../economyCalculations.js";
 import type * as economyPureTests from "../economyPureTests.js";
 import type * as economyTests from "../economyTests.js";
+import type * as buildings from "../buildings.js";
 import type * as kingdoms from "../kingdoms.js";
 
 import type {
@@ -27,6 +28,7 @@ declare const fullApi: ApiFromModules<{
   economyCalculations: typeof economyCalculations;
   economyPureTests: typeof economyPureTests;
   economyTests: typeof economyTests;
+  buildings: typeof buildings;
   kingdoms: typeof kingdoms;
 }>;
 
