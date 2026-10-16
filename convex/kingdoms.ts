@@ -1,6 +1,7 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { resolveKingdomQueryUserId } from "./kingdomAccess";
+import { createAggregatePopulationFallback } from "./kingdomReadModel";
 
 /**
  * Consulta autoritativa completa del reino para el cliente (Resumen del Reino)
@@ -94,16 +95,17 @@ export const getKingdomFull = query({
       technologies = [];
     }
 
+    const kingdomPopulation = kingdom as any;
+    const populationFallback = createAggregatePopulationFallback(
+      kingdomId,
+      kingdomPopulation.population,
+      kingdomPopulation.unassignedCivil
+    );
+
     return {
       kingdom,
       resources: resources ?? (kingdom as any).resources,
-      population: population ?? {
-        total: (kingdom as any).population ?? 2000,
-        available: (kingdom as any).unassignedCivil ?? 0,
-        capacity: 2500,
-        starving: false,
-        kingdomId,
-      },
+      population: population ?? populationFallback,
       populationJobs,
       armyUnits,
       buildings,

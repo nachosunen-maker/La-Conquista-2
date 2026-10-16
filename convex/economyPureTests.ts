@@ -21,6 +21,7 @@ import {
   executeRegimeChangeTransition,
 } from "./economyAdapter";
 import { DEMO_USER_ID, isKingdomOwner, resolveKingdomQueryUserId } from "./kingdomAccess";
+import { createAggregatePopulationFallback } from "./kingdomReadModel";
 
 /**
  * ============================================================================
@@ -67,6 +68,28 @@ export function runEconomicValidationTests(): TestResult[] {
       test: "Acceso: el subject autenticado autoriza el reino propio y la demo permanece solo de lectura",
       passed,
       details: `Demo pública de lectura: ${resolveKingdomQueryUserId(DEMO_USER_ID) === DEMO_USER_ID}; usuario ajeno rechazado: ${rejectedForeignUser}; demo modificable: ${isKingdomOwner(DEMO_USER_ID, "usuario_autenticado")}`,
+    });
+  }
+
+  {
+    const fallback = createAggregatePopulationFallback("k_read_model", 2000, 250);
+    const missing = createAggregatePopulationFallback("k_read_model", 2000, undefined);
+    const invalid = createAggregatePopulationFallback("k_read_model", 2000.5, 250);
+    const overassigned = createAggregatePopulationFallback("k_read_model", 200, 250);
+    const passed =
+      fallback?.total === 2000 &&
+      fallback.available === 250 &&
+      !Object.hasOwn(fallback, "capacity") &&
+      !Object.hasOwn(fallback, "starving") &&
+      missing === null &&
+      invalid === null &&
+      overassigned === null;
+
+    results.push({
+      category: "INTEGRACIÓN CONVEX",
+      test: "Lectura de población: fallback solo usa censo y mano libre persistidos, sin inventar capacidad ni hambruna",
+      passed,
+      details: `Fallback agregado: ${fallback ? `${fallback.total}/${fallback.available}` : "ausente"}; sin capacidad/hambruna inventadas: ${Boolean(fallback && !Object.hasOwn(fallback, "capacity") && !Object.hasOwn(fallback, "starving"))}; faltantes/inválidos/sobreasignados rechazados: ${missing === null && invalid === null && overassigned === null}`,
     });
   }
 

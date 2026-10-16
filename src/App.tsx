@@ -77,7 +77,7 @@ interface ResourcesDoc {
 interface PopulationDoc {
   _id: string;
   total: number;
-  capacity: number;
+  capacity?: number;
   available: number;
   starving?: boolean;
   kingdomId: string;
@@ -100,7 +100,7 @@ interface ArmyUnit {
 interface KingdomFullResponse {
   kingdom?: KingdomDoc;
   resources?: ResourcesDoc;
-  population?: PopulationDoc;
+  population?: PopulationDoc | null;
   populationJobs?: PopulationJob[];
   armyUnits?: ArmyUnit[];
   buildings?: unknown[];
@@ -640,8 +640,8 @@ function KingdomOverviewContent() {
   // Cálculos demográficos confirmados
   const totalPop = population?.total ?? null;
   const capacityPop = population?.capacity ?? null;
-  const availablePop = population?.available ?? 0;
-  const isStarving = population?.starving ?? false;
+  const availablePop = population?.available ?? null;
+  const isStarving = population?.starving;
 
   // Cálculos de ejército confirmados
   const totalTroops = armyUnits ? armyUnits.reduce((acc, u) => acc + (u.count || 0), 0) : null;
@@ -1229,11 +1229,13 @@ function KingdomOverviewContent() {
                 </h2>
               </div>
               <span className={`text-[11px] font-medium px-2 py-0.5 rounded border ${
-                isStarving 
-                  ? 'bg-rose-950/60 text-rose-300 border-rose-800/50' 
-                  : 'bg-emerald-950/50 text-emerald-300 border-emerald-800/40'
+                isStarving === true
+                  ? 'bg-rose-950/60 text-rose-300 border-rose-800/50'
+                  : isStarving === false
+                    ? 'bg-emerald-950/50 text-emerald-300 border-emerald-800/40'
+                    : 'bg-neutral-900 text-neutral-400 border-neutral-700'
               }`}>
-                {isStarving ? 'En Peligro de Hambruna' : 'Población Abastecida'}
+                {isStarving === true ? 'En Peligro de Hambruna' : isStarving === false ? 'Población Abastecida' : 'Estado sin registro'}
               </span>
             </div>
 
@@ -1256,7 +1258,7 @@ function KingdomOverviewContent() {
               <div className="bg-[#19150f] p-3 rounded-lg border border-[#2c2419]">
                 <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider mb-0.5">Mano Libre</span>
                 <span className="text-lg font-bold text-[#d4af37] font-serif">
-                  {availablePop.toLocaleString('es-ES')}
+                  {availablePop !== null ? availablePop.toLocaleString('es-ES') : 'No disponible'}
                 </span>
                 <span className="text-[10px] text-[#695d4c] block mt-0.5">sin asignar</span>
               </div>
