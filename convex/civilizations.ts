@@ -14,6 +14,12 @@ export function civilizationLabel(id: string | undefined | null): string | null 
   return CIVILIZATIONS.find((civilization) => civilization.id === id)?.label ?? null;
 }
 
+export const OFFICIAL_CIVILIZATIONS = CIVILIZATIONS;
+export const isValidCivilization = isCivilizationId;
+export function getCivilizationById(id: string) {
+  return CIVILIZATIONS.find((c) => c.id === id) ?? null;
+}
+
 export const listCivilizations = query({
   args: {},
   handler: async () => ({

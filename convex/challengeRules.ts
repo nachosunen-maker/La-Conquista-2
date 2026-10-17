@@ -130,3 +130,8 @@ export function approximatePopulation(exact: number): number {
 export function pendingExpiry(createdAt: number): number {
   return createdAt + PARLIAMENT.PENDING_EXPIRY_MS;
 }
+
+export const validateNewChallengeInput = validateNewChallenge;
+export const calculateScheduledExecutionTime = scheduleFor;
+export const isValidWindowOption = isScheduleWindow;
+export const validateChallengeStateTransition = assertTransition;

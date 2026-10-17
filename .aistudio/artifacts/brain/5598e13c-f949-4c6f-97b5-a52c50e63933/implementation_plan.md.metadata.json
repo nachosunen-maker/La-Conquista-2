@@ -1,0 +1,6 @@
+{
+  "summary": "Plan de ejecución para el despliegue controlado a Convex con npx convex deploy, sincronizando la tabla trainingQueue y verificando la integridad del sistema sin alterar Iberia.",
+  "updatedAt": "2026-10-17T13:41:21.116019669Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

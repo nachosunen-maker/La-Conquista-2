@@ -1,11 +1,18 @@
 import { runEconomicValidationTests, type TestResult } from "../convex/economyPureTests";
+import { runMilitaryTests, type MilitaryTestResult } from "../convex/militaryPureTests";
+import { runFoundationTests, type FoundationTestResult } from "../convex/foundationPureTests";
+import { runChallengeValidationTests as runChallengePureTests, type ChallengeTestResult } from "../convex/challengePureTests";
 
 console.log("================================================================================");
-console.log("LA CONQUISTA — BATERÍA DE PRUEBAS MATEMÁTICAS Y DE REGLAS ECONÓMICAS");
+console.log("LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAMENTO)");
 console.log("================================================================================\n");
 
 const startTime = Date.now();
-const results: TestResult[] = runEconomicValidationTests();
+const economicResults: TestResult[] = runEconomicValidationTests();
+const militaryResults: MilitaryTestResult[] = runMilitaryTests();
+const foundationResults: FoundationTestResult[] = runFoundationTests();
+const challengeResults: ChallengeTestResult[] = runChallengePureTests();
+const results = [...economicResults, ...militaryResults, ...foundationResults, ...challengeResults];
 const durationMs = Date.now() - startTime;
 
 let passedCount = 0;
