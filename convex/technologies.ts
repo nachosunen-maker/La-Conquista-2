@@ -80,14 +80,14 @@ export const researchTechnology = mutation({
   args: { kingdomId: v.id("kingdoms"), techType: v.string() },
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
+    const now = Date.now();
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const [progress, buildings] = await Promise.all([
       readProgress(ctx, args.kingdomId),
       ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
     ]);
     const collection = validateBuildingCollection(buildings);
     if (!collection.success) throw new Error(collection.error);
-    const now = Date.now();
-    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const planResult = createResearchPlan({
       technologyId: args.techType,
       resources: settled.settledResources,

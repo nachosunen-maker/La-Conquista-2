@@ -113,6 +113,9 @@ export const startConstruction = mutation({
       throw new Error(`El edificio '${args.buildingType}' no pertenece al catálogo configurado.`);
     }
 
+    // La liquidación completa obras vencidas: la cola y los niveles se leen después de ella.
+    const now = Date.now();
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const [storedBuildings, queue] = await Promise.all([
       ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
       ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
@@ -121,9 +124,6 @@ export const startConstruction = mutation({
     if (!collection.success) throw new Error(collection.error);
     const buildingLevels = collection.levels;
     const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
-
-    const now = Date.now();
-    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const resourceSnapshot: Record<ResourceType, number> = settled.settledResources;
     const planResult = createConstructionPlan({
       buildingType: args.buildingType,

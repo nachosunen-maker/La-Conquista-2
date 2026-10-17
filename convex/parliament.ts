@@ -31,7 +31,7 @@ import {
   validateNewChallenge,
   type ChallengeStatus,
 } from "./challengeRules";
-import { MORALE, PARLIAMENT, PREDEFINED_MESSAGES, TERRAINS, UNIT_TYPES, WELLBEING, type UnitType } from "./balanceConfig";
+import { MORALE, PARLIAMENT, PREDEFINED_MESSAGES, TERRAINS, UNITS, UNIT_TYPES, WELLBEING, type UnitType } from "./balanceConfig";
 import type { ResourceType } from "./economyCalculations";
 
 type ChallengeDoc = Doc<"challenges">;
@@ -409,6 +409,18 @@ async function applyCasualtiesToArmy(ctx: MutationCtx, kingdomId: Id<"kingdoms">
   }
 }
 
+async function removeDeadFromPopulation(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
+  let deadPersons = 0;
+  for (const type of UNIT_TYPES as readonly UnitType[]) {
+    const dead = Math.max(0, casualties[type] - wounded[type]);
+    deadPersons += dead * UNITS[type].populationPerUnit;
+  }
+  if (deadPersons <= 0) return;
+  const population: any = await (ctx.db as any).query("population").filter((q: any) => q.eq(q.field("kingdomId"), kingdomId)).first();
+  if (!population) return;
+  await ctx.db.patch(population._id, { total: Math.max(0, population.total - deadPersons) });
+}
+
 export const resolveChallenge = internalMutation({
   args: { challengeId: v.id("challenges") },
   handler: async (ctx, args) => {
@@ -441,6 +453,9 @@ export const resolveChallenge = internalMutation({
 
     await applyCasualtiesToArmy(ctx, current.challengerKingdomId, report.attacker.casualtiesComposition, report.attacker.woundedComposition);
     await applyCasualtiesToArmy(ctx, current.targetKingdomId, report.defender.casualtiesComposition, report.defender.woundedComposition);
+    // [MAESTRA P46] Los muertos se pierden definitivamente: salen también del censo (operadores incluidos).
+    await removeDeadFromPopulation(ctx, current.challengerKingdomId, report.attacker.casualtiesComposition, report.attacker.woundedComposition);
+    await removeDeadFromPopulation(ctx, current.targetKingdomId, report.defender.casualtiesComposition, report.defender.woundedComposition);
 
     const expiresAt = now + MORALE.BATTLE_EFFECT_DURATION_SECONDS * 1000;
     for (const side of [current.challengerKingdomId, current.targetKingdomId]) {

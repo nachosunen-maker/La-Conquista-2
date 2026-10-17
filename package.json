@@ -7,7 +7,9 @@
     "dev": "vite --port 3000 --host",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit && tsc --noEmit -p convex"
+    "lint": "tsc --noEmit && tsc --noEmit -p convex",
+    "test": "tsx scripts/runEconomicTests.ts",
+    "codegen:offline": "node scripts/regenerateConvexApi.mjs"
   },
   "dependencies": {
     "convex": "^1.46.0",
@@ -22,6 +24,7 @@
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^6.1.1",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.2"
   }

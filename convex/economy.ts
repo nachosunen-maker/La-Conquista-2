@@ -250,7 +250,11 @@ export async function settleRelationalKingdomEconomy(
     if (Object.keys(kingdomPatch).length > 0) await ctx.db.patch(kingdom._id, { ...kingdomPatch, updatedAt: now });
 
     if (extended.militaryDesertion > 0) {
-      await applyMilitaryDesertion(ctx, state.armyUnits, extended.militaryDesertion);
+      const deserted = await applyMilitaryDesertion(ctx, state.armyUnits, extended.militaryDesertion);
+      if (deserted > 0) {
+        const populationDoc = await ctx.db.get(state.population._id);
+        if (populationDoc) await ctx.db.patch(state.population._id, { total: Math.max(0, populationDoc.total - deserted) });
+      }
     }
 
     // [MAESTRA P45] Recuperación de heridos por nivel de Hospital militar (+ tecnología, tope 60 %).
@@ -284,7 +288,7 @@ export async function settleRelationalKingdomEconomy(
 }
 
 /** [COMPLEMENTO D-48] Deserción en fase 3: se retira tropa viva empezando por los lotes más numerosos. */
-async function applyMilitaryDesertion(ctx: any, armyUnits: any[], personnel: number): Promise<void> {
+async function applyMilitaryDesertion(ctx: any, armyUnits: any[], personnel: number): Promise<number> {
   let remaining = personnel;
   const living = armyUnits
     .filter((doc) => normalizeUnitType(doc.unitType) && normalizeUnitType(doc.unitType) !== "asedio" && doc.count > 0)
@@ -305,6 +309,7 @@ async function applyMilitaryDesertion(ctx: any, armyUnits: any[], personnel: num
       remaining -= machines * UNITS.asedio.populationPerUnit;
     }
   }
+  return personnel - remaining;
 }
 
 async function migrateAggregateKingdomState(ctx: any, kingdom: any) {

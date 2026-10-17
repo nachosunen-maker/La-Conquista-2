@@ -230,12 +230,14 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   const growth = computePopulationGrowth({ total: state.population, elapsedDays, residentialCapacity: input.residentialCapacity });
   const phase3Days = daysInPhase3(starvationBefore, starvationAfter);
   const civilPopulation = Math.max(0, state.population - state.regularSoldiers);
-  const deaths = phase3Days > 0 ? Math.min(civilPopulation, Math.floor(civilPopulation * STARVATION.DAILY_CIVIL_LOSS_RATE * phase3Days)) : 0;
+  // [DERIVADO] Las muertes civiles salen de la reserva libre (nacimientos incluidos) para no dejar
+  // puestos de trabajo asignados por encima del censo; el resto de la pérdida se difiere al siguiente intervalo.
+  const theoreticalDeaths = phase3Days > 0 ? Math.floor(civilPopulation * STARVATION.DAILY_CIVIL_LOSS_RATE * phase3Days) : 0;
+  const deaths = Math.min(theoreticalDeaths, Math.max(0, state.unassignedCivil + growth.births));
   const militaryDesertion = phase3Days > 0
     ? Math.min(input.militaryPersonnel, Math.floor(input.militaryPersonnel * STARVATION.DAILY_MILITARY_DESERTION_RATE * phase3Days))
     : 0;
   const totalAfter = state.population + growth.births - deaths;
-  // Los nacimientos engrosan la reserva civil libre; las muertes salen primero de la reserva libre.
   const availableAfter = Math.max(0, state.unassignedCivil + growth.births - deaths);
 
   // 6. Felicidad (D-49): contribuciones diarias limitadas a ±5 puntos por día.

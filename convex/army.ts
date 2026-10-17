@@ -180,19 +180,19 @@ export const startTraining = mutation({
   },
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
+    // La liquidación completa lotes vencidos y actualiza la población: todo se lee después de ella.
+    const now = Date.now();
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const [buildings, queue] = await Promise.all([
       ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
       readTrainingQueue(ctx, args.kingdomId),
     ]);
     const collection = validateBuildingCollection(buildings);
     if (!collection.success) throw new Error(collection.error);
-    await readArmyUnitsWithMigration(ctx, args.kingdomId);
     const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
     const modifiers = computeTechnologyModifiers(completedTechnologies);
-
-    const now = Date.now();
-    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
-    const population = settled.population;
+    const population = await ctx.db.get(settled.population._id);
+    if (!population) throw new Error("No existe documento de población para el reino.");
     const planResult = createTrainingPlan({
       unitType: args.unitType,
       count: args.count,
@@ -244,7 +244,9 @@ export const cancelTraining = mutation({
       nextResources[resource] += amount;
     }
     await ctx.db.patch(settled.resources._id, nextResources);
-    await ctx.db.patch(settled.population._id, { available: settled.population.available + cancellation.populationReturned });
+    const population = await ctx.db.get(settled.population._id);
+    if (!population) throw new Error("No existe documento de población para el reino.");
+    await ctx.db.patch(population._id, { available: population.available + cancellation.populationReturned });
     await ctx.db.delete(args.trainingId);
     return { success: true, refund: cancellation.refund, populationReturned: cancellation.populationReturned };
   },
