@@ -1,0 +1,840 @@
+# LA CONQUISTA — Documento de complemento de especificación
+## Resolución propuesta de datos pendientes y fórmulas de balance
+
+**Fecha:** 17 de octubre de 2026
+**Documento de referencia:** *LA CONQUISTA 2 MD FINAL.pdf*, especialmente las secciones
+«Información pendiente para completar los bloques» y «Faltantes por bloque».
+**Proyecto:** La Conquista — juego persistente de estrategia medieval, backend Convex.
+
+---
+
+## 0. Alcance, criterio y estado de las decisiones
+
+Este documento convierte los huecos enumerados en el PDF en una propuesta de
+especificación utilizable para continuar el desarrollo. Se ha respetado el concepto central del
+juego: **1 día real equivale a 1 año de juego**, la población ejecuta las órdenes
+automáticamente, las decisiones deben tener costes y consecuencias, las batallas deben
+premiar la preparación y el servidor es la autoridad de los valores críticos.
+
+### Cómo interpretar las etiquetas
+
+- **[CONFIRMADO EN EL DOCUMENTO/CÓDIGO DESCRITO POR EL PDF]**: el PDF
+identifica expresamente el valor como existente o aprobado. No se sustituye.
+- **[PROPUESTA DE BALANCE]**: número o regla nueva sugerida para cubrir un hueco. Es
+coherente con las reglas conocidas, pero **no debe presentarse como un valor histórico
+recuperado de la memoria ni como una decisión ya aprobada**.
+- **[DECISIÓN DE PRODUCTO]**: necesita aprobación expresa porque cambia el alcance o la
+experiencia del juego.
+- **[IMPLEMENTACIÓN]**: recomendación técnica para evitar inconsistencias.
+
+El PDF declara que el repositorio no contiene una especificación completa y que varios valores
+de `buildingsCatalog.ts` no están conectados al backend ni tienen una fuente documental. Por
+tanto, este complemento no afirma que esos números ya fueran oficiales. Los valores nuevos
+se presentan como una propuesta revisable para que el responsable del juego pueda
+aceptarlos, modificarlos o rechazarlos.
+
+## 1. Reglas base que deben conservarse
+
+| Regla | Valor que se conserva | Estado |
+|---|---:|---|
+| Escala temporal | 86.400 segundos reales = 1 año de juego | Confirmado |
+| Recursos principales | Oro, madera, piedra, hierro, alimentos | Confirmado |
+| Población inicial | 2.000 habitantes | Confirmado en la versión revisada del PDF |
+| Ración mínima | 0,75 | Confirmado en el código descrito |
+| Ración normal | 1,00 | Confirmado en el código descrito |
+| Ración abundante | 1,10 | Confirmado en el código descrito |
+| Ración excelente | 1,20 | Confirmado en el código descrito |
+| Consumo militar regular | Factor 1,05 frente al civil | Confirmado |
+| Consumo civil base | 1 unidad de alimento por habitante y día real | Confirmado como
+aprobado |
+| Producción agrícola | 2 alimentos por agricultor y día real | Confirmado como aprobado |
+| Nivel máximo de edificio | 100 | Confirmado en `buildingRules.ts` |
+| Obras simultáneas | 2 ranuras | Confirmado en `buildingRules.ts` |
+| Duración de construcción | Base × (1 + 0,01 × (nivel − 1)) | Confirmado en `buildingRules.ts` |
+| Tipos de unidad en esquema | `infanteria`, `caballeria`, `arqueria`, `asedio` | Confirmado en el
+PDF |
+| Autoridad sobre estado y tiempo | Servidor Convex | Confirmado |
+
+### Fórmulas base
+
+**Consumo diario de alimentos**
+
+\[
+C = P_c \cdot r + P_m \cdot 1{,}05 \cdot r
+\]
+
+Donde `Pc` son civiles no militares, `Pm` son tropas regulares y `r` es el multiplicador de ración.
+Los mercenarios deben contabilizarse como militares si usan la misma regla de consumo; esto
+se propone para evitar que una unidad consuma menos por su procedencia.
+
+**Producción agrícola**
+
+\[
+A = 2 \cdot F \cdot M_a
+\]
+
+Donde `F` es el número de agricultores efectivos y `Ma` es el multiplicador agrícola total de
+edificios, tecnologías, clima y estado laboral. En la primera versión, si no existen esos
+modificadores implementados, `Ma = 1`.
+
+**Tiempo de construcción por nivel**
+
+\[
+T_n = T_1 \cdot [1 + 0{,}01(n-1)]
+\]
+
+La fórmula documentada aumenta un 1 % por nivel. Debe aclararse si el nivel `n` representa el
+nivel que se está construyendo o el nivel previo del edificio. Propuesta: `n` es el nivel que se
+está construyendo, de modo que la primera mejora usa `n = 2`.
+
+**Actualización por tiempo transcurrido**
+
+El servidor calcula `elapsedSeconds = max(0, now - lastUpdatedAt)`. La producción, consumo y
+progreso se procesan en intervalos o mediante una función de acumulación equivalente. No
+debe aceptarse un `now`, año o delta enviado libremente por el cliente como autoridad.
+
+---
+
+## 2. D-01 a D-07 — Edificios y construcción
+
+### Decisiones recomendadas
+
+- **D-01 — Catálogo de edificios:** no copiar automáticamente los valores de
+`buildingsCatalog.ts` al catálogo activo. Usar la tabla de este documento como propuesta de
+balance y mantener el catálogo antiguo fuera de producción hasta aprobar los valores.
+- **D-02 — Escalado de costes:** sí, coste por nivel con crecimiento compuesto del 15 %
+respecto al nivel anterior. Fórmula propuesta: `coste(n) = redondear(costeBase × 1,15^(n−1))`.
+No confundir esta fórmula propuesta con el incremento del 1 % de duración, que sí figura en el
+código descrito.
+- **D-03 — Capacidad por nivel:** capacidad lineal por nivel en la primera versión:
+`capacidad(n) = capacidadBase × n`. Esto facilita auditar la economía. Los efectos tecnológicos
+pueden modificarla posteriormente.
+- **D-04 — Cancelación:** reembolsar el 50 % de los recursos pagados, independientemente
+del tiempo restante. No reembolsar recursos que no llegaron a descontarse. El reembolso
+proporcional al tiempo restante descrito en otra ruta debe retirarse para evitar dos reglas
+distintas.
+- **D-05 — Nivel máximo respecto al Castillo:** ningún edificio puede superar el nivel del
+Castillo. El propio Castillo es la excepción obvia a esta comparación consigo mismo.
+- **D-06 — Prerrequisitos iniciales:** aceptar provisionalmente los requisitos listados en el PDF
+pendiente: Cuartel ← Castillo 1; Mina de hierro ← Cantera 1; Herrería ← Cuartel 1 + Mina de
+hierro 1; Universidad ← Castillo 2; Parlamento ← Castillo 2. Deben validarse también los
+requisitos de la tabla siguiente.
+- **D-07 — Producción de oro:** introducir la profesión `gold` como mineros de oro, habilitada
+por una Mina de oro. No asignar producción de oro a una mina de hierro o cantera.
+
+### Tabla propuesta de edificios
+
+Los costes son por la **primera construcción/nivel 1**. Las duraciones son segundos reales. La
+capacidad residencial es número de residentes; la capacidad laboral es máximo de
+trabajadores asignables a ese edificio por nivel. Los números son **propuesta de balance**, no
+valores confirmados por el PDF.
+
+| Edificio | Oro | Madera | Piedra | Hierro | Alimentos | Duración base (s) | Vivienda/nivel |
+Trabajadores/nivel | Oficio/función | Requisitos |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| Castillo | 500 | 800 | 800 | 100 | 0 | 86.400 | 0 | 0 | Desbloqueos y administración | Ninguno |
+| Viviendas | 40 | 100 | 20 | 0 | 0 | 7.200 | 100 | 0 | Capacidad residencial | Castillo 1 |
+| Granja | 30 | 80 | 20 | 0 | 0 | 10.800 | 0 | 100 | Agricultura | Castillo 1 |
+| Aserradero | 40 | 100 | 30 | 0 | 0 | 14.400 | 0 | 80 | Madera | Castillo 1 |
+| Cantera | 50 | 80 | 80 | 0 | 0 | 18.000 | 0 | 80 | Piedra | Castillo 1 |
+| Mina de hierro | 60 | 100 | 80 | 20 | 0 | 21.600 | 0 | 60 | Hierro | Cantera 1 |
+| Mina de oro | 100 | 100 | 100 | 0 | 0 | 21.600 | 0 | 50 | Oro | Castillo 2 |
+| Cuartel/Barracones | 100 | 150 | 100 | 20 | 0 | 28.800 | 0 | 0 | Reclutamiento y entrenamiento |
+Castillo 1 |
+| Herrería | 100 | 120 | 100 | 80 | 0 | 28.800 | 0 | 50 | Armas y armaduras | Cuartel 1 + Mina de
+hierro 1 |
+| Universidad | 150 | 100 | 150 | 20 | 0 | 43.200 | 0 | 0 | Investigación y tecnologías | Castillo 2 |
+| Murallas | 100 | 100 | 300 | 20 | 0 | 36.000 | 0 | 0 | Defensa del reino | Castillo 2 |
+| Mercado | 100 | 150 | 100 | 0 | 0 | 28.800 | 0 | 30 | Intercambio y eficiencia económica | Castillo
+2|
+| Parlamento | 200 | 100 | 200 | 20 | 0 | 43.200 | 0 | 0 | Desafíos y diplomacia | Castillo 2 |
+| Hospital militar | 100 | 100 | 150 | 30 | 0 | 36.000 | 0 | 50 | Recuperación de heridos | Castillo 2 |
+| Taberna | 50 | 100 | 40 | 0 | 0 | 14.400 | 0 | 30 | Contratación de mercenarios | Castillo 1 |
+| Panadería | 40 | 100 | 30 | 0 | 0 | 14.400 | 0 | 40 | Apoyo a la alimentación | Castillo 1 |
+| Iglesia | 60 | 100 | 80 | 0 | 0 | 18.000 | 0 | 40 | Religión y moral | Castillo 1 |
+| Circo/Feria | 60 | 120 | 60 | 0 | 0 | 18.000 | 0 | 40 | Felicidad | Castillo 1 |
+
+**Reglas operativas propuestas**
+
+1. Cada edificio tiene un registro único y un catálogo canónico compartido por backend e
+interfaz.
+2. `startConstruction` valida propiedad del reino, nivel de Castillo, requisitos, ranuras, recursos y
+límites antes de descontar recursos.
+3. Los recursos se descuentan una sola vez al iniciar la obra.
+4. La obra se completa por tiempo transcurrido validado en servidor, no por un botón de
+completar instantáneamente.
+5. La capacidad productiva efectiva de una profesión es el mínimo entre trabajadores
+asignados y suma de capacidades disponibles de los edificios correspondientes.
+6. La capacidad residencial efectiva es la suma de viviendas completadas; edificios en
+construcción no cuentan.
+7. Si se cancela, se libera la ranura y se reembolsa el 50 % del coste ya pagado. La política
+debe ser única en todas las mutaciones.
+8. El límite de 100 niveles se conserva como límite técnico, pero la progresión de Castillo y los
+requisitos deben impedir que el juego llegue a niveles altos sin contenido de apoyo.
+
+### Nota de coherencia sobre población inicial
+
+La población inicial de 2.000 y la producción agrícola aprobada de 2 alimentos por agricultor y
+día implican que una ración normal de 2.000 habitantes requiere aproximadamente 2.000
+alimentos/día. Por tanto, **1.000 agricultores cubren matemáticamente el consumo civil base**,
+antes de contar tropas, modificadores, pérdidas y otros usos. Esta es una igualdad de balance,
+no una garantía de que 1.000 agricultores sea el reparto ideal: también hay que financiar
+materiales, vivienda, crecimiento y edificios. La asignación inicial de trabajadores citada en el
+PDF (1.100 / 250 / 250 / 100 / 50) y la reserva de 250 aparecen expresamente como
+provisionales, por lo que no se elevan aquí a canon.
+
+---
+
+## 3. D-08 a D-15 — Ejército, reclutamiento y entrenamiento
+
+### Decisiones recomendadas
+
+- **D-08 — Duración:** no aceptar como confirmada la referencia de una semana de juego
+(aprox. 28 minutos reales), porque el propio PDF la marca como documentación anterior no
+confirmada. Propuesta: duración base por unidad y tipo, tabla abajo.
+- **D-09 — Colas simultáneas:** una cola de entrenamiento por Cuartel en nivel 1; una cola
+adicional por cada 3 niveles completos de Cuartel, hasta un máximo de 4 colas por reino. Esto
+mantiene el valor del edificio sin permitir producción militar ilimitada.
+- **D-10 — Cancelación:** devolver el 50 % de recursos pagados; devolver al censo civil las
+unidades de población reservadas para el lote, siempre que aún no hayan sido convertidas en
+tropas. Una vez completado el lote no se puede cancelar.
+- **D-11 — Fuente de verdad:** `armyUnits` debe ser la fuente canónica para los regimientos.
+El campo heredado `regularSoldiers` debe migrarse y dejar de alimentar los cálculos tras
+verificar la migración. Nunca sumar ambos.
+- **D-12 — Asedio y comida:** las unidades de asedio no son personas y no consumen
+raciones. Los operadores humanos sí deben estar contabilizados como personal militar o
+población asignada, no como máquinas.
+- **D-13 — Multiplicadores de nivel militar:** conservar los valores de P29 como valores de
+diseño de la especificación: nivel 1 = 1,00; nivel 2 = 1,15; nivel 3 = 1,35; nivel 4 = 1,60; nivel 5 =
+1,90. La aplicación concreta requiere requisitos y duración de entrenamiento.
+- **D-14 — Requisitos de nivel:** conservar los requisitos citados en P23. Normalizar
+“Barracones” y `cuartel` como un solo edificio canónico `cuartel`, mostrando
+“Cuartel/Barracones” en textos si se desea.
+- **D-15 — Tabla antigua `Armyunits`:** retirarla después de una migración verificada y una
+comprobación de que no quedan lectores/escritores activos. No borrarla antes de respaldar y
+migrar sus datos.
+### Costes y entrenamiento propuestos
+
+Costes por unidad entrenada, en recursos. El personal civil libre consumido se convierte en una
+unidad militar regular. Los valores son **propuesta de balance**.
+
+| Unidad | Oro | Madera | Piedra | Hierro | Alimentos | Duración/unidad (s) | Población libre
+consumida | Salario recurrente | Requisitos |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---|
+| Infantería | 5 | 0 | 0 | 2 | 2 | 1.800 | 1 | 0,5 oro/año de juego | Cuartel 1 |
+| Arquería | 6 | 2 | 0 | 2 | 2 | 2.400 | 1 | 0,6 oro/año de juego | Cuartel 1 |
+| Caballería | 15 | 2 | 0 | 5 | 4 | 3.600 | 1 | 1,5 oro/año de juego | Cuartel 2 + Herrería 1 |
+| Asedio | 30 | 20 | 20 | 10 | 0 | 10.800 | 0 máquinas; 5 operadores asignados por pieza | 0,5
+oro/año por operador | Cuartel 3 + Herrería 2 |
+
+**Interpretación temporal:** si la unidad de duración es el segundo real, 1.800 segundos son 30
+minutos reales, equivalentes a 0,0208 años de juego. La tabla propone entrenamiento
+asíncrono para que el jugador pueda desconectarse. Si el sistema procesa unidades por lote, la
+duración de un lote debe definirse como `duraciónPorUnidad × cantidad` o mediante una curva
+explícita; no se debe cambiar de interpretación silenciosamente.
+
+**Salarios:** como el documento original no concreta salarios, los anteriores son una
+propuesta. Se recomienda que el “año de juego” sea la unidad contable del salario, liquidado
+proporcionalmente al tiempo real transcurrido. Así, un salario de 0,5 oro/año de juego equivale
+a 0,5 oro por cada 86.400 segundos reales por unidad. Si se desea un sistema menos exigente
+de microgestión, se puede eliminar el salario militar y dejar el coste de mantenimiento
+principalmente en alimentos; esa sería una decisión de producto distinta.
+
+### Niveles de entrenamiento
+
+| Nivel | Nombre | Multiplicador | Requisitos |
+|---|---|---:|---|
+| 1 | Milicia | 1,00 | Cuartel 1 |
+| 2 | Entrenado | 1,15 | Castillo 2 + Cuartel 2 |
+| 3 | Veterano | 1,35 | Castillo 4 + Cuartel 3 + Universidad 2 |
+| 4 | Profesional | 1,60 | Castillo 6 + Cuartel 4 + Universidad 3 |
+| 5 | Élite | 1,90 | Castillo 8 + Cuartel 5 + Universidad 4 + Herrería 5 |
+
+El multiplicador debe aplicarse a la eficacia de combate del regimiento, no al número de
+soldados ni a la producción económica. Evitar multiplicarlo dos veces, por ejemplo en el nivel
+de unidad y otra vez en la resolución de batalla.
+
+---
+## 4. D-16 a D-21 — Árbol tecnológico e investigación
+
+### Reglas generales propuestas
+
+- Una tecnología tiene `id`, nombre, rama, nivel, descripción, coste, duración, requisitos y
+efectos estructurados.
+- **Una investigación activa por supervisor**. La regla ya aparece en P25. Propuesta inicial: una
+investigación activa por reino sin supervisor; cada supervisor cualificado añade una ranura, con
+límite inicial de 3 simultáneas.
+- La Universidad debe cumplir el nivel mínimo requerido y las tecnologías previas deben estar
+completadas.
+- La investigación no puede iniciarse si faltan recursos; el coste se descuenta al iniciar.
+- Al cancelar: reembolso del 50 % del coste si se cancela antes de completar. La decisión debe
+ser uniforme con construcción y entrenamiento.
+- **Modelo de datos:** un documento de progreso por tecnología y reino, con estado `locked |
+available | researching | completed`, timestamps y supervisor asignado. El catálogo global de
+tecnologías es inmutable y separado del progreso individual.
+- Efectos aplicados de forma idempotente: la actualización de tiempo no debe conceder la
+misma tecnología o bonificación varias veces.
+
+### Catálogo inicial propuesto
+
+Los costes y duraciones de esta tabla son propuestas. “Días reales” significa duración de reloj;
+un día real equivale a un año de juego.
+
+| ID | Tecnología | Rama | Nivel Univ. | Coste (oro/madera/piedra/hierro) | Duración real |
+Requisitos | Efecto propuesto |
+|---|---|---|---:|---|---:|---|---|
+| `agri_1` | Rotación de cultivos | Económica | 1 | 100/100/50/0 | 1 día | Ninguno | +5 %
+producción agrícola |
+| `mining_1` | Herramientas mineras | Económica | 1 | 100/80/80/10 | 1 día | Ninguno | +5 %
+madera, piedra y hierro; aplicar solo a las profesiones correspondientes |
+| `storage_1` | Almacenes reforzados | Económica | 1 | 100/150/100/0 | 1 día | Ninguno | +10 %
+capacidad de almacenamiento |
+| `medicine_1` | Cataplasmas medicinales | Militar/civil | 2 | 150/80/100/10 | 2 días | Castillo 2 +
+Universidad 2 | +5 puntos porcentuales a recuperación de heridos, limitada al 60 % anual |
+| `espionage_1` | Espionaje I | Inteligencia | 2 | 200/100/100/20 | 2 días | Castillo 2 +
+Universidad 2 | Desbloquea informe militar aproximado |
+| `training_1` | Doctrina de instrucción | Militar | 2 | 200/100/100/30 | 2 días | Cuartel 2 | −5 %
+duración de entrenamiento |
+| `weapons_1` | Metalurgia del acero | Militar | 3 | 300/100/150/100 | 3 días | Castillo 5 +
+Universidad 3 + Herrería 4 | Desbloquea arma de acero, multiplicador 1,15 |
+| `armor_1` | Armaduras reforzadas | Militar | 3 | 300/100/150/100 | 3 días | Castillo 5 +
+Universidad 3 + Herrería 4 | Desbloquea armadura de acero según catálogo |
+| `construction_1` | Ingeniería civil | Civil | 2 | 200/150/200/20 | 2 días | Castillo 2 + Universidad 2
+| −5 % duración de construcción, con mínimo del 50 % de la duración base |
+| `happiness_1` | Fiestas comunales | Civil | 1 | 100/100/50/0 | 1 día | Ninguno | +3 felicidad
+base, con límite de 100 |
+| `medical_2` | Cirugía de campaña | Militar/civil | 4 | 500/150/200/150 | 5 días | Cataplasmas
+medicinales + Hospital 3 | +10 puntos porcentuales de recuperación; límite acumulado 60 % |
+| `espionage_2` | Espionaje II | Inteligencia | 4 | 500/200/200/100 | 5 días | Espionaje I +
+Universidad 4 | Estrecha el intervalo de estimación militar |
+| `advanced_steel` | Acero avanzado | Militar | 4 | 700/200/300/250 | 7 días | Castillo 5 +
+Universidad 3 + Herrería 4 + Metalurgia del acero | Desbloquea arma de acero avanzado,
+multiplicador 1,30 |
+
+**Importante:** la duración se expresa en tiempo real para evitar ambigüedad. Si la intención
+del juego es que una investigación tarde varios años de reino, 2 días reales equivalen a 2 años
+de juego. El servidor debe guardar `startedAt` y `completesAt`, y completar automáticamente al
+evaluar el estado.
+
+### Árbol tecnológico por ramas
+
+1. **Económica:** rotación de cultivos → herramientas agrícolas avanzadas; herramientas
+mineras → extracción eficiente; almacenes reforzados → logística comercial.
+2. **Civil:** ingeniería civil → arquitectura avanzada; fiestas comunales → administración
+urbana; educación → supervisores especializados.
+3. **Militar:** doctrina de instrucción → tácticas de formación; metalurgia del acero → acero
+avanzado; armaduras reforzadas → protección profesional; medicina de campaña → cirugía de
+campaña.
+4. **Inteligencia:** espionaje I → espionaje II → contraespionaje.
+5. **Civilización:** una rama específica por civilización, solo después de aprobar bonificaciones
+oficiales. No inventar doce árboles distintos en esta fase sin fijar su alcance.
+
+---
+
+## 5. D-22 a D-26 — Territorios y mapa
+
+### Decisiones recomendadas
+
+- **D-22 — Coordenadas:** mapa de provincias/territorios discretos con coordenadas axiales
+hexagonales `(q, r)`. Facilita adyacencia y distancia de marcha.
+- **D-23 — Tamaño inicial:** mapa de 21 × 21 coordenadas hexagonales válidas alrededor de
+un centro, con límite de 331 celdas. No es necesario poblarlas todas en la primera versión; se
+pueden activar por fases.
+- **D-24 — Terrenos:** llanura, bosque, colina, montaña, río y costa. Modificadores iniciales de
+propuesta: llanura +10 % agricultura; bosque +15 % madera; colina +10 % piedra; montaña +15
+% hierro y +10 % defensa; río +10 % agricultura; costa +10 % comercio si existe puerto. Los
+modificadores económicos solo se aplican si el reino posee un edificio/territorio que los habilite.
+- **D-25 — Asignación inicial:** cada reino comienza con un territorio principal asociado a su
+Castillo. Los territorios restantes empiezan libres o se asignan a bots neutrales según una
+semilla de mundo reproducible. No se debe regalar más territorio inicial sin regla explícita.
+- **D-26 — Distancia:** distancia hexagonal `d = (|Δq| + |Δr| + |Δq + Δr|) / 2`.
+
+### Tiempo de marcha y fatiga propuestos
+
+\[
+T_{marcha} = T_{base} \cdot d \cdot M_{terreno} \cdot M_{unidad}
+\]
+
+Propuesta inicial: `Tbase = 1.800 segundos por hexágono`; terreno normal `Mterreno = 1`;
+unidades lentas/asedio pueden aumentar el multiplicador. Para simplificar la primera versión,
+todas las composiciones viajan a la velocidad de la unidad más lenta, con `Munidad = 1,0` para
+infantería, `1,2` para caballería si viaja desmontada con el ejército y `1,5` si incluye asedio.
+Estos valores necesitan pruebas de balance.
+
+La fatiga por marcha puede calcularse como:
+
+\[
+F_{nueva} = \min(100,\ F_{actual} + 2d \cdot M_{terreno})
+\]
+
+La recuperación fuera de combate se propone en 10 puntos de fatiga por día real, siempre que
+el ejército esté descansando y reciba alimentación normal o mejor. Si no existe un estado
+persistente de descanso, no aplicar recuperación automática todavía.
+
+---
+
+## 6. D-27 a D-33 — Resolución de batallas
+
+### Decisiones de diseño
+
+- **D-27 — Pesos:** conservar como punto de partida los pesos de P34: número 30 %,
+entrenamiento 20 %, armas 15 %, armadura 10 %, formación/estrategia 10 %, moral 5 %,
+alimentación 5 %, fatiga 5 %. La suma es 100 %. Sin embargo, esos pesos no deben sumarse
+directamente como porcentajes absolutos; se recomienda normalizar cada factor y calcular una
+puntuación compuesta.
+- **D-28 — Valores por unidad:** usar los valores de la tabla siguiente como parámetros
+iniciales, no como historia confirmada.
+- **D-29 — Bajas y rondas:** tres rondas como máximo; cada ronda calcula potencia efectiva,
+bajas y retirada si se cumple el umbral de derrota.
+- **D-30 — Resultado:** victoria si una fuerza elimina o fuerza la retirada del rival; derrota si
+sucede lo contrario; empate si ambos siguen operativos y la diferencia de bajas no supera la
+tolerancia propuesta del 10 % del tamaño combinado, sin ventaja territorial automática.
+- **D-31 — Botín:** no transferir recursos automáticamente en la primera versión. El documento
+base no fija saqueo; activarlo exige una regla separada y límites de capacidad.
+- **D-32 — Informe:** guardar resultado, participantes, composición al inicio, bajas, heridos,
+supervivientes, rondas, factores aplicados, honor/gloria, territorio, desgaste y marca temporal.
+La explicación de victoria debe generarse a partir de los factores reales guardados, no de texto
+arbitrario.
+- **D-33 — PvE:** introducir bots solo si se aprueba explícitamente. Propuesta: bots neutrales
+de dificultad configurada y semilla reproducible; no crear ejércitos que superen reglas de
+reclutamiento, economía y tecnología sin declararlos como excepciones.
+
+### Estadísticas base propuestas por unidad
+
+Los valores son relativos y no representan soldados individuales; se aplican al regimiento.
+
+| Unidad | Ataque | Defensa | Velocidad relativa | Coste logístico |
+|---|---:|---:|---:|---:|
+| Infantería | 1,00 | 1,20 | 1,00 | 1,00 |
+| Arquería | 1,20 | 0,70 | 0,90 | 1,00 |
+| Caballería | 1,40 | 1,00 | 1,30 | 1,25 |
+| Asedio | 1,80 contra murallas | 0,50 | 0,60 | 0,00 alimento para la máquina; operadores
+consumen como militares |
+
+### Fórmula propuesta de potencia
+
+Para cada ejército, calcular:
+
+- `N`: suma de efectivos equivalentes de las unidades participantes.
+- `E`: multiplicador medio de entrenamiento, ponderado por número.
+- `W`: multiplicador medio de armas.
+- `A`: multiplicador medio de armadura.
+- `F`: multiplicador de formación y estrategia, con intervalo recomendado `0,80–1,25`.
+- `M`: moral en escala `0–100`, convertida a `0,50 + M/200` (50 de moral = 0,75; 100 = 1,00; 0 =
+0,50).
+- `R`: ración, tomando 1,00 como normal y aplicando penalización/bonificación de combate
+limitada a `0,80–1,05`.
+- `Fat`: penalización de fatiga de P32: 1,00; 0,97; 0,92; 0,85; 0,75; 0,60; 0,45 según sus
+intervalos.
+Para respetar los pesos de P34 sin producir una suma de factores con unidades incompatibles,
+normalizar cada variable contra una referencia: `Nref` se fija a 1.000 efectivos; los demás
+factores usan 1,00 como referencia. La puntuación:
+
+\[
+P = 0{,}30(N/N_{ref}) + 0{,}20E + 0{,}15W + 0{,}10A + 0{,}10F + 0{,}05M + 0{,}05R + 0{,}05Fat
+\]
+
+Esta puntuación sirve para comparar la preparación, pero **no debe ser la potencia final de
+daño sin calibración**, porque la contribución de número sería lineal y podría hacer que 2.000
+soldados valgan exactamente el doble que 1.000 antes de otros factores. Para la resolución, se
+recomienda:
+
+\[
+Potencia = N^{0{,}85} \cdot E^{0{,}20} \cdot W^{0{,}15} \cdot A^{0{,}10} \cdot F^{0{,}10} \cdot
+M^{0{,}05} \cdot R^{0{,}05} \cdot Fat^{0{,}05}
+\]
+
+El exponente 0,85 de `N` reduce la linealidad de la superioridad numérica y deja espacio a
+entrenamiento, equipamiento y estrategia. Esta es una **propuesta matemática** y debe
+probarse con simulaciones automatizadas. Si se prefiere una fórmula estrictamente fiel a los
+pesos originales, se usará la puntuación lineal normalizada, pero no ambas fórmulas a la vez.
+
+### Bajas por ronda propuestas
+
+Sea `PA` la potencia ofensiva efectiva del atacante y `PD` la defensa efectiva del defensor.
+Para evitar divisiones por cero:
+
+\[
+Ratio = \frac{PA}{\max(PD, 0{,}01)}
+\]
+
+\[
+BajasDefensor = \min(N_D,\ \operatorname{redondear}(N_D \cdot k \cdot \frac{Ratio}{1+Ratio}))
+\]
+
+\[
+BajasAtacante = \min(N_A,\ \operatorname{redondear}(N_A \cdot k \cdot
+\frac{1/Ratio}{1+1/Ratio}))
+\]
+
+`k` es el máximo aproximado de bajas por ronda; propuesta inicial `k = 0,18`. Recalcular cada
+ronda con efectivos supervivientes. Para evitar resultados extremos por redondeo, conservar
+precisión interna y redondear solo al persistir el resultado final.
+
+**Conversión de bajas:** aproximadamente el 65 % de las bajas de las tropas del jugador
+pueden convertirse en heridos, conforme a P44. Propuesta de aplicación: `heridos =
+redondear(bajas × 0,65)` y `muertos = bajas − heridos`. No aplicar la conversión dos veces en
+la misma secuencia.
+
+### Victoria aplastante, empate y retirada
+
+- **Victoria aplastante:** el enemigo pierde más del 75 % de su ejército inicial. Debe fijarse si
+“pierde” significa muertos + heridos + capturados; propuesta: contar bajas totales, incluidos
+heridos que no pueden seguir combatiendo.
+- **Empate:** ninguno fuerza la retirada y la diferencia de bajas relativas es ≤10 puntos
+porcentuales. El 10 % es una propuesta, pues el PDF deja la tolerancia pendiente.
+- **Retirada:** una fuerza se retira cuando pierde al menos el 70 % de efectivos disponibles o
+cae por debajo del 20 % de moral. Es propuesta de balance; no equivale a eliminación del
+reino.
+- **Territorio:** una victoria aplastante habilita reclamar un territorio libre cercano; no transfiere
+el territorio principal del enemigo.
+
+### Pruebas obligatorias de combate
+
+Antes de aprobar los valores, simular al menos 10.000 enfrentamientos deterministas con
+semillas controladas para cada caso:
+1. fuerzas iguales en todos los factores;
+2. ejército pequeño con mejor entrenamiento y equipamiento;
+3. superioridad numérica grande pero mala moral y fatiga;
+4. ataque contra defensa;
+5. cada estrategia contra cada estrategia;
+6. tropas de cada civilización;
+7. escenarios con arquería/caballería/asedio;
+8. combate con población y alimentos al límite.
+
+Guardar distribuciones de victoria, empate, bajas y duración. No equilibrar únicamente con
+ejemplos anecdóticos.
+
+---
+
+## 7. D-34 a D-42 — Parlamento y desafíos
+
+### Reglas propuestas
+- **D-34 — Penalización por rechazar:** penalización del 2 % de cada recurso almacenable,
+con mínimo de 10 y máximo de 500 unidades por recurso; no puede reducir un recurso por
+debajo de cero. No se penaliza población ni tropas. El rechazo debe quedar registrado para
+evitar doble cobro.
+- **D-35 — Tres ventanas:** 1 día real, 3 días reales y 7 días reales desde la aceptación.
+Equivalen a 1, 3 y 7 años de juego. Deben mostrarse en fecha y hora reales locales del
+jugador, pero el servidor guarda timestamps UTC.
+- **D-36 — Congelación del contingente:** congelar composición militar, equipamiento y
+estrategia 15 minutos reales antes del combate. La economía y la recuperación siguen
+funcionando; los cambios posteriores no alteran el contingente congelado. Propuesta pendiente
+de pruebas.
+- **D-37 — Apuestas:** primera versión sin apuestas territoriales ni de recursos. Pueden
+aparecer como “no disponible”. Para añadirlas, implementar escrow del lado servidor: reservar
+recursos al confirmar, liberarlos si se cancela de común acuerdo antes de congelación,
+transferirlos según resultado y devolverlos si la batalla no se resuelve por un fallo del sistema.
+- **D-38 — Marcha/fatiga:** utilizar las fórmulas del §5.
+- **D-39 — Espionaje:** sin Espionaje I, mostrar intervalo de efectivos con error de ±25 %; con
+Espionaje I, ±15 %; con Espionaje II, ±7 %. Coste propuesto: 100 oro para Espionaje I y 250
+oro para Espionaje II por informe. Los informes caducan a las 24 horas reales para no revelar
+cambios posteriores.
+- **D-40 — Desafíos simultáneos:** máximo de 3 desafíos pendientes por reino; enfriamiento
+de 24 horas reales entre desafíos contra el mismo rival. Evitar spam y desafíos duplicados.
+- **D-41 — Mensajes:** conservar los cinco mensajes predefinidos de P60: “¿Te atreves a
+retarme?”, “Mi reino está preparado”, “Buena suerte”, “¿Eso es todo?” y “Nos veremos en el
+campo de batalla”. No habilitar chat libre en esta fase.
+- **D-42 — Nivel de Parlamento:** Parlamento nivel 1 para enviar o recibir desafíos; Castillo 2
+para construir Parlamento, según los requisitos propuestos de edificios.
+
+### Máquina de estados
+
+Conservar la máquina descrita en `docs/BLOQUE_9.txt`: `PENDING → ACCEPTED /
+REJECTED → FROZEN → RESOLVED`. Definir explícitamente las transiciones inválidas y sus
+mensajes. Un desafío rechazado no puede pasar a `FROZEN`; uno ya resuelto no puede volver
+a editarse. La resolución debe ser idempotente y solo procesarse una vez.
+
+---
+
+## 8. D-43 a D-45 — Civilizaciones
+
+### Lista de selección
+
+Conservar las doce civilizaciones listadas en P6: Ingleses, Romanos, Griegos, Vikingos,
+Bizantinos, Árabes, Mongoles, Chinos, Japoneses, Indios americanos, Aztecas y Keniatas. La
+nomenclatura “Indios americanos” es amplia e históricamente ambigua; antes de publicar,
+conviene decidir si se sustituye por una civilización concreta. No cambiarla automáticamente en
+el código sin decisión de producto.
+
+- **D-43:** la lista anterior es la lista de partida de la especificación.
+- **D-44:** la especificación exige bonificaciones pasivas distintas, pero no define sus valores.
+Propuesta para la primera versión jugable: **no conceder bonificaciones numéricas por
+civilización hasta que exista una tabla oficial aprobada**. Se puede mostrar la civilización
+elegida sin alterar cálculos.
+- **D-45:** se elige al fundar el reino y queda inmutable en la primera versión. Si más adelante
+se permite cambiarla, debe ser una acción excepcional, con coste y reglas de migración.
+
+No inventar ventajas de combate por civilización en esta etapa: introducirlas antes de cerrar la
+economía y el combate puede generar desequilibrios difíciles de separar.
+
+---
+
+## 9. D-46 a D-51 — Economía, población y bienestar
+
+### D-46 — Producción de recursos por trabajador
+
+La agricultura tiene tasa aprobada de 2 alimentos por agricultor y día real. Para los demás
+oficios, el PDF no contiene tasas oficiales. Propuesta inicial:
+
+| Profesión | Producción por trabajador/día real | Requisito | Estado |
+|---|---:|---|---|
+| Agricultura | 2 alimentos | Granja con capacidad | Confirmado |
+| Madera | 1 madera | Aserradero con capacidad | Propuesta |
+| Piedra | 0,75 piedra | Cantera con capacidad | Propuesta |
+| Hierro | 0,40 hierro | Mina de hierro con capacidad | Propuesta |
+| Oro | 0,20 oro | Mina de oro con capacidad | Propuesta |
+
+Los decimales deben acumularse en precisión interna; no redondear cada trabajador/día a
+entero porque se perdería producción. Redondear solo al presentar o al transferir unidades
+indivisibles, conservando el residuo acumulado.
+
+### D-47 — Capacidad productiva por edificio
+
+`trabajadoresEfectivos = min(trabajadoresAsignados, capacidadTotalDeEdificiosCompletados)`.
+La capacidad se calcula como `capacidadBase × nivel`, según D-03. Los edificios en
+construcción no aportan capacidad. Si hay varios edificios, se suman sus capacidades del
+mismo oficio. No permitir que el mismo trabajador figure en dos profesiones.
+### D-48 — Inanición
+
+Propuesta de fases para no convertir una escasez breve en destrucción inmediata del reino:
+
+1. Si las reservas no cubren el consumo completo, se consume lo disponible y se registra
+déficit.
+2. Déficit de alimentos durante menos de 1 día real: alerta y penalización de felicidad de −2
+puntos por día con déficit.
+3. Déficit acumulado de 1 a 3 días reales: productividad civil −10 %, moral militar −10 puntos.
+4. Más de 3 días reales de déficit continuado: pérdida diaria de población equivalente al 0,5 %
+de población civil y deserción militar del 1 % de efectivos por día.
+5. Al volver a cubrirse el consumo, detener inmediatamente las pérdidas nuevas; recuperar
+felicidad/moral de forma gradual, no instantánea.
+
+Estos umbrales son **propuesta de balance**. El estado de inanición y su duración deben
+persistirse en servidor para que desconectarse no borre el déficit. Los cálculos deben procesar
+el tiempo real acumulado sin multiplicar penalizaciones dos veces tras reconectar.
+
+### D-49 — Felicidad, moral y política fiscal
+
+Escalas propuestas: felicidad y moral militar entre 0 y 100, con valor inicial 70. Impuestos entre
+0 % y 100 %. No usar valores fuera de rango.
+
+**Impuestos:** propuesta de tramos para evitar que el 100 % sea una estrategia dominante:
+- 0–10 %: presión fiscal baja; sin penalización por impuestos.
+- 11–30 %: penalización de felicidad de −0,1 puntos por cada punto porcentual por encima de
+10, por actualización diaria.
+- 31–60 %: penalización adicional de productividad de hasta −15 %.
+- 61–100 %: penalización adicional de moral militar y riesgo de disturbios; nunca debe generar
+oro ilimitado sin coste social.
+
+La recaudación se calcula sobre la base económica realmente producida: `oroRecaudado =
+baseImponible × tasaImpositiva`. No recaudar una tasa sobre un valor de producción que ya se
+contabilizó como oro en el almacén; evitar duplicación de ingresos.
+
+**Felicidad:** actualizar a partir de impuestos, vivienda, alimentación, descanso, religión y
+entretenimiento. Propuesta sencilla inicial:
+
+`Δfelicidad = alimentación + descanso + vivienda + religión + entretenimiento − presiónFiscal −
+inanición`
+
+Limitar cada actualización a ±5 puntos para evitar oscilaciones extremas. Los coeficientes
+exactos deben residir en configuración.
+**Moral militar:** propuesta:
+
+`moral = clamp(50 + 0,25×(felicidad−50) + bonusAlimentación + bonusDescanso +
+bonusVictorias − penalizaciónDerrotas − penalizaciónFiscal, 0, 100)`
+
+Esta fórmula es inicial y no debe coexistir con otro cálculo duplicado. La moral persistida debe
+actualizarse de forma idempotente.
+
+### D-50 — Crecimiento y límite de población
+
+El documento base indica crecimiento del 30 % anual de juego, limitado por viviendas: sin
+vivienda disponible, la población no aumenta. Para respetar el 30 % sin permitir crecimiento
+infinito instantáneo:
+
+\[
+P_{objetivo} = \lfloor P \cdot 1{,}30^{t} \rfloor
+\]
+
+donde `t` son años de juego transcurridos (equivalentes a días reales). La población final será
+`min(Pobjetivo, capacidadResidencial)`. Para fracciones de año, utilizar tiempo acumulado y
+cálculo continuo equivalente, evitando redondear un 30 % completo por cada reconexión.
+
+**Advertencia de balance:** un crecimiento anual del 30 % es exponencial. La población se
+multiplica por `1,3^5 ≈ 3,71` en cinco años y por `1,3^10 ≈ 13,79` en diez años, si hay vivienda.
+Por tanto, el límite residencial no es opcional: es la válvula principal del sistema. La
+construcción de vivienda, el consumo alimentario y la capacidad de trabajo deben crecer de
+forma coordinada.
+
+La población militar regular reclutada se descuenta de la población civil disponible, pero no
+debe desaparecer del total demográfico del reino: conviene mantener campos separados de
+`civilPopulation`, `militaryPopulation` y `totalPopulation`. Los mercenarios se contabilizan como
+efectivos militares contratados, no como civiles que generan natalidad. Esto resuelve la
+ambigüedad del PDF donde se dice que los mercenarios “se suman a la población” sin que su
+contratación aumente artificialmente la capacidad residencial.
+
+### D-51 — Salarios militares
+
+La especificación original identifica los salarios como pendientes. Se recomienda aprobar una
+de estas opciones antes de codificar:
+- **Opción A (propuesta en §3):** salario en oro por unidad militar y año de juego, liquidado
+proporcionalmente al tiempo real.
+- **Opción B (más simple):** sin salario militar recurrente; el coste de mantenimiento se
+concentra en alimentos, equipo y coste inicial de reclutamiento.
+
+No implementar ambos sistemas a la vez sin calibración. La opción A añade decisiones
+económicas y hace más costoso sostener ejércitos grandes; la opción B reduce complejidad y
+riesgo de que el jugador pierda el reino por una deuda de oro poco visible.
+
+---
+
+## 10. Resolución de inconsistencias documentales
+
+### Punto 10.1 — Población inicial
+
+En la versión más antigua del documento aparece “1.000 habitantes” en P10; en la versión
+revisada incluida en el PDF aparece “2.000 habitantes”, que también coincide con las reglas de
+economía descritas. **Tomar 2.000 como valor de la versión revisada**, y retirar el valor de
+1.000 de copias de trabajo antiguas para que no vuelva a introducirse.
+
+### Punto 10.2 — Puntos vacíos 56 y 61
+
+El documento revisado los etiqueta como “Pendiente de aclaración documental”. No se deben
+rellenar como si fueran mecánicas aprobadas. Propuesta:
+- **P56:** reservarlo para “Reglas de mantenimiento, costes recurrentes y límites de
+sostenibilidad económica” solo si el responsable aprueba ampliar el documento.
+- **P61:** reservarlo para “Reglas de moderación, privacidad y seguridad de comunicación
+entre reinos” solo si se decide desarrollar esa materia.
+Hasta su aprobación, mantener ambos como puntos pendientes y no convertirlos en requisitos
+de implementación.
+
+### Punto 10.3 — Temporadas competitivas frente a estaciones
+
+La versión revisada distingue estaciones meteorológicas de temporadas competitivas y elimina
+reinicios y recompensas automáticas por cierre de temporada. Por tanto, no implementar
+reinicios competitivos ni recompensas estacionales. Las estaciones solo deben afectar al juego
+si sus modificadores y calendario quedan definidos.
+
+### Punto 10.4 — Términos de edificios y unidades
+
+- `Barracones` y `Cuartel` deben apuntar al mismo ID canónico.
+- `Forga` del documento parece una errata por `Forja`; usar `herrería` como ID técnico si ya
+existe en el catálogo, y mostrar “Herrería/Forja” en interfaz hasta aprobar la terminología.
+- `Hospital militar` y `Enfermería militar` son el mismo concepto; elegir un ID técnico y un
+nombre visible único.
+- `arqueria`/“Arquería” debe mantener el ID exacto usado por el esquema.
+- `asedio` representa máquinas, no población, salvo que el modelo de unidad defina
+explícitamente operadores.
+
+### Punto 10.5 — Reglas duplicadas en Convex
+
+Antes de añadir más mecánicas:
+1. Elegir una única implementación canónica para `getConstructionState`, `startConstruction` y
+`cancelConstruction`.
+2. Hacer que backend e interfaz importen el mismo catálogo o consuman valores servidos
+desde el backend.
+3. Retirar los catálogos sin uso o etiquetarlos claramente como borradores.
+4. Migrar los campos heredados del ejército a `armyUnits`.
+5. Añadir tests de idempotencia para el procesamiento de tiempo, construcción, investigación,
+entrenamiento, salarios, alimentación y resultados de batalla.
+
+---
+
+## 11. Prioridad de implementación recomendada
+
+1. **Bloque A — Construcción:** decidir D-01 a D-07; unificar catálogo y mutaciones; probar
+coste, requisitos, cancelación, dos ranuras y completado por tiempo.
+2. **Bloque B — Ejército:** decidir D-08 a D-15; normalizar tablas; implementar cola,
+entrenamiento y conversión de población sin doble conteo.
+3. **Bloque C — Investigación:** crear catálogo global, progreso por reino y completado
+automático.
+4. **Bloque D — Economía:** implementar producción y consumo con acumulación temporal,
+límites de capacidad, población y hambre persistente.
+5. **Bloque E — Parlamento:** máquina de estados y validaciones del servidor antes de
+integrar el combate.
+6. **Bloque F — Combate:** simulador determinista, registro completo de factores y pruebas
+masivas antes de permitir PvP.
+7. **Bloque G — Mapa y territorios:** coordenadas, adyacencia, distancia y reclamación de
+territorio libre.
+8. **Bloque H — Civilizaciones:** mantener bonificaciones desactivadas hasta aprobar una
+tabla de balance.
+
+Esta prioridad respeta la regla de oro de P71: no añadir contenido nuevo sobre economía,
+tiempo, construcción, guardado, ejército, batallas o progresión que no funcionen de manera
+fiable.
+
+---
+
+## 12. Criterios de aceptación y pruebas
+Antes de marcar como terminado cada bloque:
+
+- El mismo intervalo de tiempo procesado una vez o en varias reconexiones produce el mismo
+estado final, salvo eventos aleatorios persistidos con semilla.
+- Ninguna mutación permite gastar recursos por debajo de cero.
+- Ningún trabajador puede estar asignado simultáneamente a dos profesiones.
+- Ningún edificio supera la capacidad laboral/residencial declarada.
+- Ninguna unidad se cuenta dos veces por coexistencia de campos heredados y tablas nuevas.
+- El cliente no puede fijar el reloj, acelerar construcciones ni completar investigaciones o
+entrenamientos.
+- Una mutación repetida por reintento de red no duplica costes, tropas, recompensas o
+resultados.
+- La cancelación aplica un solo porcentaje de reembolso y libera una sola ranura.
+- Los costes y efectos visibles en la interfaz coinciden con los validados por Convex.
+- Las pruebas económicas incluyen: reino nuevo, población en capacidad máxima, falta de
+alimentos, recursos insuficientes, dos construcciones simultáneas, cancelación, reconexión tras
+varios días y ejército grande.
+- Las pruebas de combate incluyen empates, victorias aplastantes, derrotas y conversiones de
+bajas a heridos.
+- Los valores provisionales se guardan en configuración central, no dispersos en funciones.
+
+---
+
+## 13. Registro compacto de decisiones para aprobar
+
+| Decisión | Propuesta resumida | Estado |
+|---|---|---|
+| D-01 | No activar el catálogo antiguo automáticamente; aprobar tabla §2 | Pendiente de
+aprobación |
+| D-02 | Costes × `1,15^(nivel−1)` | Propuesta |
+| D-03 | Capacidad lineal por nivel | Propuesta |
+| D-04 | Reembolso del 50 % al cancelar | Propuesta |
+| D-05 | Edificio ≤ nivel del Castillo | Propuesta a confirmar |
+| D-06 | Requisitos iniciales según tabla §2 | Propuesta a confirmar |
+| D-07 | Mina de oro habilita oficio `gold` | Propuesta |
+| D-08 | Duraciones por unidad según §3; no asumir la semana antigua | Propuesta |
+| D-09 | 1 cola + 1 por cada 3 niveles de Cuartel; máximo 4 | Propuesta |
+| D-10 | 50 % recursos y devolución de población reservada | Propuesta |
+| D-11 | `armyUnits` como fuente única | Recomendación técnica |
+| D-12 | Máquinas de asedio no comen; operadores sí | Propuesta |
+| D-13 | Multiplicadores militares P29 conservados | Basado en especificación |
+| D-14 | Requisitos P23 conservados; Cuartel = Barracones | Basado en especificación |
+| D-15 | Retirar tabla antigua tras migración | Recomendación técnica |
+| D-16–D-21 | Catálogo tecnológico §4 | Propuesta |
+| D-22–D-26 | Mapa hexagonal, distancia y marcha §5 | Propuesta |
+| D-27–D-33 | Fórmula y resolución de batalla §6 | Propuesta de simulación |
+| D-34–D-42 | Parlamento y desafíos §7 | Propuesta |
+| D-43 | Lista de 12 civilizaciones del documento | Basado en especificación |
+| D-44 | Bonificaciones desactivadas hasta aprobación | Recomendación |
+| D-45 | Civilización inmutable al fundar | Propuesta |
+| D-46–D-51 | Economía y bienestar §9 | Mezcla de valores confirmados y propuestas,
+identificadas en cada tabla |
+
+---
+
+## 14. Conclusión
+
+La información del PDF permite confirmar varios pilares (escala temporal, población inicial
+revisada, consumo y producción de alimentos, niveles militares, recuperación de heridos y
+pesos de combate), pero no contiene una especificación numérica completa para edificios,
+salarios, tecnologías, mapa, resolución de bajas, desafíos, civilizaciones y bienestar.
+
+Este documento cubre esos huecos con fórmulas y valores propuestos, separando
+explícitamente lo confirmado de lo nuevo. **No debe cargarse todo como “oficial” sin
+aprobación de balance.** La vía más segura es aprobar primero D-01 a D-15, porque
+desbloquean construcción y entrenamiento; después cerrar economía e investigación; y solo
+entonces habilitar batallas y PvP.
+
+La regla de implementación que no debe romperse es: **una sola fuente de verdad por
+sistema, cálculo temporal autoritativo en el servidor y parámetros de balance centralizados y
+comprobables.**
+
