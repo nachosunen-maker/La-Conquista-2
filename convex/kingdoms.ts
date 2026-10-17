@@ -322,3 +322,53 @@ export const cancelConstruction = mutation({
     return { success: true, refund: refundResult.refund };
   },
 });
+
+/**
+ * Consulta de solo lectura de unidades militares del reino.
+ * Requiere que la tabla 'armyUnits' esté desplegada en el backend remoto.
+ */
+export const getArmyUnits = query({
+  args: { kingdomId: v.id("kingdoms") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    const kingdom = await ctx.db.get(args.kingdomId);
+    if (!kingdom) throw new Error("Reino no encontrado.");
+    const isDemoRead = kingdom.userId === "guest_g9ai8cz";
+    if (!isDemoRead && !isKingdomOwner(kingdom.userId, identity?.subject)) {
+      throw new Error("No autorizado: solo puede consultar su propio reino.");
+    }
+
+    let units: any[] = [];
+    try {
+      units = await ctx.db
+        .query("armyUnits" as any)
+        .withIndex("by_kingdom", (q: any) => q.eq("kingdomId", args.kingdomId))
+        .collect();
+    } catch {
+      units = [];
+    }
+
+    return {
+      kingdomId: args.kingdomId,
+      units,
+      serverTimeMs: Date.now(),
+    };
+  },
+});
+
+/**
+ * Validador puro auxiliar para entradas de unidades militares.
+ * Asegura que el tipo de unidad sea válido y la cantidad un entero no negativo.
+ */
+export function validateMilitaryUnitInput(unitType: string, count: number): { success: boolean; error?: string } {
+  const validTypes = ["infanteria", "caballeria", "arqueria", "asedio"];
+  const normalizedType = (unitType || "").toLowerCase().trim();
+  if (!validTypes.includes(normalizedType)) {
+    return { success: false, error: `Tipo de unidad no admitido: '${unitType}'. Válidos: ${validTypes.join(", ")}.` };
+  }
+  if (!Number.isInteger(count) || count < 0) {
+    return { success: false, error: `Cantidad inválida: debe ser un número entero no negativo (recibido: ${count}).` };
+  }
+  return { success: true };
+}
+
