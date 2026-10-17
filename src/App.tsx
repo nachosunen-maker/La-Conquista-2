@@ -34,7 +34,9 @@ import {
   UserCheck,
   Database,
   Check,
-  Loader2
+  Loader2,
+  Award,
+  Sun
 } from 'lucide-react';
 import { 
   calculateSimulatedKingdomResources, 
@@ -44,7 +46,7 @@ import {
 import { constructionProgress } from '../convex/buildingRules';
 import { useAuth } from './auth';
 import { DEMO_USER_ID } from '../convex/kingdomAccess';
-import { CIVILIZATIONS, DAILY_BONUS } from '../convex/balanceConfig';
+import { BUILDINGS, CIVILIZATIONS, DAILY_BONUS, PROFESSION_EFFECTS, REST_POLICIES } from '../convex/balanceConfig';
 import { TabNavigation, type MainTab } from './components/TabNavigation';
 import { FoundingWizard } from './components/FoundingWizard';
 import { ArmyPanel } from './components/ArmyPanel';
@@ -76,6 +78,8 @@ interface KingdomDoc {
   homeTerritoryId?: string;
   pendingTerritoryClaims?: number;
   armyFatigue?: number;
+  restPolicy?: string;
+  formation?: Partial<Record<string, number>>;
   createdAt?: number;
   updatedAt?: number;
 }
@@ -188,7 +192,15 @@ interface SettlementSummary {
   happiness: number | null;
   militaryMorale: number | null;
   militaryDesertion: number;
+  storageCapacity: number | null;
+  wastedByStorage: Record<string, number> | null;
+  professions: { woundedRecoveryBonus: number; happinessPerDay: number; foodConsumptionMultiplier: number; constructionDurationMultiplier: number; effectiveWorkers: Record<string, number> } | null;
+  glory: { before: number; after: number; moraleBonus: number } | null;
+  mercenaries: { count: number; salaryDue: number; salaryPaid: number; unpaid: boolean } | null;
+  restPolicy: string;
 }
+
+const setRestPolicyMutation = makeFunctionReference<"mutation">("economy:setRestPolicy");
 
 const getParliamentBadgeQuery = makeFunctionReference<"query">("parliament:getParliament");
 const bootstrapInitialBuildingsMutation = makeFunctionReference<"mutation">("kingdoms:bootstrapInitialBuildings");
@@ -209,6 +221,7 @@ interface KingdomFullResponse {
   buildings?: BuildingRecord[];
   constructionQueue?: unknown[];
   technologies?: unknown[];
+  season?: { id: string; label: string; progress: number; effectsEnabled: boolean };
 }
 
 const getKingdomFullQuery = makeFunctionReference<"query">("kingdoms:getKingdomFull");
@@ -540,6 +553,9 @@ function KingdomOverviewContent() {
 
   // Estados de liquidación autoritativa en Convex
   const [isSettling, setIsSettling] = useState<boolean>(false);
+  const [restPolicySaving, setRestPolicySaving] = useState<boolean>(false);
+  const [restPolicyError, setRestPolicyError] = useState<string | null>(null);
+  const setRestPolicy = useMutation(setRestPolicyMutation);
   const [settleError, setSettleError] = useState<string | null>(null);
   const [savingWorkerJob, setSavingWorkerJob] = useState<string | null>(null);
   const [workerSaveError, setWorkerSaveError] = useState<string | null>(null);
@@ -634,6 +650,20 @@ function KingdomOverviewContent() {
   };
 
   // Manejador de liquidación autoritativa (Requisito 3)
+  // [M-04] Política de descanso del Castillo (P15, P55)
+  const handleRestPolicyChange = async (restPolicy: string) => {
+    if (!isOwner || !kingdom || restPolicy === (kingdom.restPolicy ?? 'normal')) return;
+    setRestPolicySaving(true);
+    setRestPolicyError(null);
+    try {
+      await setRestPolicy({ kingdomId: kingdom._id, restPolicy });
+    } catch (err: any) {
+      setRestPolicyError(err?.message || 'No se pudo cambiar la política de descanso.');
+    } finally {
+      setRestPolicySaving(false);
+    }
+  };
+
   const handleSettleEconomy = async () => {
     if (!isOwner || !kingdom) return;
 
@@ -664,6 +694,12 @@ function KingdomOverviewContent() {
           happiness: typeof res.happiness === 'number' ? res.happiness : null,
           militaryMorale: typeof res.militaryMorale === 'number' ? res.militaryMorale : null,
           militaryDesertion: res.militaryDesertion ?? 0,
+          storageCapacity: typeof res.storageCapacity === 'number' ? res.storageCapacity : null,
+          wastedByStorage: res.wastedByStorage ?? null,
+          professions: res.professions ?? null,
+          glory: res.glory ?? null,
+          mercenaries: res.mercenaries ?? null,
+          restPolicy: res.restPolicy ?? 'normal',
         });
         setSettleError(null);
       } else {
@@ -905,13 +941,29 @@ function KingdomOverviewContent() {
   ) ?? null;
 
   // Etiquetas legibles de oficios
-  const jobLabels: Record<string, { label: string; color: string; desc: string }> = {
-    agriculture: { label: 'Agricultura', color: 'bg-emerald-500', desc: 'Producción de grano y provisiones' },
-    mining: { label: 'Minería y Cantería', color: 'bg-amber-600', desc: 'Extracción de hierro y piedra' },
-    construction: { label: 'Construcción y Obras', color: 'bg-amber-800', desc: 'Edificación, viviendas y tala' },
-    military: { label: 'Guarnición y Milicia', color: 'bg-rose-600', desc: 'Fuerza armada permanente' },
-    scholars: { label: 'Eruditos y Sabios', color: 'bg-sky-500', desc: 'Estudios y desarrollo técnico' },
+  const jobCapacity = (job: string): string => {
+    const capacity = constructionState?.jobCapacities?.[job as keyof NonNullable<typeof constructionState.jobCapacities>];
+    return typeof capacity === 'number' ? `capacidad de edificios: ${capacity.toLocaleString('es-ES')}` : 'capacidad sin dato';
   };
+  const jobLabels: Record<string, { label: string; color: string; desc: string }> = {
+    agriculture: { label: 'Agricultura', color: 'bg-emerald-500', desc: `2 alimentos por agricultor y día · ${jobCapacity('agriculture')}` },
+    wood: { label: 'Aserradero (madera)', color: 'bg-lime-700', desc: `1 madera por trabajador y día · ${jobCapacity('wood')}` },
+    stone: { label: 'Cantería (piedra)', color: 'bg-stone-500', desc: `0,75 piedra por trabajador y día · ${jobCapacity('stone')}` },
+    iron: { label: 'Minería de hierro', color: 'bg-amber-600', desc: `0,40 hierro por trabajador y día · ${jobCapacity('iron')}` },
+    gold: { label: 'Minería de oro', color: 'bg-yellow-500', desc: `0,20 oro por trabajador y día · ${jobCapacity('gold')}` },
+    medicine: { label: 'Medicina (Hospital militar)', color: 'bg-teal-500', desc: PROFESSION_EFFECTS.medicine.description },
+    religion: { label: 'Religión (Iglesia)', color: 'bg-indigo-400', desc: PROFESSION_EFFECTS.religion.description },
+    entertainment: { label: 'Circo y feria', color: 'bg-pink-500', desc: PROFESSION_EFFECTS.entertainment.description },
+    bakery: { label: 'Panadería', color: 'bg-orange-400', desc: PROFESSION_EFFECTS.bakery.description },
+    construction: { label: 'Construcción y obras', color: 'bg-amber-800', desc: PROFESSION_EFFECTS.construction.description },
+    mining: { label: 'Minería (heredado)', color: 'bg-neutral-500', desc: 'Oficio heredado sin efecto: reasigna a hierro, piedra u oro' },
+    military: { label: 'Guarnición (heredado)', color: 'bg-neutral-500', desc: 'Oficio heredado sin efecto: las tropas se entrenan en el Cuartel' },
+    scholars: { label: 'Eruditos (heredado)', color: 'bg-neutral-500', desc: 'Oficio heredado sin efecto: la investigación se hace en la Universidad' },
+  };
+  const persistedJobTypes = new Set((populationJobs ?? []).map(job => job.jobType.trim().toLowerCase()));
+  const visibleJobTypes = Object.keys(jobLabels).filter(jobType =>
+    !['mining', 'military', 'scholars'].includes(jobType) || persistedJobTypes.has(jobType)
+  );
 
   // Etiquetas legibles de edificios (del catálogo servido)
   const buildingLabels: Record<string, string> = Object.fromEntries(
@@ -988,6 +1040,15 @@ function KingdomOverviewContent() {
                     <span>Impuestos: <span className="text-[#c7beac] capitalize">{kingdom.taxPolicy}</span></span>
                   </>
                 )}
+                {kingdomData?.season && (
+                  <>
+                    <span aria-hidden="true" className="text-[#453d30]">•</span>
+                    <span className="inline-flex items-center gap-1" title={kingdomData.season.effectsEnabled ? 'Estación con efectos activos' : 'Estación informativa (P3): sin efectos hasta aprobar sus modificadores'}>
+                      <Sun className="w-3 h-3 text-amber-300" />
+                      {kingdomData.season.label} ({Math.round(kingdomData.season.progress * 100)} %){kingdomData.season.effectsEnabled ? '' : ' · sin efectos'}
+                    </span>
+                  </>
+                )}
                 <span aria-hidden="true" className="text-[#453d30]">•</span>
                 <span className="font-mono text-[11px] text-[#695d4b]">ID: {kingdom.userId}</span>
               </div>
@@ -1018,6 +1079,25 @@ function KingdomOverviewContent() {
                 </span>
               </div>
             </div>
+            <div className="bg-[#16130e] border border-[#2d251a] rounded-lg px-3.5 py-2.5 flex items-center gap-3">
+              <div className="p-2 bg-amber-950/50 rounded text-[#d4af37]">
+                <Award className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-[10px] text-[#8e816d] uppercase tracking-wider block font-medium">Honor</span>
+                <span className="text-base font-bold text-[#d4af37] font-serif">{(kingdom.honor ?? 0).toLocaleString('es-ES')}</span>
+              </div>
+            </div>
+            <div className="bg-[#16130e] border border-[#2d251a] rounded-lg px-3.5 py-2.5 flex items-center gap-3">
+              <div className="p-2 bg-sky-950/50 rounded text-sky-300">
+                <Scroll className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-[10px] text-[#8e816d] uppercase tracking-wider block font-medium">Gloria</span>
+                <span className="text-base font-bold text-sky-300 font-serif">{(kingdom.glory ?? 0).toLocaleString('es-ES', { maximumFractionDigits: 1 })}</span>
+                <span className="text-[10px] text-[#695d4c] block">decae 1/día · +1 moral por cada 10</span>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -1028,7 +1108,7 @@ function KingdomOverviewContent() {
         <ArmyPanel kingdomId={kingdom._id} isOwner={isOwner} buildingLabels={buildingLabels} />
       )}
       {activeTab === 'universidad' && (
-        <UniversityPanel kingdomId={kingdom._id} isOwner={isOwner} buildingLabels={buildingLabels} />
+        <UniversityPanel kingdomId={kingdom._id} isOwner={isOwner} buildingLabels={buildingLabels} buildingLevels={constructionState?.buildingLevels} />
       )}
       {activeTab === 'parlamento' && (
         <ParliamentPanel
@@ -1155,6 +1235,39 @@ function KingdomOverviewContent() {
               <span className="text-[#c7beac] block">Felicidad {lastSettlement.happiness ?? '—'} · moral militar {lastSettlement.militaryMorale ?? '—'}</span>
               <span className="text-[#c7beac] block">Inanición acumulada: {formatSecondsDuration(lastSettlement.starvationSeconds)} (fase {lastSettlement.starvationPhase})</span>
               {lastSettlement.militaryDesertion > 0 && <span className="text-rose-300 block">Deserción militar: {lastSettlement.militaryDesertion}</span>}
+              {lastSettlement.glory && (
+                <span className="text-[#c7beac] block">Gloria {lastSettlement.glory.after.toFixed(1)} (+{lastSettlement.glory.moraleBonus} moral)</span>
+              )}
+            </div>
+            <div className="bg-[#12100d] border border-[#241e15] rounded-lg p-2.5 space-y-0.5">
+              <span className="text-[#8e816d] uppercase tracking-wider text-[10px] block">Almacén y descanso</span>
+              <span className="text-[#c7beac] block">Tope de almacén: {lastSettlement.storageCapacity !== null ? lastSettlement.storageCapacity.toLocaleString('es-ES') : '—'} por recurso</span>
+              {lastSettlement.wastedByStorage && Object.values(lastSettlement.wastedByStorage).some((v) => v > 0) ? (
+                <span className="text-amber-300 block">
+                  Producción perdida por el tope: {Object.entries(lastSettlement.wastedByStorage).filter(([, v]) => v > 0).map(([r, v]) => `${v.toFixed(1)} ${r}`).join(', ')}
+                </span>
+              ) : (
+                <span className="text-[#8e816d] block">Sin pérdidas por almacén</span>
+              )}
+              <span className="text-[#c7beac] block">Descanso: {REST_POLICIES[lastSettlement.restPolicy as keyof typeof REST_POLICIES]?.label ?? lastSettlement.restPolicy}</span>
+            </div>
+            <div className="bg-[#12100d] border border-[#241e15] rounded-lg p-2.5 space-y-0.5">
+              <span className="text-[#8e816d] uppercase tracking-wider text-[10px] block">Profesiones (P13)</span>
+              {lastSettlement.professions ? (
+                <>
+                  <span className="text-[#c7beac] block">Recuperación de heridos +{Math.round(lastSettlement.professions.woundedRecoveryBonus * 100)} pp · felicidad +{lastSettlement.professions.happinessPerDay}/día</span>
+                  <span className="text-[#c7beac] block">Consumo de alimentos ×{lastSettlement.professions.foodConsumptionMultiplier.toFixed(2)} · obras ×{lastSettlement.professions.constructionDurationMultiplier.toFixed(2)}</span>
+                </>
+              ) : <span className="text-[#8e816d]">Sin datos</span>}
+            </div>
+            <div className="bg-[#12100d] border border-[#241e15] rounded-lg p-2.5 space-y-0.5">
+              <span className="text-[#8e816d] uppercase tracking-wider text-[10px] block">Mercenarios (P53)</span>
+              {lastSettlement.mercenaries && lastSettlement.mercenaries.count > 0 ? (
+                <>
+                  <span className="text-[#c7beac] block">{lastSettlement.mercenaries.count} contratados · salario debido {lastSettlement.mercenaries.salaryDue.toFixed(1)} oro · pagado {lastSettlement.mercenaries.salaryPaid.toFixed(1)}</span>
+                  {lastSettlement.mercenaries.unpaid && <span className="text-rose-300 block">Salario impagado: los mercenarios han desertado.</span>}
+                </>
+              ) : <span className="text-[#8e816d]">Sin mercenarios contratados</span>}
             </div>
           </div>
         )}
@@ -1369,6 +1482,38 @@ function KingdomOverviewContent() {
               P2: 86.400 s/año
             </span>
           </div>
+        </div>
+
+        {/* [M-04] Política de descanso del Castillo (P15, P55) */}
+        <div className="bg-[#100e0b] border border-[#292116] rounded-lg p-3 sm:p-3.5 space-y-2 text-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <span className="font-semibold text-[#e6ded0] block">Política de descanso del Castillo (P15, P55)</span>
+              <span className="text-[11px] text-[#8e816d]">
+                Vigente: {REST_POLICIES[(kingdom.restPolicy ?? 'normal') as keyof typeof REST_POLICIES]?.label ?? kingdom.restPolicy}. Afecta a la producción, la felicidad y la fatiga del ejército en cada liquidación.
+              </span>
+            </div>
+            {restPolicySaving && <span className="text-[11px] text-amber-300">Guardando…</span>}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {Object.entries(REST_POLICIES).map(([id, policy]) => {
+              const active = (kingdom.restPolicy ?? 'normal') === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  disabled={!isOwner || restPolicySaving}
+                  onClick={() => handleRestPolicyChange(id)}
+                  className={`rounded border px-2.5 py-2 text-left transition-colors ${active ? 'border-[#d4af37] bg-[#241a10] text-[#f4eedb]' : 'border-[#362b1c] bg-[#1b1610] text-[#a0937e] hover:bg-[#251f16]'} disabled:opacity-60`}
+                >
+                  <span className="font-semibold block">{policy.label}</span>
+                  <span className="text-[10px] text-[#8e816d] block">{policy.description}</span>
+                </button>
+              );
+            })}
+          </div>
+          {restPolicyError && <p role="alert" className="text-[11px] text-rose-400">{restPolicyError}</p>}
+          {!isOwner && <p className="text-[10px] text-[#615545]">Consulta de solo lectura: la política no puede cambiarse en el reino demo.</p>}
         </div>
 
         {/* Validación y Renderizado de Resultados */}
@@ -1607,7 +1752,8 @@ function KingdomOverviewContent() {
               </p>
               {populationJobs && populationJobs.length > 0 ? (
                 <div className="space-y-2">
-                  {Object.entries(jobLabels).map(([jobType, info]) => {
+                  {visibleJobTypes.map((jobType) => {
+                    const info = jobLabels[jobType];
                     const assignedCount = populationJobs.find(
                       job => job.jobType.trim().toLowerCase() === jobType
                     )?.assignedCount ?? 0;
@@ -1667,7 +1813,7 @@ function KingdomOverviewContent() {
                   <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">
                     No se registraron asignaciones laborales persistidas.
                   </p>
-                  {isOwner && Object.entries(jobLabels).map(([jobType, info]) => (
+                  {isOwner && visibleJobTypes.map((jobType) => { const info = jobLabels[jobType]; return (
                     <form
                       key={jobType}
                       onSubmit={event => handleWorkerReassignment(event, jobType)}
@@ -1694,7 +1840,7 @@ function KingdomOverviewContent() {
                         </button>
                       </div>
                     </form>
-                  ))}
+                  ); })}
                 </div>
               )}
               {workerSaveError && (
@@ -1837,10 +1983,12 @@ function KingdomOverviewContent() {
                   const inQueue = constructionState.constructionQueue.some((c) => c.buildingType === buildingType);
                   const canStart = isOwner && blockers.length === 0 && !inQueue;
                   const jobNames: Record<string, string> = { agriculture: 'agricultura', wood: 'madera', stone: 'piedra', iron: 'hierro', gold: 'oro' };
+                  const professionNames: Record<string, string> = { medicine: 'medicina', religion: 'religión', entertainment: 'circo y feria', bakery: 'panadería' };
+                  const professionJob = (BUILDINGS as Record<string, { professionJob?: string }>)[buildingType]?.professionJob;
                   const effect = entry.residentialCapacityPerLevel > 0
                     ? `+${entry.residentialCapacityPerLevel} plazas de vivienda`
                     : entry.workerCapacityPerLevel > 0
-                      ? `+${entry.workerCapacityPerLevel} trabajadores${entry.jobType ? ` de ${jobNames[entry.jobType] ?? entry.jobType}` : ''}`
+                      ? `+${entry.workerCapacityPerLevel} trabajadores${entry.jobType ? ` de ${jobNames[entry.jobType] ?? entry.jobType}` : professionJob ? ` de ${professionNames[professionJob] ?? professionJob}` : ''} · ${entry.role}`
                       : entry.role;
                   return (
                     <div key={buildingType} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 rounded border border-[#2b2419] bg-[#100e0b] px-2.5 py-2 text-[11px]">

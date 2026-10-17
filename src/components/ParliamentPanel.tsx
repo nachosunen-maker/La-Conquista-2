@@ -315,7 +315,9 @@ export function ParliamentPanel(props: {
               Rondas: {r.rounds.map((round) => `R${round.round} ratio ${round.ratio.toFixed(2)}`).join(' · ')}
             </p>
             <p className="text-[#8e816d]">
-              Honor y gloria: {r.honorAwarded.pending ? 'importes pendientes de balance (P50-P51)' : `${r.honorAwarded.attacker}/${r.honorAwarded.defender}`}
+              Honor y gloria: {r.honorAwarded.pending
+                ? 'importes pendientes de balance (P50-P51)'
+                : `tú +${battle.role === 'attacker' ? r.honorAwarded.attacker : r.honorAwarded.defender} honor / ${battle.role === 'attacker' ? r.gloryAwarded.attacker : r.gloryAwarded.defender} gloria · rival +${battle.role === 'attacker' ? r.honorAwarded.defender : r.honorAwarded.attacker} honor / ${battle.role === 'attacker' ? r.gloryAwarded.defender : r.gloryAwarded.attacker} gloria`}
               {' · '}Desgaste de equipo: {battle.role === 'attacker' ? r.equipmentWear.attacker : r.equipmentWear.defender} %
               {' · '}Botín: {r.lootTransferred ? 'transferido' : 'sin botín (D-31)'}
               {' · '}Territorio: {battle.crushingVictory ? 'el vencedor puede reclamar un territorio libre cercano' : 'sin cambios'}

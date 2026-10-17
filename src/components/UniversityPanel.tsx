@@ -75,8 +75,9 @@ const STATUS_LABELS: Record<string, string> = {
   locked: 'bloqueada',
 };
 
-export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; buildingLabels: Record<string, string> }) {
+export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; buildingLabels: Record<string, string>; buildingLevels?: Record<string, number> }) {
   const { kingdomId, isOwner, buildingLabels } = props;
+  const buildingLevelOf = (type: string) => props.buildingLevels?.[type] ?? 0;
   const state = useQuery(getTechnologiesQuery, { kingdomId }) as TechnologiesState | undefined;
   const research = useMutation(researchTechnologyMutation);
   const cancel = useMutation(cancelResearchMutation);
@@ -127,7 +128,7 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
       <PanelSection
         icon={<GraduationCap className="w-4 h-4 text-sky-400" />}
         title="Investigación en curso"
-        aside={<span>{state.slotsFree}/{state.slots} ranuras libres (una investigación por supervisor, P25)</span>}
+        aside={<span>{state.slotsFree}/{state.slots} ranuras libres · ranuras: {state.slots} (Universidad nivel {buildingLevelOf('universidad')}; nivel 3 da 2 y nivel 5 da 3)</span>}
       >
         {state.researching.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
