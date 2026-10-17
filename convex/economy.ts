@@ -165,7 +165,14 @@ export async function settleRelationalKingdomEconomy(
 
   const state = await readRelationalKingdomState(ctx, kingdom._id);
   if (!state.resources) throw new Error("No existen recursos para el reino.");
-  if (!state.population) throw new Error("No existe documento de población para el reino.");
+  if (!state.population) {
+    const populationId = await ctx.db.insert("population" as any, {
+      kingdomId: kingdom._id,
+      total: INITIAL_KINGDOM_CONFIG.population,
+      available: INITIAL_KINGDOM_CONFIG.unassignedCivil,
+    });
+    state.population = await ctx.db.get(populationId);
+  }
 
   const isFirstInitialization = state.resources.settlementInitialized !== true;
   const settlement = calculateSettlementProgress({

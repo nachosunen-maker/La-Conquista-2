@@ -18,6 +18,9 @@ export const getKingdomFull = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     const userId = resolveKingdomQueryUserId(args.userId, identity?.subject);
+    if (!userId) {
+      return null;
+    }
 
     // Iberia es la única consulta pública; los reinos de usuario usan el subject validado.
     const kingdom = await ctx.db
