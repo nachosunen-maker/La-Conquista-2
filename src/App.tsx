@@ -155,9 +155,9 @@ const getViewerQuery = makeFunctionReference<"query">("kingdoms:getViewer");
 const settleKingdomEconomyMutation = makeFunctionReference<"mutation">("economy:settleKingdomEconomy");
 const setKingdomFoodTierMutation = makeFunctionReference<"mutation">("economy:setKingdomFoodTier");
 const reassignPopulationJobMutation = makeFunctionReference<"mutation">("economy:reassignPopulationJob");
-const getConstructionStateQuery = makeFunctionReference<"query">("buildings:getConstructionState");
-const startConstructionMutation = makeFunctionReference<"mutation">("buildings:startConstruction");
-const cancelConstructionMutation = makeFunctionReference<"mutation">("buildings:cancelConstruction");
+const getConstructionStateQuery = makeFunctionReference<"query">("kingdoms:getConstructionState");
+const startConstructionMutation = makeFunctionReference<"mutation">("kingdoms:startConstruction");
+const cancelConstructionMutation = makeFunctionReference<"mutation">("kingdoms:cancelConstruction");
 
 /* ==========================================================================
    COMPONENTE DE INICIO DE SESIÓN CON GOOGLE IDENTITY SERVICES

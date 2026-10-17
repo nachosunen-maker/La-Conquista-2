@@ -8,12 +8,18 @@
  * @module
  */
 
+import type * as buildingRules from "../buildingRules.js";
+import type * as buildings from "../buildings.js";
+import type * as buildingsCalculations from "../buildingsCalculations.js";
+import type * as buildingsCatalog from "../buildingsCatalog.js";
+import type * as constructionPureTests from "../constructionPureTests.js";
 import type * as economy from "../economy.js";
 import type * as economyAdapter from "../economyAdapter.js";
 import type * as economyCalculations from "../economyCalculations.js";
 import type * as economyPureTests from "../economyPureTests.js";
 import type * as economyTests from "../economyTests.js";
-import type * as buildings from "../buildings.js";
+import type * as kingdomAccess from "../kingdomAccess.js";
+import type * as kingdomReadModel from "../kingdomReadModel.js";
 import type * as kingdoms from "../kingdoms.js";
 
 import type {
@@ -23,12 +29,18 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  buildingRules: typeof buildingRules;
+  buildings: typeof buildings;
+  buildingsCalculations: typeof buildingsCalculations;
+  buildingsCatalog: typeof buildingsCatalog;
+  constructionPureTests: typeof constructionPureTests;
   economy: typeof economy;
   economyAdapter: typeof economyAdapter;
   economyCalculations: typeof economyCalculations;
   economyPureTests: typeof economyPureTests;
   economyTests: typeof economyTests;
-  buildings: typeof buildings;
+  kingdomAccess: typeof kingdomAccess;
+  kingdomReadModel: typeof kingdomReadModel;
   kingdoms: typeof kingdoms;
 }>;
 
