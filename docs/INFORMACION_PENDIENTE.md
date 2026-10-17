@@ -21,7 +21,7 @@ Todos los valores viven en `convex/balanceConfig.ts` con su origen etiquetado: `
 | F. Combate y batallas (D-27 a D-32) | Implementado con dos límites de balance (§3) | `battleRules.ts`, `parliament.ts` | 7 |
 | G. Mapa y territorios (D-22 a D-26) | Implementado | `territoryRules.ts`, `territories.ts` | 6 |
 | H. Civilizaciones (D-43 a D-45) | Implementado | `civilizations.ts` | — |
-| Interfaz P64 | Implementada (ver commit de interfaz) | `src/components/*` | tipado |
+| Interfaz P64 | Implementada: pestañas Aldea/Ejército/Universidad/Parlamento/Mapa, asistente de fundación P4-P9, insignia P58 | `src/App.tsx`, `src/components/*` | lint y build |
 
 Batería completa: 104 pruebas puras (`npm test`), comprobación de tipos de `src/` y de `convex/` (`npm run lint`).
 
@@ -59,20 +59,22 @@ Batería completa: 104 pruebas puras (`npm test`), comprobación de tipos de `sr
 
 ---
 
-## 3. Límites de balance detectados (requieren decisión)
+## 3. Puntos de revisión de balance (decisión del 17-10-2026: se mantienen los valores aprobados)
 
-Las pruebas los documentan con el detalle numérico; el código respeta los valores aprobados sin alterarlos.
+El responsable decidió mantener los valores del Complemento y dejar estos dos puntos abiertos para aprobación con sugerencias. El código no los altera; las pruebas `Batalla:` documentan el detalle numérico.
 
-- **B-01 Techo de bajas.** Con k = 0,18 y 3 rondas, las bajas máximas de un bando en una batalla son 1 − 0,82³ = 44,9 %. Por tanto la retirada al 70 % y la victoria aplastante del 75 % (P47) **no pueden ocurrir**, y las reclamaciones de territorio (P48) nunca se conceden. Opciones: subir k, subir el número de rondas, o rebajar los umbrales.
-- **B-02 Empates dominantes.** Con exponentes 0,20/0,15/0,10/0,05 y tolerancia de empate de 10 puntos, 1.000 soldados de élite (nivel 5, acero avanzado, acero, moral 95, ración excelente) contra 1.000 reclutas con palos, sin armadura, moral 30, ración mínima y fatiga 80 % terminan en **empate**. P34/P69 exigen que la preparación pueda vencer al número. Opciones: aumentar los exponentes de calidad, reducir la tolerancia de empate, o usar la puntuación lineal normalizada del Complemento.
+- **B-01 Techo de bajas.** Con k = 0,18 y 3 rondas, las bajas máximas de un bando en una batalla son 1 − 0,82³ = 44,9 %. La retirada al 70 % y la victoria aplastante del 75 % (P47) **no pueden ocurrir** y las reclamaciones de territorio (P48) nunca se conceden.
+  Sugerencias para aprobar (cálculos derivados, no valores oficiales): (a) k = 0,40 con 3 rondas → techo 78,4 %; (b) 8 rondas con k = 0,18 → techo 79,7 %; (c) rebajar los umbrales de retirada y de victoria aplastante por debajo del 44,9 %. Parámetros: `COMBAT.CASUALTY_RATE_K`, `COMBAT.MAX_ROUNDS`, `COMBAT.RETREAT_LOSS_RATIO`, `COMBAT.CRUSHING_VICTORY_LOSS_RATIO`.
+- **B-02 Empates dominantes.** Con exponentes 0,20/0,15/0,10/0,05 y tolerancia de empate de 10 puntos, 1.000 soldados de élite (nivel 5, acero avanzado, acero, moral 95, ración excelente) contra 1.000 reclutas con palos, sin armadura, moral 30, ración mínima y fatiga 80 % terminan en **empate**; P34/P69 exigen que la preparación pueda vencer al número.
+  Sugerencias para aprobar: (a) tolerancia de empate de 5 puntos (`COMBAT.DRAW_TOLERANCE`); (b) usar la puntuación lineal normalizada del Complemento (pesos P34 literales) como potencia; (c) elevar los exponentes de calidad (`COMBAT.WEIGHTS`) manteniendo el 0,85 del número.
 
----
+## 4. Reglas derivadas pendientes de aprobación (`[DERIVADO]`)
 
-## 4. Reglas derivadas que conviene confirmar (`[DERIVADO]`)
+El responsable pidió el 17-10-2026 que R-01 quede como sugerencia pendiente de aprobación; el resto sigue el mismo criterio.
 
 | Id | Regla aplicada | Dónde |
 |---|---|---|
-| R-01 | Edificios fundacionales: Castillo 1, Viviendas 20, Granja 11, Aserradero 4, Cantera 4, Mina de hierro 2, Mina de oro 1 (`nivel = ceil(trabajadores iniciales / capacidad por nivel)`), para que P19 se cumpla con la capacidad D-47. | `INITIAL_BUILDINGS` |
+| R-01 | **Sugerencia pendiente de aprobación.** Edificios fundacionales: Castillo 1, Viviendas 20, Granja 11, Aserradero 4, Cantera 4, Mina de hierro 2, Mina de oro 1 (`nivel = ceil(trabajadores iniciales / capacidad por nivel)`), para que P19 se cumpla con la capacidad D-47. Alternativa: solo Castillo 1 (incumple P19 hasta construir granjas). | `INITIAL_BUILDINGS` |
 | R-02 | Base imponible = unidades producidas de alimentos, madera, piedra y hierro en el intervalo; `oro = base × tasa`. El oro minado no tributa. | `economyExtended.ts` |
 | R-03 | Las tecnologías de felicidad elevan el nivel de equilibrio (70 + bonus) y recuperan 1 punto/día hasta alcanzarlo. | `economyExtended.ts` |
 | R-04 | Contribuciones diarias de felicidad: ración (−2/0/+1/+2), hacinamiento −2, iglesia +1, circo +1. | `WELLBEING` |
