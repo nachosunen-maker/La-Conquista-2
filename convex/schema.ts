@@ -93,6 +93,13 @@ export default defineSchema(
         food: v.optional(v.number()),
       })),
     }).index("by_kingdom", ["kingdomId"]),
+
+    // Unidades militares del reino (esquema mínimo persistido)
+    armyUnits: defineTable({
+      kingdomId: v.id("kingdoms"),
+      unitType: v.string(), // "infanteria", "caballeria", "arqueria", "asedio", etc.
+      count: v.number(),    // Cantidad entera no negativa
+    }).index("by_kingdom", ["kingdomId"]),
   },
   {
     schemaValidation: false,
