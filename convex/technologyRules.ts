@@ -8,6 +8,7 @@
 import type { ResourceType } from "./economyCalculations";
 import {
   RESEARCH,
+  RESEARCH_SLOTS_BY_UNIVERSITY,
   TECHNOLOGIES,
   HOSPITAL_RECOVERY_CAP,
   type TechnologyBalance,
@@ -32,10 +33,16 @@ export interface ResearchQueueEntry {
   costs: Partial<Record<ResourceType, number>>;
 }
 
-/** [COMPLEMENTO §4] Ranuras de investigación: 1 base + supervisores, máximo 3. Sin sistema de supervisores → 1. */
-export function researchSlots(supervisors: number = 0): number {
-  const extra = Number.isInteger(supervisors) && supervisors > 0 ? supervisors : 0;
-  return Math.min(RESEARCH.MAX_SLOTS, RESEARCH.BASE_SLOTS + extra);
+/**
+ * [DECISIÓN 17-10-2026, M-03 opción B] Ranuras de investigación por nivel de Universidad
+ * (nivel 1 = 1, nivel 3 = 2, nivel 5 = 3). Sustituye a los supervisores formados de P25
+ * hasta que exista esa mecánica; el máximo sigue siendo RESEARCH.MAX_SLOTS.
+ */
+export function researchSlots(universityLevel: number = 0): number {
+  const level = Number.isInteger(universityLevel) && universityLevel > 0 ? universityLevel : 0;
+  let slots = 0;
+  for (const row of RESEARCH_SLOTS_BY_UNIVERSITY) if (level >= row.minLevel) slots = row.slots;
+  return Math.min(RESEARCH.MAX_SLOTS, Math.max(RESEARCH.BASE_SLOTS, slots));
 }
 
 /** Modificadores agregados de las tecnologías completadas. Idempotente: cada tecnología cuenta una vez. */
@@ -133,7 +140,6 @@ export function createResearchPlan(input: {
   activeResearch: ReadonlyArray<ResearchQueueEntry>;
   buildingLevels: Readonly<Record<string, number>>;
   now: number;
-  supervisors?: number;
 }): { success: true; plan: ResearchPlan } | { success: false; error: string } {
   const technology = TECHNOLOGY_CATALOG[input.technologyId];
   if (!technology) return { success: false, error: `La tecnología '${input.technologyId}' no existe en el catálogo.` };
@@ -146,8 +152,9 @@ export function createResearchPlan(input: {
   )) {
     return { success: false, error: "La cola de investigación contiene una entrada incompleta; requiere conciliación." };
   }
-  if (input.activeResearch.length >= researchSlots(input.supervisors)) {
-    return { success: false, error: `No hay ranuras de investigación libres (máximo ${researchSlots(input.supervisors)}).` };
+  const slots = researchSlots(input.buildingLevels.universidad ?? 0);
+  if (input.activeResearch.length >= slots) {
+    return { success: false, error: `No hay ranuras de investigación libres (${slots} con Universidad nivel ${input.buildingLevels.universidad ?? 0}).` };
   }
   const evaluation = evaluateTechnologyStatus({ technology, completedIds, researchingIds, buildingLevels: input.buildingLevels });
   if (evaluation.status === "completed") return { success: false, error: `'${technology.name}' ya está investigada.` };

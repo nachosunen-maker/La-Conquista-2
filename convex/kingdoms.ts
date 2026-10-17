@@ -5,7 +5,8 @@ import { createAggregatePopulationFallback } from "./kingdomReadModel";
 import { readArmyUnitDocs } from "./army";
 import { validateMilitaryUnitInput as validateMilitaryUnitInputRule } from "./armyRules";
 import { requireOwner } from "./buildings";
-import { DAILY_BONUS } from "./balanceConfig";
+import { DAILY_BONUS, SEASONS, TIME } from "./balanceConfig";
+import { seasonAt } from "./economyExtended";
 
 /**
  * Consulta autoritativa completa del reino para el cliente (Resumen del Reino)
@@ -75,8 +76,11 @@ export const getKingdomFull = query({
       kingdomPopulation.unassignedCivil
     );
 
+    const season = seasonAt(Date.now(), SEASONS.ORDER, TIME.MS_PER_GAME_YEAR);
+
     return {
       kingdom,
+      season: { id: season.id, label: SEASONS.LABELS[season.id as keyof typeof SEASONS.LABELS], progress: season.progress, effectsEnabled: SEASONS.ENABLED_EFFECTS },
       resources: resources ?? (kingdom as any).resources,
       population: population ?? populationFallback,
       populationJobs,

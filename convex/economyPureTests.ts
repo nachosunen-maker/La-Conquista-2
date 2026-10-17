@@ -30,6 +30,7 @@ import { runExtendedEconomyTests } from "./economyExtendedPureTests";
 import { runTerritoryValidationTests } from "./territoryPureTests";
 import { runBattleValidationTests } from "./battlePureTests";
 import { runChallengeValidationTests } from "./challengePureTests";
+import { runRound2EconomyTests } from "./economyRound2PureTests";
 
 /**
  * ============================================================================
@@ -2293,6 +2294,12 @@ export function runEconomicValidationTests(): TestResult[] {
   results.push(...runChallengeValidationTests().map((result) => ({
     category: "MATEMÁTICA / LÓGICA PURA" as const,
     test: `Parlamento: ${result.test}`,
+    passed: result.passed,
+    details: result.details,
+  })));
+  results.push(...runRound2EconomyTests().map((result) => ({
+    category: "MATEMÁTICA / LÓGICA PURA" as const,
+    test: `Ronda 2: ${result.test}`,
     passed: result.passed,
     details: result.details,
   })));

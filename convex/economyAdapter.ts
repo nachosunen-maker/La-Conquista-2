@@ -73,10 +73,24 @@ export interface RemotePopulationJobDoc {
   assignedCount: number;
 }
 
+/**
+ * Oficios asignables desde la interfaz (P12, P13):
+ * - productivos (recursos): agriculture, wood, stone, iron, gold;
+ * - profesiones con efecto (M-07): medicine, religion, entertainment, bakery, construction;
+ * - heredados sin efecto propio: mining, military, scholars (se conservan por compatibilidad).
+ */
 export const ASSIGNABLE_POPULATION_JOB_TYPES = [
   "agriculture",
-  "mining",
+  "wood",
+  "stone",
+  "iron",
+  "gold",
+  "medicine",
+  "religion",
+  "entertainment",
+  "bakery",
   "construction",
+  "mining",
   "military",
   "scholars",
 ] as const;
@@ -392,6 +406,7 @@ export function adaptRemoteDocumentsToEconomicState(
     other: 0,
   };
 
+  const jobCounts: Record<string, number> = {};
   if (populationJobs && Array.isArray(populationJobs)) {
     const seenJobTypes = new Set<string>();
     for (const job of populationJobs) {
@@ -419,6 +434,7 @@ export function adaptRemoteDocumentsToEconomicState(
         };
       }
       seenJobTypes.add(jobKey);
+      jobCounts[jobKey] = job.assignedCount;
 
       switch (jobKey) {
         case "agriculture":
@@ -474,6 +490,7 @@ export function adaptRemoteDocumentsToEconomicState(
     resources: kingdomResources,
     foodTier,
     lastUpdated: resources.lastUpdated,
+    jobCounts,
     ...(input.buildings !== undefined
       ? {
           foodProductionWorkerLimit: input.buildings

@@ -59,6 +59,14 @@ export default defineSchema(
       armorTier: v.optional(v.string()),
       strategy: v.optional(v.string()),
       armyFatigue: v.optional(v.number()),
+      // Ronda 2: política de descanso (M-04) y formación de combate (P37, M-11)
+      restPolicy: v.optional(v.string()),
+      formation: v.optional(v.object({
+        infanteria: v.optional(v.number()),
+        arqueria: v.optional(v.number()),
+        caballeria: v.optional(v.number()),
+        asedio: v.optional(v.number()),
+      })),
       // Bloques D-F: bienestar, impuestos, honor y gloria
       taxRate: v.optional(v.number()),
       honor: v.optional(v.number()),
@@ -218,6 +226,8 @@ export default defineSchema(
       count: v.number(),    // Activos: cantidad entera no negativa
       wounded: v.optional(v.number()), // Heridos (P44) separados de los disponibles
       recoveryProgress: v.optional(v.number()), // Fracción acumulada de recuperación hospitalaria (P45)
+      isMercenary: v.optional(v.boolean()), // [M-02] Contrato de mercenarios (P53)
+      contractEndsAt: v.optional(v.number()),
     }).index("by_kingdom", ["kingdomId"]),
   },
   {

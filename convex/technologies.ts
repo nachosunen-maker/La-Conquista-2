@@ -51,7 +51,7 @@ export const getTechnologies = query({
     const researching = progress.filter((doc) => doc.status === "researching");
     const researchingIds = new Set<string>(researching.map((doc) => doc.technologyId));
     const serverTimeMs = Date.now();
-    const slots = researchSlots(0);
+    const slots = researchSlots(buildingLevels.universidad ?? 0);
     return {
       serverTimeMs,
       writable: isKingdomOwner(kingdom.userId, identity?.subject),

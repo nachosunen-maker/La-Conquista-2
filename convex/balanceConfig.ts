@@ -144,6 +144,8 @@ export interface BuildingBalance {
   workerCapacityPerLevel: number;
   /** Oficio productivo habilitado, si aplica. */
   jobType: ProductiveJob | null;
+  /** Profesión de P13 cuya capacidad habilita (sin producción de recursos). */
+  professionJob?: "medicine" | "religion" | "entertainment" | "bakery";
   /** Requisitos de progresión: edificio → nivel mínimo. */
   requirements: Readonly<Record<string, number>>;
   /** Función descriptiva (P20). */
@@ -164,11 +166,11 @@ export const BUILDINGS: Readonly<Record<string, BuildingBalance>> = {
   murallas: { label: "Murallas", baseCosts: { gold: 100, wood: 100, stone: 300, iron: 20, food: 0 }, baseDurationSeconds: 36_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 2 }, role: "Defensa del reino" },
   mercado: { label: "Mercado", baseCosts: { gold: 100, wood: 150, stone: 100, iron: 0, food: 0 }, baseDurationSeconds: 28_800, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 30, jobType: null, requirements: { castillo: 2 }, role: "Intercambio y eficiencia económica" },
   parlamento: { label: "Parlamento", baseCosts: { gold: 200, wood: 100, stone: 200, iron: 20, food: 0 }, baseDurationSeconds: 43_200, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 2 }, role: "Desafíos y diplomacia" },
-  hospitalMilitar: { label: "Hospital militar", baseCosts: { gold: 100, wood: 100, stone: 150, iron: 30, food: 0 }, baseDurationSeconds: 36_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 50, jobType: null, requirements: { castillo: 2 }, role: "Recuperación de heridos" },
+  hospitalMilitar: { label: "Hospital militar", baseCosts: { gold: 100, wood: 100, stone: 150, iron: 30, food: 0 }, baseDurationSeconds: 36_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 50, jobType: null, requirements: { castillo: 2 }, role: "Recuperación de heridos", professionJob: "medicine" },
   taberna: { label: "Taberna", baseCosts: { gold: 50, wood: 100, stone: 40, iron: 0, food: 0 }, baseDurationSeconds: 14_400, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 30, jobType: null, requirements: { castillo: 1 }, role: "Contratación de mercenarios" },
-  panaderia: { label: "Panadería", baseCosts: { gold: 40, wood: 100, stone: 30, iron: 0, food: 0 }, baseDurationSeconds: 14_400, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Apoyo a la alimentación" },
-  iglesia: { label: "Iglesia", baseCosts: { gold: 60, wood: 100, stone: 80, iron: 0, food: 0 }, baseDurationSeconds: 18_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Religión y moral" },
-  circo: { label: "Circo/Feria", baseCosts: { gold: 60, wood: 120, stone: 60, iron: 0, food: 0 }, baseDurationSeconds: 18_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Felicidad" },
+  panaderia: { label: "Panadería", baseCosts: { gold: 40, wood: 100, stone: 30, iron: 0, food: 0 }, baseDurationSeconds: 14_400, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Apoyo a la alimentación", professionJob: "bakery" },
+  iglesia: { label: "Iglesia", baseCosts: { gold: 60, wood: 100, stone: 80, iron: 0, food: 0 }, baseDurationSeconds: 18_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Religión y moral", professionJob: "religion" },
+  circo: { label: "Circo/Feria", baseCosts: { gold: 60, wood: 120, stone: 60, iron: 0, food: 0 }, baseDurationSeconds: 18_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Felicidad", professionJob: "entertainment" },
 };
 
 export const CONSTRUCTION = {
@@ -340,25 +342,91 @@ export const STRATEGY_COUNTER_BONUS = 1.15; // [DERIVADO de P35: la estrategia a
 export const STRATEGY_FACTOR_RANGE = { min: 0.8, max: 1.25 } as const;
 
 // ============================================================================
+// 4b. MERCENARIOS, SUPERVISORES, DESCANSO, ESTACIONES, ALMACÉN Y PROFESIONES (ronda 2)
+// ============================================================================
+/** [DECISIÓN 17-10-2026, M-02 opción A] Mercenarios contratados en la Taberna (P53). */
+export const MERCENARIES = {
+  GOLD_PER_UNIT: 25,
+  UNIT_TYPE: "infanteria" as UnitType,
+  LEVEL: 2,
+  /** Máximo de mercenarios activos por nivel de Taberna. */
+  MAX_PER_TAVERN_LEVEL: 50,
+  CONTRACT_DAYS: 7,
+  /** Salario por mercenario y día real, descontado en la liquidación; si no hay oro, desertan. */
+  SALARY_GOLD_PER_DAY: 1,
+  /** No cuentan para la natalidad ni para la capacidad residencial. */
+  COUNTS_FOR_GROWTH: false,
+} as const;
+
+/** [DECISIÓN 17-10-2026, M-03 opción B] Ranuras de investigación según nivel de Universidad (P25). */
+export const RESEARCH_SLOTS_BY_UNIVERSITY: readonly { minLevel: number; slots: number }[] = [
+  { minLevel: 1, slots: 1 },
+  { minLevel: 3, slots: 2 },
+  { minLevel: 5, slots: 3 },
+];
+
+/** [DECISIÓN 17-10-2026, M-04 opción A] Políticas de descanso del Castillo (P15, P55). */
+export type RestPolicy = "normal" | "intensiva" | "relajada";
+export const REST_POLICIES: Readonly<Record<RestPolicy, { label: string; productionMultiplier: number; happinessPerDay: number; fatiguePerDay: number; description: string }>> = {
+  normal: { label: "Descanso normal", productionMultiplier: 1.0, happinessPerDay: 0, fatiguePerDay: 0, description: "Sin efectos." },
+  intensiva: { label: "Jornada intensiva («A tope»)", productionMultiplier: 1.15, happinessPerDay: -3, fatiguePerDay: 5, description: "+15 % de producción, −3 felicidad y +5 fatiga por día." },
+  relajada: { label: "Jornada relajada", productionMultiplier: 0.9, happinessPerDay: 2, fatiguePerDay: -5, description: "−10 % de producción, +2 felicidad y −5 fatiga adicional por día." },
+};
+
+/** [DECISIÓN 17-10-2026, M-05 opción B] Estaciones informativas (P3); los modificadores quedan desactivados hasta aprobación (opción A). */
+export const SEASONS = {
+  ENABLED_EFFECTS: false,
+  /** Cuatro estaciones por año de juego: 1/4 de día real cada una. */
+  ORDER: ["primavera", "verano", "otono", "invierno"] as const,
+  LABELS: { primavera: "Primavera", verano: "Verano", otono: "Otoño", invierno: "Invierno" } as const,
+  /** Propuesta M-05 opción A (sin efecto mientras ENABLED_EFFECTS sea false). */
+  AGRICULTURE_MODIFIER: { primavera: 0.1, verano: 0.2, otono: 0, invierno: -0.3 } as const,
+  WINTER_MARCH_MULTIPLIER: 1.25,
+} as const;
+
+/** [DECISIÓN 17-10-2026, M-06 opción A] Tope de almacén por recurso. */
+export const STORAGE = {
+  BASE_CAPACITY: 10_000,
+  CAPACITY_PER_MARKET_LEVEL: 2_000,
+} as const;
+
+/**
+ * [DECISIÓN 17-10-2026, M-07 opción A] Efectos de las profesiones de P13 que no producen recursos.
+ * Cada efecto escala por bloques de trabajadores con un tope.
+ */
+export const PROFESSION_EFFECTS = {
+  medicine: { building: "hospitalMilitar", workersPerStep: 10, perStep: 0.01, max: 0.10, description: "+1 punto porcentual de recuperación de heridos por cada 10 trabajadores (máximo +10)" },
+  religion: { building: "iglesia", workersPerStep: 20, perStep: 1, max: 3, description: "+1 felicidad/día por cada 20 trabajadores (máximo +3)" },
+  entertainment: { building: "circo", workersPerStep: 20, perStep: 1, max: 3, description: "+1 felicidad/día por cada 20 trabajadores (máximo +3)" },
+  bakery: { building: "panaderia", workersPerStep: 20, perStep: -0.05, max: -0.15, description: "−5 % de consumo de alimentos por cada 20 trabajadores (máximo −15 %)" },
+  construction: { building: null, workersPerStep: 10, perStep: -0.01, max: -0.20, description: "−1 % de duración de obras por cada 10 trabajadores (máximo −20 %)" },
+} as const;
+export type ProfessionJob = keyof typeof PROFESSION_EFFECTS;
+
+// ============================================================================
 // 5. COMBATE (P34, P44-P47, D-27 a D-32)
 // ============================================================================
 export const COMBAT = {
-  /** [MAESTRA P34] Pesos del combate (suman 100 %). */
+  /** [MAESTRA P34] Pesos del combate (suman 100 %). Se conservan como referencia y para la puntuación lineal. */
   WEIGHTS: { number: 0.3, training: 0.2, weapons: 0.15, armor: 0.1, formation: 0.1, morale: 0.05, food: 0.05, fatigue: 0.05 } as const,
-  /** [COMPLEMENTO §6] Exponente de número en la fórmula multiplicativa de potencia. */
-  NUMBER_EXPONENT: 0.85,
+  /**
+   * [DECISIÓN 17-10-2026, B-02 opción D] Exponentes de la fórmula multiplicativa de potencia.
+   * El número conserva 0,85 (Complemento); los factores de calidad suben para que la preparación
+   * pueda vencer al número (P34, P69). Validados con scripts/simulateBattles.ts.
+   */
+  EXPONENTS: { number: 0.85, training: 0.6, weapons: 0.45, armor: 0.3, formation: 0.3, morale: 0.15, food: 0.15, fatigue: 0.15 } as const,
   /** [COMPLEMENTO §6] Referencia de efectivos para la puntuación lineal normalizada. */
   NUMBER_REFERENCE: 1000,
   /** [COMPLEMENTO §6] Máximo de rondas. */
   MAX_ROUNDS: 3,
-  /** [COMPLEMENTO §6] Máximo aproximado de bajas por ronda. */
-  CASUALTY_RATE_K: 0.18,
+  /** [DECISIÓN 17-10-2026, B-01 opción B] Máximo aproximado de bajas por ronda: techo 1 − 0,60³ = 78,4 %. */
+  CASUALTY_RATE_K: 0.4,
   /** [MAESTRA P44] ≈65 % de las bajas se convierten en heridos. */
   WOUNDED_RATIO: 0.65,
   /** [MAESTRA P47] Victoria aplastante: el enemigo pierde MÁS del 75 %. */
   CRUSHING_VICTORY_LOSS_RATIO: 0.75,
-  /** [COMPLEMENTO §6] Empate: diferencia de bajas relativas ≤ 10 puntos porcentuales. */
-  DRAW_TOLERANCE: 0.1,
+  /** [DECISIÓN 17-10-2026, B-02 opción B] Empate: diferencia de bajas relativas ≤ 5 puntos porcentuales. */
+  DRAW_TOLERANCE: 0.05,
   /** [COMPLEMENTO §6] Retirada al perder ≥70 % de efectivos o moral < 20. */
   RETREAT_LOSS_RATIO: 0.7,
   RETREAT_MORALE_BELOW: 20,
@@ -370,10 +438,35 @@ export const COMBAT = {
   FOOD_FACTOR_MAX: 1.05,
   /** [COMPLEMENTO D-31] Sin transferencia de botín en la primera versión. */
   LOOT_ENABLED: false,
-  /** [MAESTRA P50-P51] Recompensas numéricas de honor/gloria por batalla pendientes de balance. */
-  HONOR_REWARDS_DEFINED: false,
+  /** [DECISIÓN 17-10-2026, M-01 opción A] Honor y gloria por batalla definidos (ver BATTLE_REWARDS). */
+  HONOR_REWARDS_DEFINED: true,
   /** [COMPLEMENTO §6] Daño de asedio solo pleno contra murallas. */
   SIEGE_ATTACK_WITHOUT_WALLS: 1.0,
+  /** [DECISIÓN 17-10-2026, M-06 opción A] Murallas: +5 % de defensa por nivel, máximo +50 %. */
+  WALLS_DEFENSE_PER_LEVEL: 0.05,
+  WALLS_DEFENSE_MAX: 0.5,
+  /** [DECISIÓN 17-10-2026, M-11 opción A] Ventaja de +25 % del tipo contra el tipo que contrarresta (P37). */
+  FORMATION_COUNTER_BONUS: 0.25,
+} as const;
+
+/** [MAESTRA P37 + M-11] Matriz de contrapartidas: caballería > arqueros > infantería > caballería. */
+export const UNIT_COUNTERS: Readonly<Record<Exclude<UnitType, "asedio">, Exclude<UnitType, "asedio">>> = {
+  caballeria: "arqueria",
+  arqueria: "infanteria",
+  infanteria: "caballeria",
+};
+
+/** [DECISIÓN 17-10-2026, M-01 opción A] Recompensas de honor y gloria por batalla (P50, P51). */
+export const BATTLE_REWARDS = {
+  victory: { honor: 20, glory: 10 },
+  crushingVictory: { honor: 50, glory: 30 },
+  draw: { honor: 5, glory: 0 },
+  defeat: { honor: 0, glory: -5 },
+  /** La gloria decae 1 punto por día real y nunca baja de 0. */
+  GLORY_DECAY_PER_DAY: 1,
+  /** +1 punto de moral por cada 10 de gloria, máximo +10. */
+  GLORY_MORALE_PER_POINTS: 10,
+  GLORY_MORALE_MAX: 10,
 } as const;
 
 /** [MAESTRA P45] Recuperación anual de heridos por nivel de Hospital militar. */
