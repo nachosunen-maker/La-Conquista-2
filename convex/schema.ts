@@ -94,6 +94,22 @@ export default defineSchema(
       })),
     }).index("by_kingdom", ["kingdomId"]),
 
+    // Cola de entrenamiento militar (ciclo de vida de reclutamiento)
+    trainingQueue: defineTable({
+      kingdomId: v.id("kingdoms"),
+      unitType: v.optional(v.string()),
+      count: v.optional(v.number()),
+      startedAt: v.optional(v.number()),
+      durationMs: v.optional(v.number()),
+      costs: v.optional(v.object({
+        gold: v.optional(v.number()),
+        wood: v.optional(v.number()),
+        stone: v.optional(v.number()),
+        iron: v.optional(v.number()),
+        food: v.optional(v.number()),
+      })),
+    }).index("by_kingdom", ["kingdomId"]),
+
     // Unidades militares del reino (esquema mínimo persistido)
     armyUnits: defineTable({
       kingdomId: v.id("kingdoms"),
