@@ -26,6 +26,7 @@ import type * as economyCalculations from "../economyCalculations.js";
 import type * as economyExtended from "../economyExtended.js";
 import type * as economyExtendedPureTests from "../economyExtendedPureTests.js";
 import type * as economyPureTests from "../economyPureTests.js";
+import type * as economyRound2PureTests from "../economyRound2PureTests.js";
 import type * as economyTests from "../economyTests.js";
 import type * as kingdomAccess from "../kingdomAccess.js";
 import type * as kingdomReadModel from "../kingdomReadModel.js";
@@ -63,6 +64,7 @@ declare const fullApi: ApiFromModules<{
   economyExtended: typeof economyExtended;
   economyExtendedPureTests: typeof economyExtendedPureTests;
   economyPureTests: typeof economyPureTests;
+  economyRound2PureTests: typeof economyRound2PureTests;
   economyTests: typeof economyTests;
   kingdomAccess: typeof kingdomAccess;
   kingdomReadModel: typeof kingdomReadModel;

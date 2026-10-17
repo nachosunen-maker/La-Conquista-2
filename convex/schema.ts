@@ -81,6 +81,33 @@ export default defineSchema(
       .index("by_user_id_and_name", ["userId", "name"])
       .index("by_name", ["name"]),
 
+    // Tablas relacionales observadas en el despliegue (recursos, censo y oficios). Se declaran con
+    // campos opcionales para tipado y pruebas; schemaValidation sigue desactivada por compatibilidad.
+    resources: defineTable({
+      kingdomId: v.id("kingdoms"),
+      gold: v.number(),
+      wood: v.number(),
+      stone: v.number(),
+      iron: v.number(),
+      food: v.number(),
+      lastUpdated: v.optional(v.number()),
+      settlementInitialized: v.optional(v.boolean()),
+      foodTier: v.optional(v.string()),
+    }).index("by_kingdom", ["kingdomId"]),
+    population: defineTable({
+      kingdomId: v.id("kingdoms"),
+      total: v.number(),
+      available: v.number(),
+      capacity: v.optional(v.number()),
+      starving: v.optional(v.boolean()),
+      starvationSeconds: v.optional(v.number()),
+    }).index("by_kingdom", ["kingdomId"]),
+    populationJobs: defineTable({
+      kingdomId: v.id("kingdoms"),
+      jobType: v.string(),
+      assignedCount: v.number(),
+    }).index("by_kingdom", ["kingdomId"]),
+
     // Tabla para registro atómico e idempotente de transacciones de gasto
     transactions: defineTable({
       kingdomId: v.id("kingdoms"),

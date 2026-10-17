@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const convexDir = new URL("../convex/", import.meta.url).pathname;
 const modules = readdirSync(convexDir)
-  .filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts") && file !== "schema.ts" && file !== "auth.config.ts" && file !== "tsconfig.json")
+  .filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts") && !file.endsWith(".test.ts") && file !== "test.setup.ts" && file !== "schema.ts" && file !== "auth.config.ts")
   .map((file) => file.replace(/\.ts$/, ""))
   .sort();
 
