@@ -54,6 +54,19 @@ export default defineSchema(
         )
       ),
       lastUpdated: v.optional(v.number()),
+      // Bloque B: equipamiento y estrategia del ejército (P30, P31, P35) y fatiga (P32)
+      weaponTier: v.optional(v.string()),
+      armorTier: v.optional(v.string()),
+      strategy: v.optional(v.string()),
+      armyFatigue: v.optional(v.number()),
+      // Bloques D-F: bienestar, impuestos, honor y gloria
+      taxRate: v.optional(v.number()),
+      honor: v.optional(v.number()),
+      glory: v.optional(v.number()),
+      lastDailyBonusAt: v.optional(v.number()),
+      moraleEffects: v.optional(v.array(v.object({ amount: v.number(), expiresAt: v.number() }))),
+      // Bloque G: territorio principal
+      homeTerritoryId: v.optional(v.string()),
     })
       .index("by_user_id", ["userId"])
       .index("by_user_id_and_name", ["userId", "name"])
@@ -99,6 +112,8 @@ export default defineSchema(
       kingdomId: v.id("kingdoms"),
       unitType: v.optional(v.string()),
       count: v.optional(v.number()),
+      level: v.optional(v.number()), // Nivel militar P29 (1-5)
+      populationReserved: v.optional(v.number()), // Civiles libres reservados hasta completar
       startedAt: v.optional(v.number()),
       durationMs: v.optional(v.number()),
       costs: v.optional(v.object({
@@ -132,8 +147,10 @@ export default defineSchema(
     // Unidades militares del reino (esquema mínimo persistido)
     armyUnits: defineTable({
       kingdomId: v.id("kingdoms"),
-      unitType: v.string(), // "infanteria", "caballeria", "arqueria", "asedio", etc.
-      count: v.number(),    // Cantidad entera no negativa
+      unitType: v.string(), // "infanteria", "caballeria", "arqueria", "asedio"
+      level: v.optional(v.number()), // Nivel militar P29 (1-5); ausente = 1
+      count: v.number(),    // Activos: cantidad entera no negativa
+      wounded: v.optional(v.number()), // Heridos (P44) separados de los disponibles
     }).index("by_kingdom", ["kingdomId"]),
   },
   {

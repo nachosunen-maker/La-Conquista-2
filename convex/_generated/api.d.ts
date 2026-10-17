@@ -8,6 +8,9 @@
  * @module
  */
 
+import type * as army from "../army.js";
+import type * as armyPureTests from "../armyPureTests.js";
+import type * as armyRules from "../armyRules.js";
 import type * as balanceConfig from "../balanceConfig.js";
 import type * as buildingRules from "../buildingRules.js";
 import type * as buildings from "../buildings.js";
@@ -29,6 +32,9 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  army: typeof army;
+  armyPureTests: typeof armyPureTests;
+  armyRules: typeof armyRules;
   balanceConfig: typeof balanceConfig;
   buildingRules: typeof buildingRules;
   buildings: typeof buildings;

@@ -2,6 +2,8 @@ import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { resolveKingdomQueryUserId, isKingdomOwner } from "./kingdomAccess";
 import { createAggregatePopulationFallback } from "./kingdomReadModel";
+import { readArmyUnitDocs } from "./army";
+import { validateMilitaryUnitInput as validateMilitaryUnitInputRule } from "./armyRules";
 
 /**
  * Consulta autoritativa completa del reino para el cliente (Resumen del Reino)
@@ -44,23 +46,8 @@ export const getKingdomFull = query({
       .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
       .collect();
 
-    // 5. Unidades militares (compatibilidad Armyunits / armyUnits)
-    let armyUnits: any[] = [];
-    try {
-      armyUnits = await ctx.db
-        .query("Armyunits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-        .collect();
-    } catch {
-      try {
-        armyUnits = await ctx.db
-          .query("armyUnits" as any)
-          .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-          .collect();
-      } catch {
-        armyUnits = [];
-      }
-    }
+    // 5. Unidades militares: armyUnits es la fuente única (D-11); la tabla heredada se une solo en lectura.
+    const armyUnits: any[] = await readArmyUnitDocs(ctx, kingdomId);
 
     // Fallar explícitamente si faltan tablas relacionales requeridas; nunca presentar estado inventado.
     const buildings = await ctx.db
@@ -165,19 +152,7 @@ export const getArmyUnits = query({
   },
 });
 
-/**
- * Validador puro auxiliar para entradas de unidades militares.
- * Asegura que el tipo de unidad sea válido y la cantidad un entero no negativo.
- */
+/** Validador heredado: delega en armyRules (fuente única de tipos de unidad). */
 export function validateMilitaryUnitInput(unitType: string, count: number): { success: boolean; error?: string } {
-  const validTypes = ["infanteria", "caballeria", "arqueria", "asedio"];
-  const normalizedType = (unitType || "").toLowerCase().trim();
-  if (!validTypes.includes(normalizedType)) {
-    return { success: false, error: `Tipo de unidad no admitido: '${unitType}'. Válidos: ${validTypes.join(", ")}.` };
-  }
-  if (!Number.isInteger(count) || count < 0) {
-    return { success: false, error: `Cantidad inválida: debe ser un número entero no negativo (recibido: ${count}).` };
-  }
-  return { success: true };
+  return validateMilitaryUnitInputRule(unitType, count);
 }
-

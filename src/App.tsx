@@ -409,7 +409,6 @@ function KingdomOverviewContent() {
   // Estados para proyección puramente local en el cliente (sin escrituras en BD)
   const [clientTime, setClientTime] = useState<number>(() => Date.now());
   const [selectedFoodTier, setSelectedFoodTier] = useState<ValidFoodTier>('normal');
-  const [includeSiegeInFood, setIncludeSiegeInFood] = useState<boolean>(false);
   const [showProjectionDetails, setShowProjectionDetails] = useState<boolean>(true);
 
   // Reloj local del cliente: actualiza el tiempo de referencia periódicamente sin recrear suscripciones Convex
@@ -582,7 +581,6 @@ function KingdomOverviewContent() {
     try {
       const res = await settleKingdomEconomy({
         kingdomId: kingdom._id,
-        includeSiegeInFoodConsumption: includeSiegeInFood,
       });
       if (activeOwnerKeyRef.current !== requestOwnerKey) return;
       if (res && res.success) {
@@ -720,11 +718,8 @@ function KingdomOverviewContent() {
       foodTier: selectedFoodTier,
       targetTime: clientTime,
       callerUserId: activeUserId,
-      options: {
-        includeSiegeInFoodConsumption: includeSiegeInFood,
-      },
     });
-  }, [kingdom, resources, population, populationJobs, armyUnits, buildings, selectedFoodTier, clientTime, activeUserId, includeSiegeInFood]);
+  }, [kingdom, resources, population, populationJobs, armyUnits, buildings, selectedFoodTier, clientTime, activeUserId]);
 
   const foodDelta = simulationResult?.success && simulationResult.simulatedResources && resources
     ? simulationResult.simulatedResources.food - resources.food
@@ -1213,15 +1208,9 @@ function KingdomOverviewContent() {
           </div>
 
           <div className="flex items-center justify-between border-t border-[#211a12] pt-2">
-            <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-[#8e816d] hover:text-[#b8aa94] transition-colors">
-              <input
-                type="checkbox"
-                checked={includeSiegeInFood}
-                onChange={(e) => setIncludeSiegeInFood(e.target.checked)}
-                className="rounded border-[#453724] bg-[#1a150e] text-[#d4af37] focus:ring-0 focus:ring-offset-0"
-              />
-              <span>Computar dotaciones de asedio en raciones militares (+5% factor P18)</span>
-            </label>
+            <span className="text-[11px] text-[#8e816d]">
+              Regla D-12: las máquinas de asedio no consumen raciones; sus 5 operadores por pieza sí (factor 1,05 de P18).
+            </span>
             <span className="text-[10px] text-[#615545] font-mono">
               P2: 86.400 s/año
             </span>

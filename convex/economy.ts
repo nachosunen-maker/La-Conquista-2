@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { insertInitialBuildings } from "./buildings";
+import { readArmyUnitDocs } from "./army";
 import { isKingdomOwner } from "./kingdomAccess";
 import {
   simulateEconomicProgress,
@@ -109,18 +110,7 @@ async function readRelationalKingdomState(ctx: any, kingdomId: any) {
     .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
     .collect();
 
-  let armyUnits: any[];
-  try {
-    armyUnits = await ctx.db
-      .query("Armyunits" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .collect();
-  } catch {
-    armyUnits = await ctx.db
-      .query("armyUnits" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .collect();
-  }
+  const armyUnits: any[] = await readArmyUnitDocs(ctx, kingdomId);
 
   return { resources, population, populationJobs, armyUnits, buildings };
 }
@@ -215,9 +205,11 @@ async function migrateAggregateKingdomState(ctx: any, kingdom: any) {
     }
   }
   if (regularSoldiers > 0) {
-    await ctx.db.insert("Armyunits" as any, {
+    // [D-11] Fuente única: los soldados heredados pasan a armyUnits como infantería nivel 1 (Milicia).
+    await ctx.db.insert("armyUnits", {
       kingdomId: kingdom._id,
-      unitType: "regular",
+      unitType: "infanteria",
+      level: 1,
       count: regularSoldiers,
     });
   }
@@ -457,7 +449,7 @@ export const reassignWorkers = mutation({
     const military = classifyArmyUnits(current.armyUnits);
     if (args.newRegularSoldiers !== military.regularSoldiers) {
       throw new Error(
-        "La reasignación laboral no puede crear ni retirar tropas; los efectivos se leen de Armyunits."
+        "La reasignación laboral no puede crear ni retirar tropas; los efectivos se leen de armyUnits."
       );
     }
 
@@ -662,18 +654,7 @@ export const getKingdom = query({
       .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
       .collect();
 
-    let armyUnits: any[];
-    try {
-      armyUnits = await ctx.db
-        .query("Armyunits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-        .collect();
-    } catch {
-      armyUnits = await ctx.db
-        .query("armyUnits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-        .collect();
-    }
+    const armyUnits: any[] = await readArmyUnitDocs(ctx, kingdom._id);
 
     const now = Date.now();
     const simulation = calculateSimulatedKingdomResources({
@@ -761,22 +742,7 @@ export const getSimulatedKingdomResources = query({
       .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
       .collect();
 
-    let armyUnits: any[] = [];
-    try {
-      armyUnits = await ctx.db
-        .query("Armyunits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
-        .collect();
-    } catch {
-      try {
-        armyUnits = await ctx.db
-          .query("armyUnits" as any)
-          .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
-          .collect();
-      } catch {
-        armyUnits = [];
-      }
-    }
+    const armyUnits: any[] = await readArmyUnitDocs(ctx, args.kingdomId as any);
 
     // 3. Proyección analítica mediante el adaptador y motor puro
     const result = calculateSimulatedKingdomResources({
@@ -789,7 +755,6 @@ export const getSimulatedKingdomResources = query({
       targetTime: args.targetTime,
       callerUserId,
       options: {
-        includeSiegeInFoodConsumption: args.includeSiegeInFoodConsumption,
       },
     });
 
@@ -827,6 +792,7 @@ export const getSimulatedKingdomResources = query({
 export const settleKingdomEconomy = mutation({
   args: {
     kingdomId: v.optional(v.string()),
+    /** Obsoleto desde D-12: se acepta por compatibilidad y se ignora (el asedio nunca consume; sus operadores sí). */
     includeSiegeInFoodConsumption: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -904,22 +870,7 @@ export const settleKingdomEconomy = mutation({
       .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
       .collect();
 
-    let armyUnits: any[] = [];
-    try {
-      armyUnits = await ctx.db
-        .query("Armyunits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-        .collect();
-    } catch {
-      try {
-        armyUnits = await ctx.db
-          .query("armyUnits" as any)
-          .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-          .collect();
-      } catch {
-        armyUnits = [];
-      }
-    }
+    const armyUnits: any[] = await readArmyUnitDocs(ctx, kingdomId as any);
 
     // 4. Marca temporal autoritativa del servidor
     const now = Date.now();
@@ -938,7 +889,6 @@ export const settleKingdomEconomy = mutation({
       currentServerTimeMs: now,
       options: {
         isFirstInitialization: isFirstInit,
-        includeSiegeInFoodConsumption: args.includeSiegeInFoodConsumption,
         callerUserId,
       },
     });
@@ -1087,22 +1037,7 @@ export const setKingdomFoodTier = mutation({
       .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
       .collect();
 
-    let armyUnits: any[] = [];
-    try {
-      armyUnits = await ctx.db
-        .query("Armyunits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-        .collect();
-    } catch {
-      try {
-        armyUnits = await ctx.db
-          .query("armyUnits" as any)
-          .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-          .collect();
-      } catch {
-        armyUnits = [];
-      }
-    }
+    const armyUnits: any[] = await readArmyUnitDocs(ctx, kingdomId as any);
 
     const now = Date.now();
 

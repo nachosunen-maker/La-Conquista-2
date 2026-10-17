@@ -24,6 +24,7 @@ import {
 import { DEMO_USER_ID, isKingdomOwner, resolveKingdomQueryUserId } from "./kingdomAccess";
 import { createAggregatePopulationFallback } from "./kingdomReadModel";
 import { runConstructionValidationTests } from "./constructionPureTests";
+import { runArmyValidationTests } from "./armyPureTests";
 
 /**
  * ============================================================================
@@ -619,24 +620,23 @@ export function runEconomicValidationTests(): TestResult[] {
       { kingdomId: "k_1", unitType: "asedio", count: 10 },
     ];
 
-    // Clasificación por defecto: asedio segregado de la tropa viva (200 soldados vivos, 10 máquinas)
+    // D-12: 200 soldados vivos + 10 máquinas (no comen) con 50 operadores (sí comen) = 250 personas militares.
     const classDefault = classifyArmyUnits(armyWithSiege);
-
-    // Opción explícita de incluir dotaciones de asedio en el consumo: 210
-    const classIncludeSiege = classifyArmyUnits(armyWithSiege, { includeSiegeInFoodConsumption: true });
+    const withWounded = classifyArmyUnits([...armyWithSiege, { kingdomId: "k_1", unitType: "arqueria", count: 0, wounded: 15 }]);
 
     const passed =
-      classDefault.regularSoldiers === 200 &&
+      classDefault.regularSoldiers === 250 &&
       classDefault.siegeUnits === 10 &&
+      classDefault.siegeOperators === 50 &&
       classDefault.totalUnits === 210 &&
-      classIncludeSiege.regularSoldiers === 210 &&
-      classIncludeSiege.siegeUnits === 10;
+      withWounded.regularSoldiers === 265 &&
+      withWounded.woundedSoldiers === 15;
 
     results.push({
       category: "MATEMÁTICA / LÓGICA PURA",
-      test: "14. Adaptador: Clasificación militar y tratamiento explícito no silencioso del asedio (P18)",
+      test: "14. Adaptador: Clasificación militar (P18, D-12): máquinas de asedio no comen, operadores y heridos sí",
       passed,
-      details: `Soldados vivos regulares: ${classDefault.regularSoldiers}; Máquinas de asedio segregadas: ${classDefault.siegeUnits}; Total unidades: ${classDefault.totalUnits}`,
+      details: `Personas militares: ${classDefault.regularSoldiers}; máquinas: ${classDefault.siegeUnits}; operadores: ${classDefault.siegeOperators}; unidades activas: ${classDefault.totalUnits}; con heridos: ${withWounded.regularSoldiers}`,
     });
   }
 
@@ -985,8 +985,8 @@ export function runEconomicValidationTests(): TestResult[] {
       callerUserId: "guest_g9ai8cz",
     });
 
-    // Consulta con inclusión de dotaciones de asedio en normal (factor oficial 1,00)
-    const resWithSiege = calculateSimulatedKingdomResources({
+    // Consulta en régimen normal (factor oficial 1,00)
+    const resNormal = calculateSimulatedKingdomResources({
       kingdom,
       resources,
       population,
@@ -995,29 +995,31 @@ export function runEconomicValidationTests(): TestResult[] {
       foodTier: "normal",
       targetTime: 1_000_000,
       callerUserId: "guest_g9ai8cz",
-      options: { includeSiegeInFoodConsumption: true },
     });
 
-    // En mínima (0,75): Civiles 900 * 0.75 + Soldados 100 * (1.05 * 0.75) = 675 + 78.75 = 753.75
-    // En abundante (1,10): Civiles 900 * 1.10 + Soldados 100 * (1.05 * 1.10) = 990 + 115.5 = 1105.5
-    // En excelente (1,20): Civiles 900 * 1.20 + Soldados 100 * (1.05 * 1.20) = 1080 + 126 = 1206.0
-    // Con asedio incluido en normal (1,00): Soldados = 150 -> Civiles 850 * 1.0 + Soldados 150 * 1.05 = 850 + 157.5 = 1007.5
+    // D-12: 100 infantes + 50 máquinas × 5 operadores = 350 personas militares; civiles = 650.
+    // En mínima (0,75): 650 * 0.75 + 350 * (1.05 * 0.75) = 487.5 + 275.625 = 763.125
+    // En abundante (1,10): 650 * 1.10 + 350 * (1.05 * 1.10) = 715 + 404.25 = 1119.25
+    // En excelente (1,20): 650 * 1.20 + 350 * (1.05 * 1.20) = 780 + 441 = 1221.0
+    // En normal (1,00): 650 + 367.5 = 1017.5
     const consumoMinima = resMinima.productionAndConsumption?.dailyFoodConsumption;
     const consumoAbundante = resAbundante.productionAndConsumption?.dailyFoodConsumption;
     const consumoExcelente = resExcelente.productionAndConsumption?.dailyFoodConsumption;
-    const regularWithSiege = resWithSiege.militaryClassification?.regularSoldiers;
+    const consumoNormal = resNormal.productionAndConsumption?.dailyFoodConsumption;
+    const regularNormal = resNormal.militaryClassification?.regularSoldiers;
 
     const passed =
-      Math.abs((consumoMinima ?? 0) - 753.75) < 1e-4 &&
-      Math.abs((consumoAbundante ?? 0) - 1105.5) < 1e-4 &&
-      Math.abs((consumoExcelente ?? 0) - 1206.0) < 1e-4 &&
-      regularWithSiege === 150;
+      Math.abs((consumoMinima ?? 0) - 763.125) < 1e-4 &&
+      Math.abs((consumoAbundante ?? 0) - 1119.25) < 1e-4 &&
+      Math.abs((consumoExcelente ?? 0) - 1221.0) < 1e-4 &&
+      Math.abs((consumoNormal ?? 0) - 1017.5) < 1e-4 &&
+      regularNormal === 350;
 
     results.push({
       category: "MATEMÁTICA / LÓGICA PURA",
-      test: "21. Consulta Proyectada: Factores oficiales del régimen alimentario (P17: 0.75, 1.10, 1.20) y asedio (P18)",
+      test: "21. Consulta Proyectada: Factores oficiales del régimen alimentario (P17) y operadores de asedio (P18, D-12)",
       passed,
-      details: `Consumo mínima: ${consumoMinima} (esperado 753.75); Consumo abundante: ${consumoAbundante} (esperado 1105.5); Consumo excelente: ${consumoExcelente} (esperado 1206.0); Soldados con asedio incluido: ${regularWithSiege} (esperado 150)`,
+      details: `Consumo mínima: ${consumoMinima} (esperado 763.125); abundante: ${consumoAbundante} (esperado 1119.25); excelente: ${consumoExcelente} (esperado 1221.0); normal: ${consumoNormal} (esperado 1017.5); personas militares: ${regularNormal} (esperado 350)`,
     });
   }
 
@@ -2252,6 +2254,12 @@ export function runEconomicValidationTests(): TestResult[] {
   results.push(...runConstructionValidationTests().map((result) => ({
     category: "INTEGRACIÓN CONVEX" as const,
     ...result,
+  })));
+  results.push(...runArmyValidationTests().map((result) => ({
+    category: "INTEGRACIÓN CONVEX" as const,
+    test: `Ejército: ${result.test}`,
+    passed: result.passed,
+    details: result.details,
   })));
   return results;
 }
