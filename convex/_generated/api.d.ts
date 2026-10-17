@@ -18,6 +18,7 @@ import type * as buildingRules from "../buildingRules.js";
 import type * as buildings from "../buildings.js";
 import type * as challengePureTests from "../challengePureTests.js";
 import type * as challengeRules from "../challengeRules.js";
+import type * as civilizations from "../civilizations.js";
 import type * as constructionPureTests from "../constructionPureTests.js";
 import type * as economy from "../economy.js";
 import type * as economyAdapter from "../economyAdapter.js";
@@ -54,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   buildings: typeof buildings;
   challengePureTests: typeof challengePureTests;
   challengeRules: typeof challengeRules;
+  civilizations: typeof civilizations;
   constructionPureTests: typeof constructionPureTests;
   economy: typeof economy;
   economyAdapter: typeof economyAdapter;

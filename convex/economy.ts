@@ -11,6 +11,8 @@ import { normalizeUnitType } from "./armyRules";
 import { TAXES, WELLBEING, UNITS, TERRAINS, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP } from "./balanceConfig";
 import { woundedRecoveryRatio } from "./battleRules";
 import { recoverFatigue } from "./territoryRules";
+import { isCivilizationId } from "./civilizations";
+import { CIVILIZATIONS } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
 import {
   simulateEconomicProgress,
@@ -394,17 +396,33 @@ function legacyKingdomResponse(kingdom: any, state: any) {
 export const getOrInitializeKingdom = mutation({
   args: {
     name: v.string(),
+    /** [MAESTRA P6] Identificador de civilización; obligatorio al fundar, inmutable después (D-45). */
+    civilization: v.optional(v.string()),
+    /** [MAESTRA P8] Nombre del castillo. */
+    castleName: v.optional(v.string()),
+    /** [MAESTRA P5] Nombre del monarca. */
+    monarchName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const callerUserId = await requireAuthenticatedUser(ctx);
+    const name = args.name.trim();
+    if (!name) throw new Error("El nombre del reino es obligatorio (P7).");
     const existing = await ctx.db
       .query("kingdoms")
       .withIndex("by_user_id_and_name", (q) =>
-        q.eq("userId", callerUserId).eq("name", args.name)
+        q.eq("userId", callerUserId).eq("name", name)
       )
       .first();
 
     if (existing) {
+      if (args.civilization !== undefined && existing.civilization && args.civilization !== existing.civilization) {
+        throw new Error("La civilización se elige al fundar el reino y no puede cambiarse (D-45).");
+      }
+      const identityPatch: Record<string, unknown> = {};
+      if (!existing.civilization && isCivilizationId(args.civilization)) identityPatch.civilization = args.civilization;
+      if (!existing.castleName && args.castleName?.trim()) identityPatch.castleName = args.castleName.trim();
+      if (!existing.monarchName && args.monarchName?.trim()) identityPatch.monarchName = args.monarchName.trim();
+      if (Object.keys(identityPatch).length > 0) await ctx.db.patch(existing._id, { ...identityPatch, updatedAt: Date.now() });
       const current = await readRelationalKingdomState(ctx, existing._id);
       if (!current.resources && !current.population && current.populationJobs.length === 0 && current.armyUnits.length === 0) {
         await migrateAggregateKingdomState(ctx, existing);
@@ -414,10 +432,16 @@ export const getOrInitializeKingdom = mutation({
       return legacyKingdomResponse(existing, settled);
     }
 
+    if (args.civilization !== undefined && !isCivilizationId(args.civilization)) {
+      throw new Error(`Civilización desconocida: '${args.civilization}'. Opciones: ${CIVILIZATIONS.map((c) => c.id).join(", ")}.`);
+    }
     const now = Date.now();
     const kingdomId = await ctx.db.insert("kingdoms", {
       userId: callerUserId,
-      name: args.name,
+      name,
+      civilization: isCivilizationId(args.civilization) ? args.civilization : undefined,
+      castleName: args.castleName?.trim() || undefined,
+      monarchName: args.monarchName?.trim() || undefined,
       foodTier: INITIAL_KINGDOM_CONFIG.foodTier,
       happiness: WELLBEING.INITIAL_HAPPINESS,
       militaryMorale: WELLBEING.INITIAL_MORALE,
