@@ -110,6 +110,25 @@ export default defineSchema(
       })),
     }).index("by_kingdom", ["kingdomId"]),
 
+    // Progreso tecnológico por reino (Bloque C): un documento por tecnología iniciada o completada.
+    technologyProgress: defineTable({
+      kingdomId: v.id("kingdoms"),
+      technologyId: v.string(),
+      status: v.union(v.literal("researching"), v.literal("completed")),
+      startedAt: v.optional(v.number()),
+      durationMs: v.optional(v.number()),
+      completedAt: v.optional(v.number()),
+      costs: v.optional(v.object({
+        gold: v.optional(v.number()),
+        wood: v.optional(v.number()),
+        stone: v.optional(v.number()),
+        iron: v.optional(v.number()),
+        food: v.optional(v.number()),
+      })),
+    })
+      .index("by_kingdom", ["kingdomId"])
+      .index("by_kingdom_and_technology", ["kingdomId", "technologyId"]),
+
     // Unidades militares del reino (esquema mínimo persistido)
     armyUnits: defineTable({
       kingdomId: v.id("kingdoms"),

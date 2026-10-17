@@ -4,14 +4,13 @@
  *
  * THIS CODE IS AUTOMATICALLY GENERATED.
  *
- * To regenerate, run `npx convex dev`.
+ * To regenerate, run `npx convex dev` (or `node scripts/regenerateConvexApi.mjs` offline).
  * @module
  */
 
+import type * as balanceConfig from "../balanceConfig.js";
 import type * as buildingRules from "../buildingRules.js";
 import type * as buildings from "../buildings.js";
-import type * as buildingsCalculations from "../buildingsCalculations.js";
-import type * as buildingsCatalog from "../buildingsCatalog.js";
 import type * as constructionPureTests from "../constructionPureTests.js";
 import type * as economy from "../economy.js";
 import type * as economyAdapter from "../economyAdapter.js";
@@ -21,6 +20,7 @@ import type * as economyTests from "../economyTests.js";
 import type * as kingdomAccess from "../kingdomAccess.js";
 import type * as kingdomReadModel from "../kingdomReadModel.js";
 import type * as kingdoms from "../kingdoms.js";
+import type * as technologyRules from "../technologyRules.js";
 
 import type {
   ApiFromModules,
@@ -29,10 +29,9 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  balanceConfig: typeof balanceConfig;
   buildingRules: typeof buildingRules;
   buildings: typeof buildings;
-  buildingsCalculations: typeof buildingsCalculations;
-  buildingsCatalog: typeof buildingsCatalog;
   constructionPureTests: typeof constructionPureTests;
   economy: typeof economy;
   economyAdapter: typeof economyAdapter;
@@ -42,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   kingdomAccess: typeof kingdomAccess;
   kingdomReadModel: typeof kingdomReadModel;
   kingdoms: typeof kingdoms;
+  technologyRules: typeof technologyRules;
 }>;
 
 /**

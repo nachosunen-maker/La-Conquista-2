@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { insertInitialBuildings } from "./buildings";
 import { isKingdomOwner } from "./kingdomAccess";
 import {
   simulateEconomicProgress,
@@ -156,7 +157,14 @@ export async function settleRelationalKingdomEconomy(
     await ctx.db.patch(state.population._id, { starving: settlement.isStarving });
   }
 
-  return { ...state, settlement };
+  const settledResources: KingdomResources = {
+    gold: state.resources.gold,
+    wood: state.resources.wood,
+    stone: state.resources.stone,
+    iron: state.resources.iron,
+    food: settlement.updatedFood,
+  };
+  return { ...state, settlement, settledResources };
 }
 
 async function migrateAggregateKingdomState(ctx: any, kingdom: any) {
@@ -294,6 +302,7 @@ export const getOrInitializeKingdom = mutation({
         });
       }
     }
+    await insertInitialBuildings(ctx, kingdomId);
     const kingdom = await ctx.db.get(kingdomId);
     if (!kingdom) throw new Error("No se pudo recuperar el reino recién inicializado.");
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);

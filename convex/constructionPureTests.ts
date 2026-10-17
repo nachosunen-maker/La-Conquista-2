@@ -1,7 +1,11 @@
 import {
   BUILDING_RULES,
+  INITIAL_BUILDING_LEVELS,
   calculateConstructionCancellationRefund,
+  calculateJobCapacities,
+  calculateResidentialCapacity,
   constructionProgress,
+  costsForTargetLevel,
   createConstructionPlan,
   durationForTargetLevel,
   isConstructionDue,
@@ -10,7 +14,8 @@ import {
   type ConstructionQueueEntry,
 } from "./buildingRules";
 import { isKingdomOwner } from "./kingdomAccess";
-import type { ResourceType } from "./economyCalculations";
+import { BUILDINGS, POPULATION } from "./balanceConfig";
+import { INITIAL_KINGDOM_CONFIG, type ResourceType } from "./economyCalculations";
 
 export interface ConstructionTestResult {
   test: string;
@@ -28,10 +33,12 @@ const fullResources: Record<ResourceType, number> = {
 
 const rule: BuildingRule = {
   label: "Granja de prueba",
+  role: "prueba",
   costs: { gold: 50, wood: 120, stone: 0, iron: 0, food: 0 },
   baseDurationMs: 60_000,
   residentialCapacityPerLevel: null,
   productiveWorkerCapacityPerLevel: null,
+  jobType: "agriculture",
   progressionRequirements: {},
 };
 const testBaseDurationMs = 60_000;
@@ -42,7 +49,7 @@ function validInput(overrides: Partial<Parameters<typeof createConstructionPlan>
     currentLevel: 0,
     resources: { ...fullResources },
     activeConstructions: [] as ConstructionQueueEntry[],
-    buildingLevels: {} as Record<string, number>,
+    buildingLevels: { castillo: 5 } as Record<string, number>,
     now: 10_000,
     rule,
     ...overrides,
@@ -70,22 +77,53 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
   const malformedQueue = createConstructionPlan(validInput({
     activeConstructions: [{ buildingType: "legacy", targetLevel: 1 } as ConstructionQueueEntry],
   }));
-  const atMaxLevel = createConstructionPlan(validInput({ currentLevel: 100 }));
+  const atMaxLevel = createConstructionPlan(validInput({ currentLevel: 100, buildingLevels: { castillo: 100 } }));
   const invalidLevel = createConstructionPlan(validInput({ currentLevel: 100.5 }));
-  const missingRule = createConstructionPlan(validInput({ rule: BUILDING_RULES.granja }));
   const invalidBaseDuration = createConstructionPlan(validInput({
     rule: { ...rule, baseDurationMs: 0 },
   }));
   const durationAtLevelTwo = durationForTargetLevel(testBaseDurationMs, 2);
   const durationAtLevelHundred = durationForTargetLevel(testBaseDurationMs, 100);
   const expectedLevelHundredDuration = Math.ceil(testBaseDurationMs * (1.01 ** 99));
+  const durationWithTechnology = durationForTargetLevel(testBaseDurationMs, 1, 0.95);
   const missingPrerequisite = createConstructionPlan(validInput({
     rule: { ...rule, progressionRequirements: { universidad: 2 } },
   }));
   const satisfiedPrerequisite = createConstructionPlan(validInput({
     rule: { ...rule, progressionRequirements: { universidad: 2 } },
-    buildingLevels: { universidad: 2 },
+    buildingLevels: { castillo: 5, universidad: 2 },
   }));
+
+  // [COMPLEMENTO D-02] Coste escalado 1,15^(n−1)
+  const costsLevelOne = costsForTargetLevel(rule.costs!, 1);
+  const costsLevelThree = costsForTargetLevel(rule.costs!, 3);
+  const scaledPlan = createConstructionPlan(validInput({ currentLevel: 2 }));
+
+  // [COMPLEMENTO D-05] Tope por nivel del Castillo
+  const cappedByCastle = createConstructionPlan(validInput({ currentLevel: 5, buildingLevels: { castillo: 5 } }));
+  const noCastle = createConstructionPlan(validInput({ buildingLevels: {} }));
+  const castleItself = createConstructionPlan(validInput({
+    buildingType: "castillo",
+    rule: BUILDING_RULES.castillo,
+    currentLevel: 1,
+    buildingLevels: { castillo: 1 },
+    resources: { gold: 100_000, wood: 100_000, stone: 100_000, iron: 100_000, food: 0 },
+  }));
+
+  // [COMPLEMENTO §2] Catálogo oficial completo y edificios fundacionales coherentes con P19
+  const catalogComplete = Object.keys(BUILDINGS).every((type) => {
+    const entry = BUILDING_RULES[type];
+    return entry && entry.costs !== null && entry.baseDurationMs !== null && entry.baseDurationMs > 0 && entry.progressionRequirements !== null;
+  });
+  const initialBuildings = Object.entries(INITIAL_BUILDING_LEVELS).map(([buildingType, level]) => ({ buildingType, level }));
+  const initialResidential = calculateResidentialCapacity(initialBuildings) ?? 0;
+  const initialCapacities = calculateJobCapacities(initialBuildings);
+  const initialWorkersCovered = initialCapacities !== null &&
+    initialCapacities.agriculture >= INITIAL_KINGDOM_CONFIG.workers.agriculture &&
+    initialCapacities.wood >= INITIAL_KINGDOM_CONFIG.workers.wood &&
+    initialCapacities.stone >= INITIAL_KINGDOM_CONFIG.workers.stone &&
+    initialCapacities.iron >= INITIAL_KINGDOM_CONFIG.workers.iron &&
+    initialCapacities.gold >= INITIAL_KINGDOM_CONFIG.workers.gold;
 
   const timed = { buildingType: "granja", targetLevel: 1, startedAt: 10_000, durationMs: 60_000, costs: { gold: 50, wood: 120 } };
   const progress = constructionProgress(timed, 40_000);
@@ -93,6 +131,10 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
   const cancellation = calculateConstructionCancellationRefund({
     construction: timed,
     serverTimeMs: 40_000,
+  });
+  const cancellationLate = calculateConstructionCancellationRefund({
+    construction: timed,
+    serverTimeMs: 69_000,
   });
   const cancellationAfterCompletion = calculateConstructionCancellationRefund({
     construction: timed,
@@ -115,10 +157,18 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
       details: valid.success ? `Nivel ${valid.plan.targetLevel}, finaliza en ${valid.plan.completesAt}` : valid.error,
     },
     {
-      test: "La duración aumenta aproximadamente un 1 % por nivel sin inventar tiempos base",
+      test: "La duración aumenta un 1 % por nivel (P22) y admite el modificador tecnológico",
       passed: durationAtLevelTwo === 60_600 &&
-        durationAtLevelHundred === expectedLevelHundredDuration,
-      details: `Nivel 1 (fixture): ${testBaseDurationMs}; nivel 2: ${durationAtLevelTwo}; nivel 100: ${durationAtLevelHundred}.`,
+        durationAtLevelHundred === expectedLevelHundredDuration &&
+        durationWithTechnology === 57_000,
+      details: `Nivel 1 (fixture): ${testBaseDurationMs}; nivel 2: ${durationAtLevelTwo}; nivel 100: ${durationAtLevelHundred}; con −5 %: ${durationWithTechnology}.`,
+    },
+    {
+      test: "El coste escala con 1,15^(nivel−1) (D-02) y el plan usa el coste del nivel objetivo",
+      passed: costsLevelOne?.wood === 120 && costsLevelThree?.wood === Math.round(120 * 1.15 ** 2) &&
+        costsLevelThree.gold === Math.round(50 * 1.15 ** 2) &&
+        scaledPlan.success && scaledPlan.plan.costs.wood === costsLevelThree.wood,
+      details: `Nivel 1: ${costsLevelOne?.wood} madera; nivel 3: ${costsLevelThree?.wood} madera / ${costsLevelThree?.gold} oro; plan nivel 3: ${scaledPlan.success ? scaledPlan.plan.costs.wood : scaledPlan.error}`,
     },
     {
       test: "Rechaza recursos insuficientes sin plan de gasto",
@@ -141,17 +191,25 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
       details: `Nivel 100 rechazado: ${!atMaxLevel.success}; nivel fraccionario rechazado: ${!invalidLevel.success}`,
     },
     {
+      test: "Ningún edificio supera el nivel del Castillo (D-05); el Castillo queda exento",
+      passed: !cappedByCastle.success && cappedByCastle.error.includes("Castillo") &&
+        !noCastle.success && castleItself.success,
+      details: `Granja 5→6 con Castillo 5 bloqueada: ${!cappedByCastle.success}; sin Castillo bloqueada: ${!noCastle.success}; Castillo 1→2 permitido: ${castleItself.success ? "sí" : castleItself.error}`,
+    },
+    {
       test: "Progreso y finalización dependen sólo del intervalo temporal calculado",
       passed: progress === 50 && !isConstructionDue(timed, 69_999) && dueAtBoundary,
       details: `Progreso 50%: ${progress === 50}; vencimiento exacto: ${dueAtBoundary}`,
     },
     {
-      test: "Cancelar obra en curso reembolsa exactamente el 50%; una vencida no se cancela",
+      test: "Cancelar obra en curso reembolsa el 50 % fijo (D-04) sin depender del tiempo restante; una vencida no se cancela",
       passed: cancellation.success && cancellation.refund.gold === 25 &&
-        cancellation.refund.wood === 60 && !cancellationAfterCompletion.success &&
+        cancellation.refund.wood === 60 &&
+        cancellationLate.success && cancellationLate.refund.gold === 25 && cancellationLate.refund.wood === 60 &&
+        !cancellationAfterCompletion.success &&
         !cancellationBeforeStart.success,
       details: cancellation.success
-        ? `Reembolso oro ${cancellation.refund.gold}, madera ${cancellation.refund.wood}; vencida/futura rechazadas: ${!cancellationAfterCompletion.success && !cancellationBeforeStart.success}`
+        ? `Reembolso al 50 % de progreso: oro ${cancellation.refund.gold}, madera ${cancellation.refund.wood}; al 98 %: ${cancellationLate.success ? cancellationLate.refund.gold : cancellationLate.error}; vencida/futura rechazadas: ${!cancellationAfterCompletion.success && !cancellationBeforeStart.success}`
         : cancellation.error,
     },
     {
@@ -162,9 +220,14 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
       details: "Propietario aceptado; usuario ajeno y reino demo rechazados.",
     },
     {
-      test: "No permite iniciar edificios sin valores oficiales configurados",
-      passed: !missingRule.success && missingRule.error.includes("Costes de 'granja' pendientes de especificación oficial"),
-      details: missingRule.success ? "Se inició con parámetros no documentados." : missingRule.error,
+      test: "El catálogo oficial está completo: 18 edificios con coste, duración y requisitos",
+      passed: catalogComplete && Object.keys(BUILDING_RULES).length === 18,
+      details: `Edificios configurados: ${Object.keys(BUILDING_RULES).length}; todos completos: ${catalogComplete}`,
+    },
+    {
+      test: "Los edificios fundacionales alojan el censo inicial (P10/P19) y emplean la distribución inicial de trabajadores",
+      passed: initialResidential >= POPULATION.INITIAL && initialWorkersCovered,
+      details: `Capacidad residencial inicial ${initialResidential} ≥ ${POPULATION.INITIAL}: ${initialResidential >= POPULATION.INITIAL}; capacidades laborales cubren la distribución inicial: ${initialWorkersCovered}`,
     },
     {
       test: "Finalización conserva edificios y sólo permite crear nivel 1 o subir un nivel existente",

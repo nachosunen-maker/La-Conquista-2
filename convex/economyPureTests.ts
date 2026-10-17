@@ -2232,19 +2232,20 @@ export function runEconomicValidationTests(): TestResult[] {
       lastUpdated: 1_000_000,
     }, 1_000_000 + SECONDS_PER_GAME_YEAR * 1000);
 
+    // Granja nivel 1 = 100 agricultores de capacidad (D-03/D-47): 20 agricultores producen 40/día.
     const passed =
       projected.success &&
-      projected.foodProductionCapacityPending === true &&
-      projected.productionAndConsumption?.dailyFoodProduction === 0 &&
-      projected.productionAndConsumption.effectiveAgricultureWorkers === 0 &&
+      projected.foodProductionCapacityPending === false &&
+      projected.productionAndConsumption?.dailyFoodProduction === 40 &&
+      projected.productionAndConsumption.effectiveAgricultureWorkers === 20 &&
       configuredCapacity.dailyFoodProduction === 10 &&
       configuredCapacity.effectiveAgricultureWorkers === 5 &&
       unstaffedBuilding.dailyFoodProduction === 0;
     results.push({
       category: "INTEGRACIÓN CONVEX",
-      test: "46. La capacidad edificada limita la producción por trabajador; capacidad pendiente y edificio sin trabajadores no generan producción",
+      test: "46. La capacidad edificada limita la producción por trabajador (D-47); edificio sin trabajadores no genera producción",
       passed,
-      details: `Pendiente=${projected.foodProductionCapacityPending}; producción pendiente=${projected.productionAndConsumption?.dailyFoodProduction}; capacidad configurada (fixture)=${configuredCapacity.dailyFoodProduction}/día; granja sin agricultores=${unstaffedBuilding.dailyFoodProduction}/día`,
+      details: `Pendiente=${projected.foodProductionCapacityPending}; granja nivel 1 con 20 agricultores=${projected.productionAndConsumption?.dailyFoodProduction}/día; capacidad limitada (fixture)=${configuredCapacity.dailyFoodProduction}/día; granja sin agricultores=${unstaffedBuilding.dailyFoodProduction}/día`,
     });
   }
 
