@@ -35,9 +35,11 @@ export interface RemoteKingdomDoc {
   happiness?: number;
   militaryMorale?: number;
   taxPolicy?: string;
+  taxRate?: number;
   foodTier?: string;
   createdAt?: number;
   updatedAt?: number;
+  moraleEffects?: Array<{ amount: number; expiresAt: number }>;
 }
 
 export interface RemoteResourcesDoc {
@@ -60,6 +62,8 @@ export interface RemotePopulationDoc {
   capacity?: number;
   available: number;
   starving?: boolean;
+  /** Segundos reales acumulados de déficit alimentario (D-48), persistidos por el servidor. */
+  starvationSeconds?: number;
 }
 
 export interface RemotePopulationJobDoc {

@@ -280,7 +280,9 @@ export function simulateEconomicProgress(
     lastUpdated: number;
     foodProductionWorkerLimit?: number | null;
   },
-  currentServerTimeMs: number
+  currentServerTimeMs: number,
+  /** Multiplicador de producción agrícola (tecnologías, terreno, productividad); 1 por defecto. */
+  foodProductionMultiplier: number = 1
 ) {
   // 1. Intervalo temporal en segundos reales validado por servidor (P66, P67)
   const elapsedMs = Math.max(0, currentServerTimeMs - kingdom.lastUpdated);
@@ -305,7 +307,8 @@ export function simulateEconomicProgress(
     : kingdom.foodProductionWorkerLimit === null
       ? 0
       : Math.min(kingdom.workers.agriculture, kingdom.foodProductionWorkerLimit);
-  const totalDailyFoodProduction = effectiveAgricultureWorkers * BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY;
+  const safeMultiplier = Number.isFinite(foodProductionMultiplier) && foodProductionMultiplier >= 0 ? foodProductionMultiplier : 1;
+  const totalDailyFoodProduction = effectiveAgricultureWorkers * BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY * safeMultiplier;
 
   // 6. Superávit / déficit neto diario
   const netDailyFoodSurplus = totalDailyFoodProduction - totalDailyConsumption;

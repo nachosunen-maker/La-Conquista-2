@@ -26,6 +26,7 @@ import { createAggregatePopulationFallback } from "./kingdomReadModel";
 import { runConstructionValidationTests } from "./constructionPureTests";
 import { runArmyValidationTests } from "./armyPureTests";
 import { runTechnologyValidationTests } from "./technologyPureTests";
+import { runExtendedEconomyTests } from "./economyExtendedPureTests";
 
 /**
  * ============================================================================
@@ -2265,6 +2266,12 @@ export function runEconomicValidationTests(): TestResult[] {
   results.push(...runTechnologyValidationTests().map((result) => ({
     category: "INTEGRACIÓN CONVEX" as const,
     test: `Tecnología: ${result.test}`,
+    passed: result.passed,
+    details: result.details,
+  })));
+  results.push(...runExtendedEconomyTests().map((result) => ({
+    category: "MATEMÁTICA / LÓGICA PURA" as const,
+    test: `Economía ampliada: ${result.test}`,
     passed: result.passed,
     details: result.details,
   })));

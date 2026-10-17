@@ -18,6 +18,8 @@ import type * as constructionPureTests from "../constructionPureTests.js";
 import type * as economy from "../economy.js";
 import type * as economyAdapter from "../economyAdapter.js";
 import type * as economyCalculations from "../economyCalculations.js";
+import type * as economyExtended from "../economyExtended.js";
+import type * as economyExtendedPureTests from "../economyExtendedPureTests.js";
 import type * as economyPureTests from "../economyPureTests.js";
 import type * as economyTests from "../economyTests.js";
 import type * as kingdomAccess from "../kingdomAccess.js";
@@ -44,6 +46,8 @@ declare const fullApi: ApiFromModules<{
   economy: typeof economy;
   economyAdapter: typeof economyAdapter;
   economyCalculations: typeof economyCalculations;
+  economyExtended: typeof economyExtended;
+  economyExtendedPureTests: typeof economyExtendedPureTests;
   economyPureTests: typeof economyPureTests;
   economyTests: typeof economyTests;
   kingdomAccess: typeof kingdomAccess;
