@@ -4,7 +4,7 @@
  *
  * THIS CODE IS AUTOMATICALLY GENERATED.
  *
- * To regenerate, run `npx convex dev` (or `node scripts/regenerateConvexApi.mjs` offline).
+ * To regenerate, run `npx convex dev`.
  * @module
  */
 
@@ -28,9 +28,14 @@ import type * as economyExtendedPureTests from "../economyExtendedPureTests.js";
 import type * as economyPureTests from "../economyPureTests.js";
 import type * as economyRound2PureTests from "../economyRound2PureTests.js";
 import type * as economyTests from "../economyTests.js";
+import type * as foundationPureTests from "../foundationPureTests.js";
+import type * as foundationRules from "../foundationRules.js";
 import type * as kingdomAccess from "../kingdomAccess.js";
 import type * as kingdomReadModel from "../kingdomReadModel.js";
 import type * as kingdoms from "../kingdoms.js";
+import type * as military from "../military.js";
+import type * as militaryPureTests from "../militaryPureTests.js";
+import type * as militaryRules from "../militaryRules.js";
 import type * as parliament from "../parliament.js";
 import type * as technologies from "../technologies.js";
 import type * as technologyPureTests from "../technologyPureTests.js";
@@ -66,9 +71,14 @@ declare const fullApi: ApiFromModules<{
   economyPureTests: typeof economyPureTests;
   economyRound2PureTests: typeof economyRound2PureTests;
   economyTests: typeof economyTests;
+  foundationPureTests: typeof foundationPureTests;
+  foundationRules: typeof foundationRules;
   kingdomAccess: typeof kingdomAccess;
   kingdomReadModel: typeof kingdomReadModel;
   kingdoms: typeof kingdoms;
+  military: typeof military;
+  militaryPureTests: typeof militaryPureTests;
+  militaryRules: typeof militaryRules;
   parliament: typeof parliament;
   technologies: typeof technologies;
   technologyPureTests: typeof technologyPureTests;
