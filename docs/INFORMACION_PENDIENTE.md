@@ -18,12 +18,12 @@ Todos los valores viven en `convex/balanceConfig.ts` con su origen etiquetado: `
 | C. Tecnologías (D-16 a D-21) | Implementado | `technologyRules.ts`, `technologies.ts` | 6 |
 | D. Economía ampliada (D-46 a D-51) | Implementado | `economyExtended.ts`, `economy.ts` | 7 |
 | E. Parlamento y desafíos (D-34 a D-42) | Implementado | `challengeRules.ts`, `parliament.ts` | 5 |
-| F. Combate y batallas (D-27 a D-32) | Implementado con dos límites de balance (§3) | `battleRules.ts`, `parliament.ts` | 7 |
+| F. Combate y batallas (D-27 a D-32) | Implementado y recalibrado (§3) | `battleRules.ts`, `parliament.ts` | 8 |
 | G. Mapa y territorios (D-22 a D-26) | Implementado | `territoryRules.ts`, `territories.ts` | 6 |
 | H. Civilizaciones (D-43 a D-45) | Implementado | `civilizations.ts` | — |
 | Interfaz P64 | Implementada: pestañas Aldea/Ejército/Universidad/Parlamento/Mapa, asistente de fundación P4-P9, insignia P58 | `src/App.tsx`, `src/components/*` | lint y build |
 
-Batería completa: 104 pruebas puras (`npm test`), comprobación de tipos de `src/` y de `convex/` (`npm run lint`).
+Batería completa: 111 pruebas puras (`npm test`), 11 pruebas de integración sobre convex-test (`npm run test:integration`), banco de simulaciones de combate (`npm run simulate:battles`) y comprobación de tipos de `src/` y de `convex/` (`npm run lint`).
 
 ---
 
@@ -59,22 +59,22 @@ Batería completa: 104 pruebas puras (`npm test`), comprobación de tipos de `sr
 
 ---
 
-## 3. Puntos de revisión de balance (decisión del 17-10-2026: se mantienen los valores aprobados)
+## 3. Balance del combate: decisiones aplicadas (ronda 2, 17-10-2026)
 
-El responsable decidió mantener los valores del Complemento y dejar estos dos puntos abiertos para aprobación con sugerencias. El código no los altera; las pruebas `Batalla:` documentan el detalle numérico.
+El responsable aprobó seguir las recomendaciones del documento de decisiones. Valores vigentes en `COMBAT`:
 
-- **B-01 Techo de bajas.** Con k = 0,18 y 3 rondas, las bajas máximas de un bando en una batalla son 1 − 0,82³ = 44,9 %. La retirada al 70 % y la victoria aplastante del 75 % (P47) **no pueden ocurrir** y las reclamaciones de territorio (P48) nunca se conceden.
-  Sugerencias para aprobar (cálculos derivados, no valores oficiales): (a) k = 0,40 con 3 rondas → techo 78,4 %; (b) 8 rondas con k = 0,18 → techo 79,7 %; (c) rebajar los umbrales de retirada y de victoria aplastante por debajo del 44,9 %. Parámetros: `COMBAT.CASUALTY_RATE_K`, `COMBAT.MAX_ROUNDS`, `COMBAT.RETREAT_LOSS_RATIO`, `COMBAT.CRUSHING_VICTORY_LOSS_RATIO`.
-- **B-02 Empates dominantes.** Con exponentes 0,20/0,15/0,10/0,05 y tolerancia de empate de 10 puntos, 1.000 soldados de élite (nivel 5, acero avanzado, acero, moral 95, ración excelente) contra 1.000 reclutas con palos, sin armadura, moral 30, ración mínima y fatiga 80 % terminan en **empate**; P34/P69 exigen que la preparación pueda vencer al número.
-  Sugerencias para aprobar: (a) tolerancia de empate de 5 puntos (`COMBAT.DRAW_TOLERANCE`); (b) usar la puntuación lineal normalizada del Complemento (pesos P34 literales) como potencia; (c) elevar los exponentes de calidad (`COMBAT.WEIGHTS`) manteniendo el 0,85 del número.
+| Punto | Antes | Ahora | Efecto comprobado con `npm run simulate:battles` (964 enfrentamientos) |
+|---|---|---|---|
+| B-01 techo de bajas | k = 0,18 (techo 44,9 %) | **k = 0,40** (techo 78,4 %) | 5.000 contra 300 produce retirada y victoria aplastante; las victorias aplastantes solo aparecen con desequilibrios enormes. |
+| B-02 calidad frente a número | exponentes 0,20/0,15/0,10/0,05; empate ±10 pp | **exponentes entrenamiento 0,6, armas 0,45, armadura 0,3, formación 0,3, moral/ración/fatiga 0,15; empate ±5 pp** | 600 soldados de élite derrotan a 1.000 reclutas mal preparados; fuerzas idénticas empatan el 100 % de las veces; a partir del 60 % de proporción la élite gana siempre. |
 
-## 4. Reglas derivadas pendientes de aprobación (`[DERIVADO]`)
+Resultados completos del banco (escenarios del Complemento §6): fuerzas iguales 100 % empate; pequeño y preparado contra grande y mal preparado 29,6 % victoria / 58,3 % derrota / 12 % empate en todas las proporciones y 100 % victoria con proporción ≥ 60 %; horda con mala moral y fatiga contra 1.000 descansados 66,7 % victoria de la horda; barrido de equipo y entrenamiento 65,6 % victoria del mejor equipado. Ejecutar el banco tras cualquier cambio de `COMBAT`.
 
-El responsable pidió el 17-10-2026 que R-01 quede como sugerencia pendiente de aprobación; el resto sigue el mismo criterio.
+## 4. Reglas derivadas ratificadas (`[DERIVADO]`, aprobadas el 17-10-2026 con las recomendaciones del documento de decisiones)
 
 | Id | Regla aplicada | Dónde |
 |---|---|---|
-| R-01 | **Sugerencia pendiente de aprobación.** Edificios fundacionales: Castillo 1, Viviendas 20, Granja 11, Aserradero 4, Cantera 4, Mina de hierro 2, Mina de oro 1 (`nivel = ceil(trabajadores iniciales / capacidad por nivel)`), para que P19 se cumpla con la capacidad D-47. Alternativa: solo Castillo 1 (incumple P19 hasta construir granjas). | `INITIAL_BUILDINGS` |
+| R-01 | **Ratificada (opción A).** Edificios fundacionales: Castillo 1, Viviendas 20, Granja 11, Aserradero 4, Cantera 4, Mina de hierro 2, Mina de oro 1 (`nivel = ceil(trabajadores iniciales / capacidad por nivel)`), para que P19 se cumpla con la capacidad D-47. Alternativa: solo Castillo 1 (incumple P19 hasta construir granjas). | `INITIAL_BUILDINGS` |
 | R-02 | Base imponible = unidades producidas de alimentos, madera, piedra y hierro en el intervalo; `oro = base × tasa`. El oro minado no tributa. | `economyExtended.ts` |
 | R-03 | Las tecnologías de felicidad elevan el nivel de equilibrio (70 + bonus) y recuperan 1 punto/día hasta alcanzarlo. | `economyExtended.ts` |
 | R-04 | Contribuciones diarias de felicidad: ración (−2/0/+1/+2), hacinamiento −2, iglesia +1, circo +1. | `WELLBEING` |
@@ -85,25 +85,33 @@ El responsable pidió el 17-10-2026 que R-01 quede como sugerencia pendiente de 
 | R-09 | Desbloqueo de equipo: palo libre; lanza con Herrería 1; espada de hierro con Herrería 2 + Mina 1; acero con Herrería 4 + Metalurgia; acero avanzado con Acero avanzado; armaduras análogas. | `EQUIPMENT_UNLOCKS` |
 | R-10 | Un desafío pendiente caduca a los 7 días reales sin respuesta. | `PENDING_EXPIRY_MS` |
 | R-11 | Desgaste de equipamiento informado como porcentaje de bajas propias (sin regla numérica oficial). | `battleRules.ts` |
-| R-12 | Las murallas solo condicionan el ×1,8 del asedio; no hay valor oficial de defensa por nivel de muralla (se deja en 0). | `COMBAT` |
+| R-12 | Las murallas condicionan el ×1,8 del asedio y añaden **+5 % de defensa por nivel (máximo +50 %)** (M-06 opción A). | `COMBAT.WALLS_DEFENSE_PER_LEVEL` |
 | R-13 | Deserción (fase 3) retira tropa viva empezando por los lotes más numerosos; muertes civiles salen primero de la reserva libre. | `economy.ts` |
 | R-14 | Fatiga de marcha calculada con terreno neutro (multiplicador 1) hasta definir el terreno intermedio. | `parliament.ts` |
 
 ---
 
-## 5. Pendiente sin valor oficial (bloqueado explícitamente, no inventado)
+## 5. Mecánicas de la ronda 2 (decisiones M-01 a M-11 aplicadas el 17-10-2026)
 
-- **Honor y gloria por batalla (P50-P51):** el informe registra 0 con marca `pending`. Solo existe el bonus diario +5 (P59).
-- **Mercenarios (P53) y Taberna:** sin coste ni reglas; el edificio existe sin efecto.
-- **Supervisores (P25):** sin reglas de formación; las ranuras de investigación quedan en 1.
-- **Descanso y horarios (P15), estaciones y clima (P3), modo «A tope» (P55):** cualitativos en la Maestra; sin fórmulas.
-- **Efectos de Herrería, Mercado, Panadería, Hospital como edificios de trabajadores:** la capacidad laboral existe pero el oficio no produce nada definido (solo el Hospital actúa por nivel, P45).
-- **Capacidad de almacenamiento:** la tecnología `storage_1` acumula +10 % pero no hay tope de almacén base, así que no tiene efecto.
-- **Profesiones de la Maestra sin oficio modelado (P13):** construcción, educación, medicina, religión, circo, feria como trabajadores.
-- **Terreno intermedio en la marcha y apuestas de territorio (D-37).**
-- **Bonificaciones por civilización (D-44) y revisión del nombre "Indios americanos".**
+| Decisión | Aplicación |
+|---|---|
+| M-01 honor y gloria (opción A) | Victoria +20/+10, aplastante +50/+30, empate +5/0, derrota 0/−5 (gloria nunca < 0). La gloria decae 1 punto/día real y da +1 moral por cada 10 (máximo +10). `BATTLE_REWARDS`. |
+| M-02 mercenarios (opción A) | `army:hireMercenaries`: 25 oro por mercenario (infantería nivel 2), hasta 50 activos por nivel de Taberna, contrato de 7 días reales, salario 1 oro/día liquidado en la economía; si no hay oro desertan; no generan natalidad. `MERCENARIES`. |
+| M-03 supervisores (opción B) | Ranuras de investigación por nivel de Universidad: 1 (nivel 1-2), 2 (3-4), 3 (5+). `RESEARCH_SLOTS_BY_UNIVERSITY`. |
+| M-04 descanso (opción A) | `economy:setRestPolicy`: normal; intensiva (+15 % producción, −3 felicidad/día, +5 fatiga/día, equivale al modo «A tope»); relajada (−10 %, +2, −5). `REST_POLICIES`. |
+| M-05 estaciones (opción B) | Estación informativa en `kingdoms:getKingdomFull.season` (cuatro por año de juego). Los modificadores de la opción A están en `SEASONS` desactivados (`ENABLED_EFFECTS = false`). |
+| M-06 murallas y almacén (opción A) | Murallas +5 %/nivel (máx. +50 %). Almacén: 10.000 por recurso + 2.000 por nivel de Mercado, ×1,10 con Almacenes reforzados; el excedente producido se pierde, las reservas previas no. `STORAGE`. |
+| M-07 profesiones (opción A) | medicina +1 pp de recuperación por 10 trabajadores (tope +10); religión y circo +1 felicidad/día por 20 (tope +3 cada una); panadería −5 % de consumo por 20 (tope −15 %); construcción −1 % de duración de obras por 10 (tope −20 %). Limitadas por la capacidad del edificio. Oficios asignables ampliados. `PROFESSION_EFFECTS`. |
+| M-08 apuestas | Se mantienen desactivadas (opción A). |
+| M-09 civilizaciones | Sin bonificaciones (opción A); el nombre "Indios americanos" sigue pendiente de decisión antes de publicar. |
+| M-10 bots PvE | Sin bots (opción A); siguiente paso lógico una vez calibrado el combate. |
+| M-11 formación (opción A) | Matriz de contrapartidas caballería > arqueros > infantería > caballería (+25 % contra el tipo contrarrestado, proporcional a su presencia) y fracción de participación por tipo (`army:setFormation`). `UNIT_COUNTERS`, `COMBAT.FORMATION_COUNTER_BONUS`. |
 
----
+### Sigue sin valor oficial
+- Nombre de la civilización "Indios americanos" (M-09).
+- Terreno intermedio en la marcha (R-14) y apuestas de territorio (M-08).
+- Bonificaciones por civilización (M-09) y bots PvE (M-10), pospuestos por decisión.
+- Inicio de sesión con correo y contraseña (T-01): requiere Convex Auth con secretos fuera del repositorio; Google OIDC ya está configurado.
 
 ## 6. Observaciones técnicas
 
@@ -111,3 +119,4 @@ El responsable pidió el 17-10-2026 que R-01 quede como sugerencia pendiente de 
 2. `npx convex codegen` exige un despliegue; `scripts/regenerateConvexApi.mjs` regenera `convex/_generated/api.d.ts` sin conexión. Al desplegar con `npx convex dev` se regenerará automáticamente.
 3. La liquidación (`settleRelationalKingdomEconomy`) completa obras, lotes e investigaciones vencidas aunque el scheduler no se haya ejecutado, y aplica recursos, población, bienestar, heridos y fatiga en una sola transacción.
 4. Ningún cambio se ha desplegado al backend remoto; todo es local en la rama.
+5. Las pruebas de integración usan `convex-test` con el reloj simulado (`vi.useFakeTimers`) para completar obras, lotes, investigaciones y desafíos programados sin esperar tiempo real.
