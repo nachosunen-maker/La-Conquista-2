@@ -27,6 +27,7 @@ import { runConstructionValidationTests } from "./constructionPureTests";
 import { runArmyValidationTests } from "./armyPureTests";
 import { runTechnologyValidationTests } from "./technologyPureTests";
 import { runExtendedEconomyTests } from "./economyExtendedPureTests";
+import { runTerritoryValidationTests } from "./territoryPureTests";
 
 /**
  * ============================================================================
@@ -2272,6 +2273,12 @@ export function runEconomicValidationTests(): TestResult[] {
   results.push(...runExtendedEconomyTests().map((result) => ({
     category: "MATEMÁTICA / LÓGICA PURA" as const,
     test: `Economía ampliada: ${result.test}`,
+    passed: result.passed,
+    details: result.details,
+  })));
+  results.push(...runTerritoryValidationTests().map((result) => ({
+    category: "MATEMÁTICA / LÓGICA PURA" as const,
+    test: `Mapa: ${result.test}`,
     passed: result.passed,
     details: result.details,
   })));

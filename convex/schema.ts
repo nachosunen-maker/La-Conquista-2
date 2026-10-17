@@ -65,8 +65,9 @@ export default defineSchema(
       glory: v.optional(v.number()),
       lastDailyBonusAt: v.optional(v.number()),
       moraleEffects: v.optional(v.array(v.object({ amount: v.number(), expiresAt: v.number() }))),
-      // Bloque G: territorio principal
+      // Bloque G: territorio principal y reclamaciones pendientes (P47)
       homeTerritoryId: v.optional(v.string()),
+      pendingTerritoryClaims: v.optional(v.number()),
     })
       .index("by_user_id", ["userId"])
       .index("by_user_id_and_name", ["userId", "name"])
@@ -143,6 +144,19 @@ export default defineSchema(
     })
       .index("by_kingdom", ["kingdomId"])
       .index("by_kingdom_and_technology", ["kingdomId", "technologyId"]),
+
+    // Mapa hexagonal (Bloque G): una fila por celda; ownerKingdomId ausente = territorio libre (P49).
+    territories: defineTable({
+      cellId: v.string(),
+      q: v.number(),
+      r: v.number(),
+      terrain: v.string(),
+      ownerKingdomId: v.optional(v.id("kingdoms")),
+      isHome: v.optional(v.boolean()),
+      claimedAt: v.optional(v.number()),
+    })
+      .index("by_cell", ["cellId"])
+      .index("by_owner", ["ownerKingdomId"]),
 
     // Unidades militares del reino (esquema mínimo persistido)
     armyUnits: defineTable({

@@ -28,6 +28,9 @@ import type * as kingdoms from "../kingdoms.js";
 import type * as technologies from "../technologies.js";
 import type * as technologyPureTests from "../technologyPureTests.js";
 import type * as technologyRules from "../technologyRules.js";
+import type * as territories from "../territories.js";
+import type * as territoryPureTests from "../territoryPureTests.js";
+import type * as territoryRules from "../territoryRules.js";
 
 import type {
   ApiFromModules,
@@ -56,6 +59,9 @@ declare const fullApi: ApiFromModules<{
   technologies: typeof technologies;
   technologyPureTests: typeof technologyPureTests;
   technologyRules: typeof technologyRules;
+  territories: typeof territories;
+  territoryPureTests: typeof territoryPureTests;
+  territoryRules: typeof territoryRules;
 }>;
 
 /**

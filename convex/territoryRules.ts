@@ -1,0 +1,200 @@
+/**
+ * LA CONQUISTA — REGLAS PURAS DEL MAPA Y TERRITORIOS (Bloque G, D-22 a D-26)
+ * Mapa hexagonal con coordenadas axiales (q, r), radio 10 → 331 celdas.
+ * Sin acceso a Convex.
+ */
+import {
+  FATIGUE,
+  FATIGUE_TABLE,
+  FOOD,
+  MAP,
+  TERRAINS,
+  UNITS,
+  type TerrainType,
+  type UnitType,
+} from "./balanceConfig";
+
+export interface HexCoord {
+  q: number;
+  r: number;
+}
+
+export interface WorldCell extends HexCoord {
+  cellId: string;
+  terrain: TerrainType;
+}
+
+export function cellId(q: number, r: number): string {
+  return `${q},${r}`;
+}
+
+export function parseCellId(id: string): HexCoord | null {
+  const match = /^(-?\d+),(-?\d+)$/.exec(id);
+  if (!match) return null;
+  return { q: Number(match[1]), r: Number(match[2]) };
+}
+
+/** [COMPLEMENTO D-26] d = (|Δq| + |Δr| + |Δq + Δr|) / 2 */
+export function hexDistance(a: HexCoord, b: HexCoord): number {
+  const dq = a.q - b.q;
+  const dr = a.r - b.r;
+  return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+}
+
+export function isInsideWorld(coord: HexCoord, radius: number = MAP.RADIUS): boolean {
+  return Number.isInteger(coord.q) && Number.isInteger(coord.r) && hexDistance(coord, { q: 0, r: 0 }) <= radius;
+}
+
+const HEX_DIRECTIONS: readonly HexCoord[] = [
+  { q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 }, { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 },
+];
+
+export function hexNeighbors(coord: HexCoord, radius: number = MAP.RADIUS): HexCoord[] {
+  return HEX_DIRECTIONS
+    .map((direction) => ({ q: coord.q + direction.q, r: coord.r + direction.r }))
+    .filter((neighbor) => isInsideWorld(neighbor, radius));
+}
+
+/** Hash determinista (xorshift sobre semilla y coordenadas) para asignar terrenos reproducibles (D-25). */
+function hashCell(q: number, r: number, seed: number): number {
+  let h = (seed ^ (q * 374761393) ^ (r * 668265263)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+const TERRAIN_ORDER: readonly TerrainType[] = ["llanura", "bosque", "colina", "montana", "rio", "costa"];
+
+/**
+ * [DERIVADO] Terreno de una celda: la costa solo aparece en el borde del mundo; el resto se
+ * reparte por hash. Los pesos relativos (llanura 30 %, bosque 25 %, colina 20 %, montaña 15 %,
+ * río 10 %) son parámetros de generación revisables.
+ */
+const INLAND_WEIGHTS: ReadonlyArray<{ terrain: TerrainType; weight: number }> = [
+  { terrain: "llanura", weight: 30 },
+  { terrain: "bosque", weight: 25 },
+  { terrain: "colina", weight: 20 },
+  { terrain: "montana", weight: 15 },
+  { terrain: "rio", weight: 10 },
+];
+
+export function terrainForCell(q: number, r: number, seed: number = MAP.WORLD_SEED, radius: number = MAP.RADIUS): TerrainType {
+  const distance = hexDistance({ q, r }, { q: 0, r: 0 });
+  const h = hashCell(q, r, seed);
+  if (distance === radius && h % 2 === 0) return "costa";
+  const total = INLAND_WEIGHTS.reduce((sum, entry) => sum + entry.weight, 0);
+  let roll = h % total;
+  for (const entry of INLAND_WEIGHTS) {
+    if (roll < entry.weight) return entry.terrain;
+    roll -= entry.weight;
+  }
+  return TERRAIN_ORDER[0];
+}
+
+/** [COMPLEMENTO D-23] Todas las celdas del mundo (331 con radio 10). */
+export function generateWorldCells(radius: number = MAP.RADIUS, seed: number = MAP.WORLD_SEED): WorldCell[] {
+  const cells: WorldCell[] = [];
+  for (let q = -radius; q <= radius; q++) {
+    for (let r = Math.max(-radius, -q - radius); r <= Math.min(radius, -q + radius); r++) {
+      cells.push({ q, r, cellId: cellId(q, r), terrain: terrainForCell(q, r, seed, radius) });
+    }
+  }
+  return cells;
+}
+
+/**
+ * [DERIVADO de D-25] Territorio principal de un reino nuevo: el centro si está libre; si no,
+ * la celda libre que maximiza la distancia mínima a los territorios principales existentes
+ * (desempate por identificador), para repartir los reinos por el mapa de forma reproducible.
+ */
+export function chooseHomeCell(
+  cells: ReadonlyArray<WorldCell>,
+  occupiedCellIds: ReadonlySet<string>,
+  existingHomes: ReadonlyArray<HexCoord>
+): WorldCell | null {
+  const free = cells.filter((cell) => !occupiedCellIds.has(cell.cellId));
+  if (free.length === 0) return null;
+  if (existingHomes.length === 0) {
+    return free.find((cell) => cell.q === 0 && cell.r === 0) ?? free[0];
+  }
+  let best: WorldCell | null = null;
+  let bestScore = -1;
+  for (const cell of free) {
+    const score = Math.min(...existingHomes.map((home) => hexDistance(cell, home)));
+    if (score > bestScore || (score === bestScore && best && cell.cellId < best.cellId)) {
+      best = cell;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/** [MAESTRA P48] Tras una victoria aplastante se reclama un territorio libre CERCANO: a distancia ≤ 2 de uno propio ([DERIVADO]). */
+export const CLAIM_MAX_DISTANCE = 2;
+
+export function canClaimTerritory(input: {
+  target: WorldCell & { ownerKingdomId?: string | null };
+  ownedCells: ReadonlyArray<HexCoord>;
+  pendingClaims: number;
+}): { success: true } | { success: false; error: string } {
+  if (!Number.isInteger(input.pendingClaims) || input.pendingClaims < 1) {
+    return { success: false, error: "No tienes reclamaciones territoriales pendientes; se obtienen con victorias aplastantes (P47)." };
+  }
+  if (input.target.ownerKingdomId) {
+    return { success: false, error: "El territorio ya tiene propietario; no se arrebatan territorios ocupados (P48)." };
+  }
+  if (input.ownedCells.length === 0) {
+    return { success: false, error: "El reino no tiene territorio principal desde el que reclamar." };
+  }
+  const nearest = Math.min(...input.ownedCells.map((cell) => hexDistance(cell, input.target)));
+  if (nearest > CLAIM_MAX_DISTANCE) {
+    return { success: false, error: `El territorio debe estar cerca (distancia ≤ ${CLAIM_MAX_DISTANCE}); el más cercano propio está a ${nearest}.` };
+  }
+  return { success: true };
+}
+
+// ----------------------------------------------------------------------------
+// Marcha y fatiga (P41, P32, D-26)
+// ----------------------------------------------------------------------------
+export function terrainMarchMultiplier(terrain: TerrainType): number {
+  return TERRAINS[terrain]?.marchMultiplier ?? 1;
+}
+
+/** El ejército viaja a la velocidad de la unidad más lenta presente. */
+export function armyMarchMultiplier(composition: Partial<Record<UnitType, number>>): number {
+  let multiplier = 1;
+  for (const [unitType, count] of Object.entries(composition) as [UnitType, number][]) {
+    if (count > 0 && UNITS[unitType]) multiplier = Math.max(multiplier, UNITS[unitType].marchMultiplier);
+  }
+  return multiplier;
+}
+
+/** [COMPLEMENTO §5] T_marcha = T_base × d × M_terreno × M_unidad (segundos reales). */
+export function marchTimeSeconds(distance: number, terrainMultiplier: number = 1, unitMultiplier: number = 1): number {
+  if (!Number.isFinite(distance) || distance < 0) return 0;
+  return MAP.MARCH_SECONDS_PER_HEX * distance * terrainMultiplier * unitMultiplier;
+}
+
+/** [COMPLEMENTO §5] F_nueva = min(100, F_actual + 2·d·M_terreno). */
+export function marchFatigue(currentFatigue: number, distance: number, terrainMultiplier: number = 1): number {
+  const current = Number.isFinite(currentFatigue) ? Math.max(0, currentFatigue) : 0;
+  return Math.min(100, current + FATIGUE.PER_HEX * Math.max(0, distance) * terrainMultiplier);
+}
+
+/** [MAESTRA P32] Multiplicador por fatiga. */
+export function fatigueMultiplier(fatigue: number): number {
+  const value = Number.isFinite(fatigue) ? Math.max(0, Math.min(100, fatigue)) : 0;
+  for (const row of FATIGUE_TABLE) {
+    if (value <= row.maxFatigue) return row.multiplier;
+  }
+  return FATIGUE_TABLE[FATIGUE_TABLE.length - 1].multiplier;
+}
+
+/** [COMPLEMENTO §5] Recuperación de 10 puntos por día real en descanso con ración normal o mejor. */
+export function recoverFatigue(currentFatigue: number, elapsedDays: number, foodTier: string): number {
+  const current = Number.isFinite(currentFatigue) ? Math.max(0, Math.min(100, currentFatigue)) : 0;
+  const tierFactor = (FOOD.TIER_FACTORS as Record<string, number>)[foodTier] ?? 1;
+  const minimum = FOOD.TIER_FACTORS[FATIGUE.MIN_TIER_FOR_RECOVERY];
+  if (tierFactor < minimum || !(elapsedDays > 0)) return current;
+  return Math.max(0, current - FATIGUE.RECOVERY_PER_DAY * elapsedDays);
+}

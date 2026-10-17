@@ -3,11 +3,12 @@ import { v } from "convex/values";
 import { completeDueConstructions, insertInitialBuildings } from "./buildings";
 import { completeDueTraining, readArmyUnitDocs, readArmyUnitsWithMigration } from "./army";
 import { completeDueResearch } from "./technologies";
+import { ensureHomeTerritory } from "./territories";
 import { calculateJobCapacities, calculateResidentialCapacity, validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import { simulateExtendedEconomy, type ExtendedEconomyResult } from "./economyExtended";
 import { normalizeUnitType } from "./armyRules";
-import { TAXES, WELLBEING, UNITS } from "./balanceConfig";
+import { TAXES, WELLBEING, UNITS, TERRAINS } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
 import {
   simulateEconomicProgress,
@@ -128,7 +129,6 @@ async function readTerrainBonuses(ctx: any, kingdomId: any): Promise<Partial<Rec
       .query("territories")
       .withIndex("by_owner", (q: any) => q.eq("ownerKingdomId", kingdomId))
       .collect();
-    const { TERRAINS } = await import("./balanceConfig");
     const bonuses: Partial<Record<"agriculture" | "wood" | "stone" | "iron" | "gold", number>> = {};
     for (const territory of territories) {
       const terrain = (TERRAINS as any)[territory.terrain];
@@ -419,6 +419,7 @@ export const getOrInitializeKingdom = mutation({
       }
     }
     await insertInitialBuildings(ctx, kingdomId);
+    await ensureHomeTerritory(ctx, kingdomId);
     const kingdom = await ctx.db.get(kingdomId);
     if (!kingdom) throw new Error("No se pudo recuperar el reino recién inicializado.");
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
