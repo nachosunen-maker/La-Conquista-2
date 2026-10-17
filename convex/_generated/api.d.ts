@@ -23,6 +23,8 @@ import type * as economyTests from "../economyTests.js";
 import type * as kingdomAccess from "../kingdomAccess.js";
 import type * as kingdomReadModel from "../kingdomReadModel.js";
 import type * as kingdoms from "../kingdoms.js";
+import type * as technologies from "../technologies.js";
+import type * as technologyPureTests from "../technologyPureTests.js";
 import type * as technologyRules from "../technologyRules.js";
 
 import type {
@@ -47,6 +49,8 @@ declare const fullApi: ApiFromModules<{
   kingdomAccess: typeof kingdomAccess;
   kingdomReadModel: typeof kingdomReadModel;
   kingdoms: typeof kingdoms;
+  technologies: typeof technologies;
+  technologyPureTests: typeof technologyPureTests;
   technologyRules: typeof technologyRules;
 }>;
 

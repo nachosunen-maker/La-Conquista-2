@@ -25,6 +25,7 @@ import { DEMO_USER_ID, isKingdomOwner, resolveKingdomQueryUserId } from "./kingd
 import { createAggregatePopulationFallback } from "./kingdomReadModel";
 import { runConstructionValidationTests } from "./constructionPureTests";
 import { runArmyValidationTests } from "./armyPureTests";
+import { runTechnologyValidationTests } from "./technologyPureTests";
 
 /**
  * ============================================================================
@@ -2258,6 +2259,12 @@ export function runEconomicValidationTests(): TestResult[] {
   results.push(...runArmyValidationTests().map((result) => ({
     category: "INTEGRACIÓN CONVEX" as const,
     test: `Ejército: ${result.test}`,
+    passed: result.passed,
+    details: result.details,
+  })));
+  results.push(...runTechnologyValidationTests().map((result) => ({
+    category: "INTEGRACIÓN CONVEX" as const,
+    test: `Tecnología: ${result.test}`,
     passed: result.passed,
     details: result.details,
   })));

@@ -60,16 +60,11 @@ export const getKingdomFull = query({
       .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
       .collect();
 
-    // 8. Tecnologías
-    let technologies: any[] = [];
-    try {
-      technologies = await ctx.db
-        .query("technologies" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-        .collect();
-    } catch {
-      technologies = [];
-    }
+    // 8. Tecnologías: progreso por reino (Bloque C)
+    const technologies = await ctx.db
+      .query("technologyProgress")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+      .collect();
 
     const kingdomPopulation = kingdom as any;
     const populationFallback = createAggregatePopulationFallback(
