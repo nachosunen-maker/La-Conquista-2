@@ -1,0 +1,1098 @@
+       LA CONQUISTA — ESPECIFICACIÓN
+            MAESTRA DEL JUEGO
+                               Documento completo — Puntos 1 al 73
+
+LA CONQUISTA — ESPECIFICACIÓN MAESTRA DEL JUEGO
+
+1. CONCEPTO GENERAL
+
+La Conquista es un juego de estrategia y gestión medieval de partidas persistentes.
+
+El jugador encarna al monarca de un reino. No controla directamente a cada ciudadano ni cada
+soldado. Su función es tomar decisiones estratégicas y administrativas:
+
+●   distribuir la población;
+●   administrar recursos;
+●   construir y mejorar edificios;
+●   investigar tecnologías;
+●   entrenar tropas;
+●   administrar alimentación, descanso y salarios;
+●   recuperar tropas heridas;
+●   desarrollar el reino;
+●   explorar;
+●   negociar conflictos;
+●   pactar batallas;
+●   preparar ejércitos;
+●   conquistar territorios;
+●   competir por honor, gloria y clasificación.
+
+El concepto fundamental es: “El jugador mueve los hilos y la población ejecuta automáticamente
+las órdenes.”
+
+No debe ser un juego que obligue al jugador a estar conectado continuamente.
+
+2. ESCALA TEMPORAL
+
+Regla fundamental: 1 día real = 1 año dentro del juego.
+
+1 día real = 1 año de reino.
+
+7 días reales = 7 años.
+
+Las estaciones meteorológicas siguen el ciclo del mundo del juego; su duración exacta y los
+cambios de estación se configurarán en el sistema temporal.
+
+
+
+Nunca debe existir en la versión jugable un botón para avanzar manualmente un año. No debe
+existir “Pasar 1 año”, “Simular día” ni ningún sistema equivalente.
+
+
+                          La Conquista — Especificación Maestra del Juego
+El juego calcula el tiempo utilizando el reloj real y guarda la última actualización. Al volver a
+abrirlo, calcula el tiempo real transcurrido y aplica los años correspondientes a recursos,
+población, construcciones, investigación, entrenamiento, recuperación, etc.
+
+3. ESTACIONES METEOROLÓGICAS Y CLIMA
+
+●   El juego utiliza estaciones meteorológicas —primavera, verano, otoño e invierno— en lugar
+    de temporadas competitivas.
+●   El clima y la estación pueden afectar a los sistemas del reino y a la planificación estratégica.
+●   No habrá reinicios competitivos, clasificaciones de temporada ni recompensas automáticas
+    por cerrar una temporada.
+●   Los efectos concretos del clima, sus magnitudes y su calendario quedan pendientes de
+    balance y definición, sin fijar valores no aprobados.
+●   El cambio de estación no reinicia el reino ni elimina su progreso.
+
+
+
+
+4. PANTALLA DE INICIO
+
+Al abrir la aplicación por primera vez aparece una pantalla de bienvenida.
+
+Debe mostrar:
+
+LA CONQUISTA
+
+“Gobierna. Entrena. Negocia. Conquista.”
+
+Botones:
+
+INICIAR SESIÓN — Google o correo electrónico.
+
+CREAR CUENTA — correo y contraseña.
+
+JUGAR COMO INVITADO — opcional; debe advertir que el progreso puede no sincronizarse sin
+cuenta.
+
+5. REGISTRO
+
+Después del registro correcto:
+
+●   Nombre del monarca.
+●   Correo electrónico asociado a la cuenta.
+●   Contraseña gestionada por el sistema de autenticación y nunca almacenada como texto
+    plano.
+
+6. CREACIÓN DEL REINO
+
+Después del registro aparece un asistente de creación del reino. Primero: “Elige el origen de tu
+reino”.
+
+Civilizaciones iniciales:
+
+
+
+
+                            La Conquista — Especificación Maestra del Juego
+●   Ingleses
+●   Romanos
+●   Griegos
+●   Vikingos
+●   Bizantinos
+●   Árabes
+●   Mongoles
+●   Chinos
+●   Japoneses
+●   Indios americanos
+●   Aztecas
+●   Keniatas
+
+Cada civilización tiene bonificaciones pasivas propias y debe ofrecer un estilo diferente, sin que
+una sea objetivamente superior.
+
+7. NOMBRE DEL REINO
+
+Segundo paso: “Nombra tu reino”.
+
+Campo para introducir el nombre del reino. Ejemplo: Reino de Iberia. El nombre queda asociado
+permanentemente a la partida.
+
+8. NOMBRE DEL CASTILLO
+
+Tercer paso: “Nombra tu castillo”.
+
+Campo para introducir el nombre del castillo. Ejemplo: Castillo de Zaragoza. El castillo es el
+centro administrativo del reino.
+
+9. CONFIRMACIÓN
+
+Pantalla “Tu reino está preparado”.
+
+Mostrar:
+
+●   Monarca
+●   Reino
+●   Castillo
+●   Civilización
+
+Botón: FUNDAR MI REINO.
+
+Al pulsarlo se crea la partida.
+
+
+
+10. COMIENZO DE LA PARTIDA
+El jugador comienza con 2.000 habitantes. El objetivo inicial es disponer de un pequeño reino
+funcional y permitir decisiones estratégicas desde el principio.
+
+
+
+
+                         La Conquista — Especificación Maestra del Juego
+11. PANTALLA PRINCIPAL — ALDEA
+La pantalla principal es la Aldea/Reino.
+
+Barra superior:
+
+●   nombre del reino;
+●   nombre del monarca;
+●   año;
+●   oro;
+●   madera;
+●   piedra;
+●   hierro;
+●   alimentos;
+●   población.
+
+La información debe actualizarse automáticamente.
+
+
+
+    12. POBLACIÓN
+
+Empiezas con 2.000 habitantes, cada año en el juego la población crece un 30%
+
+
+
+La asignación de soldados se resta de la población total.
+
+Si se contratan mercenarios, se suman a la población, pero cuestan oro.
+
+La población es un sistema fundamental. El jugador NO controla personas individualmente.
+Asigna cantidades a profesiones.
+
+Ejemplo:
+
+Agricultura: 300
+
+Construcción: 100
+
+Minería: 150
+
+Soldados: 100
+
+Educación: 100
+
+Medicina: 50
+
+Religión: 50
+
+Otros: 150
+
+La suma debe corresponder a la población activa disponible.
+
+
+
+
+                        La Conquista — Especificación Maestra del Juego
+13. PROFESIONES
+Categorías principales:
+
+●   Agricultura: produce alimentos.
+●   Construcción: permite construir y mejorar.
+●   Viviendas: con las viviendas se permite mayor población, sin viviendas aunque crezca un
+    30% al año, no tendrán donde vivir y no subirá la población
+●   Aserradero.
+●   Minería de oro.
+●   Minería: produce recursos minerales.
+●   Cantería: produce piedra.
+●   Metalurgia: trabaja hierro y materiales avanzados.
+●   Forga. Creación de nuevas armas y armaduras, adecuadas a cada civilización.
+●   Circo.
+●   Iglesia.
+●   Hospital militar
+●   Taberna, aquí se contratan los mercenarios.
+●   Universidad, aquí se investiga el árbol tecnológico.
+●   Soldados: forman el ejército.
+●   Educación: forma personal cualificado y supervisores.
+●   Medicina: mejora recuperación de heridos y salud.
+●   Religión: afecta a moral/felicidad.
+●   Supervisores: administran trabajadores y mejoran rendimiento.
+●   Panadería
+●   Feria
+
+●   Barracones, se restan civiles de la población y pasan a ser soldados. Elegir diferentes
+    tiempos e intensidades de entrenamiento, todo influye a la victoria.
+
+
+
+14. TRABAJO AUTOMÁTICO
+Una vez asignada población a una actividad, trabaja automáticamente. El jugador no debe dar
+órdenes constantemente.
+
+Ejemplo: asignar 250 personas a agricultura hace que produzcan automáticamente, consuman
+alimentos, reciban salario si corresponde, descansen y participen en el crecimiento.
+
+
+
+15. DESCANSO
+La población necesita descansar. Falta de descanso:
+
+●   reduce productividad;
+●   empeora moral;
+●   aumenta fatiga;
+●   puede reducir rendimiento militar.
+
+El jugador gestiona horarios laborales, descanso e intensidad productiva. Castillo/Ayuntamiento
+controla estas políticas.
+
+
+
+                          La Conquista — Especificación Maestra del Juego
+16. VIVIENDAS
+La población necesita viviendas. Si los habitantes superan significativamente las viviendas
+disponibles:
+
+●   empeora el descanso;
+●   disminuye felicidad;
+●   puede aumentar fatiga;
+●   baja productividad.
+
+Construir viviendas es una necesidad estructural.
+
+
+
+17. ALIMENTACIÓN
+Cuatro niveles:
+
+Mínima: 1 comida al día; supervivencia con penalizaciones.
+
+Normal: 3 comidas; sin penalización significativa.
+
+Abundante: 4 comidas variadas; bonificación positiva.
+
+Excelente: 4 comidas variadas y abundantes; bonificación máxima.
+
+
+
+18. CONSUMO MILITAR
+Los soldados consumen un 5 % más de comida que los civiles. Mantener un ejército grande
+tiene una consecuencia económica real y obliga a aumentar la producción alimentaria.
+
+
+
+19. PRODUCCIÓN INICIAL DE ALIMENTOS
+Los 2.000 habitantes iniciales NO deben entrar en hambruna inmediatamente. Una distribución
+razonable de trabajadores debe sostener una ración normal con un pequeño margen.
+
+El crecimiento del reino obliga progresivamente a aumentar agricultores, construir granjas y
+mejorar agricultura.
+
+
+
+
+Cada edificio tiene funciones específicas de producción, población, economía, felicidad,
+investigación, ejército o diplomacia.
+
+
+
+21. CONSTRUCCIÓN
+La construcción utiliza una cola de tareas.
+
+Ejemplo: “Construir 20 casas”. Los trabajadores ejecutan la orden automáticamente. Debe
+aparecer progreso y tiempo restante.
+
+
+
+                        La Conquista — Especificación Maestra del Juego
+Nunca debe completarse instantáneamente.
+
+
+
+22. TIEMPOS DE CONSTRUCCIÓN
+Cada nivel superior debe ser aproximadamente un 1 % más lento que el nivel anterior. Los
+tiempos concretos son parámetros de balance modificables sin reescribir toda la lógica.
+
+
+
+23. CASTILLO
+El Castillo es la principal puerta de progresión. Determinados edificios, tropas y tecnologías
+requieren un nivel mínimo.
+
+Tropa nivel 2: Castillo 2 + Barracones 2.
+
+Tropa nivel 3: Castillo 4 + Barracones 3 + Universidad 2.
+
+Tropa nivel 4: Castillo 6 + Barracones 4 + Universidad 3.
+
+Tropa nivel 5: Castillo 8 + Barracones 5 + Universidad 4 + Herrería 5.
+
+
+
+24. UNIVERSIDAD
+Desbloquea tecnologías.
+
+Ejemplos:
+
+●   Cataplasmas medicinales: Castillo 2 + Universidad 2.
+●   Espionaje I: Castillo 2 + Universidad 2.
+●   Acero avanzado: Castillo 5 + Universidad 3 + Herrería 4.
+
+
+
+25. SUPERVISORES
+Los supervisores son trabajadores especializados formados mediante la Universidad. Un
+supervisor puede encargarse de una línea de investigación o actividad. Regla inicial: un
+supervisor = una investigación activa.
+
+
+
+26. ECONOMÍA
+Recursos principales:
+
+●   oro
+●   madera
+●   piedra
+●   hierro
+●   alimentos
+
+Los edificios y actividades generan riqueza. El Estado recauda impuestos sobre la actividad
+económica.
+
+
+
+
+                        La Conquista — Especificación Maestra del Juego
+27. IMPUESTOS
+El jugador puede elegir entre 0 % y 100 % de impuestos. Impuestos altos producen más oro,
+pero reducen felicidad, moral y rendimiento militar. Debe existir un equilibrio fiscal.
+
+
+
+28. EJÉRCITO
+El ejército está formado por regimientos abstractos. No se controlan soldados individualmente en
+tiempo real.
+
+Tipos principales:
+
+●   infantería
+●   arqueros
+●   caballería
+●   Mercenarios, con diferentes niveles
+
+Adaptados a cada civilización.
+
+
+
+29. NIVELES MILITARES
+Nivel 1 — Milicia: 100 %
+
+Nivel 2 — Entrenado: 115 %
+
+Nivel 3 — Veterano: 135 %
+
+Nivel 4 — Profesional: 160 %
+
+Nivel 5 — Élite: 190 %
+
+Son multiplicadores de eficacia del entrenamiento.
+
+
+
+30. ARMAMENTO
+Calidad de armas:
+
+●   palo: 0,70
+●   lanza básica: 0,90
+●   espada de hierro: 1,00
+●   acero: 1,15
+●   acero avanzado: 1,30
+
+Adaptadas a cada civilización.
+
+
+
+31. ARMADURAS
+Calidad de armadura:
+
+●   ninguna: 0,70
+
+
+
+                         La Conquista — Especificación Maestra del Juego
+● piel: 0,85
+● cuero reforzado: 0,95
+● hierro: 1,10
+● acero: 1,25
+Adaptados a cada civilización.
+
+
+
+32. FATIGA
+0–10 %: sin penalización.
+
+11–25 %: -3 %.
+
+26–40 %: -8 %.
+
+41–60 %: -15 %.
+
+61–75 %: -25 %.
+
+76–90 %: -40 %.
+
+Más de 90 %: -55 %.
+
+
+
+33. MORAL
+La moral militar afecta al rendimiento y depende de:
+
+●   alimentación;
+●   descanso;
+●   impuestos;
+●   victorias;
+●   derrotas;
+●   felicidad;
+●   liderazgo;
+●   religión;
+●   situación general del reino.
+
+
+
+34. PESOS DEL COMBATE
+Cálculo aproximado:
+
+●   Número: 30 %
+●   Entrenamiento/nivel: 20 %
+●   Armas: 15 %
+●   Armadura: 10 %
+●   Formación/estrategia: 10 %
+●   Moral: 5 %
+●   Alimentación: 5 %
+●   Fatiga: 5 %
+
+
+
+
+                        La Conquista — Especificación Maestra del Juego
+La cantidad importa, pero una fuerza pequeña bien entrenada y equipada debe poder derrotar a
+una fuerza mayor mal preparada.
+
+
+
+35. ESTRATEGIAS
+Estrategias iniciales:
+
+●   Defensiva: mejor resistencia.
+●   Agresiva: mayor capacidad ofensiva y mayores pérdidas potenciales.
+●   Concentración/Bien preparada: busca explotar debilidades.
+
+La estrategia adecuada contra el enemigo adecuado debe poder producir una victoria enorme.
+
+
+
+36. BATALLAS
+Las batallas son automáticas. El jugador configura antes:
+
+●   formación;
+●   estrategia;
+●   tropas;
+●   alimentación;
+●   entrenamiento;
+●   equipamiento.
+
+La composición exacta del enemigo permanece oculta salvo mediante inteligencia.
+
+
+
+37. FORMACIÓN
+El jugador puede distribuir sus tropas entre infantería, arqueros y caballería. La eficacia depende
+de la interacción entre formación propia, formación enemiga y estrategia.
+
+
+
+38. PARLAMENTO
+No existen ataques sorpresa. Todo combate PvP importante pasa por el Parlamento. Un jugador
+puede desafiar a otro reino y el rival recibe una notificación. Se dan varias opciones, atacar o no.
+Si se rechaza se tiene una penalización de recursos.
+
+
+
+Si se acepta, se dan tres opciones, una más próxima en el tiempo, otra dentro de unos días, y la
+última en una semana ( en tiempo real todas las fechas).
+
+
+
+39. DESAFÍOS
+Un desafío incluye:
+
+●   rival;
+●   fecha;
+●   hora;
+
+
+
+                         La Conquista — Especificación Maestra del Juego
+●   condiciones;
+●   territorio o apuesta si corresponde.
+
+Puede negociarse, aceptarse o rechazarse.
+
+
+
+40. PREPARACIÓN DEL COMBATE
+Una vez acordada la batalla, el jugador utiliza el tiempo restante para:
+
+●   entrenar;
+●   fabricar armas;
+●   producir alimentos;
+●   reorganizar población;
+●   contratar mercenarios;
+●   mejorar moral;
+●   reducir fatiga.
+
+La formación puede modificarse hasta el límite establecido antes del combate.
+
+
+
+41. DISTANCIA
+La distancia entre reinos afecta desplazamiento, tiempos, cansancio y preparación.
+
+
+
+42. INFORMACIÓN DEL ENEMIGO
+La composición exacta permanece oculta. Sin espionaje se muestran datos generales. Ejemplo:
+
+Reino de X
+
+Población: aproximadamente 8.000
+
+Ejército estimado: 1.500–2.000
+
+Honor: 3.420
+
+La composición exacta requiere inteligencia.
+
+
+
+43. RESULTADO DE BATALLA
+Cada batalla genera un informe completo:
+
+●   Victoria/Derrota/Empate.
+●   Muertos, heridos y supervivientes de cada bando.
+●   Explicación de por qué ganó.
+●   Honor ganado.
+●   Gloria ganada.
+●   Territorio conquistado si corresponde.
+●   Desgaste de equipamiento.
+●   Recuperación prevista.
+
+
+
+
+                        La Conquista — Especificación Maestra del Juego
+44. HERIDOS
+No todas las bajas son muertes. Parámetro inicial: aproximadamente 65 % de las bajas del
+jugador pueden convertirse en heridos.
+
+Los heridos:
+
+●   abandonan temporalmente el ejército;
+●   no pueden combatir;
+●   aparecen separados de soldados disponibles;
+●   necesitan recuperación.
+
+
+
+45. HOSPITAL MILITAR
+Edificio: Enfermería Militar/Hospital Militar.
+
+Recuperación inicial:
+
+Nivel 1: 15 % de heridos por año.
+
+Nivel 2: 22 %.
+
+Nivel 3: 30 %.
+
+Nivel 4: 40 %.
+
+Nivel 5+: 50 %.
+
+Los trabajadores de medicina aportan bonificaciones. Los heridos recuperados vuelven al
+ejército. La capacidad hospitalaria y sus reglas de exceso deben concretarse sin asumir valores
+no definidos.
+
+
+
+46. MUERTOS
+Las tropas que mueren se pierden definitivamente. Una derrota nunca debe eliminar
+automáticamente la partida completa.
+
+
+
+47. VICTORIA APLASTANTE
+Una batalla es una VICTORIA APLASTANTE cuando el enemigo pierde más del 75 % de su
+ejército. El criterio exacto de cómputo de las pérdidas debe mantenerse coherente con el sistema
+de bajas y queda pendiente de definición si no está especificado en otra regla oficial.
+
+El vencedor obtiene una recompensa territorial especial.
+
+
+
+48. TERRITORIOS
+El ganador NO roba automáticamente el territorio principal enemigo. Tras una victoria aplastante
+puede reclamar un territorio libre cercano.
+
+Al reclamarlo y cumplir las condiciones:
+
+
+                         La Conquista — Especificación Maestra del Juego
+●   desaparece de territorios libres;
+●   pasa a territorios del reino;
+●   aparece en el mapa como territorio propio.
+
+
+
+49. TERRITORIOS LIBRES
+Son territorios sin propietario. Pueden obtenerse mediante victorias aplastantes y futuros
+sistemas de exploración. No se conceden como recompensa por temporadas competitivas.
+
+
+
+50. HONOR
+El honor representa reputación militar y política. Se obtiene mediante victorias, grandes victorias
+y desafíos. Sirve para rankings, títulos y prestigio. Las cantidades y reglas exactas de concesión
+quedan sujetas a balance.
+
+
+
+51. GLORIA
+La gloria representa rendimiento militar reciente. Puede proporcionar bonificaciones temporales.
+Una gran victoria proporciona más gloria que una victoria pequeña. No sustituye al desarrollo
+estructural.
+
+
+
+52. EMPATE
+Existe empate cuando ambos bandos sufren pérdidas similares y ninguno obtiene ventaja
+significativa. No se concede territorio automáticamente. La tolerancia cuantitativa para
+determinar pérdidas similares sigue siendo una propuesta pendiente de fijación.
+
+
+
+53. MERCENARIOS
+Los mercenarios pueden contratarse con oro. Aumentan el ejército y la población y permiten
+reforzar temporalmente una fuerza sin desmontar completamente la economía civil.
+
+
+
+54. RECLUTAMIENTO
+Los ciudadanos pueden convertirse en soldados. Al hacerlo dejan temporalmente su profesión
+civil, creando un coste económico real por mantener el ejército.
+
+
+
+55. MODO «A TOPE»
+Antes de una batalla el jugador puede llevar la economía al límite:
+
+●   aumentar armas;
+●   aumentar alimentos;
+●   acelerar entrenamiento;
+●   reducir actividades civiles;
+●   aumentar población militar.
+
+
+
+
+                        La Conquista — Especificación Maestra del Juego
+Debe tener consecuencias económicas y sociales.
+
+
+
+56. PENDIENTE DE ACLARACIÓN DOCUMENTAL
+
+
+
+57. REINO AFECTADO POR LAS DECISIONES
+Las decisiones tienen consecuencias.
+
+Muchos soldados: mayor fuerza, mayor consumo y menos trabajadores civiles.
+
+Impuestos altos: más oro, menor felicidad/moral.
+
+Poco descanso: producción inmediata, mayor fatiga y peor rendimiento posterior.
+
+Mala alimentación: ahorro inmediato pero menor moral, productividad y rendimiento militar.
+
+
+
+58. NOTIFICACIONES
+
+🔴
+El Parlamento muestra una insignia cuando existe un desafío pendiente. Ejemplo: Parlamento
+   1. Debe desaparecer cuando el desafío se gestiona.
+
+
+
+59. BONUS DIARIO
+El jugador recibe una recompensa por entrar cada día.
+
+Parámetro inicial: +5 honor.
+
+Solo puede reclamarse una vez cada 24 horas. En la versión online, la validación definitiva debe
+realizarse en servidor.
+
+
+
+60. COMUNICACIÓN ENTRE REINOS
+No habrá chat libre inicialmente. Solo mensajes predefinidos:
+
+                               ⚔
+                               👑
+●   ¿Te atreves a retarme?
+
+                   🛡
+●   Mi reino está preparado.
+
+                   😂
+●   Buena suerte.
+
+                                          ⚔
+●   ¿Eso es todo?
+●   Nos veremos en el campo de batalla.
+
+Posteriormente: límites de spam, enfriamiento y protección.
+
+
+
+61. PENDIENTE DE ACLARACIÓN DOCUMENTAL
+●
+
+
+
+
+                       La Conquista — Especificación Maestra del Juego
+62. UNIVERSIDAD Y TECNOLOGÍAS FUTURAS
+Árboles previstos:
+
+Militar: entrenamiento, armas, armaduras, formación, medicina militar.
+
+Económico: agricultura, minería, producción, almacenamiento.
+
+Civil: educación, felicidad, salud, construcción.
+
+Inteligencia: espionaje.
+
+Civilización: tecnologías únicas por civilización.
+
+Árbol tecnológico lo más coherente y desarrollado posible
+
+
+
+63. PROGRESIÓN DE EDIFICIOS
+Los edificios tienen niveles. Cada nivel mejora producción, capacidad, desbloqueos y
+tecnologías. Los niveles dependen de Castillo, edificio especializado, Universidad y otros
+requisitos. No debe haber mejoras infinitas sin progresión.
+
+
+
+64. PANTALLA INFERIOR / NAVEGACIÓN
+Secciones principales:
+
+🏰 Aldea — economía y población.
+⚔ Ejército — tropas, entrenamiento, armas, armaduras, heridos y Hospital Militar.
+🎓 Universidad — tecnologías e investigación.
+🏛 Parlamento — desafíos y diplomacia.
+🗺 Mapa — territorios y mundo.
+65. GUARDADO
+Guardar:
+
+●   cuenta;
+●   monarca;
+●   civilización;
+●   reino;
+●   castillo;
+●   población;
+●   trabajos;
+●   recursos;
+●   edificios;
+●   tecnologías;
+●   tropas;
+
+
+
+                           La Conquista — Especificación Maestra del Juego
+●   niveles;
+●   heridos;
+●   territorios;
+●   honor;
+●   gloria;
+●   desafíos;
+●   historial de batallas;
+●   investigaciones;
+●   tareas en cola;
+●   último bonus;
+●   fecha/hora de última actualización;
+●
+
+
+
+66. AUTORIDAD DEL SERVIDOR Y SEGURIDAD TEMPORAL
+
+El servidor es la autoridad sobre el tiempo transcurrido y los valores críticos de la partida. El
+cliente nunca puede decidir libremente que han pasado 100 años ni modificar recursos, tropas,
+territorios o resultados de combate sin validación del servidor.
+
+
+
+67. PRINCIPIO FUNDAMENTAL DE DISEÑO
+El juego debe evitar dos extremos: no ser demasiado pasivo ni convertirse en trabajo.
+
+El objetivo es entrar unos minutos, tomar decisiones estratégicas, salir y volver después para
+comprobar cómo ha evolucionado el reino.
+
+
+
+68. DERROTA
+Perder una batalla no significa perder la partida. El jugador puede recuperar heridos, reconstruir
+tropas, mejorar tecnología, reparar economía, negociar y preparar una revancha. Una derrota
+debe crear una nueva decisión estratégica.
+
+
+
+69. FILOSOFÍA DE LAS BATALLAS
+Una batalla debe responder a “¿Quién gestionó mejor su reino y preparó mejor el ejército?”, no
+simplemente a “¿Quién tiene más soldados?”.
+
+Cantidad importa, pero entrenamiento, equipo, moral, comida, fatiga, estrategia, formación y
+tecnología pueden cambiar el resultado.
+
+
+
+70. PRINCIPIOS DE INTERFAZ
+La interfaz debe ser clara, legible en móvil, rápida, visualmente medieval, fácil de entender y sin
+saturación de botones.
+
+Cada acción debe indicar:
+
+
+
+
+                        La Conquista — Especificación Maestra del Juego
+qué hace → cuánto cuesta → cuánto tarda → qué resultado tendrá.
+
+
+
+71. REGLA DE ORO PARA EL DESARROLLO
+Antes de añadir nuevas características:
+
+1. La economía debe funcionar.
+
+2. El tiempo debe funcionar.
+
+3. La construcción debe funcionar.
+
+4. El guardado debe funcionar.
+
+5. El ejército debe funcionar.
+
+6. Las batallas deben funcionar.
+
+7. La progresión debe funcionar.
+
+8. El servidor debe ser fiable.
+
+No añadir contenido nuevo sobre sistemas fundamentales rotos.
+
+
+
+72. PARÁMETROS AJUSTABLES
+Son parámetros de balance modificables:
+
+●   crecimiento de población;
+●   velocidad de recuperación de heridos;
+●   porcentaje de bajas convertidas en heridos;
+●   costes de edificios;
+●   duración de construcciones;
+●   consumo de alimentos;
+●   producción agrícola;
+●   impuestos;
+●   multiplicadores de combate;
+●   recompensas de honor/gloria;
+●   fuerza de cada civilización;
+●   velocidad de entrenamiento;
+●   costes tecnológicos.
+
+La lógica debe permitir modificar estos parámetros fácilmente.
+
+
+
+73. OBJETIVO FINAL
+La Conquista debe sentirse como dirigir un reino vivo.
+
+El jugador decide: “Quiero 300 agricultores, 150 mineros, 200 soldados, subir el Castillo al nivel
+4, investigar acero y preparar una batalla dentro de tres días”.
+
+
+
+
+                        La Conquista — Especificación Maestra del Juego
+Después, la población trabaja, produce, descansa, come, entrena, construye e investiga
+automáticamente.
+
+Al volver:
+
+●   hay recursos nuevos;
+●   el castillo puede haber terminado;
+●   hay soldados heridos recuperándose;
+●   la Universidad puede haber terminado una investigación;
+●   puede existir un desafío enemigo;
+●   puede faltar tiempo para una batalla.
+
+La siguiente decisión estratégica nace de la evolución automática del reino.
+
+
+
+
+                       La Conquista — Especificación Maestra del Juego
+ANEXO — CONSOLIDACIÓN DE LA AUDITORÍA P41–P73
+Este anexo recoge precisiones acordadas durante la auditoría. No sustituye las reglas principales
+ni convierte propuestas o parámetros pendientes en reglas oficiales.
+
+P41 — Distancia
+●   La distancia entre reinos afecta al desplazamiento del ejército, al tiempo de llegada, al
+    cansancio de la marcha y al tiempo disponible para prepararse.
+●   Las fórmulas y conversiones exactas de distancia/tiempo permanecen pendientes; no se
+    introducen valores nuevos.
+
+P42 — Información del enemigo
+●   Sin inteligencia suficiente se muestra información general o aproximada, no la composición
+    exacta del ejército rival.
+●   La composición exacta requiere inteligencia conforme a las reglas que se definan para ese
+    sistema.
+
+P43 — Informe de batalla
+●   El informe contempla Victoria/Derrota/Empate, muertos, heridos y supervivientes de ambos
+    bandos, explicación del resultado, honor, gloria, territorio si corresponde, desgaste del
+    equipo y recuperación prevista.
+●   Las fórmulas exactas de recompensas y resultados no se fijan en este anexo.
+
+P44–P46 — Bajas, heridos y muertos
+●   Parámetro inicial de laboratorio/diseño: aproximadamente el 65 % de las bajas puede
+    convertirse en heridos; no debe tratarse como valor inmutable sin balance.
+●   Los heridos salen temporalmente del ejército activo, no pueden combatir y se registran
+    aparte hasta recuperarse.
+●   Los muertos se pierden definitivamente. Una derrota no elimina automáticamente la partida.
+
+P45 — Hospital militar
+●   Valores iniciales de recuperación por año de juego: nivel 1 = 15 %, nivel 2 = 22 %, nivel 3 =
+    30 %, nivel 4 = 40 %, nivel 5 o superior = 50 %.
+●   Los trabajadores de medicina aportan bonificaciones. Capacidad, exceso de heridos y
+    detalles de implementación siguen pendientes si no están definidos en otra regla.
+
+P47–P49 — Victoria aplastante y territorios
+●   Victoria aplastante: el enemigo pierde más del 75 % de su ejército; exactamente el 75 % no
+    cumple el umbral estricto «más del 75 %».
+●   El vencedor no roba automáticamente el territorio principal enemigo. Puede reclamar un
+    territorio libre cercano tras una victoria aplastante y cumplir las condiciones
+    correspondientes.
+●   Los territorios libres pueden obtenerse mediante victorias aplastantes y futuros sistemas de
+    exploración. Se eliminan las recompensas por temporada competitiva.
+
+P50–P52 — Honor, gloria y empate
+●   El honor representa reputación militar/política y sirve para rankings, títulos y prestigio; no se
+    fijan aquí recompensas numéricas nuevas.
+
+
+
+                        La Conquista — Especificación Maestra del Juego
+●   La gloria representa el rendimiento militar reciente y puede aportar bonificaciones
+    temporales; duración, decaimiento y efectos exactos quedan pendientes.
+●   El empate implica pérdidas similares, ausencia de ventaja significativa y ningún territorio
+    concedido automáticamente. La banda cuantitativa de pérdidas similares sigue pendiente y
+    no es regla oficial.
+
+P53–P55 y P57 — Economía y decisiones
+●   Mercenarios: se contratan con oro y refuerzan temporalmente el ejército.
+●   Reclutar ciudadanos reduce temporalmente la mano de obra civil disponible.
+●   El modo «A tope» permite priorizar la preparación militar con consecuencias económicas y
+    sociales.
+●   Se mantienen los efectos cualitativos documentados: más soldados consumen más y
+    reducen trabajadores civiles; impuestos altos aumentan oro y reducen felicidad/moral; poco
+    descanso aumenta fatiga; mala alimentación perjudica moral, productividad y rendimiento
+    militar.
+
+P56 y P61 — Pendientes documentales
+●   Los puntos 56 y 61 no contienen una regla desarrollada en la especificación disponible. Se
+    dejan pendientes de aclaración documental; no se inventa contenido para rellenarlos.
+
+P58–P60 — Interfaz social inicial
+●   El Parlamento muestra una insignia cuando hay desafíos pendientes y la retira cuando se
+    gestionan.
+●   Bonus diario inicial: +5 honor, una vez cada 24 horas, validado por el servidor.
+●   No habrá chat libre inicialmente; se emplean mensajes predefinidos.
+
+P62–P64 — Tecnología, edificios y navegación
+●   Se mantienen los árboles tecnológicos previstos: militar, económico, civil, inteligencia y
+    tecnologías únicas de civilización.
+●   Los edificios tienen niveles y requisitos; no hay mejoras infinitas sin progresión.
+●   La navegación principal incluye Aldea, Ejército, Universidad, Parlamento y Mapa.
+
+P65–P66 — Persistencia y autoridad
+●   Se guardan cuenta, monarca, civilización, reino, castillo, población, trabajos, recursos,
+    edificios, tecnologías, tropas, niveles, heridos, territorios, honor, gloria, desafíos, historial de
+    batallas, investigaciones, colas, último bonus y marca temporal de actualización.
+●   No se guarda una temporada competitiva. El servidor controla el tiempo transcurrido y valida
+    el estado crítico; el cliente no puede alterar esos valores por su cuenta.
+
+P67–P73 — Principios de producto
+●   El juego debe permitir sesiones breves y progreso automático mientras el jugador está
+    desconectado.
+●   Una derrota crea nuevas decisiones, no un fin de partida.
+●   Las batallas ponderan la gestión y preparación del reino, no solo el número de soldados.
+●   La interfaz móvil debe ser clara y cada acción debe indicar efecto, coste, duración y
+    resultado esperado.
+●   Primero deben funcionar economía, tiempo, construcción, guardado, ejército, batallas,
+    progresión y servidor.
+
+
+
+                         La Conquista — Especificación Maestra del Juego
+●   Los parámetros de balance deben poder ajustarse fácilmente.
+●   Objetivo final: un reino vivo que evoluciona automáticamente según las decisiones
+    estratégicas del jugador.
+
+ESTADO DE CIERRE: especificación consolidada para continuar el desarrollo web con React +
+Convex. No se reutiliza el backend antiguo de Firebase/Cloudflare ni los once archivos
+anteriores. Antes de tocar funciones existentes de Convex, se comprobará qué código ya está
+presente para no sobrescribir sistemas funcionales.
+
+
+
+
+                       La Conquista — Especificación Maestra del Juego
+

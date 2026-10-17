@@ -1,0 +1,153 @@
+                                        LA CONQUISTA
+                             Indicaciones del juego — documento consolidado
+
+
+       Recopilación de reglas, decisiones y estado técnico disponibles en la memoria del
+                                           proyecto.
+
+
+
+ Importante: este PDF reconstruye las indicaciones que están disponibles en el contexto de trabajo. No es una copia
+ literal ni íntegra del documento maestro original de 73 puntos. Cuando una regla antigua entra en conflicto con
+ decisiones posteriores, se marca para revisión.
+
+
+
+
+                   Proyecto: juego web multijugador de estrategia medieval
+                                       Backend: Convex
+      Estado de referencia: Bloque Militar 2C informado como completado localmente; sin
+                                      despliegue remoto.
+
+
+
+
+LA CONQUISTA · Indicaciones del juego                                                                         Página 1
+ 1. Principios de trabajo del proyecto
+ • No inventar mecánicas, fórmulas, costes, tiempos, requisitos ni bonificaciones.
+ • Dar prioridad a la Especificación Maestra vigente y a las decisiones explícitas más recientes del usuario.
+ • Distinguir siempre entre documentación, código local, pruebas locales y backend desplegado.
+ • No afirmar que una función remota existe o está sincronizada sin verificación suficiente.
+ • No desplegar, ejecutar mutaciones remotas ni alterar datos sin autorización explícita.
+ • Iberia es un reino de pruebas y puede utilizarse para validaciones controladas, con autorización y sin operaciones
+ destructivas inadvertidas.
+
+
+ 2. Reglas generales recuperadas
+ Escala temporal (P2): 1 día real equivale a 1 año de juego (86.400 segundos).
+
+ Recursos (P3): oro, madera, piedra, hierro y alimentos.
+
+ Población inicial (P10): 2.000 habitantes. No ajustar automáticamente sin una regla aprobada.
+
+ Raciones (P17): mínima 0,75; normal 1,00; abundante 1,10; excelente 1,20.
+
+ Consumo militar (P18): factor adicional de alimentos de 1,05 para tropas regulares. La inclusión o exclusión de
+ máquinas de asedio requiere confirmar la regla vigente.
+
+
+ 3. Población y economía
+ • La población se relaciona con soldados, trabajadores y reserva civil libre. La reserva debe validarse para no ser
+ negativa ni contabilizar a una misma persona en categorías incompatibles.
+ • Una decisión posterior del proyecto indica que el reclutamiento debe utilizar población civil libre y no retirar
+ automáticamente trabajadores productivos.
+ • El modelo contiene datos de población y puestos de trabajo en tablas relacionales, además de campos heredados
+ en kingdoms. La implementación debe comprobar qué fuente usa cada ruta.
+ • Debe evitarse contabilizar dos veces las tropas si se usan conjuntamente armyUnits y regularSoldiers.
+
+
+ 4. Sistema militar documentado
+ Tipos presentes en el código informado: infanteria, caballeria, arqueria y asedio. Esto no demuestra que el catálogo
+ militar esté completo ni que todas las reglas estén implementadas.
+
+ Calidad militar (P29, documentación recuperada): niveles 1–5 con multiplicadores de 100 %, 115 %, 135 %, 160 % y
+ 190 %. Confirmar vigencia antes de implementarlos.
+
+ Requisitos históricos de calidad militar (P30–P31, documentación anterior):
+
+        Nivel    Nombre                 Requisitos documentados
+
+        1        Milicia                Sin requisito mínimo especificado
+
+        2        Entrenado              Castillo 2 + Barracones 2
+
+        3        Veterano               Castillo 4 + Barracones 3 + Universidad 2
+
+        4        Profesional            Castillo 6 + Barracones 4 + Universidad 3
+
+        5        Élite                  Castillo 8 + Barracones 5 + Universidad 4 + Herrería 5
+
+
+ Estos son requisitos de calidad/nivel militar recuperados de documentación anterior, no una confirmación de que estén implementados ni
+ de que bloqueen tipos concretos de unidad.
+
+ Entrenamiento (documentación anterior): una semana de juego, aproximadamente 28 minutos reales según la escala
+ temporal. La duración vigente por tipo/nivel no está confirmada.
+ Conflicto pendiente: una especificación antigua indica que los reclutas dejan su trabajo civil y reciben salario; una
+ decisión posterior indica reclutar de población civil libre sin quitar trabajadores productivos. Debe prevalecer la
+
+
+
+LA CONQUISTA · Indicaciones del juego                                                                                           Página 2
+ decisión más reciente salvo confirmación contraria.
+
+
+ 5. Civilizaciones
+ La propiedad civilization existe en el esquema de reinos, pero el informe técnico dice que no hay bonificaciones
+ militares por civilización implementadas. La documentación antigua contiene ejemplos de diferencias históricas, pero
+ su vigencia no está confirmada. No aplicar esas bonificaciones automáticamente.
+
+
+ 6. Combate y desafíos: reglas recuperadas
+ • Documentación anterior atribuye al combate estos pesos: número 30 %, entrenamiento/nivel 20 %, armas 15 %,
+ armadura 10 %, formación/estrategia 10 %, moral 5 %, alimentación 5 % y fatiga 5 %. Confirmar que la fórmula siga
+ vigente antes de codificarla.
+ • Las reglas históricas de desafíos PvP incluyen ausencia de ataques sorpresa, intervención del Parlamento,
+ aceptación/rechazo y opciones temporales; preparación del contingente hasta el congelamiento; efecto de la distancia
+ sobre marcha/fatiga y ocultación de la composición exacta sin espionaje. Verificar contra la versión maestra vigente.
+
+
+ 7. Arquitectura técnica y estado conocido
+ • Backend: Convex. Esquemas y funciones deben validarse contra el código local y el despliegue real.
+ • kingdoms:getArmyUnits: función de lectura protegida, reportada como implementada y desplegada.
+ • army:trainArmyUnits: no encontrada en la auditoría; no debe llamarse como si existiera.
+ • armyUnits: tabla relacional con kingdomId, unitType y count; índice by_kingdom.
+ • regularSoldiers: campo legado en kingdoms utilizado por la economía.
+ • classifyArmyUnits: adaptador que clasifica unidades regulares y máquinas de asedio; comprobar el flujo hasta el
+ cálculo final de consumo.
+ • constructionQueue: patrón existente para colas de construcción.
+ • trainingQueue: añadida a convex/schema.ts en el Bloque Militar 2C según el informe, con kingdomId, unitType,
+ count, startedAt, durationMs, costs e índice by_kingdom. No se ha desplegado al backend remoto.
+
+
+ 8. Estado militar y próximos pasos
+ Implementado según auditorías: lectura del ejército, validador de tipos/cantidades, adaptador de clasificación y
+ esquema local de trainingQueue.
+
+ Pendiente: confirmar integridad demográfica; resolver la fuente de verdad del ejército; definir costes y tiempos
+ aprobados; implementar mutaciones autoritativas de entrenamiento; completar automáticamente entrenamientos
+ vencidos; integrar requisitos de edificios y civilizaciones; diseñar cancelaciones y devoluciones; realizar pruebas de
+ integración y despliegue autorizado.
+
+
+ 9. Parámetros y decisiones pendientes
+ No se han localizado valores definitivos para costes unitarios de reclutamiento, salarios militares, capacidad
+ simultánea de entrenamiento, penalización de cancelación, duración por tipo/nivel, requisitos por unidad y
+ modificadores vigentes por civilización. Deben obtenerse de la Especificación Maestra vigente o aprobarse
+ explícitamente.
+
+
+ 10. Regla de seguridad para cada bloque
+ Antes de modificar o desplegar: identificar archivos afectados; declarar qué reglas están confirmadas y cuáles
+ pendientes; mantener pruebas; evitar cambios destructivos; probar con Iberia de forma controlada solo con
+ autorización; separar claramente cambios locales de cambios remotos.
+
+
+ Documento de trabajo reconstruido a partir del contexto de memoria disponible. No sustituye el documento maestro original ni confirma
+ por sí solo la vigencia de las reglas históricas señaladas.
+
+
+
+
+LA CONQUISTA · Indicaciones del juego                                                                                            Página 3
+

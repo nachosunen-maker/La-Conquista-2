@@ -22,6 +22,7 @@ import {
   simulateEconomicProgress,
 } from "./economyCalculations";
 import { calculateBuildingWorkerCapacity } from "./buildingRules";
+import { UNITS } from "./balanceConfig";
 
 /** Representaciones canónicas de los documentos del backend remoto */
 export interface RemoteKingdomDoc {
@@ -34,9 +35,11 @@ export interface RemoteKingdomDoc {
   happiness?: number;
   militaryMorale?: number;
   taxPolicy?: string;
+  taxRate?: number;
   foodTier?: string;
   createdAt?: number;
   updatedAt?: number;
+  moraleEffects?: Array<{ amount: number; expiresAt: number }>;
 }
 
 export interface RemoteResourcesDoc {
@@ -59,6 +62,8 @@ export interface RemotePopulationDoc {
   capacity?: number;
   available: number;
   starving?: boolean;
+  /** Segundos reales acumulados de déficit alimentario (D-48), persistidos por el servidor. */
+  starvationSeconds?: number;
 }
 
 export interface RemotePopulationJobDoc {
@@ -178,6 +183,8 @@ export interface RemoteArmyUnitDoc {
   kingdomId: string;
   unitType: string;
   count: number;
+  level?: number;   // Nivel militar P29 (1-5); ausente = 1
+  wounded?: number; // Heridos P44, separados de los activos
 }
 
 export type ValidFoodTier = "minima" | "normal" | "abundante" | "excelente";
@@ -193,33 +200,31 @@ export function isValidFoodTier(tier: string): tier is ValidFoodTier {
 }
 
 /**
- * Clasificación de unidades militares y tratamiento del consumo (P18).
- * Regla normativa: P18 establece que las tropas consumen un 5% más de comida (factor 1,05).
- * - Infantería, caballería y arquería son unidades de combatientes vivos (consumen alimentos).
- * - Asedio: Las máquinas de asedio (catapultas, arietes) son ingenios mecánicos operados por
- *   dotaciones de ingenieros. P18 no especifica expresamente si una unidad de asedio cuenta
- *   como 1 soldado que consume alimentos o si su tripulación está computada en otro lugar.
- *   Por defecto conservador y seguro, el adaptador clasifica como 'regularSoldiers' a todas las
- *   tropas regulares vivas conocidas ('infanteria', 'caballeria', 'arqueria').
- *   Si la especificación aprueba que el asedio consume raciones o se proporciona la opción
- *   'includeSiegeInFoodConsumption', se suma explícitamente.
+ * Clasificación de unidades militares y tratamiento del consumo (P18, D-12).
+ * - Infantería, caballería y arquería son tropa viva: consumen con el factor 1,05.
+ * - Las máquinas de asedio no consumen raciones; sus operadores (5 por pieza,
+ *   reservados de la población civil al entrenar) son personal militar y sí consumen.
+ * - Los heridos siguen siendo personas: consumen como tropa.
+ * - La tabla heredada 'Armyunits' usa unitType "regular", tratado como infantería.
  */
 export interface MilitaryClassification {
-  regularSoldiers: number; // Tropas sujetas al factor militar 1,05 de comida
-  siegeUnits: number;      // Máquinas de asedio
-  totalUnits: number;      // Total de efectivos militares
+  regularSoldiers: number; // Personas militares sujetas al factor 1,05 (tropa viva + operadores + heridos)
+  siegeUnits: number;      // Máquinas de asedio (no consumen)
+  siegeOperators: number;  // Operadores de las máquinas (incluidos en regularSoldiers)
+  woundedSoldiers: number; // Heridos (incluidos en regularSoldiers)
+  totalUnits: number;      // Unidades militares activas (tropa viva + máquinas)
 }
 
 export function classifyArmyUnits(
-  armyUnits: RemoteArmyUnitDoc[] | undefined | null,
-  options?: { includeSiegeInFoodConsumption?: boolean }
+  armyUnits: RemoteArmyUnitDoc[] | undefined | null
 ): MilitaryClassification {
   if (!armyUnits || !Array.isArray(armyUnits)) {
-    return { regularSoldiers: 0, siegeUnits: 0, totalUnits: 0 };
+    return { regularSoldiers: 0, siegeUnits: 0, siegeOperators: 0, woundedSoldiers: 0, totalUnits: 0 };
   }
 
-  let regularSoldiers = 0;
+  let livingActive = 0;
   let siegeUnits = 0;
+  let wounded = 0;
 
   for (const unit of armyUnits) {
     if (typeof unit.count !== "number" || !Number.isInteger(unit.count) || unit.count < 0) {
@@ -227,24 +232,28 @@ export function classifyArmyUnits(
         `Cantidad inválida en unidad militar '${unit.unitType}': debe ser un entero no negativo (recibido: ${unit.count}).`
       );
     }
+    const unitWounded = (unit as { wounded?: number }).wounded;
+    if (unitWounded !== undefined && (!Number.isInteger(unitWounded) || unitWounded < 0)) {
+      throw new Error(`Heridos inválidos en unidad militar '${unit.unitType}': debe ser un entero no negativo.`);
+    }
 
     const typeNormalized = (unit.unitType || "").toLowerCase().trim();
-
     if (typeNormalized === "asedio") {
       siegeUnits += unit.count;
-      if (options?.includeSiegeInFoodConsumption) {
-        regularSoldiers += unit.count;
-      }
+      wounded += (unitWounded ?? 0) * UNITS.asedio.populationPerUnit;
     } else {
-      // infanteria, caballeria, arqueria u otras unidades regulares de tropa viva
-      regularSoldiers += unit.count;
+      livingActive += unit.count;
+      wounded += unitWounded ?? 0;
     }
   }
 
+  const siegeOperators = siegeUnits * UNITS.asedio.populationPerUnit;
   return {
-    regularSoldiers,
+    regularSoldiers: livingActive + siegeOperators + wounded,
     siegeUnits,
-    totalUnits: regularSoldiers + (options?.includeSiegeInFoodConsumption ? 0 : siegeUnits),
+    siegeOperators,
+    woundedSoldiers: wounded,
+    totalUnits: livingActive + siegeUnits,
   };
 }
 
@@ -256,9 +265,6 @@ export interface EconomicAdapterInput {
   armyUnits: RemoteArmyUnitDoc[] | null | undefined;
   buildings?: RemoteBuildingDoc[] | null | undefined;
   foodTier: string; // Parámetro explícito requerido
-  options?: {
-    includeSiegeInFoodConsumption?: boolean;
-  };
 }
 
 export interface EconomicAdapterResult {
@@ -285,7 +291,7 @@ export function adaptRemoteDocumentsToEconomicState(
     return { success: false, error: "Documento de población ('population') ausente o nulo." };
   }
 
-  const { kingdom, resources, population, populationJobs = [], armyUnits = [], foodTier, options } = input;
+  const { kingdom, resources, population, populationJobs = [], armyUnits = [], foodTier } = input;
 
   // 2. Validación de consistencia relacional (mismo kingdomId si está presente)
   const targetKingdomId = kingdom._id;
@@ -368,7 +374,7 @@ export function adaptRemoteDocumentsToEconomicState(
   // 6. Clasificación militar y validación de tropas
   let military: MilitaryClassification;
   try {
-    military = classifyArmyUnits(armyUnits, options);
+    military = classifyArmyUnits(armyUnits);
   } catch (err: unknown) {
     return {
       success: false,
@@ -512,7 +518,6 @@ export interface SimulatedKingdomResourcesInput {
   targetTime?: number; // Hora de referencia inyectable (ms UTC). Si se omite, Date.now()
   callerUserId?: string; // Identificador del usuario que solicita la consulta (P1)
   options?: {
-    includeSiegeInFoodConsumption?: boolean;
     bypassAuthCheck?: boolean; // Permite omitir control de usuario en pruebas puras aisladas
   };
 }
@@ -571,9 +576,6 @@ export function calculateSimulatedKingdomResources(
     armyUnits: input.armyUnits,
     buildings: input.buildings,
     foodTier: input.foodTier,
-    options: {
-      includeSiegeInFoodConsumption: input.options?.includeSiegeInFoodConsumption,
-    },
   });
 
   if (!adapterResult.success || !adapterResult.kingdomState) {
@@ -655,7 +657,6 @@ export interface SettlementInput {
   currentServerTimeMs: number;
   options?: {
     isFirstInitialization?: boolean;
-    includeSiegeInFoodConsumption?: boolean;
     callerUserId?: string;
     overrideFoodTier?: ValidFoodTier;
   };
@@ -718,9 +719,6 @@ export function calculateSettlementProgress(input: SettlementInput): SettlementR
     armyUnits: input.armyUnits,
     buildings: input.buildings,
     foodTier,
-    options: {
-      includeSiegeInFoodConsumption: input.options?.includeSiegeInFoodConsumption,
-    },
   });
 
   if (!adapterResult.success || !adapterResult.kingdomState) {
@@ -810,7 +808,6 @@ export interface RegimeChangeInput {
   currentServerTimeMs: number;
   options?: {
     isFirstInitialization?: boolean;
-    includeSiegeInFoodConsumption?: boolean;
     callerUserId?: string;
   };
 }
@@ -854,7 +851,6 @@ export function executeRegimeChangeTransition(input: RegimeChangeInput): RegimeC
     currentServerTimeMs: input.currentServerTimeMs,
     options: {
       isFirstInitialization: input.options?.isFirstInitialization,
-      includeSiegeInFoodConsumption: input.options?.includeSiegeInFoodConsumption,
       callerUserId: input.options?.callerUserId,
       overrideFoodTier: previousTier,
     },

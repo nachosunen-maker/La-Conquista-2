@@ -1,5 +1,18 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { completeDueConstructions, insertInitialBuildings } from "./buildings";
+import { completeDueTraining, readArmyUnitDocs, readArmyUnitsWithMigration } from "./army";
+import { completeDueResearch } from "./technologies";
+import { ensureHomeTerritory } from "./territories";
+import { calculateJobCapacities, calculateResidentialCapacity, validateBuildingCollection } from "./buildingRules";
+import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
+import { simulateExtendedEconomy, type ExtendedEconomyResult } from "./economyExtended";
+import { normalizeUnitType } from "./armyRules";
+import { TAXES, WELLBEING, UNITS, TERRAINS, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP } from "./balanceConfig";
+import { woundedRecoveryRatio } from "./battleRules";
+import { recoverFatigue } from "./territoryRules";
+import { isCivilizationId } from "./civilizations";
+import { CIVILIZATIONS } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
 import {
   simulateEconomicProgress,
@@ -108,55 +121,195 @@ async function readRelationalKingdomState(ctx: any, kingdomId: any) {
     .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
     .collect();
 
-  let armyUnits: any[];
-  try {
-    armyUnits = await ctx.db
-      .query("Armyunits" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .collect();
-  } catch {
-    armyUnits = await ctx.db
-      .query("armyUnits" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .collect();
-  }
+  const armyUnits: any[] = await readArmyUnitsWithMigration(ctx, kingdomId);
 
   return { resources, population, populationJobs, armyUnits, buildings };
 }
 
+/** Lee bonificaciones de terreno de los territorios del reino (Bloque G); vacío si el módulo no está disponible. */
+async function readTerrainBonuses(ctx: any, kingdomId: any): Promise<Partial<Record<"agriculture" | "wood" | "stone" | "iron" | "gold", number>>> {
+  try {
+    const territories: any[] = await ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q: any) => q.eq("ownerKingdomId", kingdomId))
+      .collect();
+    const bonuses: Partial<Record<"agriculture" | "wood" | "stone" | "iron" | "gold", number>> = {};
+    for (const territory of territories) {
+      const terrain = (TERRAINS as any)[territory.terrain];
+      if (!terrain) continue;
+      for (const [job, bonus] of Object.entries(terrain.production as Record<string, number>)) {
+        const key = job as keyof typeof bonuses;
+        bonuses[key] = (bonuses[key] ?? 0) + bonus;
+      }
+    }
+    return bonuses;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Liquidación autoritativa y persistente del reino (Bloques A-D):
+ * 1. Completa obras, lotes de entrenamiento e investigaciones vencidas (salvaguarda del scheduler).
+ * 2. Liquida alimentos con el motor aprobado (calculateSettlementProgress) y, si no es la primera
+ *    inicialización, el resto de la economía ampliada (recursos, impuestos, población, inanición,
+ *    felicidad y moral) con simulateExtendedEconomy.
+ * 3. Persiste todo en la misma transacción Convex.
+ */
 export async function settleRelationalKingdomEconomy(
   ctx: any,
   kingdom: any,
   callerUserId: string,
   now: number
 ) {
+  await completeDueConstructions(ctx, kingdom._id, now);
+  await completeDueTraining(ctx, kingdom._id, now);
+  await completeDueResearch(ctx, kingdom._id, now);
+
   const state = await readRelationalKingdomState(ctx, kingdom._id);
   if (!state.resources) throw new Error("No existen recursos para el reino.");
   if (!state.population) throw new Error("No existe documento de población para el reino.");
 
+  const isFirstInitialization = state.resources.settlementInitialized !== true;
   const settlement = calculateSettlementProgress({
     kingdom,
     ...state,
     currentServerTimeMs: now,
-    options: {
-      isFirstInitialization: state.resources.settlementInitialized !== true,
-      callerUserId,
-    },
+    options: { isFirstInitialization, callerUserId },
   });
   if (!settlement.success || settlement.updatedFood === undefined) {
     throw new Error(settlement.error ?? "Fallo al liquidar la economía relacional.");
   }
 
-  await ctx.db.patch(state.resources._id, {
+  const collection = validateBuildingCollection(state.buildings);
+  const buildingLevels = collection.success ? collection.levels : {};
+  const completedTechnologies = await readCompletedTechnologyIds(ctx, kingdom._id);
+
+  let extended: ExtendedEconomyResult | null = null;
+  let settledResources: KingdomResources = {
+    gold: state.resources.gold,
+    wood: state.resources.wood,
+    stone: state.resources.stone,
+    iron: state.resources.iron,
     food: settlement.updatedFood,
+  };
+
+  if (!isFirstInitialization) {
+    const adapted = adaptRemoteDocumentsToEconomicState({
+      kingdom,
+      resources: state.resources,
+      population: state.population,
+      populationJobs: state.populationJobs,
+      armyUnits: state.armyUnits,
+      buildings: state.buildings,
+      foodTier: settlement.appliedFoodTier ?? (kingdom.foodTier || "normal"),
+    });
+    if (!adapted.success || !adapted.kingdomState || !adapted.militaryClassification) {
+      throw new Error(adapted.error ?? "No se pudo adaptar el estado relacional del reino.");
+    }
+    const terrainBonuses = await readTerrainBonuses(ctx, kingdom._id);
+    extended = simulateExtendedEconomy({
+      kingdomState: adapted.kingdomState,
+      now,
+      jobCapacities: calculateJobCapacities(state.buildings),
+      residentialCapacity: calculateResidentialCapacity(state.buildings),
+      technologyModifiers: computeTechnologyModifiers(completedTechnologies),
+      terrainBonuses,
+      taxRate: typeof kingdom.taxRate === "number" ? kingdom.taxRate : TAXES.INITIAL_RATE,
+      happiness: typeof kingdom.happiness === "number" ? kingdom.happiness : WELLBEING.INITIAL_HAPPINESS,
+      moraleEffects: Array.isArray(kingdom.moraleEffects) ? kingdom.moraleEffects : [],
+      starvationSeconds: typeof state.population.starvationSeconds === "number" ? state.population.starvationSeconds : 0,
+      buildingLevels,
+      militaryPersonnel: adapted.militaryClassification.regularSoldiers,
+    });
+    settledResources = extended.updatedResources;
+  }
+
+  await ctx.db.patch(state.resources._id, {
+    ...settledResources,
     lastUpdated: settlement.effectiveTimeMs ?? now,
     settlementInitialized: true,
   });
-  if (state.population.starving !== settlement.isStarving) {
-    await ctx.db.patch(state.population._id, { starving: settlement.isStarving });
+
+  const populationPatch: Record<string, unknown> = {};
+  const isStarving = extended ? extended.starvation.phaseAfter > 0 || settledResources.food <= 0 : settlement.isStarving;
+  if (state.population.starving !== isStarving) populationPatch.starving = isStarving;
+  if (extended) {
+    if (extended.population.totalAfter !== state.population.total) populationPatch.total = extended.population.totalAfter;
+    if (extended.population.availableAfter !== state.population.available) populationPatch.available = extended.population.availableAfter;
+    if ((state.population.starvationSeconds ?? 0) !== extended.starvation.secondsAfter) populationPatch.starvationSeconds = extended.starvation.secondsAfter;
+  }
+  if (Object.keys(populationPatch).length > 0) await ctx.db.patch(state.population._id, populationPatch);
+
+  if (extended) {
+    const kingdomPatch: Record<string, unknown> = {};
+    if (kingdom.happiness !== extended.happiness.after) kingdomPatch.happiness = extended.happiness.after;
+    if (kingdom.militaryMorale !== extended.morale) kingdomPatch.militaryMorale = extended.morale;
+    const liveEffects = (Array.isArray(kingdom.moraleEffects) ? kingdom.moraleEffects : []).filter((e: any) => e.expiresAt > now);
+    if (liveEffects.length !== (kingdom.moraleEffects?.length ?? 0)) kingdomPatch.moraleEffects = liveEffects;
+    if (Object.keys(kingdomPatch).length > 0) await ctx.db.patch(kingdom._id, { ...kingdomPatch, updatedAt: now });
+
+    if (extended.militaryDesertion > 0) {
+      const deserted = await applyMilitaryDesertion(ctx, state.armyUnits, extended.militaryDesertion);
+      if (deserted > 0) {
+        const populationDoc = await ctx.db.get(state.population._id);
+        if (populationDoc) await ctx.db.patch(state.population._id, { total: Math.max(0, populationDoc.total - deserted) });
+      }
+    }
+
+    // [MAESTRA P45] Recuperación de heridos por nivel de Hospital militar (+ tecnología, tope 60 %).
+    const recoveryRatio = woundedRecoveryRatio(
+      buildingLevels.hospitalMilitar ?? 0,
+      computeTechnologyModifiers(completedTechnologies).woundedRecoveryBonus,
+      HOSPITAL_RECOVERY_PER_YEAR,
+      HOSPITAL_RECOVERY_CAP
+    );
+    if (recoveryRatio > 0 && extended.elapsedDays > 0) {
+      for (const doc of state.armyUnits) {
+        const wounded = Number.isInteger(doc.wounded) && doc.wounded > 0 ? doc.wounded : 0;
+        if (wounded === 0) continue;
+        const progress = (typeof doc.recoveryProgress === "number" ? doc.recoveryProgress : 0) + wounded * recoveryRatio * extended.elapsedDays;
+        const recovered = Math.min(wounded, Math.floor(progress));
+        await ctx.db.patch(doc._id, {
+          wounded: wounded - recovered,
+          count: doc.count + recovered,
+          recoveryProgress: recovered >= wounded ? 0 : progress - recovered,
+        });
+      }
+    }
+
+    // [COMPLEMENTO §5] Recuperación de fatiga: 10 puntos por día real con ración normal o mejor.
+    const currentFatigue = typeof kingdom.armyFatigue === "number" ? kingdom.armyFatigue : 0;
+    const nextFatigue = recoverFatigue(currentFatigue, extended.elapsedDays, settlement.appliedFoodTier ?? "normal");
+    if (nextFatigue !== currentFatigue) await ctx.db.patch(kingdom._id, { armyFatigue: nextFatigue });
   }
 
-  return { ...state, settlement };
+  return { ...state, settlement, settledResources, extended };
+}
+
+/** [COMPLEMENTO D-48] Deserción en fase 3: se retira tropa viva empezando por los lotes más numerosos. */
+async function applyMilitaryDesertion(ctx: any, armyUnits: any[], personnel: number): Promise<number> {
+  let remaining = personnel;
+  const living = armyUnits
+    .filter((doc) => normalizeUnitType(doc.unitType) && normalizeUnitType(doc.unitType) !== "asedio" && doc.count > 0)
+    .sort((a, b) => b.count - a.count);
+  for (const doc of living) {
+    if (remaining <= 0) break;
+    const removed = Math.min(doc.count, remaining);
+    await ctx.db.patch(doc._id, { count: doc.count - removed });
+    remaining -= removed;
+  }
+  // Operadores de asedio desertan en bloques de máquina completa.
+  if (remaining > 0) {
+    const siege = armyUnits.filter((doc) => normalizeUnitType(doc.unitType) === "asedio" && doc.count > 0);
+    for (const doc of siege) {
+      if (remaining < UNITS.asedio.populationPerUnit) break;
+      const machines = Math.min(doc.count, Math.floor(remaining / UNITS.asedio.populationPerUnit));
+      await ctx.db.patch(doc._id, { count: doc.count - machines });
+      remaining -= machines * UNITS.asedio.populationPerUnit;
+    }
+  }
+  return personnel - remaining;
 }
 
 async function migrateAggregateKingdomState(ctx: any, kingdom: any) {
@@ -207,9 +360,11 @@ async function migrateAggregateKingdomState(ctx: any, kingdom: any) {
     }
   }
   if (regularSoldiers > 0) {
-    await ctx.db.insert("Armyunits" as any, {
+    // [D-11] Fuente única: los soldados heredados pasan a armyUnits como infantería nivel 1 (Milicia).
+    await ctx.db.insert("armyUnits", {
       kingdomId: kingdom._id,
-      unitType: "regular",
+      unitType: "infanteria",
+      level: 1,
       count: regularSoldiers,
     });
   }
@@ -246,17 +401,33 @@ function legacyKingdomResponse(kingdom: any, state: any) {
 export const getOrInitializeKingdom = mutation({
   args: {
     name: v.string(),
+    /** [MAESTRA P6] Identificador de civilización; obligatorio al fundar, inmutable después (D-45). */
+    civilization: v.optional(v.string()),
+    /** [MAESTRA P8] Nombre del castillo. */
+    castleName: v.optional(v.string()),
+    /** [MAESTRA P5] Nombre del monarca. */
+    monarchName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const callerUserId = await requireAuthenticatedUser(ctx);
+    const name = args.name.trim();
+    if (!name) throw new Error("El nombre del reino es obligatorio (P7).");
     const existing = await ctx.db
       .query("kingdoms")
       .withIndex("by_user_id_and_name", (q) =>
-        q.eq("userId", callerUserId).eq("name", args.name)
+        q.eq("userId", callerUserId).eq("name", name)
       )
       .first();
 
     if (existing) {
+      if (args.civilization !== undefined && existing.civilization && args.civilization !== existing.civilization) {
+        throw new Error("La civilización se elige al fundar el reino y no puede cambiarse (D-45).");
+      }
+      const identityPatch: Record<string, unknown> = {};
+      if (!existing.civilization && isCivilizationId(args.civilization)) identityPatch.civilization = args.civilization;
+      if (!existing.castleName && args.castleName?.trim()) identityPatch.castleName = args.castleName.trim();
+      if (!existing.monarchName && args.monarchName?.trim()) identityPatch.monarchName = args.monarchName.trim();
+      if (Object.keys(identityPatch).length > 0) await ctx.db.patch(existing._id, { ...identityPatch, updatedAt: Date.now() });
       const current = await readRelationalKingdomState(ctx, existing._id);
       if (!current.resources && !current.population && current.populationJobs.length === 0 && current.armyUnits.length === 0) {
         await migrateAggregateKingdomState(ctx, existing);
@@ -266,11 +437,22 @@ export const getOrInitializeKingdom = mutation({
       return legacyKingdomResponse(existing, settled);
     }
 
+    if (args.civilization !== undefined && !isCivilizationId(args.civilization)) {
+      throw new Error(`Civilización desconocida: '${args.civilization}'. Opciones: ${CIVILIZATIONS.map((c) => c.id).join(", ")}.`);
+    }
     const now = Date.now();
     const kingdomId = await ctx.db.insert("kingdoms", {
       userId: callerUserId,
-      name: args.name,
+      name,
+      civilization: isCivilizationId(args.civilization) ? args.civilization : undefined,
+      castleName: args.castleName?.trim() || undefined,
+      monarchName: args.monarchName?.trim() || undefined,
       foodTier: INITIAL_KINGDOM_CONFIG.foodTier,
+      happiness: WELLBEING.INITIAL_HAPPINESS,
+      militaryMorale: WELLBEING.INITIAL_MORALE,
+      taxRate: TAXES.INITIAL_RATE,
+      honor: 0,
+      glory: 0,
       createdAt: now,
       updatedAt: now,
     });
@@ -294,6 +476,8 @@ export const getOrInitializeKingdom = mutation({
         });
       }
     }
+    await insertInitialBuildings(ctx, kingdomId);
+    await ensureHomeTerritory(ctx, kingdomId);
     const kingdom = await ctx.db.get(kingdomId);
     if (!kingdom) throw new Error("No se pudo recuperar el reino recién inicializado.");
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
@@ -448,7 +632,7 @@ export const reassignWorkers = mutation({
     const military = classifyArmyUnits(current.armyUnits);
     if (args.newRegularSoldiers !== military.regularSoldiers) {
       throw new Error(
-        "La reasignación laboral no puede crear ni retirar tropas; los efectivos se leen de Armyunits."
+        "La reasignación laboral no puede crear ni retirar tropas; los efectivos se leen de armyUnits."
       );
     }
 
@@ -653,18 +837,7 @@ export const getKingdom = query({
       .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
       .collect();
 
-    let armyUnits: any[];
-    try {
-      armyUnits = await ctx.db
-        .query("Armyunits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-        .collect();
-    } catch {
-      armyUnits = await ctx.db
-        .query("armyUnits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-        .collect();
-    }
+    const armyUnits: any[] = await readArmyUnitDocs(ctx, kingdom._id);
 
     const now = Date.now();
     const simulation = calculateSimulatedKingdomResources({
@@ -752,22 +925,7 @@ export const getSimulatedKingdomResources = query({
       .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
       .collect();
 
-    let armyUnits: any[] = [];
-    try {
-      armyUnits = await ctx.db
-        .query("Armyunits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
-        .collect();
-    } catch {
-      try {
-        armyUnits = await ctx.db
-          .query("armyUnits" as any)
-          .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
-          .collect();
-      } catch {
-        armyUnits = [];
-      }
-    }
+    const armyUnits: any[] = await readArmyUnitDocs(ctx, args.kingdomId as any);
 
     // 3. Proyección analítica mediante el adaptador y motor puro
     const result = calculateSimulatedKingdomResources({
@@ -780,7 +938,6 @@ export const getSimulatedKingdomResources = query({
       targetTime: args.targetTime,
       callerUserId,
       options: {
-        includeSiegeInFoodConsumption: args.includeSiegeInFoodConsumption,
       },
     });
 
@@ -792,28 +949,69 @@ export const getSimulatedKingdomResources = query({
   },
 });
 
+/** Resuelve un reino por id (tipado o no) o por el usuario autenticado, verificando titularidad (P1). */
+async function resolveOwnedKingdom(ctx: any, callerUserId: string, kingdomId?: string): Promise<any> {
+  let kingdom: any = null;
+  if (kingdomId) {
+    try {
+      kingdom = await ctx.db.get(kingdomId as any);
+    } catch {
+      // kingdomId no tipado
+    }
+    if (!kingdom) {
+      kingdom = await ctx.db
+        .query("kingdoms" as any)
+        .filter((q: any) => q.eq(q.field("_id"), kingdomId))
+        .first();
+    }
+    if (!kingdom) throw new Error(`Reino no encontrado con ID '${kingdomId}'.`);
+    if (!isKingdomOwner(kingdom.userId, callerUserId)) {
+      throw new Error("No autorizado: el reino especificado no pertenece al usuario autenticado.");
+    }
+    return kingdom;
+  }
+  kingdom = await ctx.db
+    .query("kingdoms")
+    .withIndex("by_user_id", (q: any) => q.eq("userId", callerUserId))
+    .first();
+  if (!kingdom) throw new Error("No se encontró ningún reino asignado a la identidad autenticada.");
+  return kingdom;
+}
+
+function settlementResponse(kingdom: any, settled: Awaited<ReturnType<typeof settleRelationalKingdomEconomy>>, now: number) {
+  const { settlement, settledResources, extended } = settled;
+  return {
+    success: true,
+    kingdomId: kingdom._id,
+    resources: settledResources,
+    foodDelta: settlement.foodDelta,
+    isStarving: extended ? extended.starvation.phaseAfter > 0 || settledResources.food <= 0 : settlement.isStarving,
+    starvationSeconds: extended ? extended.starvation.secondsAfter : settlement.starvationSeconds,
+    starvationPhase: extended ? extended.starvation.phaseAfter : 0,
+    secondsToExhaustion: settlement.secondsToExhaustion,
+    elapsedSeconds: settlement.elapsedSeconds,
+    cappedInterval: settlement.cappedInterval,
+    appliedFoodTier: settlement.appliedFoodTier ?? (kingdom.foodTier || "normal"),
+    lastUpdated: settlement.effectiveTimeMs ?? now,
+    dailyProduction: extended?.dailyProduction ?? null,
+    dailyFoodConsumption: extended?.dailyFoodConsumption ?? null,
+    dailyTaxIncome: extended?.dailyTaxIncome ?? null,
+    taxesCollected: extended?.taxesCollected ?? 0,
+    productivityMultiplier: extended?.productivityMultiplier ?? 1,
+    population: extended?.population ?? null,
+    happiness: extended?.happiness.after ?? kingdom.happiness ?? null,
+    militaryMorale: extended?.morale ?? kingdom.militaryMorale ?? null,
+    militaryDesertion: extended?.militaryDesertion ?? 0,
+  };
+}
+
 /**
  * ============================================================================
- * ETAPA 2: MUTACIÓN AUTORITATIVA DE LIQUIDACIÓN ECONÓMICA PERSISTENTE
+ * LIQUIDACIÓN ECONÓMICA PERSISTENTE (Bloques A-D)
  * ============================================================================
- * Liquida de forma persistente y atómica la economía del reino en Convex.
- *
- * Requisitos cumplidos:
- * 1. Identificación y autorización estricta (P1): Identifica al usuario mediante
- *    'ctx.auth.getUserIdentity()'. No confía en identidades ni en 'kingdomId'
- *    enviados por el cliente sin verificar la titularidad real del reino.
- * 2. Lectura directa de las tablas relacionales reales: 'kingdoms', 'resources',
- *    'population', 'populationJobs', 'buildings' y 'Armyunits'.
- * 3. Tiempo autoritativo del servidor: Intervalo calculado exclusivamente con
- *    'Date.now()' y 'resources.lastUpdated'.
- * 4. Fórmulas oficiales y factores alimentarios aprobados (P17: 0.75, 1.00, 1.10, 1.20).
- * 5. Actualización atómica en la base de datos sin saldos negativos (piso en 0)
- *    y sin duplicación de liquidaciones (control de concurrencia OCC de Convex).
- * 6. Procesa el intervalo offline completo; la primera liquidación se ancla al reloj del servidor
- *    cuando los recursos todavía no tienen settlementInitialized.
- * 7. Inalterabilidad de recursos sin fórmula aprobada: madera, piedra, hierro y oro
- *    no sufren alteraciones.
- * 8. Sin persistencia forzada de 'foodTier': utiliza el valor existente o 'normal' (1.00).
+ * Identifica al usuario (P1), resuelve el reino y aplica settleRelationalKingdomEconomy
+ * con el reloj del servidor (P2, P66). El argumento includeSiegeInFoodConsumption se
+ * acepta por compatibilidad y se ignora (D-12).
  */
 export const settleKingdomEconomy = mutation({
   args: {
@@ -821,334 +1019,69 @@ export const settleKingdomEconomy = mutation({
     includeSiegeInFoodConsumption: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    // 1. Identificar al usuario mediante ctx.auth.getUserIdentity()
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity || !identity.subject) {
-      throw new Error(
-        "Autenticación requerida: No se detectó una sesión autenticada en el servidor Convex. " +
-        "Por estrictas razones de integridad y propiedad (P1), se prohíbe liquidar reinos sin sesión válida."
-      );
-    }
-
-    const callerUserId = identity.subject;
-    // 2. Resolver el reino en el servidor y verificar propiedad estrictamente
-    let kingdom: any = null;
-    if (args.kingdomId) {
-      try {
-        kingdom = await ctx.db.get(args.kingdomId as any);
-      } catch {
-        // En caso de que kingdomId no sea un ID tipado local
-      }
-      if (!kingdom) {
-        kingdom = await ctx.db
-          .query("kingdoms" as any)
-          .filter((q: any) => q.eq(q.field("_id"), args.kingdomId))
-          .first();
-      }
-      if (!kingdom) {
-        throw new Error(`Reino no encontrado con ID '${args.kingdomId}'.`);
-      }
-
-      if (!isKingdomOwner(kingdom.userId, callerUserId)) {
-        throw new Error("No autorizado: el reino especificado no pertenece al usuario autenticado.");
-      }
-    } else {
-      // Búsqueda por identificador de usuario
-      kingdom = await ctx.db
-        .query("kingdoms")
-        .withIndex("by_user_id", (q) => q.eq("userId", callerUserId))
-        .first();
-
-      if (!kingdom) {
-        throw new Error("No se encontró ningún reino asignado a la identidad autenticada.");
-      }
-    }
-
-    const kingdomId = kingdom._id;
-
-    // 3. Lectura de las tablas relacionales reales del reino
-    const resources = await ctx.db
-      .query("resources" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .first();
-
-    if (!resources) {
-      throw new Error(`Inconsistencia en la base de datos: no existen recursos para el reino '${kingdomId}'.`);
-    }
-
-    const population = await ctx.db
-      .query("population" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .first();
-
-    if (!population) {
-      throw new Error(`Inconsistencia en la base de datos: no existe documento de población para el reino '${kingdomId}'.`);
-    }
-
-    const populationJobs = await ctx.db
-      .query("populationJobs" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .collect();
-
-    const buildings = await ctx.db
-      .query("buildings" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .collect();
-
-    let armyUnits: any[] = [];
-    try {
-      armyUnits = await ctx.db
-        .query("Armyunits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-        .collect();
-    } catch {
-      try {
-        armyUnits = await ctx.db
-          .query("armyUnits" as any)
-          .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-          .collect();
-      } catch {
-        armyUnits = [];
-      }
-    }
-
-    // 4. Marca temporal autoritativa del servidor
+    const callerUserId = await requireAuthenticatedUser(ctx);
+    const kingdom = await resolveOwnedKingdom(ctx, callerUserId, args.kingdomId);
     const now = Date.now();
-
-    // El cliente no decide si se omite un intervalo histórico.
-    const isFirstInit = (resources as any).settlementInitialized !== true;
-
-    // 5. Cálculo determinista y puro de la liquidación económica (Req 3: sin tope artificial 86400s)
-    const settlement = calculateSettlementProgress({
-      kingdom,
-      resources,
-      population,
-      populationJobs,
-      armyUnits,
-      buildings,
-      currentServerTimeMs: now,
-      options: {
-        isFirstInitialization: isFirstInit,
-        includeSiegeInFoodConsumption: args.includeSiegeInFoodConsumption,
-        callerUserId,
-      },
-    });
-
-    if (!settlement.success || settlement.updatedFood === undefined) {
-      throw new Error(settlement.error ?? "Fallo en el cálculo de liquidación económica.");
-    }
-
-    // 6. Actualización atómica en la misma transacción Convex
-    await ctx.db.patch(resources._id as any, {
-      food: settlement.updatedFood,
-      lastUpdated: settlement.effectiveTimeMs ?? now,
-      settlementInitialized: true,
-    });
-
-    if (population.starving !== settlement.isStarving) {
-      await ctx.db.patch(population._id as any, {
-        starving: settlement.isStarving,
-      });
-    }
-
-    // Req 1: Persistir foodTier en kingdoms si carecía del campo (inicial "normal")
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
     if ((kingdom as any).foodTier === undefined) {
-      await ctx.db.patch(kingdom._id as any, {
-        foodTier: "normal",
-      });
+      await ctx.db.patch(kingdom._id as any, { foodTier: "normal" });
     }
-
-    return {
-      success: true,
-      kingdomId,
-      resources: {
-        gold: resources.gold,
-        wood: resources.wood,
-        stone: resources.stone,
-        iron: resources.iron,
-        food: settlement.updatedFood,
-      },
-      foodDelta: settlement.foodDelta,
-      isStarving: settlement.isStarving,
-      starvationSeconds: settlement.starvationSeconds,
-      secondsToExhaustion: settlement.secondsToExhaustion,
-      elapsedSeconds: settlement.elapsedSeconds,
-      cappedInterval: settlement.cappedInterval,
-      appliedFoodTier: settlement.appliedFoodTier ?? ((kingdom as any).foodTier || "normal"),
-      lastUpdated: settlement.effectiveTimeMs ?? now,
-    };
+    return settlementResponse(kingdom, settled, now);
   },
 });
 
 /**
- * ============================================================================
- * TRANSICIÓN ATÓMICA DE RÉGIMEN ALIMENTARIO (BLOQUE B.8, REQ 1 Y 6)
- * ============================================================================
- * 1. Valida la sesión y propiedad del reino.
- * 2. Comprueba que el nuevo foodTier pertenezca a los regímenes oficiales de P17.
- * 3. LIQUIDA PRIMERO el intervalo transcurrido con el régimen vigente hasta 'now'.
- * 4. ACTUALIZA DE FORMA ATÓMICA:
- *    - 'resources': nuevo saldo de comida y 'lastUpdated = now'.
- *    - 'population': estado 'starving' según el resultado de la liquidación previa.
- *    - 'kingdoms': guarda 'foodTier = args.foodTier' y 'updatedAt = now'.
+ * Transición atómica de régimen alimentario (P17): liquida primero el intervalo con el
+ * régimen vigente y a continuación persiste el nuevo régimen a partir de esa marca temporal.
  */
 export const setKingdomFoodTier = mutation({
   args: {
     kingdomId: v.optional(v.string()),
-    foodTier: v.string(), // "minima" | "normal" | "abundante" | "excelente"
+    foodTier: v.string(),
   },
   handler: async (ctx, args) => {
-    // 1. Identificar al usuario
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity || !identity.subject) {
-      throw new Error(
-        "Autenticación requerida: No se detectó una sesión autenticada en el servidor Convex."
-      );
-    }
-
-    const callerUserId = identity.subject;
-    // 2. Validar que el nuevo foodTier sea válido según P17
+    const callerUserId = await requireAuthenticatedUser(ctx);
     const requestedTier = args.foodTier.toLowerCase().trim();
-    if (
-      requestedTier !== "minima" &&
-      requestedTier !== "normal" &&
-      requestedTier !== "abundante" &&
-      requestedTier !== "excelente"
-    ) {
-      throw new Error(
-        `Régimen alimentario inválido '${args.foodTier}'. Permitidos: minima, normal, abundante, excelente.`
-      );
+    if (!["minima", "normal", "abundante", "excelente"].includes(requestedTier)) {
+      throw new Error(`Régimen alimentario inválido '${args.foodTier}'. Permitidos: minima, normal, abundante, excelente.`);
     }
-
-    // 3. Resolver el reino y verificar propiedad
-    let kingdom: any = null;
-    if (args.kingdomId) {
-      try {
-        kingdom = await ctx.db.get(args.kingdomId as any);
-      } catch {}
-      if (!kingdom) {
-        kingdom = await ctx.db
-          .query("kingdoms" as any)
-          .filter((q: any) => q.eq(q.field("_id"), args.kingdomId))
-          .first();
-      }
-      if (!kingdom) {
-        throw new Error(`Reino no encontrado con ID '${args.kingdomId}'.`);
-      }
-      if (!isKingdomOwner(kingdom.userId, callerUserId)) {
-        throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
-      }
-    } else {
-      kingdom = await ctx.db
-        .query("kingdoms")
-        .withIndex("by_user_id", (q) => q.eq("userId", callerUserId))
-        .first();
-
-      if (!kingdom) {
-        throw new Error("No se encontró ningún reino para el usuario autenticado.");
-      }
-    }
-
-    const kingdomId = kingdom._id;
-
-    // 4. Leer tablas relacionales reales
-    const resources = await ctx.db
-      .query("resources" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .first();
-    if (!resources) {
-      throw new Error("No existen recursos para el reino.");
-    }
-
-    const population = await ctx.db
-      .query("population" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .first();
-    if (!population) {
-      throw new Error("No existe documento de población para el reino.");
-    }
-
-    const populationJobs = await ctx.db
-      .query("populationJobs" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .collect();
-
-    const buildings = await ctx.db
-      .query("buildings" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-      .collect();
-
-    let armyUnits: any[] = [];
-    try {
-      armyUnits = await ctx.db
-        .query("Armyunits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-        .collect();
-    } catch {
-      try {
-        armyUnits = await ctx.db
-          .query("armyUnits" as any)
-          .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-          .collect();
-      } catch {
-        armyUnits = [];
-      }
-    }
-
+    const kingdom = await resolveOwnedKingdom(ctx, callerUserId, args.kingdomId);
+    const previousTier = (kingdom as any).foodTier ?? "normal";
     const now = Date.now();
-
-    // 5. Transición atómica pura: liquida primero el régimen previo
-    const isFirstInit = (resources as any).settlementInitialized !== true;
-
-    const transition = executeRegimeChangeTransition({
-      kingdom,
-      resources,
-      population,
-      populationJobs,
-      armyUnits,
-      buildings,
-      newFoodTier: requestedTier,
-      currentServerTimeMs: now,
-      options: {
-        isFirstInitialization: isFirstInit,
-        callerUserId,
-      },
-    });
-
-    if (!transition.success || transition.settledFood === undefined) {
-      throw new Error(transition.error ?? "Fallo al realizar la transición del régimen alimentario.");
-    }
-
-    // 6. Actualización atómica en Convex
-    await ctx.db.patch(resources._id as any, {
-      food: transition.settledFood,
-      lastUpdated: now,
-      settlementInitialized: true,
-    });
-
-    if (population.starving !== transition.isStarving) {
-      await ctx.db.patch(population._id as any, {
-        starving: transition.isStarving,
-      });
-    }
-
-    // Persiste el nuevo régimen alimentario en kingdoms (Req 1 y 6)
-    await ctx.db.patch(kingdom._id as any, {
-      foodTier: requestedTier,
-      updatedAt: now,
-    });
-
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
+    await ctx.db.patch(kingdom._id as any, { foodTier: requestedTier, updatedAt: now });
     return {
       success: true,
-      kingdomId,
-      previousFoodTier: transition.previousFoodTier,
-      newFoodTier: transition.newFoodTier,
-      settledFood: transition.settledFood,
-      foodDelta: transition.foodDelta,
-      isStarving: transition.isStarving,
-      starvationSeconds: transition.starvationSeconds,
-      elapsedSeconds: transition.elapsedSeconds,
+      kingdomId: kingdom._id,
+      previousFoodTier: previousTier,
+      newFoodTier: requestedTier,
+      settledFood: settled.settledResources.food,
+      foodDelta: settled.settlement.foodDelta,
+      isStarving: settled.extended ? settled.extended.starvation.phaseAfter > 0 : settled.settlement.isStarving,
+      starvationSeconds: settled.extended ? settled.extended.starvation.secondsAfter : settled.settlement.starvationSeconds,
+      elapsedSeconds: settled.settlement.elapsedSeconds,
       timestamp: now,
     };
+  },
+});
+
+/** [MAESTRA P27] Tasa impositiva entre 0 % y 100 %; liquida primero el intervalo con la tasa anterior. */
+export const setTaxRate = mutation({
+  args: { kingdomId: v.id("kingdoms"), taxRate: v.number() },
+  handler: async (ctx, args) => {
+    const callerUserId = await requireAuthenticatedUser(ctx);
+    const kingdom = await ctx.db.get(args.kingdomId);
+    if (!kingdom) throw new Error("Reino no encontrado.");
+    if (!isKingdomOwner(kingdom.userId, callerUserId)) {
+      throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
+    }
+    if (!Number.isFinite(args.taxRate) || args.taxRate < TAXES.MIN_RATE || args.taxRate > TAXES.MAX_RATE) {
+      throw new Error(`La tasa impositiva debe estar entre ${TAXES.MIN_RATE * 100} % y ${TAXES.MAX_RATE * 100} %.`);
+    }
+    const now = Date.now();
+    await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
+    const taxRate = Math.round(args.taxRate * 100) / 100;
+    await ctx.db.patch(args.kingdomId, { taxRate, updatedAt: now });
+    return { success: true, kingdomId: args.kingdomId, taxRate };
   },
 });

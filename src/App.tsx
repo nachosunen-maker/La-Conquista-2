@@ -44,6 +44,16 @@ import {
 import { constructionProgress } from '../convex/buildingRules';
 import { useAuth } from './auth';
 import { DEMO_USER_ID } from '../convex/kingdomAccess';
+import { CIVILIZATIONS, DAILY_BONUS } from '../convex/balanceConfig';
+import { TabNavigation, type MainTab } from './components/TabNavigation';
+import { FoundingWizard } from './components/FoundingWizard';
+import { ArmyPanel } from './components/ArmyPanel';
+import { UniversityPanel } from './components/UniversityPanel';
+import { ParliamentPanel } from './components/ParliamentPanel';
+import { MapPanel } from './components/MapPanel';
+import { formatCosts, formatRequirements } from './components/shared';
+
+const CIVILIZATION_LABELS: Record<string, string> = Object.fromEntries(CIVILIZATIONS.map((c) => [c.id, c.label]));
 
 /* ==========================================================================
    TIPOS DEL BACKEND CONVEX Y ESTADO DEL REINO
@@ -59,6 +69,13 @@ interface KingdomDoc {
   taxPolicy?: string;
   userId: string;
   foodTier?: string; // Régimen alimentario persistente oficial (P17 / B.8)
+  taxRate?: number;
+  honor?: number;
+  glory?: number;
+  lastDailyBonusAt?: number;
+  homeTerritoryId?: string;
+  pendingTerritoryClaims?: number;
+  armyFatigue?: number;
   createdAt?: number;
   updatedAt?: number;
 }
@@ -125,13 +142,57 @@ interface ConstructionState {
   pendingParameters?: readonly string[];
   catalog?: Record<string, {
     label: string;
+    role?: string;
     costs: Record<string, number> | null;
     baseDurationMs: number | null;
     progressionRequirements: Record<string, number> | null;
     residentialCapacityPerLevel?: number | null;
     productiveWorkerCapacityPerLevel?: number | null;
+    jobType?: string | null;
   }>;
+  catalogForLevels?: Record<string, {
+    label: string;
+    role: string;
+    currentLevel: number;
+    nextLevel: number | null;
+    nextCosts: Record<string, number> | null;
+    nextDurationMs: number | null;
+    requirements: Record<string, number>;
+    requirementsSatisfied: boolean;
+    castleCapSatisfied: boolean;
+    residentialCapacityPerLevel: number;
+    workerCapacityPerLevel: number;
+    jobType: string | null;
+  }>;
+  buildingLevels?: Record<string, number>;
+  jobCapacities?: Record<string, number> | null;
+  constructionDurationModifier?: number;
+  hasInitialBuildings?: boolean;
 }
+
+interface SettlementSummary {
+  timestamp: number;
+  foodDelta: number;
+  foodResult: number;
+  isStarving: boolean;
+  starvationSeconds: number;
+  starvationPhase: number;
+  elapsedSeconds: number;
+  appliedTier: string;
+  dailyProduction: Record<string, number> | null;
+  dailyFoodConsumption: number | null;
+  dailyTaxIncome: number | null;
+  taxesCollected: number;
+  productivityMultiplier: number;
+  population: { totalBefore: number; totalAfter: number; births: number; deaths: number; growthCappedByHousing: boolean; residentialCapacity: number | null } | null;
+  happiness: number | null;
+  militaryMorale: number | null;
+  militaryDesertion: number;
+}
+
+const getParliamentBadgeQuery = makeFunctionReference<"query">("parliament:getParliament");
+const bootstrapInitialBuildingsMutation = makeFunctionReference<"mutation">("kingdoms:bootstrapInitialBuildings");
+const ensureMyHomeTerritoryMutation = makeFunctionReference<"mutation">("territories:ensureMyHomeTerritory");
 
 function hasConstructionTiming(
   construction: ConstructionRecord
@@ -402,6 +463,9 @@ function KingdomOverviewContent() {
 
   const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<MainTab>('aldea');
+  const [bootstrapBusy, setBootstrapBusy] = useState<string | null>(null);
+  const [bootstrapMessage, setBootstrapMessage] = useState<string | null>(null);
 
   // Consulta autoritativa OIDC de Convex en tiempo real
   const viewer = useQuery(getViewerQuery);
@@ -409,7 +473,6 @@ function KingdomOverviewContent() {
   // Estados para proyección puramente local en el cliente (sin escrituras en BD)
   const [clientTime, setClientTime] = useState<number>(() => Date.now());
   const [selectedFoodTier, setSelectedFoodTier] = useState<ValidFoodTier>('normal');
-  const [includeSiegeInFood, setIncludeSiegeInFood] = useState<boolean>(false);
   const [showProjectionDetails, setShowProjectionDetails] = useState<boolean>(true);
 
   // Reloj local del cliente: actualiza el tiempo de referencia periódicamente sin recrear suscripciones Convex
@@ -433,6 +496,10 @@ function KingdomOverviewContent() {
     getConstructionStateQuery,
     kingdom ? { kingdomId: kingdom._id } : "skip"
   ) as ConstructionState | undefined;
+  const parliamentBadge = useQuery(
+    getParliamentBadgeQuery,
+    kingdom ? { kingdomId: kingdom._id } : "skip"
+  ) as { badgeCount: number } | undefined;
 
   // Mutaciones autoritativas del Bloque B.8
   const settleKingdomEconomy = useMutation(settleKingdomEconomyMutation);
@@ -440,6 +507,8 @@ function KingdomOverviewContent() {
   const reassignPopulationJob = useMutation(reassignPopulationJobMutation);
   const cancelConstruction = useMutation(cancelConstructionMutation);
   const startConstruction = useMutation(startConstructionMutation);
+  const bootstrapInitialBuildings = useMutation(bootstrapInitialBuildingsMutation);
+  const ensureMyHomeTerritory = useMutation(ensureMyHomeTerritoryMutation);
 
   // Verificación estricta de titularidad en el servidor (P1)
   const isOwner = Boolean(
@@ -483,15 +552,7 @@ function KingdomOverviewContent() {
     serverTimeMs: number;
     clientTimeMs: number;
   } | null>(null);
-  const [lastSettlement, setLastSettlement] = useState<{
-    timestamp: number;
-    foodDelta: number;
-    foodResult: number;
-    isStarving: boolean;
-    starvationSeconds: number;
-    elapsedSeconds: number;
-    appliedTier: string;
-  } | null>(null);
+  const [lastSettlement, setLastSettlement] = useState<SettlementSummary | null>(null);
   const tierSavedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -582,7 +643,6 @@ function KingdomOverviewContent() {
     try {
       const res = await settleKingdomEconomy({
         kingdomId: kingdom._id,
-        includeSiegeInFoodConsumption: includeSiegeInFood,
       });
       if (activeOwnerKeyRef.current !== requestOwnerKey) return;
       if (res && res.success) {
@@ -592,8 +652,18 @@ function KingdomOverviewContent() {
           foodResult: res.resources?.food ?? 0,
           isStarving: Boolean(res.isStarving),
           starvationSeconds: res.starvationSeconds ?? 0,
+          starvationPhase: res.starvationPhase ?? 0,
           elapsedSeconds: res.elapsedSeconds ?? 0,
           appliedTier: res.appliedFoodTier ?? selectedFoodTier,
+          dailyProduction: res.dailyProduction ?? null,
+          dailyFoodConsumption: res.dailyFoodConsumption ?? null,
+          dailyTaxIncome: res.dailyTaxIncome ?? null,
+          taxesCollected: res.taxesCollected ?? 0,
+          productivityMultiplier: res.productivityMultiplier ?? 1,
+          population: res.population ?? null,
+          happiness: typeof res.happiness === 'number' ? res.happiness : null,
+          militaryMorale: typeof res.militaryMorale === 'number' ? res.militaryMorale : null,
+          militaryDesertion: res.militaryDesertion ?? 0,
         });
         setSettleError(null);
       } else {
@@ -693,6 +763,36 @@ function KingdomOverviewContent() {
     }
   };
 
+  const handleBootstrapBuildings = async () => {
+    if (!isOwner || !kingdom) return;
+    setBootstrapBusy('buildings');
+    setBootstrapMessage(null);
+    try {
+      const result = await bootstrapInitialBuildings({ kingdomId: kingdom._id });
+      setBootstrapMessage(result.inserted
+        ? `Edificios fundacionales recibidos: ${Object.entries(result.levels).map(([type, level]) => `${type} ${level}`).join(', ')}.`
+        : 'El reino ya tenía edificios; no se añadió nada.');
+    } catch (error) {
+      setBootstrapMessage(error instanceof Error ? error.message : 'No se pudieron asignar los edificios fundacionales.');
+    } finally {
+      setBootstrapBusy(null);
+    }
+  };
+
+  const handleEnsureHomeTerritory = async () => {
+    if (!isOwner || !kingdom) return;
+    setBootstrapBusy('territory');
+    setBootstrapMessage(null);
+    try {
+      const result = await ensureMyHomeTerritory({ kingdomId: kingdom._id });
+      setBootstrapMessage(result.success ? `Territorio principal asignado en la celda ${result.homeTerritoryId}.` : 'No quedan celdas libres en el mapa.');
+    } catch (error) {
+      setBootstrapMessage(error instanceof Error ? error.message : 'No se pudo asignar el territorio principal.');
+    } finally {
+      setBootstrapBusy(null);
+    }
+  };
+
   // Liquidación automática al cargar el reino propio por primera vez en la sesión (sin bucles)
   useEffect(() => {
     const settlementKey = activeOwnerKey;
@@ -720,11 +820,8 @@ function KingdomOverviewContent() {
       foodTier: selectedFoodTier,
       targetTime: clientTime,
       callerUserId: activeUserId,
-      options: {
-        includeSiegeInFoodConsumption: includeSiegeInFood,
-      },
     });
-  }, [kingdom, resources, population, populationJobs, armyUnits, buildings, selectedFoodTier, clientTime, activeUserId, includeSiegeInFood]);
+  }, [kingdom, resources, population, populationJobs, armyUnits, buildings, selectedFoodTier, clientTime, activeUserId]);
 
   const foodDelta = simulationResult?.success && simulationResult.simulatedResources && resources
     ? simulationResult.simulatedResources.food - resources.food
@@ -758,34 +855,23 @@ function KingdomOverviewContent() {
     );
   }
 
-  // Si el usuario autenticado aún no tiene un reino propio en la base de datos
+  // Si el usuario autenticado aún no tiene un reino propio: asistente de fundación (P4-P9)
   if (!kingdom && isAuthenticated && !viewDemoKingdom) {
     return (
-      <div className="bg-[#14120e] border border-amber-900/40 rounded-xl p-8 text-center max-w-xl mx-auto my-12 space-y-5 shadow-2xl">
-        <Castle className="w-14 h-14 text-[#d4af37] mx-auto opacity-90" />
-        <div className="space-y-1.5">
-          <h2 className="text-xl font-serif font-bold text-[#f4eedb]">
-            Bienvenido, Soberano {user?.name || user?.email}
-          </h2>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-800/40 text-emerald-400 text-xs font-mono">
+      <div className="space-y-4">
+        <div className="text-center text-xs text-[#8e816d]">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-800/40 text-emerald-400 font-mono">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Identidad Google verificada en Convex: {viewer?.email || user?.email || user?.sub}</span>
-          </div>
+            <span>Identidad verificada en Convex: {viewer?.email || user?.email || user?.sub}</span>
+          </span>
         </div>
-        <div className="p-4 bg-[#19150f] border border-[#2c2419] rounded-lg text-xs text-[#c7beac] leading-relaxed text-left space-y-2">
-          <p className="text-[#e2d7c0] font-medium">
-            No se encontró un reino registrado para tu cuenta Google en este despliegue.
-          </p>
-          <p className="text-[#8e816d]">
-            La fundación y colonización de reinos para nuevos soberanos se habilitará en las siguientes etapas según la especificación del juego. Mientras tanto, puedes explorar el Reino de Iberia en modo demostración.
-          </p>
-        </div>
-        <div className="pt-2 flex justify-center">
+        <FoundingWizard defaultMonarchName={user?.name || ''} onFounded={() => setActiveTab('aldea')} />
+        <div className="flex justify-center">
           <button
             onClick={() => setViewDemoKingdom(true)}
-            className="px-5 py-2.5 bg-[#2d2214] hover:bg-[#3d2f1b] border border-[#d4af37]/50 rounded-lg text-[#d4af37] text-xs font-serif font-semibold uppercase tracking-wider transition-all shadow-md hover:shadow-[#d4af37]/10"
+            className="px-4 py-2 bg-[#1b1711] hover:bg-[#262017] border border-[#3b3121] rounded text-[#c5a059] text-xs font-serif transition-colors"
           >
-            Explorar Reino de Iberia (Demo)
+            Explorar el Reino de Iberia (demostración) sin fundar
           </button>
         </div>
       </div>
@@ -826,6 +912,11 @@ function KingdomOverviewContent() {
     military: { label: 'Guarnición y Milicia', color: 'bg-rose-600', desc: 'Fuerza armada permanente' },
     scholars: { label: 'Eruditos y Sabios', color: 'bg-sky-500', desc: 'Estudios y desarrollo técnico' },
   };
+
+  // Etiquetas legibles de edificios (del catálogo servido)
+  const buildingLabels: Record<string, string> = Object.fromEntries(
+    Object.entries(constructionState?.catalog ?? {}).map(([type, rule]) => [type, rule.label])
+  );
 
   // Etiquetas legibles de unidades militares
   const unitLabels: Record<string, { label: string; icon: React.ReactNode; desc: string }> = {
@@ -880,7 +971,7 @@ function KingdomOverviewContent() {
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#a3947e] font-serif uppercase tracking-widest mb-1">
-                <span>Civilización {kingdom.civilization}</span>
+                <span>Civilización {CIVILIZATION_LABELS[kingdom.civilization] ?? kingdom.civilization ?? 'sin asignar'}</span>
                 <span aria-hidden="true" className="text-[#594d3c]">•</span>
                 <span className="text-[#d4af37] font-semibold">{kingdom.castleName}</span>
               </div>
@@ -931,6 +1022,30 @@ function KingdomOverviewContent() {
         </div>
       </section>
 
+      <TabNavigation active={activeTab} onChange={setActiveTab} parliamentBadge={parliamentBadge?.badgeCount ?? 0} />
+
+      {activeTab === 'ejercito' && (
+        <ArmyPanel kingdomId={kingdom._id} isOwner={isOwner} buildingLabels={buildingLabels} />
+      )}
+      {activeTab === 'universidad' && (
+        <UniversityPanel kingdomId={kingdom._id} isOwner={isOwner} buildingLabels={buildingLabels} />
+      )}
+      {activeTab === 'parlamento' && (
+        <ParliamentPanel
+          kingdomId={kingdom._id}
+          isOwner={isOwner}
+          kingdomName={kingdom.name}
+          taxRate={typeof kingdom.taxRate === 'number' ? kingdom.taxRate : null}
+          lastDailyBonusAt={typeof kingdom.lastDailyBonusAt === 'number' ? kingdom.lastDailyBonusAt : null}
+          dailyBonusCooldownMs={DAILY_BONUS.COOLDOWN_MS}
+          dailyBonusHonor={DAILY_BONUS.HONOR}
+        />
+      )}
+      {activeTab === 'mapa' && (
+        <MapPanel kingdomId={kingdom._id} isOwner={isOwner} homeTerritoryId={kingdom.homeTerritoryId ?? null} />
+      )}
+
+      {activeTab === 'aldea' && (<>
       {/* ====================================================================
           2. PANEL DE RECURSOS DEL REINO (5 RECURSOS PRIMARIOS)
           ==================================================================== */}
@@ -1000,13 +1115,47 @@ function KingdomOverviewContent() {
             </div>
             {lastSettlement.isStarving ? (
               <span className="text-rose-400 bg-rose-950/60 border border-rose-800/60 px-2 py-0.5 rounded font-mono text-[10px]">
-                Inanición Detectada
+                Inanición fase {lastSettlement.starvationPhase}
               </span>
             ) : (
               <span className="text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded font-mono text-[10px]">
                 Suministro Regular
               </span>
             )}
+          </div>
+        )}
+        {lastSettlement?.dailyProduction && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+            <div className="bg-[#12100d] border border-[#241e15] rounded-lg p-2.5 space-y-0.5">
+              <span className="text-[#8e816d] uppercase tracking-wider text-[10px] block">Producción diaria (servidor)</span>
+              <span className="text-[#c7beac] block">Oro +{lastSettlement.dailyProduction.gold.toFixed(1)} · Madera +{lastSettlement.dailyProduction.wood.toFixed(1)}</span>
+              <span className="text-[#c7beac] block">Piedra +{lastSettlement.dailyProduction.stone.toFixed(1)} · Hierro +{lastSettlement.dailyProduction.iron.toFixed(1)}</span>
+              <span className="text-[#c7beac] block">Alimentos +{lastSettlement.dailyProduction.food.toFixed(1)} · consumo −{(lastSettlement.dailyFoodConsumption ?? 0).toFixed(1)}</span>
+            </div>
+            <div className="bg-[#12100d] border border-[#241e15] rounded-lg p-2.5 space-y-0.5">
+              <span className="text-[#8e816d] uppercase tracking-wider text-[10px] block">Impuestos y productividad</span>
+              <span className="text-[#c7beac] block">Tasa {Math.round((kingdom.taxRate ?? 0.1) * 100)} % · +{(lastSettlement.dailyTaxIncome ?? 0).toFixed(1)} oro/día</span>
+              <span className="text-[#c7beac] block">Recaudado en el intervalo: {lastSettlement.taxesCollected.toFixed(1)} oro</span>
+              <span className="text-[#c7beac] block">Productividad ×{lastSettlement.productivityMultiplier.toFixed(2)}</span>
+            </div>
+            <div className="bg-[#12100d] border border-[#241e15] rounded-lg p-2.5 space-y-0.5">
+              <span className="text-[#8e816d] uppercase tracking-wider text-[10px] block">Población (P12, P16)</span>
+              {lastSettlement.population ? (
+                <>
+                  <span className="text-[#c7beac] block">{lastSettlement.population.totalBefore.toLocaleString('es-ES')} → {lastSettlement.population.totalAfter.toLocaleString('es-ES')} habitantes</span>
+                  <span className="text-[#c7beac] block">Nacimientos +{lastSettlement.population.births} · pérdidas −{lastSettlement.population.deaths}</span>
+                  <span className={lastSettlement.population.growthCappedByHousing ? 'text-amber-300 block' : 'text-[#c7beac] block'}>
+                    {lastSettlement.population.growthCappedByHousing ? 'Crecimiento limitado por viviendas' : 'Crecimiento del 30 % anual activo'}
+                  </span>
+                </>
+              ) : <span className="text-[#8e816d]">Sin datos en esta liquidación</span>}
+            </div>
+            <div className="bg-[#12100d] border border-[#241e15] rounded-lg p-2.5 space-y-0.5">
+              <span className="text-[#8e816d] uppercase tracking-wider text-[10px] block">Bienestar</span>
+              <span className="text-[#c7beac] block">Felicidad {lastSettlement.happiness ?? '—'} · moral militar {lastSettlement.militaryMorale ?? '—'}</span>
+              <span className="text-[#c7beac] block">Inanición acumulada: {formatSecondsDuration(lastSettlement.starvationSeconds)} (fase {lastSettlement.starvationPhase})</span>
+              {lastSettlement.militaryDesertion > 0 && <span className="text-rose-300 block">Deserción militar: {lastSettlement.militaryDesertion}</span>}
+            </div>
           </div>
         )}
 
@@ -1213,15 +1362,9 @@ function KingdomOverviewContent() {
           </div>
 
           <div className="flex items-center justify-between border-t border-[#211a12] pt-2">
-            <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-[#8e816d] hover:text-[#b8aa94] transition-colors">
-              <input
-                type="checkbox"
-                checked={includeSiegeInFood}
-                onChange={(e) => setIncludeSiegeInFood(e.target.checked)}
-                className="rounded border-[#453724] bg-[#1a150e] text-[#d4af37] focus:ring-0 focus:ring-offset-0"
-              />
-              <span>Computar dotaciones de asedio en raciones militares (+5% factor P18)</span>
-            </label>
+            <span className="text-[11px] text-[#8e816d]">
+              Regla D-12: las máquinas de asedio no consumen raciones; sus 5 operadores por pieza sí (factor 1,05 de P18).
+            </span>
             <span className="text-[10px] text-[#615545] font-mono">
               P2: 86.400 s/año
             </span>
@@ -1252,7 +1395,7 @@ function KingdomOverviewContent() {
                 <span className="text-lg font-bold text-amber-200/90 font-serif">
                   {simulationResult.simulatedResources.gold.toLocaleString('es-ES')}
                 </span>
-                <span className="text-[10px] text-[#5e5343] block mt-0.5">Estable (sin mina activa)</span>
+                <span className="text-[10px] text-[#5e5343] block mt-0.5">{lastSettlement?.dailyProduction ? `+${lastSettlement.dailyProduction.gold.toFixed(1)}/día + impuestos (servidor)` : 'Se liquida en el servidor'}</span>
               </div>
 
               {/* Madera proyectada */}
@@ -1261,7 +1404,7 @@ function KingdomOverviewContent() {
                 <span className="text-lg font-bold text-[#e0a96d]/90 font-serif">
                   {simulationResult.simulatedResources.wood.toLocaleString('es-ES')}
                 </span>
-                <span className="text-[10px] text-[#5e5343] block mt-0.5">Estable</span>
+                <span className="text-[10px] text-[#5e5343] block mt-0.5">{lastSettlement?.dailyProduction ? `+${lastSettlement.dailyProduction.wood.toFixed(1)}/día (servidor)` : 'Se liquida en el servidor'}</span>
               </div>
 
               {/* Piedra proyectada */}
@@ -1270,7 +1413,7 @@ function KingdomOverviewContent() {
                 <span className="text-lg font-bold text-slate-300/90 font-serif">
                   {simulationResult.simulatedResources.stone.toLocaleString('es-ES')}
                 </span>
-                <span className="text-[10px] text-[#5e5343] block mt-0.5">Estable</span>
+                <span className="text-[10px] text-[#5e5343] block mt-0.5">{lastSettlement?.dailyProduction ? `+${lastSettlement.dailyProduction.stone.toFixed(1)}/día (servidor)` : 'Se liquida en el servidor'}</span>
               </div>
 
               {/* Hierro proyectado */}
@@ -1279,7 +1422,7 @@ function KingdomOverviewContent() {
                 <span className="text-lg font-bold text-zinc-300/90 font-serif">
                   {simulationResult.simulatedResources.iron.toLocaleString('es-ES')}
                 </span>
-                <span className="text-[10px] text-[#5e5343] block mt-0.5">Estable</span>
+                <span className="text-[10px] text-[#5e5343] block mt-0.5">{lastSettlement?.dailyProduction ? `+${lastSettlement.dailyProduction.iron.toFixed(1)}/día (servidor)` : 'Se liquida en el servidor'}</span>
               </div>
 
               {/* Alimentos proyectados con indicador dinámico de delta */}
@@ -1324,9 +1467,7 @@ function KingdomOverviewContent() {
                     </span>
                   </div>
                   <p className="text-[10px] text-[#635745]">
-                    {simulationResult.foodProductionCapacityPending
-                      ? 'Capacidad productiva oficial pendiente; producción no calculable.'
-                      : `${populationJobs?.find(j => j.jobType === 'agriculture')?.assignedCount ?? 0} agricultores asignados (2 raciones/d, antes del límite del edificio).`}
+                    {`${populationJobs?.find(j => j.jobType === 'agriculture')?.assignedCount ?? 0} agricultores asignados · capacidad de granjas: ${constructionState?.jobCapacities?.agriculture ?? 'sin dato'} (2 raciones/d por agricultor efectivo).`}
                   </p>
                 </div>
 
@@ -1342,7 +1483,7 @@ function KingdomOverviewContent() {
                     </span>
                   </div>
                   <p className="text-[10px] text-[#635745]">
-                    Población civil + {simulationResult.militaryClassification?.regularSoldiers ?? 0} tropas regulares (x1,05 P18)
+                    Población civil + {simulationResult.militaryClassification?.regularSoldiers ?? 0} personas militares (x1,05 P18; incluye operadores de asedio y heridos)
                   </p>
                 </div>
 
@@ -1425,10 +1566,10 @@ function KingdomOverviewContent() {
               <div className="bg-[#19150f] p-3 rounded-lg border border-[#2c2419]">
                 <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider mb-0.5">Capacidad</span>
                 <span className="text-lg font-bold text-[#c7beac] font-serif">
-                  {capacityPop !== null ? capacityPop.toLocaleString('es-ES') : 'Pendiente'}
+                  {capacityPop !== null ? capacityPop.toLocaleString('es-ES') : 'Sin dato'}
                 </span>
                 <span className="text-[10px] text-[#695d4c] block mt-0.5">
-                  {constructionState?.residentialCapacity === null ? 'capacidad oficial por nivel pendiente' : 'plazas en viviendas'}
+                  plazas en viviendas (100 por nivel)
                 </span>
               </div>
               <div className="bg-[#19150f] p-3 rounded-lg border border-[#2c2419]">
@@ -1680,34 +1821,42 @@ function KingdomOverviewContent() {
                 No hay documentos de edificios persistidos para este reino.
               </p>
             )}
-            {constructionState?.catalog && (
+            {constructionState?.catalogForLevels && (
               <div className="mt-3 space-y-1.5">
-                <h4 className="text-[10px] font-semibold uppercase tracking-wider text-[#8e816d]">Catálogo observado / configuración</h4>
-                {Object.entries(constructionState.catalog).map(([buildingType, rule]) => {
-                  const missing: string[] = [];
-                  if (rule.costs === null) missing.push('costes');
-                  if (rule.baseDurationMs === null) missing.push('duración base');
-                  if (rule.progressionRequirements === null) missing.push('requisitos de progresión');
-                  const knownCosts = rule.costs
-                    ? Object.entries(rule.costs).map(([resource, amount]) => `${resource}: ${amount}`).join(', ')
-                    : 'sin valores oficiales';
-                  const knownRequirements = rule.progressionRequirements && Object.keys(rule.progressionRequirements).length
-                    ? Object.entries(rule.progressionRequirements).map(([type, level]) => `${type} nivel ${level}`).join(', ')
-                    : rule.progressionRequirements
-                      ? 'ninguno documentado'
-                      : 'pendientes';
-                  const canStart = isOwner &&
-                    constructionState.availableBuildingTypes.includes(buildingType);
+                <h4 className="text-[10px] font-semibold uppercase tracking-wider text-[#8e816d]">
+                  Catálogo oficial · siguiente nivel
+                  {constructionState.constructionDurationModifier && constructionState.constructionDurationModifier !== 1
+                    ? ` · duración ×${constructionState.constructionDurationModifier.toFixed(2)} por tecnología`
+                    : ''}
+                </h4>
+                {Object.entries(constructionState.catalogForLevels).map(([buildingType, entry]) => {
+                  const blockers: string[] = [];
+                  if (!entry.requirementsSatisfied) blockers.push(`requiere ${formatRequirements(entry.requirements, buildingLabels)}`);
+                  if (!entry.castleCapSatisfied) blockers.push(`el Castillo (nivel ${constructionState.buildingLevels?.castillo ?? 0}) limita el nivel`);
+                  if (entry.nextLevel === null) blockers.push('nivel máximo alcanzado');
+                  const inQueue = constructionState.constructionQueue.some((c) => c.buildingType === buildingType);
+                  const canStart = isOwner && blockers.length === 0 && !inQueue;
+                  const jobNames: Record<string, string> = { agriculture: 'agricultura', wood: 'madera', stone: 'piedra', iron: 'hierro', gold: 'oro' };
+                  const effect = entry.residentialCapacityPerLevel > 0
+                    ? `+${entry.residentialCapacityPerLevel} plazas de vivienda`
+                    : entry.workerCapacityPerLevel > 0
+                      ? `+${entry.workerCapacityPerLevel} trabajadores${entry.jobType ? ` de ${jobNames[entry.jobType] ?? entry.jobType}` : ''}`
+                      : entry.role;
                   return (
                     <div key={buildingType} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 rounded border border-[#2b2419] bg-[#100e0b] px-2.5 py-2 text-[11px]">
                       <span className="text-[#c7beac]">
-                        {rule.label} · costes: {knownCosts} · duración base: {rule.baseDurationMs === null ? 'pendiente' : formatSecondsDuration(rule.baseDurationMs / 1000)} · requisitos: {knownRequirements}
+                        <strong className="text-[#f0e8d4]">{entry.label}</strong> nivel {entry.currentLevel}
+                        {entry.nextLevel !== null && (
+                          <> → {entry.nextLevel} · coste: {formatCosts(entry.nextCosts)} · tarda: {entry.nextDurationMs ? formatSecondsDuration(entry.nextDurationMs / 1000) : 'sin dato'} · efecto: {effect}</>
+                        )}
                       </span>
-                      <div className="flex items-center gap-2">
-                        {missing.length ? (
-                          <span className="text-amber-300">Inicio bloqueado: falta especificar {missing.join(', ')}.</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {blockers.length ? (
+                          <span className="text-amber-300">{blockers.join('; ')}</span>
+                        ) : inQueue ? (
+                          <span className="text-[#8e816d]">en cola</span>
                         ) : (
-                          <span className="text-emerald-300">Configuración disponible</span>
+                          <span className="text-emerald-300">disponible</span>
                         )}
                         {canStart && (
                           <button
@@ -1726,9 +1875,29 @@ function KingdomOverviewContent() {
               </div>
             )}
             <p className="text-[11px] text-[#8e816d]">
-              Capacidad residencial: {capacityPop === null ? 'sin dato persistido' : capacityPop.toLocaleString('es-ES')}.
-              No se deriva de niveles de edificios mientras falte la fórmula oficial.
+              Capacidad residencial: {capacityPop === null ? 'sin dato' : capacityPop.toLocaleString('es-ES')} plazas ·
+              capacidad laboral: {constructionState?.jobCapacities
+                ? Object.entries(constructionState.jobCapacities).map(([job, cap]) => `${{ agriculture: 'agricultura', wood: 'madera', stone: 'piedra', iron: 'hierro', gold: 'oro' }[job] ?? job} ${cap}`).join(', ')
+                : 'sin dato'}.
             </p>
+            {isOwner && constructionState && (!constructionState.hasInitialBuildings || !kingdom.homeTerritoryId) && (
+              <div className="rounded border border-amber-900/40 bg-[#1b160f] p-3 text-[11px] text-[#c7b99f] space-y-2">
+                <span className="block">Este reino es anterior a las reglas actuales y le faltan elementos fundacionales:</span>
+                <div className="flex flex-wrap gap-2">
+                  {!constructionState.hasInitialBuildings && (
+                    <button type="button" onClick={handleBootstrapBuildings} disabled={bootstrapBusy !== null} className="rounded border border-[#6e5520] px-2 py-1 text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50">
+                      {bootstrapBusy === 'buildings' ? 'Asignando…' : 'Recibir edificios fundacionales'}
+                    </button>
+                  )}
+                  {!kingdom.homeTerritoryId && (
+                    <button type="button" onClick={handleEnsureHomeTerritory} disabled={bootstrapBusy !== null} className="rounded border border-[#6e5520] px-2 py-1 text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50">
+                      {bootstrapBusy === 'territory' ? 'Asignando…' : 'Asignar territorio principal'}
+                    </button>
+                  )}
+                </div>
+                {bootstrapMessage && <span className="block text-emerald-300">{bootstrapMessage}</span>}
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -1781,10 +1950,10 @@ function KingdomOverviewContent() {
 
         <div className="rounded border border-amber-900/40 bg-[#1b160f] p-3 text-xs text-[#c7b99f]">
           {isOwner
-            ? 'Las obras configuradas usan tiempo del servidor, dos ranuras y +1 % por nivel. Las acciones de catálogo sin costes, duración base o requisitos oficiales siguen bloqueadas.'
+            ? 'Las obras usan el reloj del servidor, dos ranuras simultáneas, +1 % de duración por nivel y coste ×1,15 por nivel. Ningún edificio supera el nivel del Castillo; cancelar devuelve el 50 % de lo pagado.'
             : 'Consulta de solo lectura. Iberia no puede iniciar ni cancelar construcciones.'}
           <span className="block mt-1 text-[11px] text-[#8e816d]">
-            Capacidades residencial/productiva y sus requisitos permanecen sin efecto hasta configurarse con valores oficiales.
+            La capacidad residencial y la laboral se calculan como capacidad por nivel × nivel de cada edificio completado.
           </span>
         </div>
         {constructionError && <p role="alert" className="text-xs text-rose-400">{constructionError}</p>}
@@ -1792,7 +1961,7 @@ function KingdomOverviewContent() {
       </section>
 
       <section className="bg-[#12100d] border border-[#241e15] rounded-xl p-4 text-xs text-[#8e816d] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <span><strong>Otros bloques pendientes:</strong> investigación de tecnologías y desafíos del parlamento.</span>
+        <span><strong>Secciones:</strong> Ejército, Universidad, Parlamento y Mapa están disponibles en la navegación principal.</span>
         <button
           onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
           className="inline-flex items-center gap-1.5 text-xs text-[#c5a059] hover:text-[#e8dfc8] transition-colors flex-shrink-0"
@@ -1853,6 +2022,7 @@ function KingdomOverviewContent() {
           </div>
         </section>
       )}
+      </>)}
     </div>
   );
 }
@@ -1907,7 +2077,7 @@ export default function App() {
       {/* ====================================================================
           CONTENEDOR PRINCIPAL
           ==================================================================== */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6" key={refreshTrigger}>
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 pb-24 sm:p-6" key={refreshTrigger}>
         <QueryErrorBoundary fallbackUserId={DEMO_USER_ID}>
           <KingdomOverviewContent />
         </QueryErrorBoundary>
@@ -1916,7 +2086,7 @@ export default function App() {
       {/* ====================================================================
           PIE DE PÁGINA
           ==================================================================== */}
-      <footer className="border-t border-[#241e15] bg-[#0e0c09] px-4 py-3 text-center text-xs text-[#6e6352]">
+      <footer className="border-t border-[#241e15] bg-[#0e0c09] px-4 py-3 pb-20 sm:pb-3 text-center text-xs text-[#6e6352]">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>La Conquista — Interfaz Jugable: Resumen del Reino</span>
           <span className="text-[11px] text-[#594f41]">

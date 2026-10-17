@@ -1,31 +1,11 @@
-import { mutation, query, type MutationCtx } from "./_generated/server";
-import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { resolveKingdomQueryUserId, isKingdomOwner } from "./kingdomAccess";
 import { createAggregatePopulationFallback } from "./kingdomReadModel";
-import { settleRelationalKingdomEconomy } from "./economy";
-import {
-  BUILDING_RULES,
-  calculateConstructionCancellationRefund,
-  constructionProgress,
-  createConstructionPlan,
-  BUILDING_PARAMETERS_PENDING,
-  calculateResidentialCapacity,
-  type ConstructionQueueEntry,
-} from "./buildingRules";
-import type { ResourceType } from "./economyCalculations";
-
-async function requireOwner(ctx: MutationCtx, kingdomId: Id<"kingdoms">) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity?.subject) throw new Error("Autenticación requerida.");
-  const kingdom = await ctx.db.get(kingdomId);
-  if (!kingdom) throw new Error("Reino no encontrado.");
-  if (!isKingdomOwner(kingdom.userId, identity.subject)) {
-    throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
-  }
-  return { kingdom, userId: identity.subject };
-}
+import { readArmyUnitDocs } from "./army";
+import { validateMilitaryUnitInput as validateMilitaryUnitInputRule } from "./armyRules";
+import { requireOwner } from "./buildings";
+import { DAILY_BONUS } from "./balanceConfig";
 
 /**
  * Consulta autoritativa completa del reino para el cliente (Resumen del Reino)
@@ -68,23 +48,8 @@ export const getKingdomFull = query({
       .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
       .collect();
 
-    // 5. Unidades militares (compatibilidad Armyunits / armyUnits)
-    let armyUnits: any[] = [];
-    try {
-      armyUnits = await ctx.db
-        .query("Armyunits" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-        .collect();
-    } catch {
-      try {
-        armyUnits = await ctx.db
-          .query("armyUnits" as any)
-          .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-          .collect();
-      } catch {
-        armyUnits = [];
-      }
-    }
+    // 5. Unidades militares: armyUnits es la fuente única (D-11); la tabla heredada se une solo en lectura.
+    const armyUnits: any[] = await readArmyUnitDocs(ctx, kingdomId);
 
     // Fallar explícitamente si faltan tablas relacionales requeridas; nunca presentar estado inventado.
     const buildings = await ctx.db
@@ -97,16 +62,11 @@ export const getKingdomFull = query({
       .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
       .collect();
 
-    // 8. Tecnologías
-    let technologies: any[] = [];
-    try {
-      technologies = await ctx.db
-        .query("technologies" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdomId))
-        .collect();
-    } catch {
-      technologies = [];
-    }
+    // 8. Tecnologías: progreso por reino (Bloque C)
+    const technologies = await ctx.db
+      .query("technologyProgress")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+      .collect();
 
     const kingdomPopulation = kingdom as any;
     const populationFallback = createAggregatePopulationFallback(
@@ -148,180 +108,13 @@ export const getViewer = query({
   },
 });
 
-export const getConstructionState = query({
-  args: { kingdomId: v.id("kingdoms") },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    const kingdom = await ctx.db.get(args.kingdomId);
-    if (!kingdom) throw new Error("Reino no encontrado.");
-    const isDemoRead = kingdom.userId === "guest_g9ai8cz";
-    if (!isDemoRead && !isKingdomOwner(kingdom.userId, identity?.subject)) {
-      throw new Error("No autorizado: solo puede consultar su propio reino.");
-    }
-
-    const [buildings, queue] = await Promise.all([
-      ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
-      ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
-    ]);
-    const serverTimeMs = Date.now();
-    return {
-      buildings,
-      residentialCapacity: calculateResidentialCapacity(buildings),
-      constructionQueue: queue.map((entry) => ({
-        ...entry,
-        progressPercent: typeof entry.startedAt === "number" && typeof entry.durationMs === "number"
-          ? constructionProgress(entry as ConstructionQueueEntry, serverTimeMs)
-          : null,
-        completesAt: typeof entry.startedAt === "number" && typeof entry.durationMs === "number"
-          ? entry.startedAt + entry.durationMs
-          : null,
-      })),
-      serverTimeMs,
-      writable: isKingdomOwner(kingdom.userId, identity?.subject),
-      availableBuildingTypes: Object.entries(BUILDING_RULES)
-        .filter(([, rule]) =>
-          rule.costs !== null &&
-          rule.baseDurationMs !== null &&
-          rule.progressionRequirements !== null
-        )
-        .map(([buildingType]) => buildingType),
-      pendingBuildingTypes: Object.entries(BUILDING_RULES)
-        .filter(([, rule]) =>
-          rule.costs === null ||
-          rule.baseDurationMs === null ||
-          rule.progressionRequirements === null
-        )
-        .map(([buildingType]) => buildingType),
-      catalog: BUILDING_RULES,
-      pendingParameters: BUILDING_PARAMETERS_PENDING,
-    };
-  },
-});
-
-export const getBuildingsAndQueue = getConstructionState;
-
-export const startConstruction = mutation({
-  args: {
-    kingdomId: v.id("kingdoms"),
-    buildingType: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
-    const rule = BUILDING_RULES[args.buildingType];
-    if (!rule) {
-      throw new Error(`El edificio '${args.buildingType}' no pertenece al catálogo configurado.`);
-    }
-
-    const [storedBuildings, queue] = await Promise.all([
-      ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
-      ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
-    ]);
-    const existingBuildings = storedBuildings.filter((item) => item.buildingType === args.buildingType);
-    const buildingLevels: Record<string, number> = {};
-    for (const building of storedBuildings) {
-      if (
-        !building.buildingType.trim() ||
-        !Number.isInteger(building.level) ||
-        building.level < 1 ||
-        building.level > 100 ||
-        Object.hasOwn(buildingLevels, building.buildingType)
-      ) {
-        throw new Error("Los edificios persistidos contienen niveles inválidos o tipos duplicados; se requiere conciliación.");
-      }
-      buildingLevels[building.buildingType] = building.level;
-    }
-    const now = Date.now();
-    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
-    if (settled.settlement.updatedFood === undefined) {
-      throw new Error("No se pudo liquidar la comida antes de iniciar la construcción.");
-    }
-    const resourceSnapshot: Record<ResourceType, number> = {
-      gold: settled.resources.gold,
-      wood: settled.resources.wood,
-      stone: settled.resources.stone,
-      iron: settled.resources.iron,
-      food: settled.settlement.updatedFood,
-    };
-    const planResult = createConstructionPlan({
-      buildingType: args.buildingType,
-      currentLevel: existingBuildings[0]?.level ?? 0,
-      resources: resourceSnapshot,
-      activeConstructions: queue as ConstructionQueueEntry[],
-      buildingLevels,
-      now,
-      rule,
-    });
-    if (!planResult.success) throw new Error(planResult.error);
-
-    const nextResources = { ...resourceSnapshot };
-    for (const [resource, cost] of Object.entries(planResult.plan.costs) as [ResourceType, number][]) {
-      nextResources[resource] -= cost;
-    }
-    await ctx.db.patch(settled.resources._id, nextResources);
-
-    const constructionId = await ctx.db.insert("constructionQueue", {
-      kingdomId: args.kingdomId,
-      buildingType: args.buildingType,
-      targetLevel: planResult.plan.targetLevel,
-      startedAt: planResult.plan.startedAt,
-      durationMs: planResult.plan.durationMs,
-      costs: planResult.plan.costs,
-    });
-    await ctx.scheduler.runAt(
-      planResult.plan.completesAt,
-      internal.buildings.completeConstruction,
-      { constructionId }
-    );
-
-    return {
-      success: true,
-      constructionId,
-      buildingType: args.buildingType,
-      targetLevel: planResult.plan.targetLevel,
-      startedAt: planResult.plan.startedAt,
-      completesAt: planResult.plan.completesAt,
-    };
-  },
-});
-
-export const cancelConstruction = mutation({
-  args: {
-    kingdomId: v.id("kingdoms"),
-    constructionId: v.id("constructionQueue"),
-  },
-  handler: async (ctx, args) => {
-    const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
-    const construction = await ctx.db.get(args.constructionId);
-    if (!construction || construction.kingdomId !== args.kingdomId) {
-      throw new Error("La construcción no existe en este reino.");
-    }
-
-    const now = Date.now();
-    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
-    if (settled.settlement.updatedFood === undefined) {
-      throw new Error("No se pudo liquidar la comida antes de cancelar la construcción.");
-    }
-    const refundResult = calculateConstructionCancellationRefund({
-      construction: construction as ConstructionQueueEntry,
-      serverTimeMs: now,
-    });
-    if (!refundResult.success) throw new Error(refundResult.error);
-
-    const updatedResources: Record<ResourceType, number> = {
-      gold: settled.resources.gold,
-      wood: settled.resources.wood,
-      stone: settled.resources.stone,
-      iron: settled.resources.iron,
-      food: settled.settlement.updatedFood,
-    };
-    for (const [resource, amount] of Object.entries(refundResult.refund) as [ResourceType, number][]) {
-      updatedResources[resource] += amount;
-    }
-    await ctx.db.patch(settled.resources._id, updatedResources);
-    await ctx.db.delete(args.constructionId);
-    return { success: true, refund: refundResult.refund };
-  },
-});
+/**
+ * Construcción: la implementación canónica vive en buildings.ts (Bloque A).
+ * Se reexporta aquí porque la interfaz invoca kingdoms:getConstructionState,
+ * kingdoms:startConstruction y kingdoms:cancelConstruction por nombre.
+ */
+export { getConstructionState, startConstruction, cancelConstruction, bootstrapInitialBuildings } from "./buildings";
+export { getConstructionState as getBuildingsAndQueue } from "./buildings";
 
 /**
  * Consulta de solo lectura de unidades militares del reino.
@@ -341,8 +134,8 @@ export const getArmyUnits = query({
     let units: any[] = [];
     try {
       units = await ctx.db
-        .query("armyUnits" as any)
-        .withIndex("by_kingdom", (q: any) => q.eq("kingdomId", args.kingdomId))
+        .query("armyUnits")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
         .collect();
     } catch {
       units = [];
@@ -356,19 +149,24 @@ export const getArmyUnits = query({
   },
 });
 
-/**
- * Validador puro auxiliar para entradas de unidades militares.
- * Asegura que el tipo de unidad sea válido y la cantidad un entero no negativo.
- */
+/** Validador heredado: delega en armyRules (fuente única de tipos de unidad). */
 export function validateMilitaryUnitInput(unitType: string, count: number): { success: boolean; error?: string } {
-  const validTypes = ["infanteria", "caballeria", "arqueria", "asedio"];
-  const normalizedType = (unitType || "").toLowerCase().trim();
-  if (!validTypes.includes(normalizedType)) {
-    return { success: false, error: `Tipo de unidad no admitido: '${unitType}'. Válidos: ${validTypes.join(", ")}.` };
-  }
-  if (!Number.isInteger(count) || count < 0) {
-    return { success: false, error: `Cantidad inválida: debe ser un número entero no negativo (recibido: ${count}).` };
-  }
-  return { success: true };
+  return validateMilitaryUnitInputRule(unitType, count);
 }
 
+/** [MAESTRA P59] Bonus diario: +5 honor una vez cada 24 horas reales, validado en servidor. */
+export const claimDailyBonus = mutation({
+  args: { kingdomId: v.id("kingdoms") },
+  handler: async (ctx, args) => {
+    const { kingdom } = await requireOwner(ctx, args.kingdomId);
+    const now = Date.now();
+    const last = typeof kingdom.lastDailyBonusAt === "number" ? kingdom.lastDailyBonusAt : 0;
+    if (now - last < DAILY_BONUS.COOLDOWN_MS) {
+      const remainingMs = DAILY_BONUS.COOLDOWN_MS - (now - last);
+      throw new Error(`El bonus diario ya fue reclamado; disponible en ${Math.ceil(remainingMs / 60_000)} minutos.`);
+    }
+    const honor = (kingdom.honor ?? 0) + DAILY_BONUS.HONOR;
+    await ctx.db.patch(args.kingdomId, { honor, lastDailyBonusAt: now, updatedAt: now });
+    return { success: true, honor, awarded: DAILY_BONUS.HONOR, nextAvailableAt: now + DAILY_BONUS.COOLDOWN_MS };
+  },
+});

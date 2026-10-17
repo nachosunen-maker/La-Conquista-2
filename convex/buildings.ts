@@ -1,3 +1,8 @@
+/**
+ * LA CONQUISTA — CONSTRUCCIÓN (ruta canónica, Bloque A)
+ * Única implementación de consulta, inicio, cancelación y finalización de obras.
+ * kingdoms.ts reexporta estas funciones por compatibilidad con la interfaz.
+ */
 import { internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
@@ -6,17 +11,22 @@ import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
 import {
   BUILDING_RULES,
+  BUILDING_PARAMETERS_PENDING,
+  INITIAL_BUILDING_LEVELS,
   calculateConstructionCancellationRefund,
+  calculateJobCapacities,
+  calculateResidentialCapacity,
   constructionProgress,
   createConstructionPlan,
-  BUILDING_PARAMETERS_PENDING,
+  describeCatalogForLevels,
+  validateBuildingCollection,
   validateConstructionCompletion,
-  calculateResidentialCapacity,
   type ConstructionQueueEntry,
 } from "./buildingRules";
+import { getConstructionDurationModifier, readCompletedTechnologyIds } from "./technologyRules";
 import type { ResourceType } from "./economyCalculations";
 
-async function requireOwner(ctx: MutationCtx, kingdomId: Id<"kingdoms">) {
+export async function requireOwner(ctx: MutationCtx, kingdomId: Id<"kingdoms">) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity?.subject) throw new Error("Autenticación requerida.");
   const kingdom = await ctx.db.get(kingdomId);
@@ -25,6 +35,23 @@ async function requireOwner(ctx: MutationCtx, kingdomId: Id<"kingdoms">) {
     throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
   }
   return { kingdom, userId: identity.subject };
+}
+
+/**
+ * [DERIVADO de P19] Inserta los edificios fundacionales de un reino que no tiene ninguno.
+ * Idempotente: si ya existe cualquier edificio no hace nada.
+ */
+export async function insertInitialBuildings(ctx: MutationCtx, kingdomId: Id<"kingdoms">): Promise<boolean> {
+  const existing = await ctx.db
+    .query("buildings")
+    .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+    .first();
+  if (existing) return false;
+  for (const [buildingType, level] of Object.entries(INITIAL_BUILDING_LEVELS)) {
+    if (!BUILDING_RULES[buildingType] || !Number.isInteger(level) || level < 1) continue;
+    await ctx.db.insert("buildings", { kingdomId, buildingType, level });
+  }
+  return true;
 }
 
 export const getConstructionState = query({
@@ -42,10 +69,16 @@ export const getConstructionState = query({
       ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
       ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
     ]);
+    const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
+    const durationModifier = getConstructionDurationModifier(completedTechnologies);
     const serverTimeMs = Date.now();
+    const collection = validateBuildingCollection(buildings);
+    const buildingLevels = collection.success ? collection.levels : {};
     return {
       buildings,
+      buildingLevels,
       residentialCapacity: calculateResidentialCapacity(buildings),
+      jobCapacities: calculateJobCapacities(buildings),
       constructionQueue: queue.map((entry) => ({
         ...entry,
         progressPercent: typeof entry.startedAt === "number" && typeof entry.durationMs === "number"
@@ -57,22 +90,13 @@ export const getConstructionState = query({
       })),
       serverTimeMs,
       writable: isKingdomOwner(kingdom.userId, identity?.subject),
-      availableBuildingTypes: Object.entries(BUILDING_RULES)
-        .filter(([, rule]) =>
-          rule.costs !== null &&
-          rule.baseDurationMs !== null &&
-          rule.progressionRequirements !== null
-        )
-        .map(([buildingType]) => buildingType),
-      pendingBuildingTypes: Object.entries(BUILDING_RULES)
-        .filter(([, rule]) =>
-          rule.costs === null ||
-          rule.baseDurationMs === null ||
-          rule.progressionRequirements === null
-        )
-        .map(([buildingType]) => buildingType),
+      availableBuildingTypes: Object.keys(BUILDING_RULES),
+      pendingBuildingTypes: [] as string[],
       catalog: BUILDING_RULES,
+      catalogForLevels: describeCatalogForLevels(buildingLevels, durationModifier),
+      constructionDurationModifier: durationModifier,
       pendingParameters: BUILDING_PARAMETERS_PENDING,
+      hasInitialBuildings: buildings.length > 0,
     };
   },
 });
@@ -89,44 +113,27 @@ export const startConstruction = mutation({
       throw new Error(`El edificio '${args.buildingType}' no pertenece al catálogo configurado.`);
     }
 
+    // La liquidación completa obras vencidas: la cola y los niveles se leen después de ella.
+    const now = Date.now();
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const [storedBuildings, queue] = await Promise.all([
       ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
       ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
     ]);
-    const existingBuildings = storedBuildings.filter((item) => item.buildingType === args.buildingType);
-    const buildingLevels: Record<string, number> = {};
-    for (const building of storedBuildings) {
-      if (
-        !building.buildingType.trim() ||
-        !Number.isInteger(building.level) ||
-        building.level < 1 ||
-        building.level > 100 ||
-        Object.hasOwn(buildingLevels, building.buildingType)
-      ) {
-        throw new Error("Los edificios persistidos contienen niveles inválidos o tipos duplicados; se requiere conciliación.");
-      }
-      buildingLevels[building.buildingType] = building.level;
-    }
-    const now = Date.now();
-    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
-    if (settled.settlement.updatedFood === undefined) {
-      throw new Error("No se pudo liquidar la comida antes de iniciar la construcción.");
-    }
-    const resourceSnapshot: Record<ResourceType, number> = {
-      gold: settled.resources.gold,
-      wood: settled.resources.wood,
-      stone: settled.resources.stone,
-      iron: settled.resources.iron,
-      food: settled.settlement.updatedFood,
-    };
+    const collection = validateBuildingCollection(storedBuildings);
+    if (!collection.success) throw new Error(collection.error);
+    const buildingLevels = collection.levels;
+    const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
+    const resourceSnapshot: Record<ResourceType, number> = settled.settledResources;
     const planResult = createConstructionPlan({
       buildingType: args.buildingType,
-      currentLevel: existingBuildings[0]?.level ?? 0,
+      currentLevel: buildingLevels[args.buildingType] ?? 0,
       resources: resourceSnapshot,
       activeConstructions: queue as ConstructionQueueEntry[],
       buildingLevels,
       now,
       rule,
+      durationModifier: getConstructionDurationModifier(completedTechnologies),
     });
     if (!planResult.success) throw new Error(planResult.error);
 
@@ -157,6 +164,7 @@ export const startConstruction = mutation({
       targetLevel: planResult.plan.targetLevel,
       startedAt: planResult.plan.startedAt,
       completesAt: planResult.plan.completesAt,
+      costs: planResult.plan.costs,
     };
   },
 });
@@ -175,22 +183,13 @@ export const cancelConstruction = mutation({
 
     const now = Date.now();
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
-    if (settled.settlement.updatedFood === undefined) {
-      throw new Error("No se pudo liquidar la comida antes de cancelar la construcción.");
-    }
     const refundResult = calculateConstructionCancellationRefund({
       construction: construction as ConstructionQueueEntry,
       serverTimeMs: now,
     });
     if (!refundResult.success) throw new Error(refundResult.error);
 
-    const updatedResources: Record<ResourceType, number> = {
-      gold: settled.resources.gold,
-      wood: settled.resources.wood,
-      stone: settled.resources.stone,
-      iron: settled.resources.iron,
-      food: settled.settlement.updatedFood,
-    };
+    const updatedResources: Record<ResourceType, number> = { ...settled.settledResources };
     for (const [resource, amount] of Object.entries(refundResult.refund) as [ResourceType, number][]) {
       updatedResources[resource] += amount;
     }
@@ -200,6 +199,10 @@ export const cancelConstruction = mutation({
   },
 });
 
+/**
+ * Finalización autoritativa programada en servidor. También puede invocarse
+ * de forma idempotente desde una liquidación posterior si el scheduler no se ejecutó.
+ */
 export const completeConstruction = internalMutation({
   args: { constructionId: v.id("constructionQueue") },
   handler: async (ctx, args) => {
@@ -237,5 +240,57 @@ export const completeConstruction = internalMutation({
     }
     await ctx.db.delete(args.constructionId);
     return { success: true, completed: true, buildingType: construction.buildingType, level: construction.targetLevel };
+  },
+});
+
+/**
+ * Completa en la misma transacción las obras vencidas de un reino (salvaguarda
+ * frente a tareas programadas perdidas). Devuelve los tipos completados.
+ */
+export async function completeDueConstructions(ctx: MutationCtx, kingdomId: Id<"kingdoms">, now: number): Promise<string[]> {
+  const queue = await ctx.db
+    .query("constructionQueue")
+    .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+    .collect();
+  const completed: string[] = [];
+  for (const construction of queue) {
+    if (
+      typeof construction.startedAt !== "number" ||
+      typeof construction.durationMs !== "number" ||
+      typeof construction.targetLevel !== "number" ||
+      typeof construction.buildingType !== "string" ||
+      constructionProgress(construction as ConstructionQueueEntry, now) !== 100
+    ) {
+      continue;
+    }
+    const buildings = await ctx.db
+      .query("buildings")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+      .collect();
+    const matching = buildings.filter((item) => item.buildingType === construction.buildingType);
+    const completion = validateConstructionCompletion({
+      buildingType: construction.buildingType,
+      targetLevel: construction.targetLevel,
+      existingLevels: matching.map((item) => item.level),
+    });
+    if (!completion.success) continue;
+    if (completion.action === "upgrade" && matching[0]) {
+      await ctx.db.patch(matching[0]._id, { level: construction.targetLevel });
+    } else if (completion.action === "insert") {
+      await ctx.db.insert("buildings", { kingdomId, buildingType: construction.buildingType, level: construction.targetLevel });
+    }
+    await ctx.db.delete(construction._id);
+    completed.push(construction.buildingType);
+  }
+  return completed;
+}
+
+/** Permite al titular de un reino sin edificios recibir los edificios fundacionales (reinos anteriores a esta regla). */
+export const bootstrapInitialBuildings = mutation({
+  args: { kingdomId: v.id("kingdoms") },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx, args.kingdomId);
+    const inserted = await insertInitialBuildings(ctx, args.kingdomId);
+    return { success: true, inserted, levels: inserted ? INITIAL_BUILDING_LEVELS : {} };
   },
 });

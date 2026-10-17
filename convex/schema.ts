@@ -54,6 +54,20 @@ export default defineSchema(
         )
       ),
       lastUpdated: v.optional(v.number()),
+      // Bloque B: equipamiento y estrategia del ejército (P30, P31, P35) y fatiga (P32)
+      weaponTier: v.optional(v.string()),
+      armorTier: v.optional(v.string()),
+      strategy: v.optional(v.string()),
+      armyFatigue: v.optional(v.number()),
+      // Bloques D-F: bienestar, impuestos, honor y gloria
+      taxRate: v.optional(v.number()),
+      honor: v.optional(v.number()),
+      glory: v.optional(v.number()),
+      lastDailyBonusAt: v.optional(v.number()),
+      moraleEffects: v.optional(v.array(v.object({ amount: v.number(), expiresAt: v.number() }))),
+      // Bloque G: territorio principal y reclamaciones pendientes (P47)
+      homeTerritoryId: v.optional(v.string()),
+      pendingTerritoryClaims: v.optional(v.number()),
     })
       .index("by_user_id", ["userId"])
       .index("by_user_id_and_name", ["userId", "name"])
@@ -99,6 +113,8 @@ export default defineSchema(
       kingdomId: v.id("kingdoms"),
       unitType: v.optional(v.string()),
       count: v.optional(v.number()),
+      level: v.optional(v.number()), // Nivel militar P29 (1-5)
+      populationReserved: v.optional(v.number()), // Civiles libres reservados hasta completar
       startedAt: v.optional(v.number()),
       durationMs: v.optional(v.number()),
       costs: v.optional(v.object({
@@ -110,11 +126,98 @@ export default defineSchema(
       })),
     }).index("by_kingdom", ["kingdomId"]),
 
+    // Progreso tecnológico por reino (Bloque C): un documento por tecnología iniciada o completada.
+    technologyProgress: defineTable({
+      kingdomId: v.id("kingdoms"),
+      technologyId: v.string(),
+      status: v.union(v.literal("researching"), v.literal("completed")),
+      startedAt: v.optional(v.number()),
+      durationMs: v.optional(v.number()),
+      completedAt: v.optional(v.number()),
+      costs: v.optional(v.object({
+        gold: v.optional(v.number()),
+        wood: v.optional(v.number()),
+        stone: v.optional(v.number()),
+        iron: v.optional(v.number()),
+        food: v.optional(v.number()),
+      })),
+    })
+      .index("by_kingdom", ["kingdomId"])
+      .index("by_kingdom_and_technology", ["kingdomId", "technologyId"]),
+
+    // Mapa hexagonal (Bloque G): una fila por celda; ownerKingdomId ausente = territorio libre (P49).
+    territories: defineTable({
+      cellId: v.string(),
+      q: v.number(),
+      r: v.number(),
+      terrain: v.string(),
+      ownerKingdomId: v.optional(v.id("kingdoms")),
+      isHome: v.optional(v.boolean()),
+      claimedAt: v.optional(v.number()),
+    })
+      .index("by_cell", ["cellId"])
+      .index("by_owner", ["ownerKingdomId"]),
+
+    // Desafíos del Parlamento (Bloque E): máquina de estados server-authoritative (BLOQUE 9).
+    challenges: defineTable({
+      challengerKingdomId: v.id("kingdoms"),
+      targetKingdomId: v.id("kingdoms"),
+      challengeType: v.string(),
+      status: v.union(
+        v.literal("PENDING"), v.literal("ACCEPTED"), v.literal("REJECTED"),
+        v.literal("FROZEN"), v.literal("RESOLVED"), v.literal("EXPIRED")
+      ),
+      createdAt: v.number(),
+      expiresAt: v.number(),
+      respondedAt: v.optional(v.number()),
+      window: v.optional(v.string()),
+      scheduledAt: v.optional(v.number()),
+      freezeAt: v.optional(v.number()),
+      frozenAt: v.optional(v.number()),
+      resolvedAt: v.optional(v.number()),
+      distance: v.optional(v.number()),
+      marchSeconds: v.optional(v.number()),
+      battleId: v.optional(v.id("Battle")),
+      penaltyApplied: v.optional(v.any()),
+      frozen: v.optional(v.any()),
+      messages: v.optional(v.array(v.object({ fromKingdomId: v.id("kingdoms"), messageId: v.string(), at: v.number() }))),
+    })
+      .index("by_challenger", ["challengerKingdomId"])
+      .index("by_target", ["targetKingdomId"]),
+
+    // Informes de batalla (Bloque F, P43). Nombre de tabla confirmado con mayúscula.
+    Battle: defineTable({
+      challengeId: v.id("challenges"),
+      attackerKingdomId: v.id("kingdoms"),
+      defenderKingdomId: v.id("kingdoms"),
+      resolvedAt: v.number(),
+      outcome: v.string(),
+      winnerKingdomId: v.optional(v.id("kingdoms")),
+      crushingVictory: v.boolean(),
+      report: v.any(),
+    })
+      .index("by_attacker", ["attackerKingdomId"])
+      .index("by_defender", ["defenderKingdomId"]),
+
+    // Informes de espionaje (D-39), caducan a las 24 h reales.
+    espionageReports: defineTable({
+      kingdomId: v.id("kingdoms"),
+      targetKingdomId: v.id("kingdoms"),
+      level: v.number(),
+      createdAt: v.number(),
+      expiresAt: v.number(),
+      estimate: v.object({ min: v.number(), max: v.number() }),
+      composition: v.optional(v.any()),
+    }).index("by_kingdom", ["kingdomId"]),
+
     // Unidades militares del reino (esquema mínimo persistido)
     armyUnits: defineTable({
       kingdomId: v.id("kingdoms"),
-      unitType: v.string(), // "infanteria", "caballeria", "arqueria", "asedio", etc.
-      count: v.number(),    // Cantidad entera no negativa
+      unitType: v.string(), // "infanteria", "caballeria", "arqueria", "asedio"
+      level: v.optional(v.number()), // Nivel militar P29 (1-5); ausente = 1
+      count: v.number(),    // Activos: cantidad entera no negativa
+      wounded: v.optional(v.number()), // Heridos (P44) separados de los disponibles
+      recoveryProgress: v.optional(v.number()), // Fracción acumulada de recuperación hospitalaria (P45)
     }).index("by_kingdom", ["kingdomId"]),
   },
   {
