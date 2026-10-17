@@ -8,7 +8,7 @@ import { calculateJobCapacities, calculateResidentialCapacity, validateBuildingC
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import { simulateExtendedEconomy, type ExtendedEconomyResult } from "./economyExtended";
 import { normalizeUnitType } from "./armyRules";
-import { TAXES, WELLBEING, UNITS, TERRAINS, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP } from "./balanceConfig";
+import { TAXES, WELLBEING, UNITS, TERRAINS, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP, REST_POLICIES } from "./balanceConfig";
 import { woundedRecoveryRatio } from "./battleRules";
 import { recoverFatigue } from "./territoryRules";
 import { isCivilizationId } from "./civilizations";
@@ -67,17 +67,14 @@ export {
 
 /**
  * ============================================================================
- * ESTADO Y LIMITACIONES REALES DE LA AUTENTICACIÓN EN CONVEX:
- * 1. El proveedor de autenticación oficial de Convex (ej. Clerk, Auth0 o JWT
- *    mediante auth.config.ts) AÚN NO HA SIDO CONFIGURADO en este entorno.
- * 2. Se han ELIMINADO por completo las identidades por defecto ("dev-user-default")
- *    y la posibilidad de aceptar un parámetro `userId` enviado por el cliente.
- * 3. Como consecuencia estricta: ninguna mutación o consulta sobre un reino podrá
- *    ejecutarse desde el cliente hasta que se configure formalmente el proveedor
- *    de autenticación, ya que `ctx.auth.getUserIdentity()` devolverá `null` y
- *    lanzará un error de autorización.
- * 4. EL SISTEMA NO DEBE PRESENTARSE COMO LISTO PARA PRODUCCIÓN NI CRIPTOGRÁFICAMENTE
- *    SEGURO hasta completar dicha configuración.
+ * AUTENTICACIÓN (P1, P4, P5, T-01)
+ * 1. El proveedor OIDC de Google está configurado en convex/auth.config.ts y el cliente
+ *    envía el ID token de Google Identity Services (src/auth.tsx); ctx.auth.getUserIdentity()
+ *    devuelve el subject verificado por Convex.
+ * 2. Nunca se acepta un userId enviado por el cliente para autorizar escrituras.
+ * 3. El inicio de sesión con correo y contraseña (P4) sigue pendiente: requiere Convex Auth y
+ *    secretos (clave JWT, SITE_URL) que se configuran en el panel de Convex, nunca en el repositorio.
+ * 4. Sin sesión válida, ninguna mutación sobre un reino se ejecuta.
  * ============================================================================
  */
 async function requireAuthenticatedUser(ctx: {
@@ -221,6 +218,11 @@ export async function settleRelationalKingdomEconomy(
       starvationSeconds: typeof state.population.starvationSeconds === "number" ? state.population.starvationSeconds : 0,
       buildingLevels,
       militaryPersonnel: adapted.militaryClassification.regularSoldiers,
+      restPolicy: typeof kingdom.restPolicy === "string" ? (kingdom.restPolicy as any) : "normal",
+      glory: typeof kingdom.glory === "number" ? kingdom.glory : 0,
+      mercenaryCount: state.armyUnits
+        .filter((doc: any) => doc.isMercenary && Number.isInteger(doc.count))
+        .reduce((sum: number, doc: any) => sum + Math.max(0, doc.count), 0),
     });
     settledResources = extended.updatedResources;
   }
@@ -245,6 +247,7 @@ export async function settleRelationalKingdomEconomy(
     const kingdomPatch: Record<string, unknown> = {};
     if (kingdom.happiness !== extended.happiness.after) kingdomPatch.happiness = extended.happiness.after;
     if (kingdom.militaryMorale !== extended.morale) kingdomPatch.militaryMorale = extended.morale;
+    if ((kingdom.glory ?? 0) !== extended.glory.after) kingdomPatch.glory = extended.glory.after;
     const liveEffects = (Array.isArray(kingdom.moraleEffects) ? kingdom.moraleEffects : []).filter((e: any) => e.expiresAt > now);
     if (liveEffects.length !== (kingdom.moraleEffects?.length ?? 0)) kingdomPatch.moraleEffects = liveEffects;
     if (Object.keys(kingdomPatch).length > 0) await ctx.db.patch(kingdom._id, { ...kingdomPatch, updatedAt: now });
@@ -258,9 +261,10 @@ export async function settleRelationalKingdomEconomy(
     }
 
     // [MAESTRA P45] Recuperación de heridos por nivel de Hospital militar (+ tecnología, tope 60 %).
+    // [M-07] La medicina (trabajadores del Hospital) suma a la bonificación tecnológica, con el mismo tope del 60 %.
     const recoveryRatio = woundedRecoveryRatio(
       buildingLevels.hospitalMilitar ?? 0,
-      computeTechnologyModifiers(completedTechnologies).woundedRecoveryBonus,
+      computeTechnologyModifiers(completedTechnologies).woundedRecoveryBonus + extended.professions.woundedRecoveryBonus,
       HOSPITAL_RECOVERY_PER_YEAR,
       HOSPITAL_RECOVERY_CAP
     );
@@ -280,11 +284,33 @@ export async function settleRelationalKingdomEconomy(
 
     // [COMPLEMENTO §5] Recuperación de fatiga: 10 puntos por día real con ración normal o mejor.
     const currentFatigue = typeof kingdom.armyFatigue === "number" ? kingdom.armyFatigue : 0;
-    const nextFatigue = recoverFatigue(currentFatigue, extended.elapsedDays, settlement.appliedFoodTier ?? "normal");
+    // [M-04] La política de descanso añade o resta fatiga diaria antes de la recuperación natural.
+    const restAdjusted = Math.max(0, Math.min(100, currentFatigue + extended.restFatigueDelta));
+    const nextFatigue = recoverFatigue(restAdjusted, extended.elapsedDays, settlement.appliedFoodTier ?? "normal");
     if (nextFatigue !== currentFatigue) await ctx.db.patch(kingdom._id, { armyFatigue: nextFatigue });
+
+    // [M-02] Mercenarios: contratos vencidos o impagados desaparecen y salen del censo.
+    await settleMercenaries(ctx, state.armyUnits, state.population._id, now, extended.mercenaries.unpaid);
   }
 
   return { ...state, settlement, settledResources, extended };
+}
+
+/** [M-02 opción A] Retira mercenarios con contrato vencido, o todos si no se pudo pagar el salario. */
+async function settleMercenaries(ctx: any, armyUnits: any[], populationId: any, now: number, unpaid: boolean): Promise<number> {
+  let removed = 0;
+  for (const doc of armyUnits) {
+    if (!doc.isMercenary) continue;
+    const expired = typeof doc.contractEndsAt === "number" && doc.contractEndsAt <= now;
+    if (!expired && !unpaid) continue;
+    removed += Math.max(0, doc.count ?? 0) + Math.max(0, doc.wounded ?? 0);
+    await ctx.db.delete(doc._id);
+  }
+  if (removed > 0) {
+    const population = await ctx.db.get(populationId);
+    if (population) await ctx.db.patch(populationId, { total: Math.max(0, population.total - removed) });
+  }
+  return removed;
 }
 
 /** [COMPLEMENTO D-48] Deserción en fase 3: se retira tropa viva empezando por los lotes más numerosos. */
@@ -1002,8 +1028,34 @@ function settlementResponse(kingdom: any, settled: Awaited<ReturnType<typeof set
     happiness: extended?.happiness.after ?? kingdom.happiness ?? null,
     militaryMorale: extended?.morale ?? kingdom.militaryMorale ?? null,
     militaryDesertion: extended?.militaryDesertion ?? 0,
+    storageCapacity: extended?.storageCapacity ?? null,
+    wastedByStorage: extended?.wastedByStorage ?? null,
+    restPolicy: extended?.restPolicy ?? (kingdom.restPolicy ?? "normal"),
+    glory: extended?.glory ?? null,
+    mercenaries: extended?.mercenaries ?? null,
+    professions: extended?.professions ?? null,
   };
 }
+
+/** [M-04 opción A] Política de descanso del Castillo (P15, P55). */
+export const setRestPolicy = mutation({
+  args: { kingdomId: v.id("kingdoms"), restPolicy: v.string() },
+  handler: async (ctx, args) => {
+    const callerUserId = await requireAuthenticatedUser(ctx);
+    const kingdom = await ctx.db.get(args.kingdomId);
+    if (!kingdom) throw new Error("Reino no encontrado.");
+    if (!isKingdomOwner(kingdom.userId, callerUserId)) {
+      throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
+    }
+    if (!Object.hasOwn(REST_POLICIES, args.restPolicy)) {
+      throw new Error(`Política de descanso desconocida: '${args.restPolicy}'. Opciones: ${Object.keys(REST_POLICIES).join(", ")}.`);
+    }
+    const now = Date.now();
+    await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
+    await ctx.db.patch(args.kingdomId, { restPolicy: args.restPolicy, updatedAt: now });
+    return { success: true, restPolicy: args.restPolicy, ...REST_POLICIES[args.restPolicy as keyof typeof REST_POLICIES] };
+  },
+});
 
 /**
  * ============================================================================

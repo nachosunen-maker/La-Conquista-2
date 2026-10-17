@@ -59,6 +59,14 @@ export default defineSchema(
       armorTier: v.optional(v.string()),
       strategy: v.optional(v.string()),
       armyFatigue: v.optional(v.number()),
+      // Ronda 2: política de descanso (M-04) y formación de combate (P37, M-11)
+      restPolicy: v.optional(v.string()),
+      formation: v.optional(v.object({
+        infanteria: v.optional(v.number()),
+        arqueria: v.optional(v.number()),
+        caballeria: v.optional(v.number()),
+        asedio: v.optional(v.number()),
+      })),
       // Bloques D-F: bienestar, impuestos, honor y gloria
       taxRate: v.optional(v.number()),
       honor: v.optional(v.number()),
@@ -72,6 +80,33 @@ export default defineSchema(
       .index("by_user_id", ["userId"])
       .index("by_user_id_and_name", ["userId", "name"])
       .index("by_name", ["name"]),
+
+    // Tablas relacionales observadas en el despliegue (recursos, censo y oficios). Se declaran con
+    // campos opcionales para tipado y pruebas; schemaValidation sigue desactivada por compatibilidad.
+    resources: defineTable({
+      kingdomId: v.id("kingdoms"),
+      gold: v.number(),
+      wood: v.number(),
+      stone: v.number(),
+      iron: v.number(),
+      food: v.number(),
+      lastUpdated: v.optional(v.number()),
+      settlementInitialized: v.optional(v.boolean()),
+      foodTier: v.optional(v.string()),
+    }).index("by_kingdom", ["kingdomId"]),
+    population: defineTable({
+      kingdomId: v.id("kingdoms"),
+      total: v.number(),
+      available: v.number(),
+      capacity: v.optional(v.number()),
+      starving: v.optional(v.boolean()),
+      starvationSeconds: v.optional(v.number()),
+    }).index("by_kingdom", ["kingdomId"]),
+    populationJobs: defineTable({
+      kingdomId: v.id("kingdoms"),
+      jobType: v.string(),
+      assignedCount: v.number(),
+    }).index("by_kingdom", ["kingdomId"]),
 
     // Tabla para registro atómico e idempotente de transacciones de gasto
     transactions: defineTable({
@@ -218,6 +253,8 @@ export default defineSchema(
       count: v.number(),    // Activos: cantidad entera no negativa
       wounded: v.optional(v.number()), // Heridos (P44) separados de los disponibles
       recoveryProgress: v.optional(v.number()), // Fracción acumulada de recuperación hospitalaria (P45)
+      isMercenary: v.optional(v.boolean()), // [M-02] Contrato de mercenarios (P53)
+      contractEndsAt: v.optional(v.number()),
     }).index("by_kingdom", ["kingdomId"]),
   },
   {

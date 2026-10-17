@@ -2,15 +2,19 @@
  * LA CONQUISTA — SIMULADOR DETERMINISTA DE BATALLAS (Bloque F, P34-P37, P43-P47, D-27 a D-32)
  * Lógica pura: dos contingentes congelados entran, un informe completo sale.
  * Sin aleatoriedad: el mismo par de contingentes produce siempre el mismo informe.
+ * Ronda 2 (17-10-2026): k = 0,40, exponentes de calidad elevados, empate a 5 puntos,
+ * murallas +5 %/nivel, matriz de contrapartidas P37 y recompensas de honor/gloria.
  */
 import {
   ARMORS,
+  BATTLE_REWARDS,
   COMBAT,
   FOOD,
   STRATEGIES,
   STRATEGY_COUNTER_BONUS,
   STRATEGY_FACTOR_RANGE,
   UNITS,
+  UNIT_COUNTERS,
   UNIT_TYPES,
   WEAPONS,
   type ArmorTier,
@@ -25,6 +29,7 @@ export type Composition = Record<UnitType, number>;
 export interface BattleSide {
   kingdomId: string;
   name: string;
+  /** Contingente que participa (ya aplicada la fracción de formación elegida, P37). */
   composition: Composition;
   /** Multiplicador medio de entrenamiento (P29), ponderado por efectivos. */
   trainingMultiplier: number;
@@ -34,7 +39,7 @@ export interface BattleSide {
   morale: number; // 0-100
   foodTier: string;
   fatigue: number; // 0-100
-  /** Nivel de murallas del defensor (el asedio solo rinde a pleno contra murallas). */
+  /** Nivel de murallas del defensor: +5 % de defensa por nivel (máx. +50 %) y asedio a pleno rendimiento. */
   wallsLevel: number;
   /** Bonificación defensiva del terreno del territorio principal (0,1 = +10 %). */
   terrainDefenseBonus: number;
@@ -51,6 +56,7 @@ export interface SideFactors {
   morale: number;
   food: number;
   fatigue: number;
+  wallsBonus: number;
   offensivePower: number;
   defensivePower: number;
   linearScore: number;
@@ -94,10 +100,10 @@ export interface BattleReport {
   attacker: SideResult;
   defender: SideResult;
   explanation: string[];
-  /** [MAESTRA P50-P51] Importes pendientes de balance: se registran a cero. */
-  honorAwarded: { attacker: number; defender: number; pending: true };
-  gloryAwarded: { attacker: number; defender: number; pending: true };
-  /** [DERIVADO] Desgaste del equipo informado como porcentaje de bajas propias (sin regla numérica oficial). */
+  /** [M-01 opción A] Honor y gloria concedidos según BATTLE_REWARDS. */
+  honorAwarded: { attacker: number; defender: number; pending: boolean };
+  gloryAwarded: { attacker: number; defender: number; pending: boolean };
+  /** [DERIVADO] Desgaste del equipo informado como porcentaje de bajas propias. */
   equipmentWear: { attacker: number; defender: number };
   /** [COMPLEMENTO D-31] Sin botín en la primera versión. */
   lootTransferred: false;
@@ -111,13 +117,27 @@ export function totalUnits(composition: Composition): number {
   return UNIT_TYPES.reduce((sum, type) => sum + Math.max(0, composition[type] ?? 0), 0);
 }
 
-function strengths(side: BattleSide, composition: Composition, enemyWalls: number): { offensive: number; defensive: number } {
+/** [M-06 opción A] Bonificación defensiva de murallas. */
+export function wallsDefenseBonus(wallsLevel: number): number {
+  const level = Number.isInteger(wallsLevel) && wallsLevel > 0 ? wallsLevel : 0;
+  return Math.min(COMBAT.WALLS_DEFENSE_MAX, level * COMBAT.WALLS_DEFENSE_PER_LEVEL);
+}
+
+/** [P37 + M-11] Fuerza ofensiva y defensiva ponderadas por tipo, con la matriz de contrapartidas. */
+function strengths(composition: Composition, enemyComposition: Composition, enemyWalls: number): { offensive: number; defensive: number } {
+  const enemyLiving = (["infanteria", "arqueria", "caballeria"] as const).reduce((sum, type) => sum + Math.max(0, enemyComposition[type] ?? 0), 0);
   let offensive = 0;
   let defensive = 0;
   for (const type of UNIT_TYPES) {
     const count = Math.max(0, composition[type] ?? 0);
+    if (count === 0) continue;
     const unit = UNITS[type];
-    const attack = type === "asedio" && enemyWalls <= 0 ? COMBAT.SIEGE_ATTACK_WITHOUT_WALLS : unit.attack;
+    let attack = type === "asedio" && enemyWalls <= 0 ? COMBAT.SIEGE_ATTACK_WITHOUT_WALLS : unit.attack;
+    if (type !== "asedio" && enemyLiving > 0) {
+      const countered = UNIT_COUNTERS[type];
+      const share = Math.max(0, enemyComposition[countered] ?? 0) / enemyLiving;
+      attack *= 1 + COMBAT.FORMATION_COUNTER_BONUS * share;
+    }
     offensive += count * attack;
     defensive += count * unit.defense;
   }
@@ -142,9 +162,9 @@ export function foodFactor(foodTier: string): number {
   return Math.max(COMBAT.FOOD_FACTOR_MIN, Math.min(COMBAT.FOOD_FACTOR_MAX, factor));
 }
 
-export function computeSideFactors(side: BattleSide, composition: Composition, enemy: BattleSide): SideFactors {
+export function computeSideFactors(side: BattleSide, composition: Composition, enemy: BattleSide, enemyComposition?: Composition): SideFactors {
   const effectives = totalUnits(composition);
-  const { offensive, defensive } = strengths(side, composition, enemy.wallsLevel);
+  const { offensive, defensive } = strengths(composition, enemyComposition ?? enemy.composition, enemy.wallsLevel);
   const training = Math.max(0.01, side.trainingMultiplier);
   const weapons = WEAPONS[side.weaponTier]?.multiplier ?? WEAPONS.palo.multiplier;
   const armor = ARMORS[side.armorTier]?.multiplier ?? ARMORS.ninguna.multiplier;
@@ -153,14 +173,17 @@ export function computeSideFactors(side: BattleSide, composition: Composition, e
   const morale = moraleFactor(side.morale);
   const food = foodFactor(side.foodTier);
   const fatigue = fatigueMultiplier(side.fatigue);
-  const common = training ** COMBAT.WEIGHTS.training * weapons ** COMBAT.WEIGHTS.weapons * armor ** COMBAT.WEIGHTS.armor
-    * morale ** COMBAT.WEIGHTS.morale * food ** COMBAT.WEIGHTS.food * fatigue ** COMBAT.WEIGHTS.fatigue;
-  const terrain = 1 + Math.max(0, side.terrainDefenseBonus);
-  const offensivePower = effectives > 0 ? offensive ** COMBAT.NUMBER_EXPONENT * formationAttack ** COMBAT.WEIGHTS.formation * common : 0;
-  const defensivePower = effectives > 0 ? (defensive * terrain) ** COMBAT.NUMBER_EXPONENT * formationDefense ** COMBAT.WEIGHTS.formation * common : 0;
-  const linearScore = COMBAT.WEIGHTS.number * (effectives / COMBAT.NUMBER_REFERENCE) + COMBAT.WEIGHTS.training * training
-    + COMBAT.WEIGHTS.weapons * weapons + COMBAT.WEIGHTS.armor * armor + COMBAT.WEIGHTS.formation * formationAttack
-    + COMBAT.WEIGHTS.morale * morale + COMBAT.WEIGHTS.food * food + COMBAT.WEIGHTS.fatigue * fatigue;
+  const E = COMBAT.EXPONENTS;
+  const common = training ** E.training * weapons ** E.weapons * armor ** E.armor
+    * morale ** E.morale * food ** E.food * fatigue ** E.fatigue;
+  const wallsBonus = wallsDefenseBonus(side.wallsLevel);
+  const terrain = 1 + Math.max(0, side.terrainDefenseBonus) + wallsBonus;
+  const offensivePower = effectives > 0 ? offensive ** E.number * formationAttack ** E.formation * common : 0;
+  const defensivePower = effectives > 0 ? (defensive * terrain) ** E.number * formationDefense ** E.formation * common : 0;
+  const W = COMBAT.WEIGHTS;
+  const linearScore = W.number * (effectives / COMBAT.NUMBER_REFERENCE) + W.training * training
+    + W.weapons * weapons + W.armor * armor + W.formation * formationAttack
+    + W.morale * morale + W.food * food + W.fatigue * fatigue;
   return {
     effectives,
     offensiveStrength: offensive,
@@ -172,6 +195,7 @@ export function computeSideFactors(side: BattleSide, composition: Composition, e
     morale,
     food,
     fatigue,
+    wallsBonus,
     offensivePower,
     defensivePower,
     linearScore,
@@ -206,6 +230,14 @@ function splitWounded(casualties: Composition): Composition {
   return wounded;
 }
 
+/** [M-01 opción A] Recompensas de honor y gloria según resultado. */
+export function battleRewards(outcome: BattleOutcome, crushing: boolean): { attacker: { honor: number; glory: number }; defender: { honor: number; glory: number } } {
+  const win = crushing ? BATTLE_REWARDS.crushingVictory : BATTLE_REWARDS.victory;
+  if (outcome === "victoria") return { attacker: { ...win }, defender: { ...BATTLE_REWARDS.defeat } };
+  if (outcome === "derrota") return { attacker: { ...BATTLE_REWARDS.defeat }, defender: { ...win } };
+  return { attacker: { ...BATTLE_REWARDS.draw }, defender: { ...BATTLE_REWARDS.draw } };
+}
+
 export function simulateBattle(attacker: BattleSide, defender: BattleSide): BattleReport {
   const initialAttacker = roundComposition(attacker.composition);
   const initialDefender = roundComposition(defender.composition);
@@ -216,8 +248,8 @@ export function simulateBattle(attacker: BattleSide, defender: BattleSide): Batt
   const rounds: RoundReport[] = [];
   let attackerRetreated = false;
   let defenderRetreated = false;
-  let lastFactorsA = computeSideFactors(attacker, currentA, defender);
-  let lastFactorsD = computeSideFactors(defender, currentD, attacker);
+  let lastFactorsA = computeSideFactors(attacker, currentA, defender, currentD);
+  let lastFactorsD = computeSideFactors(defender, currentD, attacker, currentA);
 
   if (nA0 === 0 || nD0 === 0) {
     attackerRetreated = nA0 === 0;
@@ -225,8 +257,8 @@ export function simulateBattle(attacker: BattleSide, defender: BattleSide): Batt
   }
 
   for (let round = 1; round <= COMBAT.MAX_ROUNDS && !attackerRetreated && !defenderRetreated; round++) {
-    const factorsA = computeSideFactors(attacker, currentA, defender);
-    const factorsD = computeSideFactors(defender, currentD, attacker);
+    const factorsA = computeSideFactors(attacker, currentA, defender, currentD);
+    const factorsD = computeSideFactors(defender, currentD, attacker, currentA);
     lastFactorsA = factorsA;
     lastFactorsD = factorsD;
     const nA = totalUnits(currentA);
@@ -268,6 +300,7 @@ export function simulateBattle(attacker: BattleSide, defender: BattleSide): Batt
   const loserKingdomId = outcome === "victoria" ? defender.kingdomId : outcome === "derrota" ? attacker.kingdomId : null;
   const loserLoss = outcome === "victoria" ? lossD : outcome === "derrota" ? lossA : 0;
   const crushingVictory = winnerKingdomId !== null && loserLoss > COMBAT.CRUSHING_VICTORY_LOSS_RATIO;
+  const rewards = battleRewards(outcome, crushingVictory);
 
   const woundedA = splitWounded(casualtiesA);
   const woundedD = splitWounded(casualtiesD);
@@ -279,6 +312,7 @@ export function simulateBattle(attacker: BattleSide, defender: BattleSide): Batt
   if (lastFactorsA.weapons !== lastFactorsD.weapons || lastFactorsA.armor !== lastFactorsD.armor) explanation.push(`Equipo: armas ${lastFactorsA.weapons}/${lastFactorsD.weapons}, armaduras ${lastFactorsA.armor}/${lastFactorsD.armor}.`);
   if (STRATEGIES[attacker.strategy].beats === defender.strategy) explanation.push(`La estrategia ${STRATEGIES[attacker.strategy].label} del atacante contrarrestó la ${STRATEGIES[defender.strategy].label} del defensor.`);
   if (STRATEGIES[defender.strategy].beats === attacker.strategy) explanation.push(`La estrategia ${STRATEGIES[defender.strategy].label} del defensor contrarrestó la ${STRATEGIES[attacker.strategy].label} del atacante.`);
+  if (lastFactorsD.wallsBonus > 0) explanation.push(`Las murallas del defensor aportaron +${Math.round(lastFactorsD.wallsBonus * 100)} % de defensa.`);
   if (lastFactorsA.fatigue < 1) explanation.push(`La fatiga de la marcha penalizó al atacante (×${lastFactorsA.fatigue}).`);
   if (lastFactorsA.morale !== lastFactorsD.morale) explanation.push(`Moral: atacante ${attacker.morale}, defensor ${defender.morale}.`);
   if (attackerRetreated) explanation.push("El atacante se retiró al superar el umbral de pérdidas o por moral insuficiente.");
@@ -312,17 +346,28 @@ export function simulateBattle(attacker: BattleSide, defender: BattleSide): Batt
     attacker: buildSide(attacker, initialAttacker, finalA, casualtiesA, woundedA, lossA, attackerRetreated, lastFactorsA),
     defender: buildSide(defender, initialDefender, finalD, casualtiesD, woundedD, lossD, defenderRetreated, lastFactorsD),
     explanation,
-    honorAwarded: { attacker: 0, defender: 0, pending: true },
-    gloryAwarded: { attacker: 0, defender: 0, pending: true },
+    honorAwarded: { attacker: rewards.attacker.honor, defender: rewards.defender.honor, pending: !COMBAT.HONOR_REWARDS_DEFINED },
+    gloryAwarded: { attacker: rewards.attacker.glory, defender: rewards.defender.glory, pending: !COMBAT.HONOR_REWARDS_DEFINED },
     equipmentWear: { attacker: Math.round(lossA * 10_000) / 100, defender: Math.round(lossD * 10_000) / 100 },
     lootTransferred: false,
   };
 }
 
-/** Recuperación anual de heridos según nivel de hospital (P45) más bonificación tecnológica, con tope. */
+/** Recuperación anual de heridos según nivel de hospital (P45) más bonificación tecnológica y de medicina, con tope. */
 export function woundedRecoveryRatio(hospitalLevel: number, technologyBonus: number, table: ReadonlyArray<{ minLevel: number; ratio: number }>, cap: number): number {
   let base = 0;
   for (const row of table) if (hospitalLevel >= row.minLevel) base = row.ratio;
   if (base === 0) return 0;
   return Math.min(cap, base + Math.max(0, technologyBonus));
+}
+
+/** Aplica la fracción de formación elegida (P37) a un inventario activo. */
+export function applyFormation(composition: Composition, formation: Partial<Record<UnitType, number>> | undefined | null): Composition {
+  const result = emptyComposition();
+  for (const type of UNIT_TYPES) {
+    const raw = formation?.[type];
+    const fraction = typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 1;
+    result[type] = Math.round(Math.max(0, composition[type] ?? 0) * fraction);
+  }
+  return result;
 }

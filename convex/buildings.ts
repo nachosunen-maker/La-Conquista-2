@@ -24,6 +24,7 @@ import {
   type ConstructionQueueEntry,
 } from "./buildingRules";
 import { getConstructionDurationModifier, readCompletedTechnologyIds } from "./technologyRules";
+import { computeProfessionEffects, PROFESSION_BUILDING_CAPACITY } from "./economyExtended";
 import type { ResourceType } from "./economyCalculations";
 
 export async function requireOwner(ctx: MutationCtx, kingdomId: Id<"kingdoms">) {
@@ -54,6 +55,14 @@ export async function insertInitialBuildings(ctx: MutationCtx, kingdomId: Id<"ki
   return true;
 }
 
+/** [M-07] Trabajadores de construcción: −1 % de duración por cada 10, máximo −20 %. */
+async function constructionWorkersModifier(ctx: { db: any }, kingdomId: Id<"kingdoms">): Promise<number> {
+  const jobs: any[] = await ctx.db.query("populationJobs").filter((q: any) => q.eq(q.field("kingdomId"), kingdomId)).collect();
+  const jobCounts: Record<string, number> = {};
+  for (const job of jobs) if (typeof job.jobType === "string") jobCounts[job.jobType.trim().toLowerCase()] = job.assignedCount ?? 0;
+  return computeProfessionEffects(jobCounts, {}, PROFESSION_BUILDING_CAPACITY).constructionDurationMultiplier;
+}
+
 export const getConstructionState = query({
   args: { kingdomId: v.id("kingdoms") },
   handler: async (ctx, args) => {
@@ -70,7 +79,7 @@ export const getConstructionState = query({
       ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
     ]);
     const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
-    const durationModifier = getConstructionDurationModifier(completedTechnologies);
+    const durationModifier = getConstructionDurationModifier(completedTechnologies) * (await constructionWorkersModifier(ctx, args.kingdomId));
     const serverTimeMs = Date.now();
     const collection = validateBuildingCollection(buildings);
     const buildingLevels = collection.success ? collection.levels : {};
@@ -133,7 +142,7 @@ export const startConstruction = mutation({
       buildingLevels,
       now,
       rule,
-      durationModifier: getConstructionDurationModifier(completedTechnologies),
+      durationModifier: getConstructionDurationModifier(completedTechnologies) * (await constructionWorkersModifier(ctx, args.kingdomId)),
     });
     if (!planResult.success) throw new Error(planResult.error);
 

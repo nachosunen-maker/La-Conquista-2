@@ -17,7 +17,7 @@ import { validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import { distanceBetweenKingdoms, readHomeCoord } from "./territories";
 import { marchFatigue, marchTimeSeconds, armyMarchMultiplier } from "./territoryRules";
-import { emptyComposition, simulateBattle, type BattleSide, type Composition } from "./battleRules";
+import { applyFormation, emptyComposition, simulateBattle, type BattleSide, type Composition } from "./battleRules";
 import {
   approximateEstimate,
   approximatePopulation,
@@ -357,7 +357,8 @@ async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, role: "
   return {
     kingdomId,
     name: refreshed.name,
-    composition: activeComposition(units),
+    // [P37, M-11] Solo participa la fracción de cada tipo fijada en la formación del reino.
+    composition: applyFormation(activeComposition(units), refreshed.formation ?? null),
     trainingMultiplier: summary.trainingMultiplier,
     weaponTier: (refreshed.weaponTier as BattleSide["weaponTier"]) ?? "palo",
     armorTier: (refreshed.armorTier as BattleSide["armorTier"]) ?? "ninguna",
@@ -469,6 +470,12 @@ export const resolveChallenge = internalMutation({
       const patch: Record<string, unknown> = { moraleEffects: effects, updatedAt: now };
       if (side === current.challengerKingdomId) patch.armyFatigue = (current.frozen.attacker as BattleSide).fatigue;
       if (won && report.crushingVictory) patch.pendingTerritoryClaims = (doc.pendingTerritoryClaims ?? 0) + 1;
+      // [M-01] Honor y gloria por batalla (P50, P51); la gloria nunca baja de 0.
+      const isAttacker = side === current.challengerKingdomId;
+      const honorGain = isAttacker ? report.honorAwarded.attacker : report.honorAwarded.defender;
+      const gloryGain = isAttacker ? report.gloryAwarded.attacker : report.gloryAwarded.defender;
+      patch.honor = Math.max(0, (doc.honor ?? 0) + honorGain);
+      patch.glory = Math.max(0, (doc.glory ?? 0) + gloryGain);
       await ctx.db.patch(side, patch);
     }
 

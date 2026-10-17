@@ -35,6 +35,7 @@ export function runTechnologyValidationTests(): TechnologyTestResult[] {
   const poor = createResearchPlan({ ...base, technologyId: "agri_1", resources: { ...richResources, gold: 99 } });
   const active: ResearchQueueEntry = { technologyId: "mining_1", startedAt: 0, durationMs: 1000, costs: {} };
   const slotFull = createResearchPlan({ ...base, technologyId: "agri_1", activeResearch: [active] });
+  const secondSlot = createResearchPlan({ ...base, technologyId: "agri_1", activeResearch: [active], buildingLevels: { castillo: 3, universidad: 3 } });
   const duplicate = createResearchPlan({ ...base, technologyId: "mining_1", activeResearch: [active] });
   const alreadyDone = createResearchPlan({ ...base, technologyId: "agri_1", completedIds: ["agri_1"] });
 
@@ -65,9 +66,10 @@ export function runTechnologyValidationTests(): TechnologyTestResult[] {
       details: `Espionaje I con Universidad 1 bloqueada: ${!needsUniversity2.success}; con Universidad 2: ${espionageOpen.success}; Espionaje II sin I: ${!chainLocked.success}; con I: ${chainOpen.success}; bloqueos de Metalurgia: ${status.blockers.join(" | ")}`,
     },
     {
-      test: "Ranuras (D-20): una investigación activa por reino, máximo 3 con supervisores; sin duplicados ni repetir completadas",
-      passed: researchSlots(0) === 1 && researchSlots(2) === 3 && researchSlots(10) === 3 && !slotFull.success && !duplicate.success && !alreadyDone.success && !poor.success,
-      details: `Ranuras 0/2/10 supervisores: ${researchSlots(0)}/${researchSlots(2)}/${researchSlots(10)}; ranura ocupada rechazada: ${!slotFull.success}; duplicada: ${!duplicate.success}; completada: ${!alreadyDone.success}; sin oro: ${!poor.success}`,
+      test: "Ranuras (D-20, M-03): 1 con Universidad 1-2, 2 con Universidad 3-4, 3 con Universidad 5+; sin duplicados ni repetir completadas",
+      passed: researchSlots(0) === 1 && researchSlots(2) === 1 && researchSlots(3) === 2 && researchSlots(5) === 3 && researchSlots(10) === 3 &&
+        !slotFull.success && secondSlot.success && !duplicate.success && !alreadyDone.success && !poor.success,
+      details: `Ranuras Universidad 0/2/3/5/10: ${[0, 2, 3, 5, 10].map(researchSlots).join("/")}; ranura ocupada rechazada: ${!slotFull.success}; segunda ranura con Universidad 3: ${secondSlot.success}; duplicada: ${!duplicate.success}; completada: ${!alreadyDone.success}; sin oro: ${!poor.success}`,
     },
     {
       test: "Cancelación reembolsa el 50 % antes de completar (uniforme con construcción y entrenamiento)",

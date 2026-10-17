@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
-import { Swords, Shield, Users, Clock, Activity } from 'lucide-react';
+import { Swords, Shield, Users, Clock, Activity, Coins, Flag } from 'lucide-react';
+import { UNIT_COUNTERS, COMBAT } from '../../convex/balanceConfig';
 import {
   PanelSection,
   ProgressRow,
@@ -23,11 +24,13 @@ const getArmyStateQuery = makeFunctionReference<"query">("army:getArmyState");
 const startTrainingMutation = makeFunctionReference<"mutation">("army:startTraining");
 const cancelTrainingMutation = makeFunctionReference<"mutation">("army:cancelTraining");
 const setArmyEquipmentMutation = makeFunctionReference<"mutation">("army:setArmyEquipment");
+const hireMercenariesMutation = makeFunctionReference<"mutation">("army:hireMercenaries");
+const setFormationMutation = makeFunctionReference<"mutation">("army:setFormation");
 
 interface ArmyState {
   serverTimeMs: number;
   writable: boolean;
-  units: Array<{ _id: string; unitType: string; level?: number; count: number; wounded?: number; legacy?: boolean }>;
+  units: Array<{ _id: string; unitType: string; level?: number; count: number; wounded?: number; legacy?: boolean; isMercenary?: boolean; contractEndsAt?: number }>;
   summary: {
     totalActive: number;
     totalWounded: number;
@@ -69,6 +72,18 @@ interface ArmyState {
     requirementsSatisfied: boolean;
   }>;
   trainingDurationModifier: number;
+  formation: Partial<Record<string, number>>;
+  mercenaries: {
+    active: number;
+    contracts: Array<{ count: number; contractEndsAt: number | null }>;
+    maxActive: number;
+    goldPerUnit: number;
+    salaryGoldPerDay: number;
+    contractDays: number;
+    unitType: string;
+    level: number;
+    tavernLevel: number;
+  };
   equipment: {
     weaponTier: string;
     armorTier: string;
@@ -88,6 +103,8 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const startTraining = useMutation(startTrainingMutation);
   const cancelTraining = useMutation(cancelTrainingMutation);
   const setEquipment = useMutation(setArmyEquipmentMutation);
+  const hireMercenaries = useMutation(hireMercenariesMutation);
+  const setFormation = useMutation(setFormationMutation);
   const serverNow = useServerClock(state?.serverTimeMs);
   const action = useActionState();
 
@@ -97,6 +114,8 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const [weaponTier, setWeaponTier] = useState<string | null>(null);
   const [armorTier, setArmorTier] = useState<string | null>(null);
   const [strategy, setStrategy] = useState<string | null>(null);
+  const [formationDraft, setFormationDraft] = useState<Record<string, number> | null>(null);
+  const [mercenaryCount, setMercenaryCount] = useState<number>(10);
 
   if (!state) {
     return <p className="text-xs text-[#8e816d] italic p-4">Consultando el ejército en el servidor…</p>;
@@ -130,6 +149,34 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
       return `Lote cancelado: ${formatCosts(result.refund)} devueltos y ${result.populationReturned} civiles liberados.`;
     });
   };
+
+  const FORMATION_TYPES = ['infanteria', 'arqueria', 'caballeria', 'asedio'] as const;
+  const currentFormation: Record<string, number> = formationDraft ?? Object.fromEntries(
+    FORMATION_TYPES.map((type) => [type, Math.round(((state.formation?.[type] ?? 1) as number) * 100)])
+  );
+  const formationChanged = formationDraft !== null && FORMATION_TYPES.some(
+    (type) => Math.round(((state.formation?.[type] ?? 1) as number) * 100) !== currentFormation[type]
+  );
+  const committed = (type: string) => Math.round((state.summary.byType[type]?.active ?? 0) * (currentFormation[type] ?? 100) / 100);
+
+  const handleFormation = () =>
+    action.run('formation', async () => {
+      const formation = Object.fromEntries(FORMATION_TYPES.map((type) => [type, (currentFormation[type] ?? 100) / 100]));
+      await setFormation({ kingdomId, formation });
+      setFormationDraft(null);
+      return 'Formación guardada: se aplicará al congelar el próximo combate.';
+    });
+
+  const safeMercenaries = Number.isInteger(mercenaryCount) && mercenaryCount > 0 ? mercenaryCount : 0;
+  const mercenaryCost = safeMercenaries * state.mercenaries.goldPerUnit;
+  const mercenarySalary = safeMercenaries * state.mercenaries.salaryGoldPerDay;
+  const mercenaryRoom = Math.max(0, state.mercenaries.maxActive - state.mercenaries.active);
+
+  const handleHire = () =>
+    action.run('hire', async () => {
+      const result = await hireMercenaries({ kingdomId, count: safeMercenaries });
+      return `${result.count} mercenarios contratados por ${result.cost} oro; contrato hasta ${new Date(result.contractEndsAt).toLocaleString('es-ES')} con salario de ${result.salaryGoldPerDay} oro/día.`;
+    });
 
   const handleEquipment = () =>
     action.run('equipment', async () => {
@@ -179,10 +226,11 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
                 return (
                   <div key={unit._id} className={`${cardClass} flex items-center justify-between text-xs`}>
                     <div>
-                      <span className="font-semibold text-[#f0e8d4] block">{UNIT_LABELS[unit.unitType] ?? unit.unitType}</span>
+                      <span className="font-semibold text-[#f0e8d4] block">{UNIT_LABELS[unit.unitType] ?? unit.unitType}{unit.isMercenary ? ' (mercenarios)' : ''}</span>
                       <span className="text-[10px] text-[#786c5a]">
                         Nivel {unit.level ?? 1} · {levelInfo?.name ?? 'Milicia'} (×{levelInfo?.multiplier ?? 1})
                         {unit.legacy ? ' · registro heredado' : ''}
+                        {unit.isMercenary ? ` · mercenarios hasta ${unit.contractEndsAt ? new Date(unit.contractEndsAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : 'fin de contrato'}` : ''}
                       </span>
                     </div>
                     <div className="text-right">
@@ -301,6 +349,88 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
           </div>
         </div>
         <StatusMessages error={action.error} message={action.message} />
+      </PanelSection>
+
+      <PanelSection
+        icon={<Coins className="w-4 h-4 text-[#d4af37]" />}
+        title="Mercenarios (P53, Taberna)"
+        aside={<span>{state.mercenaries.active}/{state.mercenaries.maxActive} activos · Taberna nivel {state.mercenaries.tavernLevel}</span>}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+          <div className={`${cardClass} space-y-1 text-[11px] text-[#c7beac]`}>
+            <p><strong className="text-[#e6ded0]">Qué hace:</strong> contrata {UNIT_LABELS[state.mercenaries.unitType] ?? state.mercenaries.unitType} de nivel {state.mercenaries.level} que se suman al ejército y al censo de inmediato, sin consumir población civil.</p>
+            <p><strong className="text-[#e6ded0]">Cuánto cuesta:</strong> {state.mercenaries.goldPerUnit} oro por mercenario más un salario de {state.mercenaries.salaryGoldPerDay} oro por mercenario y día real, descontado en cada liquidación.</p>
+            <p><strong className="text-[#e6ded0]">Cuánto dura:</strong> contrato de {state.mercenaries.contractDays} días reales; al vencer, o si no se puede pagar el salario, desaparecen.</p>
+            <p><strong className="text-[#e6ded0]">Límite:</strong> {state.mercenaries.maxActive} activos con la Taberna actual (50 por nivel). No generan natalidad.</p>
+            {state.mercenaries.contracts.length > 0 && (
+              <p className="text-[#8e816d]">
+                Contratos: {state.mercenaries.contracts.map((c) => `${c.count} hasta ${c.contractEndsAt ? new Date(c.contractEndsAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : 'sin fecha'}`).join(' · ')}
+              </p>
+            )}
+          </div>
+          {writable ? (
+            <form
+              className={`${cardClass} space-y-3`}
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleHire();
+              }}
+            >
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-[#a0937e]">Mercenarios a contratar</span>
+                <input className={`${inputClass} w-24 text-right`} type="number" min={1} max={Math.max(1, mercenaryRoom)} step={1} value={mercenaryCount} onChange={(e) => setMercenaryCount(Number(e.target.value))} disabled={state.mercenaries.tavernLevel < 1} />
+              </label>
+              <div className="rounded border border-[#2b2419] bg-[#100e0b] p-2.5 text-[11px] text-[#c7beac] space-y-1">
+                <p><strong className="text-[#e6ded0]">Coste inmediato:</strong> {mercenaryCost.toLocaleString('es-ES')} oro.</p>
+                <p><strong className="text-[#e6ded0]">Salario:</strong> {mercenarySalary.toLocaleString('es-ES')} oro por día real durante {state.mercenaries.contractDays} días.</p>
+                <p><strong className="text-[#e6ded0]">Resultado:</strong> +{safeMercenaries} {UNIT_LABELS[state.mercenaries.unitType] ?? state.mercenaries.unitType} de nivel {state.mercenaries.level} activos hasta el fin del contrato.</p>
+              </div>
+              {state.mercenaries.tavernLevel < 1 ? (
+                <p className="text-amber-300 text-[11px]">Se necesita una Taberna para contratar mercenarios.</p>
+              ) : mercenaryRoom === 0 ? (
+                <p className="text-amber-300 text-[11px]">La Taberna no admite más mercenarios activos.</p>
+              ) : null}
+              <button type="submit" className={primaryButton} disabled={action.busy !== null || state.mercenaries.tavernLevel < 1 || safeMercenaries === 0 || safeMercenaries > mercenaryRoom}>
+                {action.busy === 'hire' ? 'Contratando…' : 'Contratar'}
+              </button>
+            </form>
+          ) : (
+            <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">{readOnlyNote}</p>
+          )}
+        </div>
+      </PanelSection>
+
+      <PanelSection icon={<Flag className="w-4 h-4 text-sky-300" />} title="Formación de combate (P37)">
+        <p className="text-[11px] text-[#c7beac]">
+          Elige qué fracción de cada tipo participa en el próximo combate; el resto se queda en el reino y no sufre bajas.
+          Matriz de contrapartidas: {Object.entries(UNIT_COUNTERS).map(([type, countered]) => `${UNIT_LABELS[type] ?? type} +${Math.round(COMBAT.FORMATION_COUNTER_BONUS * 100)} % contra ${UNIT_LABELS[countered] ?? countered}`).join(' · ')}.
+          La formación se congela 15 minutos antes de cada batalla.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          {FORMATION_TYPES.map((type) => (
+            <label key={type} className={`${cardClass} space-y-1`}>
+              <span className="flex items-center justify-between text-[#a0937e]">
+                <span>{UNIT_LABELS[type] ?? type}</span>
+                <span className="font-mono text-[#e6ded0]">{currentFormation[type] ?? 100} % · {committed(type)} de {state.summary.byType[type]?.active ?? 0}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={currentFormation[type] ?? 100}
+                disabled={!writable}
+                onChange={(e) => setFormationDraft({ ...currentFormation, [type]: Number(e.target.value) })}
+                className="w-full accent-[#d4af37]"
+              />
+            </label>
+          ))}
+        </div>
+        {writable && (
+          <button type="button" className={primaryButton} onClick={handleFormation} disabled={!formationChanged || action.busy !== null}>
+            {action.busy === 'formation' ? 'Guardando…' : 'Guardar formación'}
+          </button>
+        )}
       </PanelSection>
 
       <PanelSection icon={<Shield className="w-4 h-4 text-emerald-400" />} title="Equipamiento y estrategia (P30, P31, P35)">

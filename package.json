@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit && tsc --noEmit -p convex",
     "test": "tsx scripts/runEconomicTests.ts",
-    "codegen:offline": "node scripts/regenerateConvexApi.mjs"
+    "codegen:offline": "node scripts/regenerateConvexApi.mjs",
+    "test:integration": "vitest run",
+    "simulate:battles": "tsx scripts/simulateBattles.ts"
   },
   "dependencies": {
     "convex": "^1.46.0",
@@ -18,14 +20,17 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.13.0",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^6.1.1",
+    "convex-test": "^0.0.62",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.2"
+    "vite": "^8.3.2",
+    "vitest": "^3.2.7"
   }
 }

@@ -71,6 +71,8 @@ export interface KingdomState {
   foodTier: "minima" | "normal" | "abundante" | "excelente";
   lastUpdated: number;
   foodProductionWorkerLimit?: number | null;
+  /** Trabajadores por oficio tal como están persistidos (incluye profesiones sin producción, M-07). */
+  jobCounts?: Record<string, number>;
   createdAt?: number;
 }
 
@@ -282,7 +284,9 @@ export function simulateEconomicProgress(
   },
   currentServerTimeMs: number,
   /** Multiplicador de producción agrícola (tecnologías, terreno, productividad); 1 por defecto. */
-  foodProductionMultiplier: number = 1
+  foodProductionMultiplier: number = 1,
+  /** Multiplicador de consumo de alimentos (panadería, M-07); 1 por defecto. */
+  foodConsumptionMultiplier: number = 1
 ) {
   // 1. Intervalo temporal en segundos reales validado por servidor (P66, P67)
   const elapsedMs = Math.max(0, currentServerTimeMs - kingdom.lastUpdated);
@@ -297,8 +301,9 @@ export function simulateEconomicProgress(
   const regularSoldiers = Math.max(0, kingdom.regularSoldiers);
 
   // 4. Tasas de consumo diario (P18: soldados regulares consumen exactamente 1,05x)
-  const civilDailyConsumption = civilPopulation * BASE_FOOD_CONSUMPTION_PER_DAY * tierFactor;
-  const militaryDailyConsumption = regularSoldiers * (BASE_FOOD_CONSUMPTION_PER_DAY * MILITARY_FOOD_FACTOR) * tierFactor;
+  const consumptionMultiplier = Number.isFinite(foodConsumptionMultiplier) && foodConsumptionMultiplier > 0 ? foodConsumptionMultiplier : 1;
+  const civilDailyConsumption = civilPopulation * BASE_FOOD_CONSUMPTION_PER_DAY * tierFactor * consumptionMultiplier;
+  const militaryDailyConsumption = regularSoldiers * (BASE_FOOD_CONSUMPTION_PER_DAY * MILITARY_FOOD_FACTOR) * tierFactor * consumptionMultiplier;
   const totalDailyConsumption = civilDailyConsumption + militaryDailyConsumption;
 
   // La tasa aprobada se aplica por agricultor; falta un campo y fórmula aprobados para limitarla por edificios.
