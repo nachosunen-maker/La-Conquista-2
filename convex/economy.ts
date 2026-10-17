@@ -8,7 +8,9 @@ import { calculateJobCapacities, calculateResidentialCapacity, validateBuildingC
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import { simulateExtendedEconomy, type ExtendedEconomyResult } from "./economyExtended";
 import { normalizeUnitType } from "./armyRules";
-import { TAXES, WELLBEING, UNITS, TERRAINS } from "./balanceConfig";
+import { TAXES, WELLBEING, UNITS, TERRAINS, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP } from "./balanceConfig";
+import { woundedRecoveryRatio } from "./battleRules";
+import { recoverFatigue } from "./territoryRules";
 import { isKingdomOwner } from "./kingdomAccess";
 import {
   simulateEconomicProgress,
@@ -177,6 +179,10 @@ export async function settleRelationalKingdomEconomy(
     throw new Error(settlement.error ?? "Fallo al liquidar la economía relacional.");
   }
 
+  const collection = validateBuildingCollection(state.buildings);
+  const buildingLevels = collection.success ? collection.levels : {};
+  const completedTechnologies = await readCompletedTechnologyIds(ctx, kingdom._id);
+
   let extended: ExtendedEconomyResult | null = null;
   let settledResources: KingdomResources = {
     gold: state.resources.gold,
@@ -199,9 +205,6 @@ export async function settleRelationalKingdomEconomy(
     if (!adapted.success || !adapted.kingdomState || !adapted.militaryClassification) {
       throw new Error(adapted.error ?? "No se pudo adaptar el estado relacional del reino.");
     }
-    const collection = validateBuildingCollection(state.buildings);
-    const buildingLevels = collection.success ? collection.levels : {};
-    const completedTechnologies = await readCompletedTechnologyIds(ctx, kingdom._id);
     const terrainBonuses = await readTerrainBonuses(ctx, kingdom._id);
     extended = simulateExtendedEconomy({
       kingdomState: adapted.kingdomState,
@@ -247,6 +250,32 @@ export async function settleRelationalKingdomEconomy(
     if (extended.militaryDesertion > 0) {
       await applyMilitaryDesertion(ctx, state.armyUnits, extended.militaryDesertion);
     }
+
+    // [MAESTRA P45] Recuperación de heridos por nivel de Hospital militar (+ tecnología, tope 60 %).
+    const recoveryRatio = woundedRecoveryRatio(
+      buildingLevels.hospitalMilitar ?? 0,
+      computeTechnologyModifiers(completedTechnologies).woundedRecoveryBonus,
+      HOSPITAL_RECOVERY_PER_YEAR,
+      HOSPITAL_RECOVERY_CAP
+    );
+    if (recoveryRatio > 0 && extended.elapsedDays > 0) {
+      for (const doc of state.armyUnits) {
+        const wounded = Number.isInteger(doc.wounded) && doc.wounded > 0 ? doc.wounded : 0;
+        if (wounded === 0) continue;
+        const progress = (typeof doc.recoveryProgress === "number" ? doc.recoveryProgress : 0) + wounded * recoveryRatio * extended.elapsedDays;
+        const recovered = Math.min(wounded, Math.floor(progress));
+        await ctx.db.patch(doc._id, {
+          wounded: wounded - recovered,
+          count: doc.count + recovered,
+          recoveryProgress: recovered >= wounded ? 0 : progress - recovered,
+        });
+      }
+    }
+
+    // [COMPLEMENTO §5] Recuperación de fatiga: 10 puntos por día real con ración normal o mejor.
+    const currentFatigue = typeof kingdom.armyFatigue === "number" ? kingdom.armyFatigue : 0;
+    const nextFatigue = recoverFatigue(currentFatigue, extended.elapsedDays, settlement.appliedFoodTier ?? "normal");
+    if (nextFatigue !== currentFatigue) await ctx.db.patch(kingdom._id, { armyFatigue: nextFatigue });
   }
 
   return { ...state, settlement, settledResources, extended };

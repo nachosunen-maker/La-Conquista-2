@@ -1,9 +1,11 @@
-import { query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { resolveKingdomQueryUserId, isKingdomOwner } from "./kingdomAccess";
 import { createAggregatePopulationFallback } from "./kingdomReadModel";
 import { readArmyUnitDocs } from "./army";
 import { validateMilitaryUnitInput as validateMilitaryUnitInputRule } from "./armyRules";
+import { requireOwner } from "./buildings";
+import { DAILY_BONUS } from "./balanceConfig";
 
 /**
  * Consulta autoritativa completa del reino para el cliente (Resumen del Reino)
@@ -151,3 +153,20 @@ export const getArmyUnits = query({
 export function validateMilitaryUnitInput(unitType: string, count: number): { success: boolean; error?: string } {
   return validateMilitaryUnitInputRule(unitType, count);
 }
+
+/** [MAESTRA P59] Bonus diario: +5 honor una vez cada 24 horas reales, validado en servidor. */
+export const claimDailyBonus = mutation({
+  args: { kingdomId: v.id("kingdoms") },
+  handler: async (ctx, args) => {
+    const { kingdom } = await requireOwner(ctx, args.kingdomId);
+    const now = Date.now();
+    const last = typeof kingdom.lastDailyBonusAt === "number" ? kingdom.lastDailyBonusAt : 0;
+    if (now - last < DAILY_BONUS.COOLDOWN_MS) {
+      const remainingMs = DAILY_BONUS.COOLDOWN_MS - (now - last);
+      throw new Error(`El bonus diario ya fue reclamado; disponible en ${Math.ceil(remainingMs / 60_000)} minutos.`);
+    }
+    const honor = (kingdom.honor ?? 0) + DAILY_BONUS.HONOR;
+    await ctx.db.patch(args.kingdomId, { honor, lastDailyBonusAt: now, updatedAt: now });
+    return { success: true, honor, awarded: DAILY_BONUS.HONOR, nextAvailableAt: now + DAILY_BONUS.COOLDOWN_MS };
+  },
+});

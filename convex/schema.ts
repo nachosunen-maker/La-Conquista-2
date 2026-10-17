@@ -158,6 +158,58 @@ export default defineSchema(
       .index("by_cell", ["cellId"])
       .index("by_owner", ["ownerKingdomId"]),
 
+    // Desafíos del Parlamento (Bloque E): máquina de estados server-authoritative (BLOQUE 9).
+    challenges: defineTable({
+      challengerKingdomId: v.id("kingdoms"),
+      targetKingdomId: v.id("kingdoms"),
+      challengeType: v.string(),
+      status: v.union(
+        v.literal("PENDING"), v.literal("ACCEPTED"), v.literal("REJECTED"),
+        v.literal("FROZEN"), v.literal("RESOLVED"), v.literal("EXPIRED")
+      ),
+      createdAt: v.number(),
+      expiresAt: v.number(),
+      respondedAt: v.optional(v.number()),
+      window: v.optional(v.string()),
+      scheduledAt: v.optional(v.number()),
+      freezeAt: v.optional(v.number()),
+      frozenAt: v.optional(v.number()),
+      resolvedAt: v.optional(v.number()),
+      distance: v.optional(v.number()),
+      marchSeconds: v.optional(v.number()),
+      battleId: v.optional(v.id("Battle")),
+      penaltyApplied: v.optional(v.any()),
+      frozen: v.optional(v.any()),
+      messages: v.optional(v.array(v.object({ fromKingdomId: v.id("kingdoms"), messageId: v.string(), at: v.number() }))),
+    })
+      .index("by_challenger", ["challengerKingdomId"])
+      .index("by_target", ["targetKingdomId"]),
+
+    // Informes de batalla (Bloque F, P43). Nombre de tabla confirmado con mayúscula.
+    Battle: defineTable({
+      challengeId: v.id("challenges"),
+      attackerKingdomId: v.id("kingdoms"),
+      defenderKingdomId: v.id("kingdoms"),
+      resolvedAt: v.number(),
+      outcome: v.string(),
+      winnerKingdomId: v.optional(v.id("kingdoms")),
+      crushingVictory: v.boolean(),
+      report: v.any(),
+    })
+      .index("by_attacker", ["attackerKingdomId"])
+      .index("by_defender", ["defenderKingdomId"]),
+
+    // Informes de espionaje (D-39), caducan a las 24 h reales.
+    espionageReports: defineTable({
+      kingdomId: v.id("kingdoms"),
+      targetKingdomId: v.id("kingdoms"),
+      level: v.number(),
+      createdAt: v.number(),
+      expiresAt: v.number(),
+      estimate: v.object({ min: v.number(), max: v.number() }),
+      composition: v.optional(v.any()),
+    }).index("by_kingdom", ["kingdomId"]),
+
     // Unidades militares del reino (esquema mínimo persistido)
     armyUnits: defineTable({
       kingdomId: v.id("kingdoms"),
@@ -165,6 +217,7 @@ export default defineSchema(
       level: v.optional(v.number()), // Nivel militar P29 (1-5); ausente = 1
       count: v.number(),    // Activos: cantidad entera no negativa
       wounded: v.optional(v.number()), // Heridos (P44) separados de los disponibles
+      recoveryProgress: v.optional(v.number()), // Fracción acumulada de recuperación hospitalaria (P45)
     }).index("by_kingdom", ["kingdomId"]),
   },
   {

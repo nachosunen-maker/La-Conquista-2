@@ -28,6 +28,8 @@ import { runArmyValidationTests } from "./armyPureTests";
 import { runTechnologyValidationTests } from "./technologyPureTests";
 import { runExtendedEconomyTests } from "./economyExtendedPureTests";
 import { runTerritoryValidationTests } from "./territoryPureTests";
+import { runBattleValidationTests } from "./battlePureTests";
+import { runChallengeValidationTests } from "./challengePureTests";
 
 /**
  * ============================================================================
@@ -2279,6 +2281,18 @@ export function runEconomicValidationTests(): TestResult[] {
   results.push(...runTerritoryValidationTests().map((result) => ({
     category: "MATEMÁTICA / LÓGICA PURA" as const,
     test: `Mapa: ${result.test}`,
+    passed: result.passed,
+    details: result.details,
+  })));
+  results.push(...runBattleValidationTests().map((result) => ({
+    category: "MATEMÁTICA / LÓGICA PURA" as const,
+    test: `Batalla: ${result.test}`,
+    passed: result.passed,
+    details: result.details,
+  })));
+  results.push(...runChallengeValidationTests().map((result) => ({
+    category: "MATEMÁTICA / LÓGICA PURA" as const,
+    test: `Parlamento: ${result.test}`,
     passed: result.passed,
     details: result.details,
   })));
