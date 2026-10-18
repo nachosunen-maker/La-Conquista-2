@@ -252,3 +252,92 @@ describe("Parlamento y batalla (Bloques E y F)", () => {
     expect(internal).toBeDefined();
   });
 });
+
+describe("Exploración del mapa y territorios libres (P22, P49)", () => {
+  test("inicia expedición, reserva explorador, completa autoritativamente y revela la celda con hallazgo", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "user-a", "Reino A");
+
+    const mapBefore = await asUser.query(api.territories.getWorldMap, { kingdomId });
+    expect(mapBefore.exploredCount).toBe(7); // Capital (0,0) + 6 vecinos iniciales
+
+    const target = mapBefore.cells.find((c) => c.cellId === "1,1")!;
+    expect(target.state).toBe("fog");
+    expect(target.canExplore).toBe(true);
+
+    const fullBefore = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
+    const freeCivilBefore = fullBefore!.population!.available;
+
+    const started = await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: "1,1" });
+    expect(started.costs.gold).toBe(30);
+    expect(started.costs.food).toBe(40);
+
+    const during = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
+    expect(during!.resources.gold).toBeCloseTo(fullBefore!.resources.gold - 30, 5);
+    expect(during!.resources.food).toBeCloseTo(fullBefore!.resources.food - 40, 5);
+    expect(during!.population!.available).toBe(freeCivilBefore - 1);
+
+    const mapDuring = await asUser.query(api.territories.getWorldMap, { kingdomId });
+    const cellDuring = mapDuring.cells.find((c) => c.cellId === "1,1");
+    expect(cellDuring?.state).toBe("exploring");
+    expect(mapDuring.activeExpeditions).toHaveLength(1);
+
+    // Avanzar reloj hasta completar la expedición
+    vi.setSystemTime(started.completesAt + 1000);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    const mapAfter = await asUser.query(api.territories.getWorldMap, { kingdomId });
+    const cellAfter = mapAfter.cells.find((c) => c.cellId === "1,1");
+    expect(cellAfter?.state).toBe("explored");
+    expect(cellAfter?.terrain).not.toBe("desconocido");
+    expect(mapAfter.exploredCount).toBe(8);
+
+    const fullAfter = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
+    expect(fullAfter!.population!.available).toBe(freeCivilBefore); // Explorador devuelto
+  });
+
+  test("cancelar expedición devuelve el 50 % de costes y libera al explorador", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "user-a", "Reino A");
+
+    const fullBefore = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
+    const started = await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: "1,1" });
+    const cancelled = await asUser.mutation(api.territories.cancelExploration, {
+      kingdomId,
+      expeditionId: started.expeditionId,
+    });
+
+    expect(cancelled.refund.gold).toBe(15);
+    expect(cancelled.refund.food).toBe(20);
+
+    const fullAfter = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
+    expect(fullAfter!.population!.available).toBe(fullBefore!.population!.available);
+    expect(fullAfter!.resources.gold).toBeCloseTo(fullBefore!.resources.gold - 15, 5);
+
+    const mapAfter = await asUser.query(api.territories.getWorldMap, { kingdomId });
+    expect(mapAfter.activeExpeditions).toHaveLength(0);
+  });
+
+  test("reclamar territorio libre (P49) exige que esté explorado previamente", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "user-a", "Reino A");
+
+    // Conceder 1 reclamación de territorio pendiente
+    await t.run(async (ctx) => {
+      await ctx.db.patch(kingdomId, { pendingTerritoryClaims: 1 });
+    });
+
+    // Celda lejana inexplorada no puede ser reclamada
+    await expect(
+      asUser.mutation(api.territories.claimFreeTerritory, { kingdomId, cellId: "5,-2" })
+    ).rejects.toThrow(/explorar y cartografiar/);
+
+    // Celda adyacente conocida (0,1) está en la visión inicial y a distancia 1: puede reclamarse
+    const claimed = await asUser.mutation(api.territories.claimFreeTerritory, { kingdomId, cellId: "0,1" });
+    expect(claimed.success).toBe(true);
+    expect(claimed.remainingClaims).toBe(0);
+
+    const territories = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
+    expect(territories.territories).toHaveLength(2); // Capital (0,0) + nuevo territorio (0,1)
+  });
+});

@@ -193,6 +193,35 @@ export default defineSchema(
       .index("by_cell", ["cellId"])
       .index("by_owner", ["ownerKingdomId"]),
 
+    // Territorios explorados y visibilidad por reino (P22, P49)
+    exploredTerritories: defineTable({
+      kingdomId: v.id("kingdoms"),
+      cellId: v.string(), // "q,r" axial
+      discoveredAt: v.number(),
+      discoveryNote: v.optional(v.string()),
+    })
+      .index("by_kingdom", ["kingdomId"])
+      .index("by_kingdom_and_cell", ["kingdomId", "cellId"]),
+
+    // Cola de expediciones de exploración en curso (autoritativa)
+    explorationQueue: defineTable({
+      kingdomId: v.id("kingdoms"),
+      cellId: v.string(), // "q,r" objetivo
+      targetQ: v.number(),
+      targetR: v.number(),
+      distance: v.number(),
+      startedAt: v.number(),
+      durationMs: v.number(),
+      completesAt: v.number(),
+      scoutsCount: v.number(),
+      costs: v.object({
+        gold: v.number(),
+        food: v.number(),
+      }),
+    })
+      .index("by_kingdom", ["kingdomId"])
+      .index("by_kingdom_and_cell", ["kingdomId", "cellId"]),
+
     // Desafíos del Parlamento (Bloque E): máquina de estados server-authoritative (BLOQUE 9).
     challenges: defineTable({
       challengerKingdomId: v.id("kingdoms"),

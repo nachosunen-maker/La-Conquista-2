@@ -573,6 +573,21 @@ export const MAP = {
   WORLD_SEED: 20261017,
 } as const;
 
+export const EXPLORATION = {
+  /** [P22, P49] Costes base de aprovisionamiento de una expedición de exploración */
+  BASE_COSTS: { gold: 30, food: 40, wood: 0, stone: 0, iron: 0 } as const,
+  /** [P22] Exploradores requeridos (ciudadanos libres reservados durante la marcha) */
+  SCOUTS_REQUIRED: 1,
+  /** [COMPLEMENTO §5 / D-26] Segundos reales de marcha por hexágono de distancia */
+  SECONDS_PER_HEX: MAP.MARCH_SECONDS_PER_HEX,
+  /** Radio de visión inicial alrededor del territorio principal (distancia <= 1, 7 celdas conocidas) */
+  INITIAL_SIGHT_RADIUS: 1,
+  /** Límite de expediciones de exploración concurrentes por reino */
+  MAX_CONCURRENT_EXPEDITIONS: 1,
+  /** Reembolso al cancelar expedición en curso (D-04, D-21: 50%) */
+  CANCELLATION_REFUND_RATIO: 0.5,
+} as const;
+
 // ============================================================================
 // 8. PARLAMENTO Y DESAFÍOS (D-34 a D-42)
 // ============================================================================

@@ -136,12 +136,16 @@ export function canClaimTerritory(input: {
   target: WorldCell & { ownerKingdomId?: string | null };
   ownedCells: ReadonlyArray<HexCoord>;
   pendingClaims: number;
+  exploredCellIds?: ReadonlySet<string>;
 }): { success: true } | { success: false; error: string } {
   if (!Number.isInteger(input.pendingClaims) || input.pendingClaims < 1) {
     return { success: false, error: "No tienes reclamaciones territoriales pendientes; se obtienen con victorias aplastantes (P47)." };
   }
   if (input.target.ownerKingdomId) {
     return { success: false, error: "El territorio ya tiene propietario; no se arrebatan territorios ocupados (P48)." };
+  }
+  if (input.exploredCellIds && !input.exploredCellIds.has(input.target.cellId)) {
+    return { success: false, error: "Debes explorar y cartografiar este territorio antes de poder reclamarlo (P22/P49)." };
   }
   if (input.ownedCells.length === 0) {
     return { success: false, error: "El reino no tiene territorio principal desde el que reclamar." };

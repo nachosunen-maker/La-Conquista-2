@@ -4,7 +4,7 @@
  *
  * THIS CODE IS AUTOMATICALLY GENERATED.
  *
- * To regenerate, run `npx convex dev`.
+ * To regenerate, run `npx convex dev` (or `node scripts/regenerateConvexApi.mjs` offline).
  * @module
  */
 
@@ -28,6 +28,7 @@ import type * as economyExtendedPureTests from "../economyExtendedPureTests.js";
 import type * as economyPureTests from "../economyPureTests.js";
 import type * as economyRound2PureTests from "../economyRound2PureTests.js";
 import type * as economyTests from "../economyTests.js";
+import type * as explorationRules from "../explorationRules.js";
 import type * as foundationPureTests from "../foundationPureTests.js";
 import type * as foundationRules from "../foundationRules.js";
 import type * as kingdomAccess from "../kingdomAccess.js";
@@ -71,6 +72,7 @@ declare const fullApi: ApiFromModules<{
   economyPureTests: typeof economyPureTests;
   economyRound2PureTests: typeof economyRound2PureTests;
   economyTests: typeof economyTests;
+  explorationRules: typeof explorationRules;
   foundationPureTests: typeof foundationPureTests;
   foundationRules: typeof foundationRules;
   kingdomAccess: typeof kingdomAccess;

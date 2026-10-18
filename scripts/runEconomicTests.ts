@@ -2,9 +2,11 @@ import { runEconomicValidationTests, type TestResult } from "../convex/economyPu
 import { runMilitaryTests, type MilitaryTestResult } from "../convex/militaryPureTests";
 import { runFoundationTests, type FoundationTestResult } from "../convex/foundationPureTests";
 import { runChallengeValidationTests as runChallengePureTests, type ChallengeTestResult } from "../convex/challengePureTests";
+import { runTerritoryValidationTests, type TerritoryTestResult } from "../convex/territoryPureTests";
+import { runExplorationValidationTests, type ExplorationTestResult } from "../convex/explorationPureTests";
 
 console.log("================================================================================");
-console.log("LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAMENTO)");
+console.log("LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAMENTO + EXPLORACIÓN)");
 console.log("================================================================================\n");
 
 const startTime = Date.now();
@@ -12,7 +14,9 @@ const economicResults: TestResult[] = runEconomicValidationTests();
 const militaryResults: MilitaryTestResult[] = runMilitaryTests();
 const foundationResults: FoundationTestResult[] = runFoundationTests();
 const challengeResults: ChallengeTestResult[] = runChallengePureTests();
-const results = [...economicResults, ...militaryResults, ...foundationResults, ...challengeResults];
+const territoryResults = runTerritoryValidationTests().map((t) => ({ ...t, category: "MAPA Y TERRITORIOS D-22-D-26" }));
+const explorationResults: ExplorationTestResult[] = runExplorationValidationTests();
+const results = [...economicResults, ...militaryResults, ...foundationResults, ...challengeResults, ...territoryResults, ...explorationResults];
 const durationMs = Date.now() - startTime;
 
 let passedCount = 0;
