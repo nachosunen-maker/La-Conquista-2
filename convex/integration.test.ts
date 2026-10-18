@@ -82,7 +82,8 @@ describe("Construcción (Bloque A)", () => {
     expect(result.costs.gold).toBe(expectedCosts.gold);
     const after = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     expect(after!.resources.gold).toBeCloseTo(before!.resources.gold - expectedCosts.gold, 5);
-    expect(result.completesAt - result.startedAt).toBe(BUILDINGS.cuartel.baseDurationSeconds * 1000);
+    // Duración con bonificación romana (−10 % duración de construcción, P6)
+    expect(result.completesAt - result.startedAt).toBe(Math.ceil(BUILDINGS.cuartel.baseDurationSeconds * 1000 * 0.90));
 
     vi.setSystemTime(result.completesAt + 1000);
     await t.finishAllScheduledFunctions(vi.runAllTimers);

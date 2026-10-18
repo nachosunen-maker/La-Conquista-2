@@ -15,6 +15,10 @@ import {
   type TechnologyEffectKey,
 } from "./balanceConfig";
 import { checkBuildingRequirements } from "./buildingRules";
+import {
+  getCivilizationPassive,
+  validateCivilizationTechAccess,
+} from "./civilizationRules";
 
 export type TechnologyStatus = "locked" | "available" | "researching" | "completed";
 
@@ -57,6 +61,10 @@ export interface TechnologyModifiers {
   happinessBase: number; // puntos
   unlockedWeapons: string[];
   unlockedArmors: string[];
+  combatAttackBonus: number; // bonificación ofensiva aditiva (+0,05 = +5 %)
+  combatDefenseBonus: number; // bonificación defensiva aditiva (+0,05 = +5 %)
+  marchSpeedBonus: number; // bonificación de velocidad de marcha (+0,15 = +15 %)
+  marchFatigueReduction: number; // reducción de fatiga acumulada (0,20 = −20 %)
 }
 
 export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>): TechnologyModifiers {
@@ -71,6 +79,10 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     happinessBase: 0,
     unlockedWeapons: [],
     unlockedArmors: [],
+    combatAttackBonus: 0,
+    combatDefenseBonus: 0,
+    marchSpeedBonus: 0,
+    marchFatigueReduction: 0,
   };
   const seen = new Set<string>();
   for (const id of completedIds) {
@@ -91,6 +103,10 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
       case "unlockWeaponSteel": modifiers.unlockedWeapons.push("acero"); break;
       case "unlockWeaponAdvancedSteel": modifiers.unlockedWeapons.push("aceroAvanzado"); break;
       case "unlockArmorSteel": modifiers.unlockedArmors.push("acero"); break;
+      case "combatAttack": modifiers.combatAttackBonus += value; break;
+      case "combatDefense": modifiers.combatDefenseBonus += value; break;
+      case "marchSpeed": modifiers.marchSpeedBonus += value; break;
+      case "marchFatigue": modifiers.marchFatigueReduction = Math.min(0.5, modifiers.marchFatigueReduction + value); break;
     }
   }
   modifiers.constructionDuration = Math.max(RESEARCH.CONSTRUCTION_MIN_DURATION_RATIO, modifiers.constructionDuration);
@@ -101,17 +117,27 @@ export function getConstructionDurationModifier(completedIds: ReadonlyArray<stri
   return computeTechnologyModifiers(completedIds).constructionDuration;
 }
 
-/** Estado de una tecnología para un reino según progreso persistido, edificios y requisitos. */
+/** Estado de una tecnología para un reino según progreso persistido, edificios, requisitos y civilización. */
 export function evaluateTechnologyStatus(input: {
   technology: TechnologyBalance;
   completedIds: ReadonlySet<string>;
   researchingIds: ReadonlySet<string>;
   buildingLevels: Readonly<Record<string, number>>;
+  kingdomCivilization?: string | null;
 }): { status: TechnologyStatus; blockers: string[] } {
-  const { technology, completedIds, researchingIds, buildingLevels } = input;
+  const { technology, completedIds, researchingIds, buildingLevels, kingdomCivilization } = input;
   if (completedIds.has(technology.id)) return { status: "completed", blockers: [] };
   if (researchingIds.has(technology.id)) return { status: "researching", blockers: [] };
   const blockers: string[] = [];
+
+  // Validación de civilización exclusiva (P62)
+  if (technology.civilizationRequirement) {
+    const access = validateCivilizationTechAccess(technology.civilizationRequirement, kingdomCivilization);
+    if (!access.allowed) {
+      blockers.push(access.error ?? `Exclusiva de la civilización: ${technology.civilizationRequirement}`);
+    }
+  }
+
   if ((buildingLevels.universidad ?? 0) < technology.universityLevel) {
     blockers.push(`Universidad nivel ${technology.universityLevel}`);
   }
@@ -140,6 +166,7 @@ export function createResearchPlan(input: {
   activeResearch: ReadonlyArray<ResearchQueueEntry>;
   buildingLevels: Readonly<Record<string, number>>;
   now: number;
+  kingdomCivilization?: string | null;
 }): { success: true; plan: ResearchPlan } | { success: false; error: string } {
   const technology = TECHNOLOGY_CATALOG[input.technologyId];
   if (!technology) return { success: false, error: `La tecnología '${input.technologyId}' no existe en el catálogo.` };
@@ -156,7 +183,13 @@ export function createResearchPlan(input: {
   if (input.activeResearch.length >= slots) {
     return { success: false, error: `No hay ranuras de investigación libres (${slots} con Universidad nivel ${input.buildingLevels.universidad ?? 0}).` };
   }
-  const evaluation = evaluateTechnologyStatus({ technology, completedIds, researchingIds, buildingLevels: input.buildingLevels });
+  const evaluation = evaluateTechnologyStatus({
+    technology,
+    completedIds,
+    researchingIds,
+    buildingLevels: input.buildingLevels,
+    kingdomCivilization: input.kingdomCivilization,
+  });
   if (evaluation.status === "completed") return { success: false, error: `'${technology.name}' ya está investigada.` };
   if (evaluation.status === "researching") return { success: false, error: `'${technology.name}' ya se está investigando.` };
   if (evaluation.status === "locked") return { success: false, error: `Bloqueada: ${evaluation.blockers.join("; ")}.` };
@@ -175,7 +208,11 @@ export function createResearchPlan(input: {
       costs[resource] = cost;
     }
   }
-  const durationMs = technology.durationSeconds * 1000;
+
+  // Bonificación pasiva de civilización sobre la duración de investigación (p. ej. Griegos −10 %)
+  const civPassive = getCivilizationPassive(input.kingdomCivilization);
+  const durationMs = Math.ceil(technology.durationSeconds * 1000 * civPassive.researchDurationMultiplier);
+
   return {
     success: true,
     plan: { technologyId: technology.id, startedAt: input.now, durationMs, completesAt: input.now + durationMs, costs },

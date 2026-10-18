@@ -230,6 +230,7 @@ export async function settleRelationalKingdomEconomy(
       mercenaryCount: state.armyUnits
         .filter((doc: any) => doc.isMercenary && Number.isInteger(doc.count))
         .reduce((sum: number, doc: any) => sum + Math.max(0, doc.count), 0),
+      civilization: kingdom.civilization,
     });
     settledResources = extended.updatedResources;
   }

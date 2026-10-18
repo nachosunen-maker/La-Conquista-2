@@ -34,6 +34,7 @@ import {
   type RestPolicy,
 } from "./balanceConfig";
 import type { TechnologyModifiers } from "./technologyRules";
+import { getCivilizationPassive } from "./civilizationRules";
 
 export interface MoraleEffect {
   amount: number;
@@ -63,6 +64,8 @@ export interface ExtendedEconomyInput {
   glory?: number;
   /** [M-02] Mercenarios activos (no generan natalidad; cobran salario diario). */
   mercenaryCount?: number;
+  /** [Bloque 10, P6] Identificador de civilización oficial para aplicar bonificaciones culturales. */
+  civilization?: string;
 }
 
 export interface ProfessionEffects {
@@ -265,11 +268,13 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   const phaseBefore = starvationPhase(starvationBefore);
   const productivity = productivityMultiplier(taxRate, phaseBefore, restPolicy);
   const terrain = input.terrainBonuses ?? {};
+  const civPassive = getCivilizationPassive(input.civilization);
   const professions = computeProfessionEffects(state.jobCounts, input.buildingLevels, PROFESSION_BUILDING_CAPACITY);
   const mercenaryCount = Number.isInteger(input.mercenaryCount) && (input.mercenaryCount as number) > 0 ? (input.mercenaryCount as number) : 0;
 
-  // 1. Alimentos: motor aprobado con multiplicador agrícola (tecnología × terreno × productividad) y consumo (panadería).
-  const agricultureMultiplier = input.technologyModifiers.agricultureProduction * (1 + (terrain.agriculture ?? 0)) * productivity;
+  // 1. Alimentos: motor aprobado con multiplicador agrícola (tecnología × terreno × civilización × productividad) y consumo (panadería).
+  const civAgriBonus = civPassive.production.agriculture ?? 0;
+  const agricultureMultiplier = input.technologyModifiers.agricultureProduction * (1 + (terrain.agriculture ?? 0)) * (1 + civAgriBonus) * productivity;
   const foodSim = simulateEconomicProgress(state, input.now, agricultureMultiplier, professions.foodConsumptionMultiplier);
 
   // 2. Resto de recursos (D-46/D-47): tasa × min(asignados, capacidad) × modificadores.
@@ -287,7 +292,8 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
     const effective = Math.max(0, Math.min(assigned, capacity));
     effectiveWorkers[job] = effective;
     const technologyMultiplier = job === "gold" ? 1 : input.technologyModifiers.miningProduction;
-    const rate = PRODUCTION_PER_WORKER_PER_DAY[job] * technologyMultiplier * (1 + (terrain[job] ?? 0)) * productivity;
+    const civJobBonus = civPassive.production[job] ?? 0;
+    const rate = PRODUCTION_PER_WORKER_PER_DAY[job] * technologyMultiplier * (1 + (terrain[job] ?? 0)) * (1 + civJobBonus) * productivity;
     dailyProduction[JOB_TO_RESOURCE[job]] = effective * rate;
   }
 
@@ -302,8 +308,9 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   const salaryPaid = Math.min(salaryDue, Math.max(0, goldBeforeSalary));
   const unpaid = salaryDue > 0 && salaryPaid + 1e-9 < salaryDue;
 
-  // 3c. [M-06] Tope de almacén.
-  const capacity = storageCapacity(input.buildingLevels.mercado ?? 0, input.technologyModifiers.storageCapacity);
+  // 3c. [M-06] Tope de almacén (con bonificación de civilización si procede).
+  const storageTechMultiplier = input.technologyModifiers.storageCapacity * (civPassive.storageCapacityMultiplier ?? 1.0);
+  const capacity = storageCapacity(input.buildingLevels.mercado ?? 0, storageTechMultiplier);
   const rawResources: KingdomResources = {
     gold: goldBeforeSalary - salaryPaid,
     wood: state.resources.wood + dailyProduction.wood * elapsedDays,
@@ -331,7 +338,14 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
 
   // 5. Población (D-50): crecimiento compuesto limitado por viviendas (los mercenarios no generan natalidad); pérdidas en fase 3.
   const growthBase = Math.max(0, state.population - mercenaryCount);
-  const growth = computePopulationGrowth({ total: growthBase, elapsedDays, residentialCapacity: input.residentialCapacity === null ? null : Math.max(0, input.residentialCapacity - mercenaryCount) });
+  const effectiveResidentialCapacity = input.residentialCapacity === null
+    ? null
+    : Math.ceil(input.residentialCapacity * (civPassive.residentialCapacityMultiplier ?? 1.0));
+  const growth = computePopulationGrowth({
+    total: growthBase,
+    elapsedDays,
+    residentialCapacity: effectiveResidentialCapacity === null ? null : Math.max(0, effectiveResidentialCapacity - mercenaryCount),
+  });
   const phase3Days = daysInPhase3(starvationBefore, starvationAfter);
   const civilPopulation = Math.max(0, state.population - state.regularSoldiers);
   // [DERIVADO R-13] Las muertes civiles salen de la reserva libre (nacimientos incluidos).
@@ -345,8 +359,8 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
 
   // 6. Felicidad (D-49, R-03/R-04, M-04, M-07): contribuciones diarias limitadas a ±5 puntos por día.
   const happinessBefore = Number.isFinite(input.happiness) ? clamp(input.happiness, WELLBEING.MIN, WELLBEING.MAX) : WELLBEING.INITIAL_HAPPINESS;
-  const overcrowded = input.residentialCapacity !== null && state.population > input.residentialCapacity;
-  const equilibrium = WELLBEING.INITIAL_HAPPINESS + input.technologyModifiers.happinessBase;
+  const overcrowded = effectiveResidentialCapacity !== null && state.population > effectiveResidentialCapacity;
+  const equilibrium = WELLBEING.INITIAL_HAPPINESS + input.technologyModifiers.happinessBase + (civPassive.happinessBonus ?? 0);
   let dailyDelta = (WELLBEING.FOOD_TIER_HAPPINESS as Record<string, number>)[state.foodTier] ?? 0;
   dailyDelta += overcrowded ? WELLBEING.OVERCROWDING_PENALTY : 0;
   dailyDelta += (input.buildingLevels.iglesia ?? 0) > 0 ? WELLBEING.RELIGION_BONUS_WITH_CHURCH : 0;

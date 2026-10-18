@@ -21,6 +21,8 @@
  */
 
 import type { ResourceType } from "./economyCalculations";
+import { getCivilizationPassive } from "./civilizationRules";
+import type { UnitType } from "./balanceConfig";
 
 export const VALID_MILITARY_UNIT_TYPES = [
   "infanteria",
@@ -140,6 +142,7 @@ export function createTrainingPlan(input: {
   buildingLevels: Readonly<Record<string, number>>;
   now: number;
   customRule?: MilitaryUnitRule;
+  civilization?: string;
 }): { success: true; plan: TrainingPlan } | { success: false; error: string } {
   const normalizedType = (input.unitType || "").toLowerCase().trim();
   if (!isValidMilitaryUnitType(normalizedType)) {
@@ -239,7 +242,9 @@ export function createTrainingPlan(input: {
     }
   }
 
-  const totalDurationMs = rule.durationMsPerUnit * input.count;
+  const civPassive = getCivilizationPassive(input.civilization);
+  const civUnitMultiplier = civPassive.trainingDurationByUnit[normalizedType as UnitType] ?? 1.0;
+  const totalDurationMs = Math.ceil(rule.durationMsPerUnit * input.count * civUnitMultiplier);
 
   return {
     success: true,

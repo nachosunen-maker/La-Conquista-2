@@ -498,7 +498,11 @@ export type TechnologyEffectKey =
   | "unlockArmorSteel"
   | "constructionDuration"
   | "happinessBase"
-  | "unlockWeaponAdvancedSteel";
+  | "unlockWeaponAdvancedSteel"
+  | "combatAttack"
+  | "combatDefense"
+  | "marchSpeed"
+  | "marchFatigue";
 
 export interface TechnologyBalance {
   id: string;
@@ -510,11 +514,12 @@ export interface TechnologyBalance {
   durationSeconds: number;
   buildingRequirements: Readonly<Record<string, number>>;
   technologyRequirements: readonly string[];
+  civilizationRequirement?: string;
   effect: { key: TechnologyEffectKey; value: number; description: string };
 }
 
 const DAY = TIME.SECONDS_PER_GAME_YEAR;
-/** [COMPLEMENTO §4] Catálogo inicial propuesto. */
+/** [COMPLEMENTO §4, P62] Catálogo tecnológico oficial con ramas universales y tecnologías únicas de civilización. */
 export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   { id: "agri_1", name: "Rotación de cultivos", branch: "economica", universityLevel: 1, costs: { gold: 100, wood: 100, stone: 50, iron: 0, food: 0 }, durationSeconds: 1 * DAY, buildingRequirements: {}, technologyRequirements: [], effect: { key: "agricultureProduction", value: 0.05, description: "+5 % producción agrícola" } },
   { id: "mining_1", name: "Herramientas mineras", branch: "economica", universityLevel: 1, costs: { gold: 100, wood: 80, stone: 80, iron: 10, food: 0 }, durationSeconds: 1 * DAY, buildingRequirements: {}, technologyRequirements: [], effect: { key: "miningProduction", value: 0.05, description: "+5 % madera, piedra y hierro" } },
@@ -529,6 +534,23 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   { id: "medical_2", name: "Cirugía de campaña", branch: "militar", universityLevel: 4, costs: { gold: 500, wood: 150, stone: 200, iron: 150, food: 0 }, durationSeconds: 5 * DAY, buildingRequirements: { hospitalMilitar: 3 }, technologyRequirements: ["medicine_1"], effect: { key: "woundedRecovery", value: 0.1, description: "+10 puntos porcentuales de recuperación (tope acumulado 60 %)" } },
   { id: "espionage_2", name: "Espionaje II", branch: "inteligencia", universityLevel: 4, costs: { gold: 500, wood: 200, stone: 200, iron: 100, food: 0 }, durationSeconds: 5 * DAY, buildingRequirements: { universidad: 4 }, technologyRequirements: ["espionage_1"], effect: { key: "espionageAccuracy", value: 2, description: "Estrecha el intervalo de estimación militar (±7 %)" } },
   { id: "advanced_steel", name: "Acero avanzado", branch: "militar", universityLevel: 4, costs: { gold: 700, wood: 200, stone: 300, iron: 250, food: 0 }, durationSeconds: 7 * DAY, buildingRequirements: { castillo: 5, universidad: 3, herreria: 4 }, technologyRequirements: ["weapons_1"], effect: { key: "unlockWeaponAdvancedSteel", value: 1, description: "Desbloquea arma de acero avanzado (×1,30)" } },
+
+  // ==========================================================================
+  // TECNOLOGÍAS ÚNICAS POR CIVILIZACIÓN (P62, Bloque 10)
+  // Cada una requiere Universidad nivel 2 y pertenecer a la civilización canónica
+  // ==========================================================================
+  { id: "tech_civ_ingleses", name: "Arco largo inglés", branch: "civilizacion", universityLevel: 2, costs: { gold: 200, wood: 250, stone: 80, iron: 50, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { cuartel: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "ingleses", effect: { key: "combatAttack", value: 0.05, description: "+5 % ataque militar (alcance letal de arquería)" } },
+  { id: "tech_civ_romanos", name: "Legión y testudo", branch: "civilizacion", universityLevel: 2, costs: { gold: 200, wood: 80, stone: 250, iron: 80, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { castillo: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "romanos", effect: { key: "combatDefense", value: 0.05, description: "+5 % defensa militar en formación cerrada" } },
+  { id: "tech_civ_griegos", name: "Falange y dialéctica", branch: "civilizacion", universityLevel: 2, costs: { gold: 250, wood: 100, stone: 150, iron: 60, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "griegos", effect: { key: "combatDefense", value: 0.05, description: "+5 % defensa militar en formación de falange" } },
+  { id: "tech_civ_vikingos", name: "Drakkar y furia nórdica", branch: "civilizacion", universityLevel: 2, costs: { gold: 180, wood: 300, stone: 80, iron: 60, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { cuartel: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "vikingos", effect: { key: "combatAttack", value: 0.05, description: "+5 % ataque militar e ímpetu de asalto" } },
+  { id: "tech_civ_bizantinos", name: "Fuego griego y baluartes", branch: "civilizacion", universityLevel: 2, costs: { gold: 300, wood: 100, stone: 200, iron: 100, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { castillo: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "bizantinos", effect: { key: "combatDefense", value: 0.06, description: "+6 % defensa militar y fuego defensivo" } },
+  { id: "tech_civ_arabes", name: "Medicina de Córdoba y riego", branch: "civilizacion", universityLevel: 2, costs: { gold: 250, wood: 120, stone: 120, iron: 40, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { hospitalMilitar: 1, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "arabes", effect: { key: "woundedRecovery", value: 0.10, description: "+10 pp recuperación de heridos y acequias de regadío" } },
+  { id: "tech_civ_mongoles", name: "Tácticas de la estepa", branch: "civilizacion", universityLevel: 2, costs: { gold: 200, wood: 150, stone: 80, iron: 50, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { establo: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "mongoles", effect: { key: "marchSpeed", value: 0.15, description: "+15 % velocidad de marcha y maniobra envolvente" } },
+  { id: "tech_civ_chinos", name: "Gran Muralla y pólvora", branch: "civilizacion", universityLevel: 2, costs: { gold: 220, wood: 150, stone: 300, iron: 50, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { castillo: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "chinos", effect: { key: "combatDefense", value: 0.06, description: "+6 % defensa militar y arquitectura defensiva" } },
+  { id: "tech_civ_japoneses", name: "Acero Tamahagane y Bushido", branch: "civilizacion", universityLevel: 2, costs: { gold: 250, wood: 100, stone: 100, iron: 120, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { herreria: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "japoneses", effect: { key: "combatAttack", value: 0.05, description: "+5 % ataque militar por temple de hojas de acero" } },
+  { id: "tech_civ_indiosAmericanos", name: "Rastreadores del bosque", branch: "civilizacion", universityLevel: 2, costs: { gold: 150, wood: 250, stone: 100, iron: 30, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "indiosAmericanos", effect: { key: "marchFatigue", value: 0.20, description: "−20 % fatiga de marcha por sendas y bosques" } },
+  { id: "tech_civ_aztecas", name: "Chinampas y sacerdotes guerreros", branch: "civilizacion", universityLevel: 2, costs: { gold: 200, wood: 200, stone: 150, iron: 30, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "aztecas", effect: { key: "agricultureProduction", value: 0.08, description: "+8 % producción agrícola en huertos intensivos" } },
+  { id: "tech_civ_keniatas", name: "Resistencia Masai y sabana", branch: "civilizacion", universityLevel: 2, costs: { gold: 160, wood: 180, stone: 100, iron: 40, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "keniatas", effect: { key: "marchFatigue", value: 0.25, description: "−25 % fatiga en expediciones de larga distancia" } },
 ];
 
 export const RESEARCH = {
@@ -628,23 +650,320 @@ export const PREDEFINED_MESSAGES = [
 ] as const;
 
 // ============================================================================
-// 9. CIVILIZACIONES (P6, D-43 a D-45)
+// 9. CIVILIZACIONES (P6, P62, D-43 a D-45, Bloque 10)
 // ============================================================================
-/** [MAESTRA P6] Doce civilizaciones iniciales. Sin bonificaciones numéricas hasta aprobación (D-44). */
+
+export interface CivilizationPassiveConfig {
+  description: string;
+  production: Partial<Record<ProductiveJob, number>>;
+  constructionDurationMultiplier: number;
+  researchDurationMultiplier: number;
+  explorationDurationMultiplier: number;
+  explorationCostMultiplier: number;
+  woundedRecoveryBonus: number;
+  marchSpeedMultiplier: number;
+  fatigueAccrualMultiplier: number;
+  residentialCapacityMultiplier: number;
+  storageCapacityMultiplier?: number;
+  trainingDurationByUnit: Partial<Record<UnitType, number>>;
+  combatAttackMultiplier: number;
+  combatDefenseMultiplier: number;
+  happinessBonus: number;
+}
+
+export interface CivilizationBalance {
+  id: string;
+  label: string;
+  emblem: string;
+  style: string;
+  passive: CivilizationPassiveConfig;
+  uniqueTechnologyId: string;
+}
+
+/**
+ * [MAESTRA P6, P62] Doce civilizaciones canónicas con identidad estratégica balanceada.
+ * Ninguna es objetivamente superior; cada una ofrece un perfil distintivo económico,
+ * demográfico, de expansión o militar calibrado entre el 5 % y el 15 %.
+ */
 export const CIVILIZATIONS = [
-  { id: "ingleses", label: "Ingleses" },
-  { id: "romanos", label: "Romanos" },
-  { id: "griegos", label: "Griegos" },
-  { id: "vikingos", label: "Vikingos" },
-  { id: "bizantinos", label: "Bizantinos" },
-  { id: "arabes", label: "Árabes" },
-  { id: "mongoles", label: "Mongoles" },
-  { id: "chinos", label: "Chinos" },
-  { id: "japoneses", label: "Japoneses" },
-  { id: "indiosAmericanos", label: "Indios americanos" },
-  { id: "aztecas", label: "Aztecas" },
-  { id: "keniatas", label: "Keniatas" },
+  {
+    id: "ingleses",
+    label: "Ingleses",
+    emblem: "🏹",
+    style: "Arqueros de tiro largo y maestros madereros",
+    passive: {
+      description: "+10 % producción de madera en aserraderos y −10 % duración de instrucción de arqueros",
+      production: { wood: 0.10 },
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: { arqueria: 0.90 },
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 0,
+    },
+    uniqueTechnologyId: "tech_civ_ingleses",
+  },
+  {
+    id: "romanos",
+    label: "Romanos",
+    emblem: "🏛️",
+    style: "Ingeniería de calzadas, cantería y legiones disciplinadas",
+    passive: {
+      description: "+10 % producción de piedra en canteras y −10 % duración de construcción de edificios",
+      production: { stone: 0.10 },
+      constructionDurationMultiplier: 0.90,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: {},
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 0,
+    },
+    uniqueTechnologyId: "tech_civ_romanos",
+  },
+  {
+    id: "griegos",
+    label: "Griegos",
+    emblem: "🏺",
+    style: "Erudición de la Academia, falange cívica y bienestar",
+    passive: {
+      description: "−10 % duración de investigaciones en Universidad y +5 puntos de felicidad base",
+      production: {},
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 0.90,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: {},
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 5,
+    },
+    uniqueTechnologyId: "tech_civ_griegos",
+  },
+  {
+    id: "vikingos",
+    label: "Vikingos",
+    emblem: "⚔️",
+    style: "Exploración marítima rápida, asaltos y grandes depósitos",
+    passive: {
+      description: "−15 % duración de expediciones de exploración y +10 % capacidad de almacenamiento",
+      production: {},
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 0.85,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: {},
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 0,
+    },
+    uniqueTechnologyId: "tech_civ_vikingos",
+  },
+  {
+    id: "bizantinos",
+    label: "Bizantinos",
+    emblem: "🛡️",
+    style: "Moneda sólida, recaudación imperial y murallas inexpugnables",
+    passive: {
+      description: "+10 % producción de oro y +5 % poder defensivo militar del reino",
+      production: { gold: 0.10 },
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: {},
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.05,
+      happinessBonus: 0,
+    },
+    uniqueTechnologyId: "tech_civ_bizantinos",
+  },
+  {
+    id: "arabes",
+    label: "Árabes",
+    emblem: "🌙",
+    style: "Medicina de vanguardia, caravanas comerciales y regadío",
+    passive: {
+      description: "+8 pp tasa de recuperación de heridos y +5 % producción de oro por comercio",
+      production: { gold: 0.05 },
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0.08,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: {},
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 0,
+    },
+    uniqueTechnologyId: "tech_civ_arabes",
+  },
+  {
+    id: "mongoles",
+    label: "Mongoles",
+    emblem: "🐎",
+    style: "Jinetes de la estepa, velocidad de marcha y caballería ligera",
+    passive: {
+      description: "+15 % velocidad de marcha en el mapa y −10 % duración de instrucción de caballería",
+      production: {},
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.15,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: { caballeria: 0.90 },
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 0,
+    },
+    uniqueTechnologyId: "tech_civ_mongoles",
+  },
+  {
+    id: "chinos",
+    label: "Chinos",
+    emblem: "🏮",
+    style: "Gran censo ordenado, cultivos intensivos y arquitectura defensiva",
+    passive: {
+      description: "+8 % producción de alimentos agrícolas y +5 % capacidad residencial en viviendas",
+      production: { agriculture: 0.08 },
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.05,
+      trainingDurationByUnit: {},
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 0,
+    },
+    uniqueTechnologyId: "tech_civ_chinos",
+  },
+  {
+    id: "japoneses",
+    label: "Japoneses",
+    emblem: "⛩️",
+    style: "Tradición samurái, temple del hierro y espíritu marcial",
+    passive: {
+      description: "+10 % producción de hierro en minas y +5 % poder ofensivo militar",
+      production: { iron: 0.10 },
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: {},
+      combatAttackMultiplier: 1.05,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 0,
+    },
+    uniqueTechnologyId: "tech_civ_japoneses",
+  },
+  {
+    id: "indiosAmericanos",
+    label: "Indios americanos",
+    emblem: "🦅",
+    style: "Rastreo ancestral, expediciones autosuficientes y bosques vivos",
+    passive: {
+      description: "−20 % costes de oro y comida en expediciones y +8 % producción de madera",
+      production: { wood: 0.08 },
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 0.80,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: {},
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 0,
+    },
+    uniqueTechnologyId: "tech_civ_indiosAmericanos",
+  },
+  {
+    id: "aztecas",
+    label: "Aztecas",
+    emblem: "☀️",
+    style: "Chinampas de alto rendimiento, fervor comunal y festividades",
+    passive: {
+      description: "+12 % producción de alimentos agrícolas y +4 puntos de felicidad base",
+      production: { agriculture: 0.12 },
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 1.0,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: {},
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 4,
+    },
+    uniqueTechnologyId: "tech_civ_aztecas",
+  },
+  {
+    id: "keniatas",
+    label: "Keniatas",
+    emblem: "🌾",
+    style: "Fondo físico inagotable en marchas y ganadería/agricultura tenaz",
+    passive: {
+      description: "−25 % fatiga acumulada en marchas territoriales y +6 % producción de alimentos",
+      production: { agriculture: 0.06 },
+      constructionDurationMultiplier: 1.0,
+      researchDurationMultiplier: 1.0,
+      explorationDurationMultiplier: 1.0,
+      explorationCostMultiplier: 1.0,
+      woundedRecoveryBonus: 0,
+      marchSpeedMultiplier: 1.0,
+      fatigueAccrualMultiplier: 0.75,
+      residentialCapacityMultiplier: 1.0,
+      trainingDurationByUnit: {},
+      combatAttackMultiplier: 1.0,
+      combatDefenseMultiplier: 1.0,
+      happinessBonus: 0,
+    },
+    uniqueTechnologyId: "tech_civ_keniatas",
+  },
 ] as const;
+
 export type CivilizationId = (typeof CIVILIZATIONS)[number]["id"];
-export const CIVILIZATION_BONUSES_ENABLED = false;
+export const CIVILIZATION_BONUSES_ENABLED = true;
 export const CIVILIZATION_IMMUTABLE = true;

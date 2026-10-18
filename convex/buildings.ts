@@ -25,6 +25,7 @@ import {
 } from "./buildingRules";
 import { getConstructionDurationModifier, readCompletedTechnologyIds } from "./technologyRules";
 import { computeProfessionEffects, PROFESSION_BUILDING_CAPACITY } from "./economyExtended";
+import { getCivilizationPassive } from "./civilizationRules";
 import type { ResourceType } from "./economyCalculations";
 
 export async function requireOwner(ctx: MutationCtx, kingdomId: Id<"kingdoms">) {
@@ -79,7 +80,11 @@ export const getConstructionState = query({
       ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
     ]);
     const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
-    const durationModifier = getConstructionDurationModifier(completedTechnologies) * (await constructionWorkersModifier(ctx, args.kingdomId));
+    const civPassive = getCivilizationPassive(kingdom.civilization);
+    const durationModifier =
+      getConstructionDurationModifier(completedTechnologies) *
+      (await constructionWorkersModifier(ctx, args.kingdomId)) *
+      civPassive.constructionDurationMultiplier;
     const serverTimeMs = Date.now();
     const collection = validateBuildingCollection(buildings);
     const buildingLevels = collection.success ? collection.levels : {};
@@ -142,7 +147,10 @@ export const startConstruction = mutation({
       buildingLevels,
       now,
       rule,
-      durationModifier: getConstructionDurationModifier(completedTechnologies) * (await constructionWorkersModifier(ctx, args.kingdomId)),
+      durationModifier:
+        getConstructionDurationModifier(completedTechnologies) *
+        (await constructionWorkersModifier(ctx, args.kingdomId)) *
+        getCivilizationPassive(kingdom.civilization).constructionDurationMultiplier,
     });
     if (!planResult.success) throw new Error(planResult.error);
 

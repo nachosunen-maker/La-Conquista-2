@@ -20,6 +20,8 @@ export function getCivilizationById(id: string) {
   return CIVILIZATIONS.find((c) => c.id === id) ?? null;
 }
 
+export { getCivilizationStrategicMatrix } from "./civilizationRules";
+
 export const listCivilizations = query({
   args: {},
   handler: async () => ({
@@ -28,3 +30,13 @@ export const listCivilizations = query({
     immutable: CIVILIZATION_IMMUTABLE,
   }),
 });
+
+export const getCivilizationMatrix = query({
+  args: {},
+  handler: async () => ({
+    matrix: (await import("./civilizationRules")).getCivilizationStrategicMatrix(),
+    bonusesEnabled: CIVILIZATION_BONUSES_ENABLED,
+    totalCivilizations: CIVILIZATIONS.length,
+  }),
+});
+

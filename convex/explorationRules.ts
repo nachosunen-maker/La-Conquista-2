@@ -12,6 +12,7 @@ import {
   type HexCoord,
   type WorldCell,
 } from "./territoryRules";
+import { applyCivilizationExploration } from "./civilizationRules";
 
 export type CellExplorationState = "owned" | "explored" | "exploring" | "fog";
 
@@ -80,6 +81,7 @@ export function canStartExploration(input: {
   currentResources: { gold: number; food: number };
   activeExpeditionsCount: number;
   worldRadius?: number;
+  civilization?: string;
 }): { success: true; plan: ExplorationPlan } | { success: false; error: string } {
   const worldRadius = input.worldRadius ?? MAP.RADIUS;
 
@@ -118,15 +120,19 @@ export function canStartExploration(input: {
     distance = Math.max(1, Math.min(...input.ownedCoords.map((c) => hexDistance(c, input.targetCoord))));
   }
 
-  // Duración canónica basada en tiempo de marcha (D-26 / Complemento §5)
-  const durationSeconds = Math.max(600, distance * EXPLORATION.SECONDS_PER_HEX);
-  const durationMs = durationSeconds * 1000;
-
-  // Costes de aprovisionamiento
-  const costs: ExplorationCosts = {
+  // Duración base de marcha (D-26 / Complemento §5) y costes base
+  const baseDurationSeconds = Math.max(600, distance * EXPLORATION.SECONDS_PER_HEX);
+  const baseDurationMs = baseDurationSeconds * 1000;
+  const baseCosts = {
     gold: EXPLORATION.BASE_COSTS.gold,
     food: EXPLORATION.BASE_COSTS.food,
   };
+
+  // Aplicar bonificaciones pasivas culturales (p. ej. Vikingos −15 % duración, Indios americanos −20 % costes)
+  const civExploration = applyCivilizationExploration(baseCosts, baseDurationMs, input.civilization);
+  const durationMs = civExploration.durationMs;
+  const durationSeconds = Math.ceil(durationMs / 1000);
+  const costs: ExplorationCosts = civExploration.costs;
 
   if (input.availableCivil < EXPLORATION.SCOUTS_REQUIRED) {
     return {

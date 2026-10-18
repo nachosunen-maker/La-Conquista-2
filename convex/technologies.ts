@@ -69,7 +69,13 @@ export const getTechnologies = query({
           : null,
       })),
       catalog: TECHNOLOGIES.map((technology) => {
-        const evaluation = evaluateTechnologyStatus({ technology, completedIds, researchingIds, buildingLevels });
+        const evaluation = evaluateTechnologyStatus({
+          technology,
+          completedIds,
+          researchingIds,
+          buildingLevels,
+          kingdomCivilization: kingdom.civilization,
+        });
         return { ...technology, status: evaluation.status, blockers: evaluation.blockers };
       }),
     };
@@ -95,6 +101,7 @@ export const researchTechnology = mutation({
       activeResearch: progress.filter((doc) => doc.status === "researching") as ResearchQueueEntry[],
       buildingLevels: collection.levels,
       now,
+      kingdomCivilization: kingdom.civilization,
     });
     if (!planResult.success) throw new Error(planResult.error);
     const plan = planResult.plan;

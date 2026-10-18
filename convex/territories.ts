@@ -502,6 +502,7 @@ export const startExploration = mutation({
       currentResources,
       activeExpeditionsCount: activeQueue.length,
       worldRadius: MAP.RADIUS,
+      civilization: kingdom.civilization,
     });
 
     if (!check.success) {

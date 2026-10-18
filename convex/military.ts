@@ -236,6 +236,7 @@ export const trainUnits = mutation({
       buildingLevels,
       now,
       customRule: args.overrideRule as MilitaryUnitRule | undefined,
+      civilization: kingdom.civilization,
     });
 
     if (!planResult.success) {

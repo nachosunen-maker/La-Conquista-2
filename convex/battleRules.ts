@@ -23,6 +23,7 @@ import {
   type WeaponTier,
 } from "./balanceConfig";
 import { fatigueMultiplier } from "./territoryRules";
+import { getCivilizationPassive } from "./civilizationRules";
 
 export type Composition = Record<UnitType, number>;
 
@@ -43,6 +44,8 @@ export interface BattleSide {
   wallsLevel: number;
   /** Bonificación defensiva del terreno del territorio principal (0,1 = +10 %). */
   terrainDefenseBonus: number;
+  /** [P6, Bloque 10] Identificador de civilización oficial. */
+  civilization?: string;
 }
 
 export interface SideFactors {
@@ -164,7 +167,10 @@ export function foodFactor(foodTier: string): number {
 
 export function computeSideFactors(side: BattleSide, composition: Composition, enemy: BattleSide, enemyComposition?: Composition): SideFactors {
   const effectives = totalUnits(composition);
-  const { offensive, defensive } = strengths(composition, enemyComposition ?? enemy.composition, enemy.wallsLevel);
+  const rawStrengths = strengths(composition, enemyComposition ?? enemy.composition, enemy.wallsLevel);
+  const civPassive = getCivilizationPassive(side.civilization);
+  const offensive = rawStrengths.offensive * civPassive.combatAttackMultiplier;
+  const defensive = rawStrengths.defensive * civPassive.combatDefenseMultiplier;
   const training = Math.max(0.01, side.trainingMultiplier);
   const weapons = WEAPONS[side.weaponTier]?.multiplier ?? WEAPONS.palo.multiplier;
   const armor = ARMORS[side.armorTier]?.multiplier ?? ARMORS.ninguna.multiplier;

@@ -85,9 +85,9 @@ export function runTechnologyValidationTests(): TechnologyTestResult[] {
       details: `Agricultura ×${modifiers.agricultureProduction}; minería ×${modifiers.miningProduction}; entrenamiento ×${modifiers.trainingDuration}; construcción ×${modifiers.constructionDuration}; heridos +${modifiers.woundedRecoveryBonus}; espionaje ${modifiers.espionageLevel}; felicidad +${modifiers.happinessBase}`,
     },
     {
-      test: "El catálogo tiene 13 tecnologías con ramas, costes y duraciones positivas",
-      passed: TECHNOLOGIES.length === 13 && TECHNOLOGIES.every((t) => t.durationSeconds > 0 && t.universityLevel >= 1 && Object.values(t.costs).every((c) => c >= 0)),
-      details: `Tecnologías: ${TECHNOLOGIES.map((t) => t.id).join(", ")}`,
+      test: "El catálogo contiene las tecnologías universales y únicas (P62) con ramas, costes y duraciones positivas",
+      passed: TECHNOLOGIES.length === 25 && TECHNOLOGIES.every((t) => t.durationSeconds > 0 && t.universityLevel >= 1 && Object.values(t.costs).every((c) => c >= 0)),
+      details: `Total tecnologías: ${TECHNOLOGIES.length} (13 universales + 12 de civilización)`,
     },
   ];
 }
