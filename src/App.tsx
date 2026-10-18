@@ -471,8 +471,8 @@ function formatSecondsDuration(seconds: number): string {
 function KingdomOverviewContent() {
   const { isAuthenticated, user } = useAuth();
   const [viewDemoKingdom, setViewDemoKingdom] = useState<boolean>(false);
-  const isViewingDemo = !isAuthenticated || viewDemoKingdom;
-  const activeUserId = isViewingDemo ? DEMO_USER_ID : (user?.sub ?? '');
+  const isViewingDemo = viewDemoKingdom;
+  const activeUserId = isAuthenticated ? (user?.sub ?? '') : (viewDemoKingdom ? DEMO_USER_ID : 'GUEST');
 
   const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);

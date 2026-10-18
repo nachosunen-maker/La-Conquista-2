@@ -194,7 +194,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
         title="Mapa del mundo y exploración"
         aside={
           <span className="flex items-center gap-3">
-            <span>Explorado: {world.exploredCount}/{world.totalCells} ({Math.round((world.exploredCount / world.totalCells) * 100)} %)</span>
+            <span>Explorado: {world.exploredCount}/{world.totalCells} ({world.totalCells > 0 ? Math.round((world.exploredCount / world.totalCells) * 100) : 0} %)</span>
             <span>·</span>
             <span className="text-[#d4af37]">{mine?.pendingClaims ?? 0} reclamación(es) (P49)</span>
           </span>
