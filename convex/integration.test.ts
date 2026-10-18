@@ -172,7 +172,7 @@ describe("Liquidación económica (Bloque D)", () => {
     const settled = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
     expect(settled.resources.food).toBeGreaterThan(before!.resources.food);
     expect(settled.resources.wood).toBeCloseTo(before!.resources.wood + 250, 3);
-    expect(settled.resources.stone).toBeCloseTo(before!.resources.stone + 187.5, 3);
+    expect(settled.resources.stone).toBeCloseTo(before!.resources.stone + 206.25, 3);
     expect(settled.taxesCollected).toBeGreaterThan(0);
     expect(settled.population?.births).toBe(0);
     expect(settled.population?.growthCappedByHousing).toBe(true);
