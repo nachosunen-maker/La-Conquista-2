@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { completeDueConstructions, insertInitialBuildings } from "./buildings";
 import { completeDueTraining, readArmyUnitDocs, readArmyUnitsWithMigration } from "./army";
 import { completeDueResearch } from "./technologies";
-import { ensureHomeTerritory } from "./territories";
+import { ensureHomeTerritory, releaseTerritories } from "./territories";
 import { calculateJobCapacities, calculateResidentialCapacity, validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import { simulateExtendedEconomy, type ExtendedEconomyResult } from "./economyExtended";
@@ -1143,5 +1143,84 @@ export const setTaxRate = mutation({
     const taxRate = Math.round(args.taxRate * 100) / 100;
     await ctx.db.patch(args.kingdomId, { taxRate, updatedAt: now });
     return { success: true, kingdomId: args.kingdomId, taxRate };
+  },
+});
+
+/**
+ * [REINICIO DE PARTIDA] Borrado masivo y reinicialización del estado económico del reino.
+ * Conserva identidad y estadísticas históricas.
+ */
+export const resetKingdom = mutation({
+  args: { kingdomId: v.id("kingdoms") },
+  handler: async (ctx, args) => {
+    const callerUserId = await requireAuthenticatedUser(ctx);
+    const kingdom = await ctx.db.get(args.kingdomId);
+    if (!kingdom) throw new Error("Reino no encontrado.");
+    if (!isKingdomOwner(kingdom.userId, callerUserId)) {
+      throw new Error("No autorizado.");
+    }
+    if (kingdom.userId === "guest_g9ai8cz") throw new Error("El reino de demostración no puede reiniciarse.");
+
+    // 1. Liberar territorios
+    await releaseTerritories(ctx, args.kingdomId);
+
+    // 2. Borrar dependencias relacionales (todas las tablas salvo historial)
+    // 2. Borrar dependencias relacionales
+    const resources = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const r of resources) await ctx.db.delete(r._id);
+    const population = await ctx.db.query("population").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const p of population) await ctx.db.delete(p._id);
+    const populationJobs = await ctx.db.query("populationJobs").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const pj of populationJobs) await ctx.db.delete(pj._id);
+    const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const b of buildings) await ctx.db.delete(b._id);
+    const constructionQueue = await ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const cq of constructionQueue) await ctx.db.delete(cq._id);
+    const trainingQueue = await ctx.db.query("trainingQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const tq of trainingQueue) await ctx.db.delete(tq._id);
+    const technologyProgress = await ctx.db.query("technologyProgress").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const tp of technologyProgress) await ctx.db.delete(tp._id);
+    const exploredTerritories = await ctx.db.query("exploredTerritories").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const et of exploredTerritories) await ctx.db.delete(et._id);
+    const explorationQueue = await ctx.db.query("explorationQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const eq of explorationQueue) await ctx.db.delete(eq._id);
+    const armyUnits = await ctx.db.query("armyUnits").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const au of armyUnits) await ctx.db.delete(au._id);
+    const espionageReports = await ctx.db.query("espionageReports").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    for (const er of espionageReports) await ctx.db.delete(er._id);
+
+    // 3. Reset campos de fundación y valores iniciales
+    const now = Date.now();
+    await ctx.db.patch(args.kingdomId, {
+      name: "", // Señal para FoundingWizard
+      civilization: undefined,
+      castleName: undefined,
+      monarchName: undefined,
+      homeTerritoryId: undefined,
+      resources: INITIAL_KINGDOM_CONFIG.resources,
+      foodTier: INITIAL_KINGDOM_CONFIG.foodTier,
+      happiness: WELLBEING.INITIAL_HAPPINESS,
+      militaryMorale: WELLBEING.INITIAL_MORALE,
+      taxRate: TAXES.INITIAL_RATE,
+      honor: 0,
+      glory: 0,
+      updatedAt: now,
+    });
+    
+    // 4. Cerrar desafíos pendientes
+    const challengesAsChallenger = await ctx.db.query("challenges").withIndex("by_challenger", (q) => q.eq("challengerKingdomId", args.kingdomId)).collect();
+    for (const c of challengesAsChallenger) {
+      if (c.status === "PENDING" || c.status === "FROZEN") {
+        await ctx.db.patch(c._id, { status: "EXPIRED", resolvedAt: now });
+      }
+    }
+    const challengesAsTarget = await ctx.db.query("challenges").withIndex("by_target", (q) => q.eq("targetKingdomId", args.kingdomId)).collect();
+    for (const c of challengesAsTarget) {
+      if (c.status === "PENDING" || c.status === "FROZEN") {
+        await ctx.db.patch(c._id, { status: "EXPIRED", resolvedAt: now });
+      }
+    }
+
+    return { success: true };
   },
 });

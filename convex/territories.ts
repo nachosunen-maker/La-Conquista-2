@@ -684,3 +684,14 @@ export const claimFreeTerritory = mutation({
     return { success: true, cellId: target.cellId, terrain: target.terrain, remainingClaims: (kingdom.pendingTerritoryClaims ?? 0) - 1 };
   },
 });
+
+/** Libera todos los territorios poseídos por un reino (al reiniciar partida). */
+export async function releaseTerritories(ctx: MutationCtx, kingdomId: Id<"kingdoms">): Promise<void> {
+  const owned = await ctx.db
+    .query("territories")
+    .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdomId))
+    .collect();
+  for (const cell of owned) {
+    await ctx.db.patch(cell._id, { ownerKingdomId: undefined, isHome: false, claimedAt: undefined });
+  }
+}
