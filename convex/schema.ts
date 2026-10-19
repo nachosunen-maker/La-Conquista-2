@@ -222,6 +222,25 @@ export default defineSchema(
       .index("by_kingdom", ["kingdomId"])
       .index("by_kingdom_and_cell", ["kingdomId", "cellId"]),
 
+    // Marchas y campañas militares en curso sobre el mapa (Bloque G)
+    armyMarches: defineTable({
+      kingdomId: v.id("kingdoms"),
+      targetCellId: v.string(),
+      targetQ: v.number(),
+      targetR: v.number(),
+      distance: v.number(),
+      units: v.array(v.object({
+        unitType: v.string(),
+        level: v.optional(v.number()),
+        count: v.number(),
+      })),
+      startedAt: v.number(),
+      durationMs: v.number(),
+      completesAt: v.number(),
+      status: v.union(v.literal("marchando"), v.literal("completada"), v.literal("cancelada")),
+      battleResult: v.optional(v.any()),
+    }).index("by_kingdom", ["kingdomId"]),
+
     // Desafíos del Parlamento (Bloque E): máquina de estados server-authoritative (BLOQUE 9).
     challenges: defineTable({
       challengerKingdomId: v.id("kingdoms"),

@@ -504,3 +504,37 @@ describe("Autenticación OIDC y Seguridad de Identidad Google (P1, P4, T-01)", (
     ).rejects.toThrow(/demostración no puede reiniciarse/);
   });
 });
+
+describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () => {
+  test("lanza ataque, programa llegada, simula batalla y devuelve supervivientes", async () => {
+    const t = createTestBackend();
+    const attacker = await foundKingdom(t, "user-atk", "Reino Atacante");
+    const defender = await foundKingdom(t, "user-def", "Reino Defensor");
+
+    await attacker.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: attacker.kingdomId });
+    await defender.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: defender.kingdomId });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 1, count: 500 });
+      await ctx.db.insert("armyUnits", { kingdomId: defender.kingdomId, unitType: "infanteria", level: 1, count: 100 });
+    });
+
+    const defTerritories = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
+    const targetCellId = defTerritories.homeTerritoryId!;
+
+    const marchRes = await attacker.asUser.mutation(api.army.launchAttack, {
+      kingdomId: attacker.kingdomId,
+      cellId: targetCellId,
+      units: [{ unitType: "infanteria", level: 1, count: 300 }],
+    });
+    expect(marchRes.success).toBe(true);
+    expect(marchRes.marchId).toBeDefined();
+
+    vi.setSystemTime(T0 + marchRes.durationSeconds * 1000 + 5000);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    const armyA = await attacker.asUser.query(api.army.getArmyState, { kingdomId: attacker.kingdomId });
+    expect(armyA.summary.livingSoldiers).toBeGreaterThan(0);
+  });
+});
+

@@ -28,8 +28,23 @@ import {
   validateEquipmentSelection,
   type TrainingQueueEntry,
 } from "./armyRules";
-import { ARMORS, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TIME, UNITS, UNIT_TYPES, WEAPONS, type UnitType } from "./balanceConfig";
+import { ARMORS, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type UnitType } from "./balanceConfig";
 import type { ResourceType } from "./economyCalculations";
+import { readHomeCoord } from "./territories";
+import {
+  armyMarchMultiplier,
+  hexDistance,
+  marchFatigue,
+  marchTimeSeconds,
+  terrainMarchMultiplier,
+} from "./territoryRules";
+import {
+  applyFormation,
+  emptyComposition,
+  simulateBattle,
+  type BattleSide,
+  type Composition,
+} from "./battleRules";
 
 /** Lectura de solo consulta: une armyUnits con la tabla heredada sin escribir. */
 export async function readArmyUnitDocs(ctx: QueryCtx | MutationCtx, kingdomId: Id<"kingdoms">): Promise<any[]> {
@@ -400,3 +415,287 @@ export const setFormation = mutation({
     return { success: true, formation };
   },
 });
+
+function activeComposition(units: any[]): Composition {
+  const composition = emptyComposition();
+  for (const unit of units) {
+    const type = normalizeUnitType(unit.unitType);
+    if (!type) continue;
+    composition[type] += Number.isInteger(unit.count) && unit.count > 0 ? unit.count : 0;
+  }
+  return composition;
+}
+
+async function applyCasualtiesToArmy(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
+  const units = await readArmyUnitsWithMigration(ctx, kingdomId);
+  for (const type of UNIT_TYPES as readonly UnitType[]) {
+    let remaining = casualties[type];
+    const docs = units.filter((doc) => normalizeUnitType(doc.unitType) === type).sort((a, b) => b.count - a.count);
+    for (const doc of docs) {
+      if (remaining <= 0) break;
+      const removed = Math.min(doc.count, remaining);
+      await ctx.db.patch(doc._id, { count: doc.count - removed });
+      remaining -= removed;
+    }
+    const woundedCount = wounded[type];
+    if (woundedCount > 0) {
+      const host = docs[0];
+      if (host) {
+        await ctx.db.patch(host._id, { wounded: (host.wounded ?? 0) + woundedCount });
+      } else {
+        await ctx.db.insert("armyUnits", { kingdomId, unitType: type, level: 1, count: 0, wounded: woundedCount });
+      }
+    }
+  }
+}
+
+async function removeDeadFromPopulation(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
+  let deadPersons = 0;
+  for (const type of UNIT_TYPES as readonly UnitType[]) {
+    const dead = Math.max(0, casualties[type] - wounded[type]);
+    deadPersons += dead * UNITS[type].populationPerUnit;
+  }
+  if (deadPersons <= 0) return;
+  const population: any = await (ctx.db as any).query("population").filter((q: any) => q.eq(q.field("kingdomId"), kingdomId)).first();
+  if (!population) return;
+  await ctx.db.patch(population._id, { total: Math.max(0, population.total - deadPersons) });
+}
+
+export const launchAttack = mutation({
+  args: {
+    kingdomId: v.id("kingdoms"),
+    cellId: v.string(),
+    units: v.array(v.object({
+      unitType: v.string(),
+      level: v.optional(v.number()),
+      count: v.number(),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
+    if (kingdom.userId === "guest_g9ai8cz") throw new Error("El reino demo no puede lanzar ataques.");
+    const now = Date.now();
+    await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
+
+    const target = await ctx.db
+      .query("territories")
+      .withIndex("by_cell", (q) => q.eq("cellId", args.cellId))
+      .first();
+    if (!target) throw new Error("El territorio objetivo no existe en el mapa.");
+    if (target.ownerKingdomId === args.kingdomId) throw new Error("No puedes atacar tu propio territorio.");
+
+    const homeCoord = await readHomeCoord(ctx, args.kingdomId);
+    if (!homeCoord) throw new Error("El reino no tiene territorio principal asignado.");
+    const distance = hexDistance(homeCoord, { q: target.q, r: target.r });
+
+    const currentArmy = await readArmyUnitsWithMigration(ctx, args.kingdomId);
+    const requestedComposition: Partial<Record<UnitType, number>> = {};
+    for (const req of args.units) {
+      if (req.count <= 0) continue;
+      const normalized = normalizeUnitType(req.unitType);
+      if (!normalized) continue;
+      const availableDoc = currentArmy.find((d) => normalizeUnitType(d.unitType) === normalized && unitLevelOf(d) === (req.level ?? 1));
+      const availableCount = availableDoc ? (availableDoc.count ?? 0) : 0;
+      if (availableCount < req.count) {
+        throw new Error(`Tropas insuficientes de '${normalized}' nivel ${req.level ?? 1}: solicitadas ${req.count}, disponibles ${availableCount}.`);
+      }
+      requestedComposition[normalized as UnitType] = (requestedComposition[normalized as UnitType] ?? 0) + req.count;
+    }
+
+    if (Object.keys(requestedComposition).length === 0) {
+      throw new Error("Debes seleccionar al menos un tipo de tropa válido para la marcha.");
+    }
+
+    for (const req of args.units) {
+      if (req.count <= 0) continue;
+      const normalized = normalizeUnitType(req.unitType);
+      if (!normalized) continue;
+      const doc = currentArmy.find((d) => normalizeUnitType(d.unitType) === normalized && unitLevelOf(d) === (req.level ?? 1));
+      if (doc) {
+        const nextCount = doc.count - req.count;
+        if (nextCount <= 0) {
+          await ctx.db.delete(doc._id);
+        } else {
+          await ctx.db.patch(doc._id, { count: nextCount });
+        }
+      }
+    }
+
+    const terrainMul = terrainMarchMultiplier(target.terrain as any);
+    const unitMul = armyMarchMultiplier(requestedComposition);
+    const durationSeconds = marchTimeSeconds(distance, terrainMul, unitMul);
+    const durationMs = Math.round(durationSeconds * 1000);
+    const completesAt = now + durationMs;
+
+    const marchId = await ctx.db.insert("armyMarches", {
+      kingdomId: args.kingdomId,
+      targetCellId: args.cellId,
+      targetQ: target.q,
+      targetR: target.r,
+      distance,
+      units: args.units,
+      startedAt: now,
+      durationMs,
+      completesAt,
+      status: "marchando",
+    });
+
+    await ctx.scheduler.runAt(completesAt, internal.army.completeMarchScheduled, { marchId });
+
+    return {
+      success: true,
+      marchId,
+      cellId: args.cellId,
+      distance,
+      durationSeconds,
+      completesAt,
+    };
+  },
+});
+
+export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">) {
+  const march = await ctx.db.get(marchId);
+  if (!march || march.status !== "marchando") return null;
+
+  const attackerKingdom = await ctx.db.get(march.kingdomId);
+  if (!attackerKingdom) {
+    await ctx.db.patch(marchId, { status: "cancelada" });
+    return null;
+  }
+
+  const targetCell = await ctx.db
+    .query("territories")
+    .withIndex("by_cell", (q) => q.eq("cellId", march.targetCellId))
+    .first();
+
+  const currentFatigue = typeof attackerKingdom.armyFatigue === "number" ? attackerKingdom.armyFatigue : 0;
+  const newFatigue = marchFatigue(currentFatigue, march.distance, 1);
+  await ctx.db.patch(march.kingdomId, { armyFatigue: newFatigue });
+
+  if (!targetCell || !targetCell.ownerKingdomId || targetCell.ownerKingdomId === march.kingdomId) {
+    for (const u of march.units) {
+      const norm = normalizeUnitType(u.unitType);
+      if (norm && u.count > 0) {
+        await addUnits(ctx, march.kingdomId, norm, u.level ?? 1, u.count);
+      }
+    }
+    await ctx.db.patch(marchId, { status: "completada", battleResult: { outcome: "pacifico" } });
+    return { success: true, outcome: "pacifico" };
+  }
+
+  const defenderKingdomId = targetCell.ownerKingdomId;
+  const defenderKingdom = await ctx.db.get(defenderKingdomId);
+  if (!defenderKingdom) {
+    for (const u of march.units) {
+      const norm = normalizeUnitType(u.unitType);
+      if (norm && u.count > 0) {
+        await addUnits(ctx, march.kingdomId, norm, u.level ?? 1, u.count);
+      }
+    }
+    await ctx.db.patch(marchId, { status: "completada" });
+    return { success: true, outcome: "sin_oposicion" };
+  }
+
+  const attackerUnitsDocs = march.units.map((u) => ({ unitType: u.unitType, level: u.level ?? 1, count: u.count }));
+  const attackerComposition = activeComposition(attackerUnitsDocs);
+  const attackerSummary = summarizeArmy(attackerUnitsDocs);
+
+  const defenderUnitsDocs = await readArmyUnitsWithMigration(ctx, defenderKingdomId);
+  const defenderComposition = activeComposition(defenderUnitsDocs);
+  const defenderSummary = summarizeArmy(defenderUnitsDocs);
+
+  const defenderBuildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", defenderKingdomId)).collect();
+  const defCollection = validateBuildingCollection(defenderBuildings);
+  const defLevels = defCollection.success ? defCollection.levels : {};
+
+  const attackerSide: BattleSide = {
+    kingdomId: march.kingdomId,
+    name: attackerKingdom.name,
+    composition: applyFormation(attackerComposition, attackerKingdom.formation ?? null),
+    trainingMultiplier: attackerSummary.trainingMultiplier,
+    weaponTier: (attackerKingdom.weaponTier as any) ?? "palo",
+    armorTier: (attackerKingdom.armorTier as any) ?? "ninguna",
+    strategy: (attackerKingdom.strategy as any) ?? "defensiva",
+    morale: typeof attackerKingdom.militaryMorale === "number" ? attackerKingdom.militaryMorale : 70,
+    foodTier: attackerKingdom.foodTier ?? "normal",
+    fatigue: newFatigue,
+    wallsLevel: 0,
+    terrainDefenseBonus: 0,
+    civilization: attackerKingdom.civilization,
+  };
+
+  const terrainDefBonus = (TERRAINS as any)[targetCell.terrain]?.defense ?? 0;
+  const defenderSide: BattleSide = {
+    kingdomId: defenderKingdomId,
+    name: defenderKingdom.name,
+    composition: applyFormation(defenderComposition, defenderKingdom.formation ?? null),
+    trainingMultiplier: defenderSummary.trainingMultiplier,
+    weaponTier: (defenderKingdom.weaponTier as any) ?? "palo",
+    armorTier: (defenderKingdom.armorTier as any) ?? "ninguna",
+    strategy: (defenderKingdom.strategy as any) ?? "defensiva",
+    morale: typeof defenderKingdom.militaryMorale === "number" ? defenderKingdom.militaryMorale : 70,
+    foodTier: defenderKingdom.foodTier ?? "normal",
+    fatigue: typeof defenderKingdom.armyFatigue === "number" ? defenderKingdom.armyFatigue : 0,
+    wallsLevel: defLevels.murallas ?? 0,
+    terrainDefenseBonus: terrainDefBonus,
+    civilization: defenderKingdom.civilization,
+  };
+
+  const report = simulateBattle(attackerSide, defenderSide);
+  const now = Date.now();
+
+  const battleId = await ctx.db.insert("Battle", {
+    challengeId: null as any,
+    attackerKingdomId: march.kingdomId,
+    defenderKingdomId,
+    resolvedAt: now,
+    outcome: report.outcome,
+    winnerKingdomId: report.winnerKingdomId ? (report.winnerKingdomId as Id<"kingdoms">) : undefined,
+    crushingVictory: report.crushingVictory,
+    report,
+  });
+
+  for (const [type, count] of Object.entries(report.attacker.survivorsComposition) as [UnitType, number][]) {
+    if (count > 0) {
+      await addUnits(ctx, march.kingdomId, type, 1, count);
+    }
+  }
+  for (const [type, count] of Object.entries(report.attacker.woundedComposition) as [UnitType, number][]) {
+    if (count > 0) {
+      const docs = await ctx.db.query("armyUnits").withIndex("by_kingdom", (q) => q.eq("kingdomId", march.kingdomId)).collect();
+      const host = docs.find((d) => normalizeUnitType(d.unitType) === type);
+      if (host) {
+        await ctx.db.patch(host._id, { wounded: (host.wounded ?? 0) + count });
+      } else {
+        await ctx.db.insert("armyUnits", { kingdomId: march.kingdomId, unitType: type, level: 1, count: 0, wounded: count });
+      }
+    }
+  }
+
+  await applyCasualtiesToArmy(ctx, defenderKingdomId, report.defender.casualtiesComposition, report.defender.woundedComposition);
+  await removeDeadFromPopulation(ctx, defenderKingdomId, report.defender.casualtiesComposition, report.defender.woundedComposition);
+
+  const wonAttacker = report.winnerKingdomId === march.kingdomId;
+  if (wonAttacker && report.crushingVictory) {
+    await ctx.db.patch(march.kingdomId, {
+      pendingTerritoryClaims: (attackerKingdom.pendingTerritoryClaims ?? 0) + 1,
+      honor: Math.max(0, (attackerKingdom.honor ?? 0) + report.honorAwarded.attacker),
+      glory: Math.max(0, (attackerKingdom.glory ?? 0) + report.gloryAwarded.attacker),
+    });
+  }
+
+  await ctx.db.patch(marchId, {
+    status: "completada",
+    battleResult: { battleId, outcome: report.outcome, crushingVictory: report.crushingVictory },
+  });
+
+  return { success: true, battleId, outcome: report.outcome };
+}
+
+export const completeMarchScheduled = internalMutation({
+  args: { marchId: v.id("armyMarches") },
+  handler: async (ctx, args) => {
+    return resolveMarch(ctx, args.marchId);
+  },
+});
+
