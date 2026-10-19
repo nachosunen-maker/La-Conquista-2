@@ -23,11 +23,14 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const defaultConvexUrl = 'https://festive-dodo-429.eu-west-1.convex.cloud';
   const convexUrl = fileUrl || env.VITE_CONVEX_URL || defaultConvexUrl;
+  const defaultGoogleClientId = '198291664207-573hkldm168ltr0h5rscs0k8iooilqul.apps.googleusercontent.com';
+  const googleClientId = env.VITE_GOOGLE_CLIENT_ID || defaultGoogleClientId;
 
   return {
     plugins: [react(), tailwindcss()],
     define: {
       'import.meta.env.VITE_CONVEX_URL': JSON.stringify(convexUrl),
+      'import.meta.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(googleClientId),
     },
     server: {
       port: 3000,

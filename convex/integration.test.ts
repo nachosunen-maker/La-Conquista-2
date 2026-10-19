@@ -387,3 +387,120 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
     expect(territories.territories).toHaveLength(2); // Capital (0,0) + nuevo territorio (0,1)
   });
 });
+
+describe("Autenticación OIDC y Seguridad de Identidad Google (P1, P4, T-01)", () => {
+  test("getViewer devuelve null para invitados anónimos y la identidad verificada para usuarios Google", async () => {
+    const t = createTestBackend();
+
+    // 1. Invitado anónimo
+    const anonymousViewer = await t.query(api.kingdoms.getViewer, {});
+    expect(anonymousViewer).toBeNull();
+
+    // 2. Usuario con sesión OIDC Google verificada
+    const googleUser = t.withIdentity({
+      subject: "198291664207-user-12345",
+      tokenIdentifier: "https://accounts.google.com|198291664207-user-12345",
+      issuer: "https://accounts.google.com",
+      email: "soberano@example.com",
+      name: "Rey Alfonso",
+    });
+    const verifiedViewer = await googleUser.query(api.kingdoms.getViewer, {});
+    expect(verifiedViewer).not.toBeNull();
+    expect(verifiedViewer?.subject).toBe("198291664207-user-12345");
+    expect(verifiedViewer?.email).toBe("soberano@example.com");
+    expect(verifiedViewer?.name).toBe("Rey Alfonso");
+    expect(verifiedViewer?.tokenIdentifier).toBe("https://accounts.google.com|198291664207-user-12345");
+  });
+
+  test("todas las mutaciones económicas y de gobierno rechazan llamadas sin identidad verificada", async () => {
+    const t = createTestBackend();
+    const { kingdomId } = await foundKingdom(t, "user-legit", "Reino Legítimo");
+
+    // Intento de fundar sin auth
+    await expect(
+      t.mutation(api.economy.getOrInitializeKingdom, { name: "Reino Pirata", civilization: "romanos" })
+    ).rejects.toThrow(/Autenticación requerida/);
+
+    // Intento de liquidar economía sin auth
+    await expect(
+      t.mutation(api.economy.settleKingdomEconomy, { kingdomId })
+    ).rejects.toThrow(/Autenticación requerida/);
+
+    // Intento de modificar régimen alimentario sin auth
+    await expect(
+      t.mutation(api.economy.setKingdomFoodTier, { kingdomId, foodTier: "abundante" })
+    ).rejects.toThrow(/Autenticación requerida/);
+
+    // Intento de cambiar política de descanso sin auth
+    await expect(
+      t.mutation(api.economy.setRestPolicy, { kingdomId, restPolicy: "festiva" })
+    ).rejects.toThrow(/Autenticación requerida/);
+
+    // Intento de iniciar construcción sin auth
+    await expect(
+      t.mutation(api.kingdoms.startConstruction, { kingdomId, buildingType: "granja" })
+    ).rejects.toThrow(/Autenticación requerida/);
+  });
+
+  test("un usuario autenticado no puede consultar ni usurpar el reino de otro usuario", async () => {
+    const t = createTestBackend();
+    const userA = t.withIdentity(identity("google-sub-a"));
+    const userB = t.withIdentity(identity("google-sub-b"));
+
+    // User A funda su reino
+    const kingdomA = await userA.mutation(api.economy.getOrInitializeKingdom, {
+      name: "Reino de A",
+      civilization: "bizantinos",
+    });
+
+    // User A puede consultar su propio reino
+    const fullA = await userA.query(api.kingdoms.getKingdomFull, { userId: "google-sub-a" });
+    expect(fullA?.kingdom.name).toBe("Reino de A");
+
+    // User B intenta consultar el reino de User A -> error de autorización
+    await expect(
+      userB.query(api.kingdoms.getKingdomFull, { userId: "google-sub-a" })
+    ).rejects.toThrow(/No autorizado/);
+
+    // User B intenta mutar el reino de User A -> rechazado
+    await expect(
+      userB.mutation(api.kingdoms.startConstruction, { kingdomId: kingdomA._id as any, buildingType: "granja" })
+    ).rejects.toThrow(/No autorizado/);
+  });
+
+  test("el reino de demostración Iberia solo admite lecturas y prohíbe cualquier mutación", async () => {
+    const t = createTestBackend();
+    let demoKingdomId: any;
+    await t.run(async (ctx) => {
+      demoKingdomId = await ctx.db.insert("kingdoms", {
+        name: "Reino de Iberia",
+        civilization: "ingleses",
+        castleName: "Castillo de Zaragoza",
+        monarchName: "Rey Arturo",
+        userId: DEMO_USER_ID,
+        happiness: 70,
+        militaryMorale: 70,
+        taxPolicy: "normales",
+      });
+    });
+
+    // 1. Invitado anónimo lee la demo con éxito
+    const demoFull = await t.query(api.kingdoms.getKingdomFull, { userId: DEMO_USER_ID });
+    expect(demoFull?.kingdom.name).toBe("Reino de Iberia");
+
+    // 2. Invitado anónimo intenta mutar la demo -> falla
+    await expect(
+      t.mutation(api.kingdoms.startConstruction, { kingdomId: demoKingdomId, buildingType: "granja" })
+    ).rejects.toThrow(/Autenticación requerida/);
+
+    // 3. Atacante autenticado con DEMO_USER_ID como subject intenta reiniciar o mutar la demo -> rechazado
+    const attacker = t.withIdentity(identity(DEMO_USER_ID));
+    await expect(
+      attacker.mutation(api.kingdoms.startConstruction, { kingdomId: demoKingdomId, buildingType: "granja" })
+    ).rejects.toThrow(/No autorizado/);
+
+    await expect(
+      attacker.mutation(api.economy.resetKingdom, { kingdomId: demoKingdomId })
+    ).rejects.toThrow(/demostración no puede reiniciarse/);
+  });
+});

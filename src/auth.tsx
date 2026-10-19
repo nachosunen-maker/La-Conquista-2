@@ -14,12 +14,13 @@ export interface AuthContextType {
   login: (idToken: string) => void;
   logout: () => void;
   isGoogleLoaded: boolean;
+  googleLoadFailed: boolean;
   googleClientId: string;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-function parseJwt(token: string): AuthUser | null {
+export function parseJwt(token: string): AuthUser | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -55,6 +56,7 @@ export function AuthProvider({ children, convex, googleClientId }: AuthProviderP
   const [idToken, setIdToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isGoogleLoaded, setIsGoogleLoaded] = useState<boolean>(false);
+  const [googleLoadFailed, setGoogleLoadFailed] = useState<boolean>(false);
 
   // Sincronización del token con el cliente Convex
   useEffect(() => {
@@ -81,6 +83,9 @@ export function AuthProvider({ children, convex, googleClientId }: AuthProviderP
 
     const timeout = setTimeout(() => {
       clearInterval(interval);
+      if (!(typeof window !== 'undefined' && (window as any).google?.accounts?.id)) {
+        setGoogleLoadFailed(true);
+      }
     }, 10000);
 
     return () => {
@@ -95,16 +100,26 @@ export function AuthProvider({ children, convex, googleClientId }: AuthProviderP
     if (profile) {
       setIdToken(credential);
       setUser(profile);
+      try {
+        convex.setAuth(async () => credential);
+      } catch (err) {
+        console.error('Error al sincronizar auth con Convex:', err);
+      }
     }
-  }, []);
+  }, [convex]);
 
   const logout = useCallback(() => {
     setIdToken(null);
     setUser(null);
+    try {
+      convex.setAuth(async () => null);
+    } catch (err) {
+      console.error('Error al limpiar auth en Convex:', err);
+    }
     if (typeof window !== 'undefined' && (window as any).google?.accounts?.id?.disableAutoSelect) {
       (window as any).google.accounts.id.disableAutoSelect();
     }
-  }, []);
+  }, [convex]);
 
   const value = useMemo<AuthContextType>(
     () => ({
@@ -113,9 +128,10 @@ export function AuthProvider({ children, convex, googleClientId }: AuthProviderP
       login,
       logout,
       isGoogleLoaded,
+      googleLoadFailed,
       googleClientId,
     }),
-    [user, idToken, login, logout, isGoogleLoaded, googleClientId]
+    [user, idToken, login, logout, isGoogleLoaded, googleLoadFailed, googleClientId]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -238,19 +238,40 @@ const cancelConstructionMutation = makeFunctionReference<"mutation">("kingdoms:c
 /* ==========================================================================
    COMPONENTE DE INICIO DE SESIÓN CON GOOGLE IDENTITY SERVICES
    ========================================================================== */
-function GoogleAuthButton() {
-  const { isAuthenticated, user, logout, isGoogleLoaded, googleClientId, login } = useAuth();
+export function GoogleAuthButton() {
+  const { isAuthenticated, user, logout, isGoogleLoaded, googleLoadFailed, googleClientId, login } = useAuth();
   const googleBtnRef = useRef<HTMLDivElement>(null);
   const viewer = useQuery(getViewerQuery);
+  const [gisError, setGisError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!googleClientId) {
+      return;
+    }
+
     if (isGoogleLoaded && !isAuthenticated && googleBtnRef.current && (window as any).google?.accounts?.id) {
       try {
         (window as any).google.accounts.id.initialize({
           client_id: googleClientId,
           callback: (response: { credential?: string }) => {
             if (response?.credential) {
+              setGisError(null);
               login(response.credential);
+            }
+          },
+          error_callback: (err: any) => {
+            console.warn('Google Identity Services error_callback:', err);
+            const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+            if (err?.type === 'origin_mismatch') {
+              setGisError(
+                `Origen no autorizado (${currentOrigin}). Añade este dominio a los "Orígenes autorizados de JavaScript" en Google Cloud Console para el ID de cliente.`
+              );
+            } else if (err?.type === 'idpiframe_initialization_failed') {
+              setGisError(
+                `Fallo al inicializar iframe de Google en ${currentOrigin}. Comprueba las cookies de terceros o los orígenes autorizados.`
+              );
+            } else {
+              setGisError(err?.type || err?.message || 'Error al autenticar con Google Identity Services');
             }
           },
         });
@@ -265,9 +286,23 @@ function GoogleAuthButton() {
         });
       } catch (err) {
         console.error('Error al inicializar Google Sign-In:', err);
+        setGisError(err instanceof Error ? err.message : 'Error al inicializar Google Sign-In');
       }
     }
   }, [isGoogleLoaded, isAuthenticated, googleClientId, login]);
+
+  // Si falta la configuración del ID de cliente
+  if (!googleClientId) {
+    return (
+      <div
+        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-950/60 border border-rose-700/60 rounded-lg text-rose-300 text-xs"
+        title="Falta la variable de entorno VITE_GOOGLE_CLIENT_ID en el archivo .env"
+      >
+        <AlertCircle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
+        <span className="font-mono text-[11px]">OAuth no configurado (falta VITE_GOOGLE_CLIENT_ID)</span>
+      </div>
+    );
+  }
 
   if (isAuthenticated && user) {
     return (
@@ -284,14 +319,14 @@ function GoogleAuthButton() {
             <span className="text-xs font-serif text-[#f4eedb] max-w-[120px] truncate" title={user.name || user.email}>
               {user.name || user.email}
             </span>
-            <span className="text-[9px] text-emerald-400 font-mono">
-              {viewer ? 'Convex OIDC OK' : 'Autenticado Google'}
+            <span className={`text-[9px] font-mono ${viewer ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {viewer ? 'Convex OIDC OK' : 'OIDC Pendiente Convex'}
             </span>
           </div>
         </div>
         <button
           onClick={logout}
-          className="flex items-center gap-1 px-2 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 hover:border-rose-800/60 rounded text-neutral-300 hover:text-rose-400 text-xs transition-colors"
+          className="flex items-center gap-1 px-2 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 hover:border-rose-800/60 rounded text-neutral-300 hover:text-rose-400 text-xs transition-colors cursor-pointer"
           title="Cerrar sesión de Google"
         >
           <LogOut className="w-3.5 h-3.5" />
@@ -302,15 +337,33 @@ function GoogleAuthButton() {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col sm:flex-row items-center gap-2">
       <div ref={googleBtnRef} className="min-h-[32px] flex items-center justify-center">
-        {!isGoogleLoaded && (
+        {!isGoogleLoaded && !googleLoadFailed && (
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#1a1610] border border-[#3b3121] rounded text-[#8e816d] text-xs animate-pulse">
             <LogIn className="w-3.5 h-3.5" />
             <span>Google...</span>
           </div>
         )}
+        {googleLoadFailed && (
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-[#1a1610] border border-amber-800/50 rounded text-amber-300 text-xs"
+            title="No se pudo cargar la librería de Google Identity Services. Comprueba tu conexión o bloqueadores de contenido."
+          >
+            <AlertCircle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+            <span>Google GIS no disponible</span>
+          </div>
+        )}
       </div>
+      {gisError && (
+        <div
+          className="flex items-center gap-1 px-2 py-1 bg-rose-950/70 border border-rose-800/60 rounded text-rose-300 text-[11px]"
+          title={gisError}
+        >
+          <AlertCircle className="w-3 h-3 text-rose-400 flex-shrink-0" />
+          <span className="max-w-[240px] truncate">{gisError}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -474,16 +527,18 @@ function KingdomOverviewContent() {
   const { isAuthenticated, user } = useAuth();
   const [viewDemoKingdom, setViewDemoKingdom] = useState<boolean>(false);
   const isViewingDemo = viewDemoKingdom;
-  const activeUserId = isAuthenticated ? (user?.sub ?? '') : (viewDemoKingdom ? DEMO_USER_ID : 'GUEST');
+
+  // Consulta autoritativa OIDC de Convex en tiempo real
+  const viewer = useQuery(getViewerQuery);
+  const activeUserId = isViewingDemo
+    ? DEMO_USER_ID
+    : (viewer?.subject ?? (isAuthenticated ? user?.sub ?? '' : 'GUEST'));
 
   const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<MainTab>('aldea');
   const [bootstrapBusy, setBootstrapBusy] = useState<string | null>(null);
   const [bootstrapMessage, setBootstrapMessage] = useState<string | null>(null);
-
-  // Consulta autoritativa OIDC de Convex en tiempo real
-  const viewer = useQuery(getViewerQuery);
 
   // Estados para proyección puramente local en el cliente (sin escrituras en BD)
   const [clientTime, setClientTime] = useState<number>(() => Date.now());
@@ -913,10 +968,22 @@ function KingdomOverviewContent() {
     return (
       <div className="space-y-4">
         <div className="text-center text-xs text-[#8e816d]">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-800/40 text-emerald-400 font-mono">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Identidad verificada en Convex: {viewer?.email || user?.email || user?.sub}</span>
-          </span>
+          {viewer ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-800/40 text-emerald-400 font-mono">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Identidad verificada en Convex: {viewer.email || viewer.subject}</span>
+            </span>
+          ) : (
+            <div className="max-w-md mx-auto p-3 bg-amber-950/40 border border-amber-600/40 rounded-lg text-amber-200 text-xs text-left">
+              <div className="flex items-center gap-1.5 font-semibold text-amber-300">
+                <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                <span>Autenticación OIDC en espera de validación por Convex</span>
+              </div>
+              <p className="mt-1 text-[11px] text-amber-300/80 leading-relaxed">
+                El token de Google fue recibido en el cliente ({user?.email}), pero Convex aún no ha verificado la identidad. Recuerda que la configuración de <code className="font-mono text-amber-200">convex/auth.config.ts</code> debe estar desplegada en el backend remoto.
+              </p>
+            </div>
+          )}
         </div>
         <FoundingWizard defaultMonarchName={user?.name || ''} onFounded={() => setActiveTab('aldea')} />
         <div className="flex justify-center">
