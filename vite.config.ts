@@ -21,16 +21,18 @@ function getLocalEnvUrl(): string | undefined {
 export default defineConfig(({ mode }) => {
   const fileUrl = getLocalEnvUrl();
   const env = loadEnv(mode, process.cwd(), '');
-  const convexUrl = fileUrl || env.VITE_CONVEX_URL;
+  const defaultConvexUrl = 'https://festive-dodo-429.eu-west-1.convex.cloud';
+  const convexUrl = fileUrl || env.VITE_CONVEX_URL || defaultConvexUrl;
 
   return {
     plugins: [react(), tailwindcss()],
-    define: convexUrl ? {
+    define: {
       'import.meta.env.VITE_CONVEX_URL': JSON.stringify(convexUrl),
-    } : {},
+    },
     server: {
       port: 3000,
-      host: true,
+      host: '0.0.0.0',
+      allowedHosts: true,
       watch: {
         usePolling: true,
         interval: 100,

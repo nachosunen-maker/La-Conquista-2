@@ -26,7 +26,7 @@ import {
   OFFICIAL_CIVILIZATIONS,
   isValidCivilization,
 } from "./civilizations";
-import { DEMO_USER_ID, isKingdomOwner } from "./kingdomAccess";
+import { DEMO_USER_ID, isKingdomOwner, resolveKingdomQueryUserId } from "./kingdomAccess";
 import { validatePopulationIntegrity } from "./economyCalculations";
 
 export interface FoundationTestResult {
@@ -241,6 +241,34 @@ export function runFoundationTests(): FoundationTestResult[] {
     "13. La civilización seleccionada se almacena permanentemente vinculada a la partida",
     civSaved === "bizantinos",
     `Civilización registrada: '${civSaved}'`
+  );
+
+  // 14. Acceso de invitado a la consulta del reino de demostración
+  const guestDemoQueryUserId = resolveKingdomQueryUserId(DEMO_USER_ID, undefined);
+  record(
+    "ACCESO COMO INVITADO",
+    "14. Un invitado sin autenticación puede consultar el reino demo (DEMO_USER_ID) en modo solo lectura",
+    guestDemoQueryUserId === DEMO_USER_ID,
+    `ID resuelto para invitado consultando demo: '${guestDemoQueryUserId}'`
+  );
+
+  // 15. Bloqueo de acceso de invitado a reinos privados
+  const guestPrivateQueryUserId = resolveKingdomQueryUserId("user_private_account", undefined);
+  record(
+    "ACCESO COMO INVITADO",
+    "15. Un invitado sin autenticación es bloqueado al intentar consultar un reino privado ajeno",
+    guestPrivateQueryUserId === null,
+    `Resultado de consultar reino privado sin sesión: ${guestPrivateQueryUserId}`
+  );
+
+  // 16. Bloqueo estricto de titularidad/mutaciones para invitados e identidad demo
+  const isGuestOwner = isKingdomOwner("any_kingdom", undefined);
+  const isDemoPermittedWrite = isKingdomOwner(DEMO_USER_ID, DEMO_USER_ID);
+  record(
+    "SEGURIDAD Y PERMISOS DE ESCRITURA",
+    "16. El invitado y la identidad demo tienen estrictamente bloqueados los permisos de escritura (P1)",
+    !isGuestOwner && !isDemoPermittedWrite,
+    `Invitado con permisos: ${isGuestOwner}; DEMO_USER_ID con permisos: ${isDemoPermittedWrite}`
   );
 
   return results;

@@ -8,6 +8,7 @@ import { api, internal } from "./_generated/api";
 import { createTestBackend } from "./test.setup";
 import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT } from "./balanceConfig";
 import { costsForTargetLevel } from "./buildingRules";
+import { DEMO_USER_ID } from "./kingdomAccess";
 
 const DAY = TIME.MS_PER_GAME_YEAR;
 const T0 = new Date("2026-10-17T10:00:00Z").getTime();
@@ -66,6 +67,50 @@ describe("Fundación del reino (P4-P10, H)", () => {
     const { kingdomId } = await foundKingdom(t, "user-a", "Reino A");
     const intruder = t.withIdentity(identity("user-b"));
     await expect(intruder.mutation(api.kingdoms.startConstruction, { kingdomId, buildingType: "granja" })).rejects.toThrow(/No autorizado/);
+  });
+
+  test("un invitado no autenticado puede consultar el reino demo Iberia pero no reinos privados ajenos", async () => {
+    const t = createTestBackend();
+    await t.run(async (ctx) => {
+      await ctx.db.insert("kingdoms", {
+        name: "Reino de Iberia",
+        civilization: "ingleses",
+        castleName: "Castillo de Zaragoza",
+        monarchName: "Rey Arturo",
+        userId: DEMO_USER_ID,
+        happiness: 70,
+        militaryMorale: 70,
+        taxPolicy: "normales",
+      });
+    });
+    // Invitado anónimo sin sesión
+    const demoFull = await t.query(api.kingdoms.getKingdomFull, { userId: DEMO_USER_ID });
+    expect(demoFull?.kingdom.name).toBe("Reino de Iberia");
+    expect(demoFull?.kingdom.userId).toBe(DEMO_USER_ID);
+
+    // Consulta de reino privado por usuario no autenticado es rechazada retornando null
+    const privateFull = await t.query(api.kingdoms.getKingdomFull, { userId: "user-private" });
+    expect(privateFull).toBeNull();
+  });
+
+  test("un invitado o atacante con DEMO_USER_ID no puede ejecutar mutaciones ni alterar datos", async () => {
+    const t = createTestBackend();
+    const { kingdomId } = await foundKingdom(t, "user-a", "Reino A");
+
+    // 1. Invitado anónimo (sin sesión OIDC) intenta mutar
+    await expect(
+      t.mutation(api.kingdoms.startConstruction, { kingdomId, buildingType: "granja" })
+    ).rejects.toThrow(/Autenticación requerida/);
+
+    await expect(
+      t.mutation(api.economy.getOrInitializeKingdom, { name: "Reino Hacker", civilization: "romanos" })
+    ).rejects.toThrow(/Autenticación requerida/);
+
+    // 2. Intruso que finge token con DEMO_USER_ID como subject
+    const fakeDemoCaller = t.withIdentity(identity(DEMO_USER_ID));
+    await expect(
+      fakeDemoCaller.mutation(api.kingdoms.startConstruction, { kingdomId, buildingType: "granja" })
+    ).rejects.toThrow(/No autorizado/);
   });
 });
 

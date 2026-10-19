@@ -82,11 +82,19 @@ export function HomeScreen({ onEnterDemo, onEnterKingdom, onCreateKingdom, hasKi
                   ? 'bg-[#1e1710] hover:bg-[#2c2014] border border-[#d4af37]/50 text-[#c5a059]'
                   : 'bg-[#2a1f13] hover:bg-[#382b1b] border-2 border-[#d4af37] text-[#f4eedb]'
               }`}
+              title="Explorar el Reino de Iberia en modo solo lectura"
             >
-              <span>🏰 Explorar Reino de Demostración (Iberia)</span>
+              <span>🏰 Empezar a jugar como invitado</span>
               <ArrowRight className="w-4 h-4 text-[#d4af37] group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
+
+          {/* Advertencia P4 para invitados */}
+          {!isAuthenticated && (
+            <p className="text-[11px] text-[#8e816d] italic max-w-lg mx-auto">
+              * Nota (P4): El modo invitado te permite explorar el Reino de Iberia en modo de solo lectura. El progreso y las acciones de gobierno requieren iniciar sesión con Google para disponer de un reino propio persistente.
+            </p>
+          )}
 
           {/* Estado de identidad actual */}
           <div className="pt-2 text-xs text-[#8e816d] flex items-center justify-center gap-2">
@@ -96,7 +104,7 @@ export function HomeScreen({ onEnterDemo, onEnterKingdom, onCreateKingdom, hasKi
                 Soberano autenticado: {user?.name || user?.email}
               </span>
             ) : (
-              <span>Modo visitante: puedes explorar el reino de prueba libremente o identificarte con Google en la barra superior para fundar tu reino.</span>
+              <span>Modo visitante: puedes empezar a jugar como invitado para explorar o identificarte con Google en la barra superior.</span>
             )}
           </div>
         </div>
@@ -279,7 +287,7 @@ export function HomeScreen({ onEnterDemo, onEnterKingdom, onCreateKingdom, hasKi
             onClick={onEnterDemo}
             className="px-4 py-2 bg-[#2c2013] hover:bg-[#3a2c1b] border border-[#d4af37]/60 rounded text-[#d4af37] font-serif font-semibold transition-colors whitespace-nowrap cursor-pointer"
           >
-            Entrar a Iberia (Demo) →
+            Empezar a jugar como invitado →
           </button>
         </div>
       </section>

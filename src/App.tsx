@@ -36,7 +36,8 @@ import {
   Check,
   Loader2,
   Award,
-  Sun
+  Sun,
+  ShieldAlert
 } from 'lucide-react';
 import { 
   calculateSimulatedKingdomResources, 
@@ -49,6 +50,7 @@ import { DEMO_USER_ID } from '../convex/kingdomAccess';
 import { BUILDINGS, CIVILIZATIONS, DAILY_BONUS, PROFESSION_EFFECTS, REST_POLICIES } from '../convex/balanceConfig';
 import { TabNavigation, type MainTab } from './components/TabNavigation';
 import { FoundingWizard } from './components/FoundingWizard';
+import { HomeScreen } from './components/HomeScreen';
 import { ArmyPanel } from './components/ArmyPanel';
 import { UniversityPanel } from './components/UniversityPanel';
 import { ParliamentPanel } from './components/ParliamentPanel';
@@ -497,7 +499,10 @@ function KingdomOverviewContent() {
   }, []);
 
   // Consulta reactiva en tiempo real al backend remoto
-  const kingdomData = useQuery(getKingdomFullQuery, { userId: activeUserId }) as KingdomFullResponse | undefined;
+  const kingdomData = useQuery(
+    getKingdomFullQuery,
+    activeUserId !== 'GUEST' ? { userId: activeUserId } : "skip"
+  ) as KingdomFullResponse | undefined;
 
   const kingdom = kingdomData?.kingdom;
   const resources = kingdomData?.resources;
@@ -876,7 +881,19 @@ function KingdomOverviewContent() {
     }, 600);
   };
 
-  // Estado de carga inicial
+  // 1. Si el usuario no está autenticado y no ha elegido la demo, mostrar pantalla de inicio / bienvenida (P4)
+  if (!isAuthenticated && !viewDemoKingdom) {
+    return (
+      <HomeScreen
+        onEnterDemo={() => setViewDemoKingdom(true)}
+        onEnterKingdom={() => {}}
+        onCreateKingdom={() => {}}
+        hasKingdom={false}
+      />
+    );
+  }
+
+  // 2. Estado de carga inicial (consultando reino en Convex)
   if (kingdomData === undefined) {
     return (
       <div className="min-h-[500px] flex flex-col items-center justify-center p-8 text-center space-y-4">
@@ -891,7 +908,7 @@ function KingdomOverviewContent() {
     );
   }
 
-  // Si el usuario autenticado aún no tiene un reino propio: asistente de fundación (P4-P9)
+  // 3. Si el usuario autenticado aún no tiene un reino propio: asistente de fundación (P4-P9)
   if (!kingdom && isAuthenticated && !viewDemoKingdom) {
     return (
       <div className="space-y-4">
@@ -905,7 +922,7 @@ function KingdomOverviewContent() {
         <div className="flex justify-center">
           <button
             onClick={() => setViewDemoKingdom(true)}
-            className="px-4 py-2 bg-[#1b1711] hover:bg-[#262017] border border-[#3b3121] rounded text-[#c5a059] text-xs font-serif transition-colors"
+            className="px-4 py-2 bg-[#1b1711] hover:bg-[#262017] border border-[#3b3121] rounded text-[#c5a059] text-xs font-serif transition-colors cursor-pointer"
           >
             Explorar el Reino de Iberia (demostración) sin fundar
           </button>
@@ -914,7 +931,26 @@ function KingdomOverviewContent() {
     );
   }
 
-  // Si el reino de demostración no existe para el userId consultado
+  // 4. Si el reino de demostración no existe o no está disponible en la base de datos de Convex
+  if (!kingdom && viewDemoKingdom) {
+    return (
+      <div className="bg-[#14120e] border-2 border-rose-900/60 rounded-xl p-8 text-center max-w-lg mx-auto my-12 space-y-4">
+        <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
+        <h2 className="text-lg font-serif font-bold text-rose-300">Reino de demostración no disponible</h2>
+        <p className="text-xs text-[#a09480] leading-relaxed">
+          El reino de demostración Iberia (<code className="text-[#d4af37] font-mono">{DEMO_USER_ID}</code>) no está disponible en el servidor Convex. Comprueba que el backend esté conectado y contenga los datos del reino de prueba.
+        </p>
+        <button
+          onClick={() => setViewDemoKingdom(false)}
+          className="px-4 py-2 bg-[#251e14] hover:bg-[#34281b] border border-amber-600/40 rounded text-amber-300 text-xs font-serif transition-colors cursor-pointer"
+        >
+          ← Volver a la pantalla de inicio
+        </button>
+      </div>
+    );
+  }
+
+  // 5. Si el reino de un usuario específico no se encuentra
   if (!kingdom) {
     return (
       <div className="bg-[#14120e] border border-amber-900/40 rounded-xl p-8 text-center max-w-lg mx-auto my-12 space-y-4">
@@ -923,6 +959,12 @@ function KingdomOverviewContent() {
         <p className="text-xs text-[#a09480] leading-relaxed">
           No se encontró ningún registro para el identificador <code className="text-[#d4af37] font-mono">{activeUserId}</code>.
         </p>
+        <button
+          onClick={() => setViewDemoKingdom(false)}
+          className="px-4 py-2 bg-[#251e14] hover:bg-[#34281b] border border-amber-600/40 rounded text-amber-300 text-xs font-serif transition-colors cursor-pointer"
+        >
+          ← Volver a la pantalla de inicio
+        </button>
       </div>
     );
   }
@@ -982,28 +1024,26 @@ function KingdomOverviewContent() {
     <div className="space-y-6">
       {/* Indicador de estado de sesión / Demo */}
       {isViewingDemo && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-[#17130e] border border-amber-900/40 rounded-xl text-xs text-[#d6c7af] shadow-inner">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-amber-950/30 border border-amber-600/40 rounded-xl text-xs text-[#d6c7af] shadow-inner mb-2">
           <div className="flex items-center gap-2.5">
-            <Info className="w-4 h-4 text-[#d4af37] flex-shrink-0" />
+            <ShieldAlert className="w-5 h-5 text-amber-400 flex-shrink-0" />
             <div>
-              <span className="font-semibold text-[#f4eedb]">
-                {isAuthenticated ? 'Modo Exploración: Reino de Iberia (Demostración)' : 'Modo Visitante: Reino de Iberia (Demostración)'}
+              <span className="font-semibold text-amber-300 block font-serif">
+                {isAuthenticated ? 'Modo Demostración: Reino de Iberia (Solo Lectura)' : 'Modo Invitado: Reino de Iberia (Solo Lectura)'}
               </span>
-              <p className="text-[11px] text-[#8e816d] mt-0.5">
+              <p className="text-[11px] text-[#a09480] mt-0.5">
                 {isAuthenticated
-                  ? `Has iniciado sesión con Google (${user?.email}). Este reino de prueba se conserva intacto para consulta.`
-                  : 'Inicia sesión con Google en la esquina superior para verificar tu identidad de soberano.'}
+                  ? `Has iniciado sesión con Google (${user?.email}). Este reino de prueba se conserva intacto en modo solo lectura.`
+                  : 'Estás explorando el reino de demostración en modo estrictamente de solo lectura. Todas las mutaciones (obras, tropas, investigación, combate) están bloqueadas. Inicia sesión con Google para fundar y gobernar tu propio reino.'}
               </p>
             </div>
           </div>
-          {isAuthenticated && (
-            <button
-              onClick={() => setViewDemoKingdom(false)}
-              className="px-3 py-1 bg-[#251d13] hover:bg-[#342718] border border-[#d4af37]/40 rounded text-[#d4af37] text-xs font-serif transition-colors whitespace-nowrap self-start sm:self-center"
-            >
-              Volver a mi cuenta
-            </button>
-          )}
+          <button
+            onClick={() => setViewDemoKingdom(false)}
+            className="px-3.5 py-1.5 bg-[#251d13] hover:bg-[#342718] border border-[#d4af37]/40 rounded text-[#d4af37] text-xs font-serif transition-colors whitespace-nowrap self-start sm:self-center cursor-pointer"
+          >
+            {isAuthenticated ? '← Volver a mi reino' : '← Volver a la pantalla de inicio'}
+          </button>
         </div>
       )}
 
