@@ -655,19 +655,63 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     report,
   });
 
-  for (const [type, count] of Object.entries(report.attacker.survivorsComposition) as [UnitType, number][]) {
-    if (count > 0) {
-      await addUnits(ctx, march.kingdomId, type, 1, count);
+  const unitsByType: Record<string, Array<{ unitType: string; level: number; count: number }>> = {};
+  for (const u of march.units) {
+    const norm = normalizeUnitType(u.unitType);
+    if (!norm || u.count <= 0) continue;
+    const lvl = u.level ?? 1;
+    if (!unitsByType[norm]) unitsByType[norm] = [];
+    unitsByType[norm].push({ unitType: norm, level: lvl, count: u.count });
+  }
+
+  for (const [type, survivorsTotal] of Object.entries(report.attacker.survivorsComposition) as [UnitType, number][]) {
+    if (survivorsTotal <= 0) continue;
+    const groups = unitsByType[type];
+    if (!groups || groups.length === 0) {
+      await addUnits(ctx, march.kingdomId, type, 1, survivorsTotal);
+      continue;
+    }
+    const totalSent = groups.reduce((sum, g) => sum + g.count, 0);
+    let remainingSurvivors = survivorsTotal;
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      const share = i === groups.length - 1 ? remainingSurvivors : Math.round(survivorsTotal * (g.count / totalSent));
+      const countToAdd = Math.min(remainingSurvivors, Math.max(0, share));
+      if (countToAdd > 0) {
+        await addUnits(ctx, march.kingdomId, type, g.level, countToAdd);
+        remainingSurvivors -= countToAdd;
+      }
     }
   }
-  for (const [type, count] of Object.entries(report.attacker.woundedComposition) as [UnitType, number][]) {
-    if (count > 0) {
+
+  for (const [type, woundedTotal] of Object.entries(report.attacker.woundedComposition) as [UnitType, number][]) {
+    if (woundedTotal <= 0) continue;
+    const groups = unitsByType[type];
+    if (!groups || groups.length === 0) {
       const docs = await ctx.db.query("armyUnits").withIndex("by_kingdom", (q) => q.eq("kingdomId", march.kingdomId)).collect();
       const host = docs.find((d) => normalizeUnitType(d.unitType) === type);
       if (host) {
-        await ctx.db.patch(host._id, { wounded: (host.wounded ?? 0) + count });
+        await ctx.db.patch(host._id, { wounded: (host.wounded ?? 0) + woundedTotal });
       } else {
-        await ctx.db.insert("armyUnits", { kingdomId: march.kingdomId, unitType: type, level: 1, count: 0, wounded: count });
+        await ctx.db.insert("armyUnits", { kingdomId: march.kingdomId, unitType: type, level: 1, count: 0, wounded: woundedTotal });
+      }
+      continue;
+    }
+    const totalSent = groups.reduce((sum, g) => sum + g.count, 0);
+    let remainingWounded = woundedTotal;
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      const share = i === groups.length - 1 ? remainingWounded : Math.round(woundedTotal * (g.count / totalSent));
+      const countToAdd = Math.min(remainingWounded, Math.max(0, share));
+      if (countToAdd > 0) {
+        const docs = await ctx.db.query("armyUnits").withIndex("by_kingdom", (q) => q.eq("kingdomId", march.kingdomId)).collect();
+        const host = docs.find((d) => normalizeUnitType(d.unitType) === type && (d.level ?? 1) === g.level);
+        if (host) {
+          await ctx.db.patch(host._id, { wounded: (host.wounded ?? 0) + countToAdd });
+        } else {
+          await ctx.db.insert("armyUnits", { kingdomId: march.kingdomId, unitType: type, level: g.level, count: 0, wounded: countToAdd });
+        }
+        remainingWounded -= countToAdd;
       }
     }
   }

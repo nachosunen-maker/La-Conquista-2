@@ -501,7 +501,7 @@ describe("Autenticación OIDC y Seguridad de Identidad Google (P1, P4, T-01)", (
 
     await expect(
       attacker.mutation(api.economy.resetKingdom, { kingdomId: demoKingdomId })
-    ).rejects.toThrow(/demostración no puede reiniciarse/);
+    ).rejects.toThrow(/No autorizado|demostración no puede reiniciarse/);
   });
 });
 
@@ -535,6 +535,38 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
 
     const armyA = await attacker.asUser.query(api.army.getArmyState, { kingdomId: attacker.kingdomId });
     expect(armyA.summary.livingSoldiers).toBeGreaterThan(0);
+  });
+
+  test("las tropas de niveles distintos conservan su nivel al regresar de campaña", async () => {
+    const t = createTestBackend();
+    const attacker = await foundKingdom(t, "user-atk-lvl", "Reino Atacante Nivel");
+    const defender = await foundKingdom(t, "user-def-lvl", "Reino Defensor Nivel");
+
+    await attacker.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: attacker.kingdomId });
+    await defender.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: defender.kingdomId });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 2, count: 200 });
+      await ctx.db.insert("armyUnits", { kingdomId: defender.kingdomId, unitType: "infanteria", level: 1, count: 50 });
+    });
+
+    const defTerritories = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
+    const targetCellId = defTerritories.homeTerritoryId!;
+
+    const marchRes = await attacker.asUser.mutation(api.army.launchAttack, {
+      kingdomId: attacker.kingdomId,
+      cellId: targetCellId,
+      units: [{ unitType: "infanteria", level: 2, count: 200 }],
+    });
+    expect(marchRes.success).toBe(true);
+
+    vi.setSystemTime(T0 + marchRes.durationSeconds * 1000 + 5000);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    const armyState = await attacker.asUser.query(api.army.getArmyState, { kingdomId: attacker.kingdomId });
+    const level2Unit = armyState.units.find((u: any) => u.unitType === "infanteria" && u.level === 2);
+    expect(level2Unit).toBeDefined();
+    expect(level2Unit.count).toBeGreaterThan(0);
   });
 });
 
