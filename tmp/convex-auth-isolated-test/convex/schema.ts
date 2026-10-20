@@ -6,11 +6,12 @@ export default defineSchema({
   ...authTables,
   users: defineTable({
     name: v.optional(v.string()),
+    username: v.optional(v.string()),
     email: v.optional(v.string()),
     emailVerificationTime: v.optional(v.number()),
     image: v.optional(v.string()),
-    // Custom fields for username login
-    username: v.optional(v.string()),
-  }).index("email", ["email"])
-    .index("username", ["username"]),
+    isAnonymous: v.optional(v.boolean()),
+  })
+    .index("by_email", ["email"])
+    .index("by_username", ["username"]),
 });
