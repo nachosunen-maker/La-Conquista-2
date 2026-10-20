@@ -1,15 +1,10 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 
-/**
- * ============================================================================
- * LA CONQUISTA — ESQUEMA DE DATOS DEL MOTOR ECONÓMICO (CONVEX)
- * ============================================================================
- */
-
-export default defineSchema(
-  {
-    // Tabla principal de reinos
+export default defineSchema({
+  ...authTables,
+  // Tabla principal de reinos
     kingdoms: defineTable({
       userId: v.string(),
       name: v.string(),

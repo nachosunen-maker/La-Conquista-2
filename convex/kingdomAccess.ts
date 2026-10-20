@@ -2,20 +2,20 @@ export const DEMO_USER_ID = "guest_g9ai8cz";
 
 export function resolveKingdomQueryUserId(
   requestedUserId: string,
-  authenticatedSubject?: string
+  authenticatedUserId?: string
 ): string | null {
   if (requestedUserId === DEMO_USER_ID) return DEMO_USER_ID;
-  if (!authenticatedSubject) return null;
-  if (requestedUserId !== authenticatedSubject) {
+  if (!authenticatedUserId) return null;
+  if (requestedUserId !== authenticatedUserId) {
     throw new Error("No autorizado: solo se puede consultar el reino propio o la demo de solo lectura.");
   }
-  return authenticatedSubject;
+  return authenticatedUserId;
 }
 
-export function isKingdomOwner(kingdomUserId: string, authenticatedSubject?: string): boolean {
+export function isKingdomOwner(kingdomUserId: string, authenticatedUserId?: string): boolean {
   return Boolean(
-    authenticatedSubject &&
+    authenticatedUserId &&
     kingdomUserId !== DEMO_USER_ID &&
-    kingdomUserId === authenticatedSubject
+    kingdomUserId === authenticatedUserId
   );
 }

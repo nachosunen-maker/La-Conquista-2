@@ -45,7 +45,7 @@ import {
   type ValidFoodTier 
 } from '../convex/economyAdapter';
 import { constructionProgress } from '../convex/buildingRules';
-import { useAuth } from './auth';
+import { useConvexAuth, useAuthActions } from "@convex-dev/auth/react";
 import { DEMO_USER_ID } from '../convex/kingdomAccess';
 import { BUILDINGS, CIVILIZATIONS, DAILY_BONUS, PROFESSION_EFFECTS, REST_POLICIES } from '../convex/balanceConfig';
 import { TabNavigation, type MainTab } from './components/TabNavigation';
@@ -236,135 +236,37 @@ const startConstructionMutation = makeFunctionReference<"mutation">("kingdoms:st
 const cancelConstructionMutation = makeFunctionReference<"mutation">("kingdoms:cancelConstruction");
 
 /* ==========================================================================
-   COMPONENTE DE INICIO DE SESIÓN CON GOOGLE IDENTITY SERVICES
+   FORMULARIO DE ACCESO (USUARIO/CONTRASEÑA)
    ========================================================================== */
-export function GoogleAuthButton() {
-  const { isAuthenticated, user, logout, isGoogleLoaded, googleLoadFailed, googleClientId, login } = useAuth();
-  const googleBtnRef = useRef<HTMLDivElement>(null);
-  const viewer = useQuery(getViewerQuery);
-  const [gisError, setGisError] = useState<string | null>(null);
+export function PasswordAuthForm() {
+  const { signIn } = useAuthActions();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (!googleClientId) {
-      return;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      await signIn("password", { username, password, flow: "signIn" });
+    } catch (err: any) {
+      setError(err.message || "Error al iniciar sesión");
+    } finally {
+      setLoading(false);
     }
-
-    if (isGoogleLoaded && !isAuthenticated && googleBtnRef.current && (window as any).google?.accounts?.id) {
-      try {
-        (window as any).google.accounts.id.initialize({
-          client_id: googleClientId,
-          callback: (response: { credential?: string }) => {
-            if (response?.credential) {
-              setGisError(null);
-              login(response.credential);
-            }
-          },
-          error_callback: (err: any) => {
-            console.warn('Google Identity Services error_callback:', err);
-            const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-            if (err?.type === 'origin_mismatch') {
-              setGisError(
-                `Origen no autorizado (${currentOrigin}). Añade este dominio a los "Orígenes autorizados de JavaScript" en Google Cloud Console para el ID de cliente.`
-              );
-            } else if (err?.type === 'idpiframe_initialization_failed') {
-              setGisError(
-                `Fallo al inicializar iframe de Google en ${currentOrigin}. Comprueba las cookies de terceros o los orígenes autorizados.`
-              );
-            } else {
-              setGisError(err?.type || err?.message || 'Error al autenticar con Google Identity Services');
-            }
-          },
-        });
-        googleBtnRef.current.innerHTML = '';
-        (window as any).google.accounts.id.renderButton(googleBtnRef.current, {
-          theme: 'filled_black',
-          size: 'medium',
-          type: 'standard',
-          shape: 'rectangular',
-          text: 'signin_with',
-          locale: 'es',
-        });
-      } catch (err) {
-        console.error('Error al inicializar Google Sign-In:', err);
-        setGisError(err instanceof Error ? err.message : 'Error al inicializar Google Sign-In');
-      }
-    }
-  }, [isGoogleLoaded, isAuthenticated, googleClientId, login]);
-
-  // Si falta la configuración del ID de cliente
-  if (!googleClientId) {
-    return (
-      <div
-        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-950/60 border border-rose-700/60 rounded-lg text-rose-300 text-xs"
-        title="Falta la variable de entorno VITE_GOOGLE_CLIENT_ID en el archivo .env"
-      >
-        <AlertCircle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
-        <span className="font-mono text-[11px]">OAuth no configurado (falta VITE_GOOGLE_CLIENT_ID)</span>
-      </div>
-    );
-  }
-
-  if (isAuthenticated && user) {
-    return (
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-2 px-2.5 py-1 bg-[#1a1610] border border-[#3b3121] rounded-lg">
-          {user.picture ? (
-            <img src={user.picture} alt={user.name ?? 'Usuario'} className="w-5 h-5 rounded-full" />
-          ) : (
-            <div className="w-5 h-5 rounded-full bg-[#d4af37]/20 border border-[#d4af37]/40 flex items-center justify-center text-[10px] text-[#d4af37] font-semibold">
-              {(user.name || user.email || 'S')[0].toUpperCase()}
-            </div>
-          )}
-          <div className="flex flex-col text-left">
-            <span className="text-xs font-serif text-[#f4eedb] max-w-[120px] truncate" title={user.name || user.email}>
-              {user.name || user.email}
-            </span>
-            <span className={`text-[9px] font-mono ${viewer ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {viewer ? 'Convex OIDC OK' : 'OIDC Pendiente Convex'}
-            </span>
-          </div>
-        </div>
-        <button
-          onClick={logout}
-          className="flex items-center gap-1 px-2 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 hover:border-rose-800/60 rounded text-neutral-300 hover:text-rose-400 text-xs transition-colors cursor-pointer"
-          title="Cerrar sesión de Google"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Salir</span>
-        </button>
-      </div>
-    );
-  }
+  };
 
   return (
-    <div className="flex flex-col sm:flex-row items-center gap-2">
-      <div ref={googleBtnRef} className="min-h-[32px] flex items-center justify-center">
-        {!isGoogleLoaded && !googleLoadFailed && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#1a1610] border border-[#3b3121] rounded text-[#8e816d] text-xs animate-pulse">
-            <LogIn className="w-3.5 h-3.5" />
-            <span>Google...</span>
-          </div>
-        )}
-        {googleLoadFailed && (
-          <div
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-[#1a1610] border border-amber-800/50 rounded text-amber-300 text-xs"
-            title="No se pudo cargar la librería de Google Identity Services. Comprueba tu conexión o bloqueadores de contenido."
-          >
-            <AlertCircle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-            <span>Google GIS no disponible</span>
-          </div>
-        )}
-      </div>
-      {gisError && (
-        <div
-          className="flex items-center gap-1 px-2 py-1 bg-rose-950/70 border border-rose-800/60 rounded text-rose-300 text-[11px]"
-          title={gisError}
-        >
-          <AlertCircle className="w-3 h-3 text-rose-400 flex-shrink-0" />
-          <span className="max-w-[240px] truncate">{gisError}</span>
-        </div>
-      )}
-    </div>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-2 p-4 bg-[#1a1610] border border-[#3b3121] rounded-lg">
+      <input type="text" placeholder="Usuario" value={username} onChange={e => setUsername(e.target.value)} className="p-2 bg-neutral-900 border border-neutral-700 rounded text-xs text-white" />
+      <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="p-2 bg-neutral-900 border border-neutral-700 rounded text-xs text-white" />
+      <button type="submit" disabled={loading} className="px-4 py-2 bg-[#d4af37] text-black text-xs font-bold rounded">
+        {loading ? "Entrando..." : "Entrar"}
+      </button>
+      {error && <p className="text-rose-500 text-[10px]">{error}</p>}
+    </form>
   );
 }
 
@@ -524,7 +426,7 @@ function formatSecondsDuration(seconds: number): string {
    PANTALLA PRINCIPAL: RESUMEN DEL REINO (JUEGO DE ESTRATEGIA MEDIEVAL)
    ========================================================================== */
 function KingdomOverviewContent() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, isLoading } = useConvexAuth();
   const [viewDemoKingdom, setViewDemoKingdom] = useState<boolean>(false);
   const isViewingDemo = viewDemoKingdom;
 
@@ -532,7 +434,7 @@ function KingdomOverviewContent() {
   const viewer = useQuery(getViewerQuery);
   const activeUserId = isViewingDemo
     ? DEMO_USER_ID
-    : (viewer?.subject ?? (isAuthenticated ? user?.sub ?? '' : 'GUEST'));
+    : (isAuthenticated ? viewer?.subject ?? '' : 'GUEST');
 
   const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -589,8 +491,7 @@ function KingdomOverviewContent() {
     isAuthenticated &&
     viewer &&
     kingdom &&
-    viewer.subject === kingdom.userId &&
-    viewer.subject === user?.sub
+    viewer.subject === kingdom.userId
   );
   const activeOwnerKey = isOwner && viewer && kingdom
     ? `${viewer.subject}:${kingdom._id}`
@@ -980,12 +881,12 @@ function KingdomOverviewContent() {
                 <span>Autenticación OIDC en espera de validación por Convex</span>
               </div>
               <p className="mt-1 text-[11px] text-amber-300/80 leading-relaxed">
-                El token de Google fue recibido en el cliente ({user?.email}), pero Convex aún no ha verificado la identidad. Recuerda que la configuración de <code className="font-mono text-amber-200">convex/auth.config.ts</code> debe estar desplegada en el backend remoto.
+                El estado de autenticación no ha sido verificado completamente por Convex. Recuerda que la configuración de <code className="font-mono text-amber-200">convex/auth.config.ts</code> debe estar desplegada en el backend remoto.
               </p>
             </div>
           )}
         </div>
-        <FoundingWizard defaultMonarchName={user?.name || ''} onFounded={() => setActiveTab('aldea')} />
+        <FoundingWizard defaultMonarchName={''} onFounded={() => setActiveTab('aldea')} />
         <div className="flex justify-center">
           <button
             onClick={() => setViewDemoKingdom(true)}
@@ -1100,8 +1001,8 @@ function KingdomOverviewContent() {
               </span>
               <p className="text-[11px] text-[#a09480] mt-0.5">
                 {isAuthenticated
-                  ? `Has iniciado sesión con Google (${user?.email}). Este reino de prueba se conserva intacto en modo solo lectura.`
-                  : 'Estás explorando el reino de demostración en modo estrictamente de solo lectura. Todas las mutaciones (obras, tropas, investigación, combate) están bloqueadas. Inicia sesión con Google para fundar y gobernar tu propio reino.'}
+                  ? `Has iniciado sesión. Este reino de prueba se conserva intacto en modo solo lectura.`
+                  : 'Estás explorando el reino de demostración en modo estrictamente de solo lectura. Todas las mutaciones (obras, tropas, investigación, combate) están bloqueadas. Inicia sesión para fundar y gobernar tu propio reino.'}
               </p>
             </div>
           </div>
@@ -2323,7 +2224,7 @@ export default function App() {
               <RefreshCw className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Sincronizar</span>
             </button>
-            <GoogleAuthButton />
+            <PasswordAuthForm />
             <ConnectionStatusBadge />
           </div>
         </div>

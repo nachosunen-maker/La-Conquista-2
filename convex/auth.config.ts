@@ -5,8 +5,8 @@
 export default {
   providers: [
     {
-      domain: "https://accounts.google.com",
-      applicationID: "198291664207-573hkldm168ltr0h5rscs0k8iooilqul.apps.googleusercontent.com",
+      domain: "CONVEX_AUTH",
+      applicationID: "convex",
     },
   ],
 };

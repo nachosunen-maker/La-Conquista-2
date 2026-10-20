@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Crown, Castle, Shield, Users, Wheat, Swords, Scroll, Clock, CheckCircle2, ArrowRight } from 'lucide-react';
-import { useAuth } from '../auth';
+import { useConvexAuth } from "@convex-dev/auth/react";
 
 interface HomeScreenProps {
   onEnterDemo: () => void;
@@ -26,7 +26,8 @@ export const OFFICIAL_CIVILIZATIONS = [
 ];
 
 export function HomeScreen({ onEnterDemo, onEnterKingdom, onCreateKingdom, hasKingdom }: HomeScreenProps) {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, isLoading } = useConvexAuth();
+  const user = null;
   const [selectedCiv, setSelectedCiv] = useState<string | null>(null);
 
   return (
@@ -101,10 +102,10 @@ export function HomeScreen({ onEnterDemo, onEnterKingdom, onCreateKingdom, hasKi
             {isAuthenticated ? (
               <span className="inline-flex items-center gap-1.5 text-emerald-400 font-mono">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                Soberano autenticado: {user?.name || user?.email}
+                Soberano autenticado: autenticado.
               </span>
             ) : (
-              <span>Modo visitante: puedes empezar a jugar como invitado para explorar o identificarte con Google en la barra superior.</span>
+              <span>Modo visitante: puedes empezar a jugar como invitado para explorar o iniciar sesión en la barra superior.</span>
             )}
           </div>
         </div>

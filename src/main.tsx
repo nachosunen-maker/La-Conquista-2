@@ -57,7 +57,7 @@ if (!convexUrl) {
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
       <ConvexProvider client={convex}>
-        <AuthProvider convex={convex} googleClientId={googleClientId}>
+        <AuthProvider convex={convex}>
           <App />
         </AuthProvider>
       </ConvexProvider>

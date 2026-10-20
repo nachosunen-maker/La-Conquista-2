@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { resolveKingdomQueryUserId, isKingdomOwner } from "./kingdomAccess";
 import { createAggregatePopulationFallback } from "./kingdomReadModel";
 import { readArmyUnitDocs } from "./army";
@@ -16,11 +17,12 @@ export const getKingdomFull = query({
     userId: v.string(),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    const userId = resolveKingdomQueryUserId(args.userId, identity?.subject);
-    if (!userId) {
-      return null;
-    }
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return null;
+    
+    // Resolve kingdom owner
+    const resolvedUserId = resolveKingdomQueryUserId(args.userId, userId);
+    if (!resolvedUserId) return null;
 
     // Iberia es la única consulta pública; los reinos de usuario usan el subject validado.
     const kingdom = await ctx.db
@@ -130,11 +132,11 @@ export { getConstructionState as getBuildingsAndQueue } from "./buildings";
 export const getArmyUnits = query({
   args: { kingdomId: v.id("kingdoms") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
+    const userId = await getAuthUserId(ctx);
     const kingdom = await ctx.db.get(args.kingdomId);
     if (!kingdom) throw new Error("Reino no encontrado.");
     const isDemoRead = kingdom.userId === "guest_g9ai8cz";
-    if (!isDemoRead && !isKingdomOwner(kingdom.userId, identity?.subject)) {
+    if (!isDemoRead && !isKingdomOwner(kingdom.userId, userId)) {
       throw new Error("No autorizado: solo puede consultar su propio reino.");
     }
 

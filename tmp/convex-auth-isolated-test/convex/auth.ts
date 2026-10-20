@@ -1,5 +1,6 @@
 import { convexAuth } from "@convex-dev/auth/server";
 import { Password } from "@convex-dev/auth/providers/Password";
+import { Google } from "@convex-dev/auth/providers/Google";
 import { DataModel } from "./_generated/dataModel.js";
 
 const CustomPassword = Password<DataModel>({
@@ -8,13 +9,18 @@ const CustomPassword = Password<DataModel>({
     const normalizedUsername = rawUsername.trim().toLowerCase();
     
     return {
-      email: (params.email as string) || `${normalizedUsername}@local.auth`,
+      email: `${normalizedUsername}@local.auth`,
       name: rawUsername.trim(),
-      username: normalizedUsername,
     };
   },
 });
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
-  providers: [CustomPassword],
+  providers: [
+    CustomPassword,
+    Google({
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    }),
+  ],
 });
