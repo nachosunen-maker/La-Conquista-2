@@ -568,5 +568,53 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     expect(level2Unit).toBeDefined();
     expect(level2Unit.count).toBeGreaterThan(0);
   });
+
+  test("seguridad getWorldMap: prohíbe espiar la niebla de guerra de otro reino y permite mapa global sin kingdomId", async () => {
+    const t = createTestBackend();
+    const userA = await foundKingdom(t, "user-map-a", "Reino A");
+    const userB = await foundKingdom(t, "user-map-b", "Reino B");
+
+    // 1. Un usuario no puede consultar la niebla de guerra ni expediciones de un reino ajeno
+    await expect(
+      userA.asUser.query(api.territories.getWorldMap, { kingdomId: userB.kingdomId })
+    ).rejects.toThrow("No autorizado: solo puede consultar la niebla de guerra de su propio reino.");
+
+    // 2. Un usuario sí puede consultar su propia niebla de guerra
+    const ownMap = await userA.asUser.query(api.territories.getWorldMap, { kingdomId: userA.kingdomId });
+    expect(ownMap.cells.length).toBe(331);
+    expect(ownMap.exploredCount).toBe(7);
+
+    // 3. Consulta global pública (sin kingdomId) devuelve el mapa general sin niebla
+    const publicMap = await t.query(api.territories.getWorldMap, {});
+    expect(publicMap.cells.length).toBe(331);
+    expect(publicMap.activeExpeditions).toHaveLength(0);
+  });
+
+  test("seguridad military:trainUnits: bloquea reinos ajenos y no permite inyección de reglas arbitrarias", async () => {
+    const t = createTestBackend();
+    const attacker = await foundKingdom(t, "user-atk-rule", "Reino Atacante");
+    const victim = await foundKingdom(t, "user-vic-rule", "Reino Víctima");
+
+    // 1. Intento de entrenar tropas en reino ajeno -> rechazado por titularidad
+    await expect(
+      attacker.asUser.mutation(api.military.trainUnits, {
+        kingdomId: victim.kingdomId,
+        unitType: "infanteria",
+        count: 10,
+        level: 1,
+      })
+    ).rejects.toThrow("No autorizado: el reino no pertenece al usuario autenticado.");
+
+    // 2. Intento de entrenar con reglas canónicas pendientes de especificación oficial -> falla de forma segura en servidor
+    await expect(
+      attacker.asUser.mutation(api.military.trainUnits, {
+        kingdomId: attacker.kingdomId,
+        unitType: "infanteria",
+        count: 10,
+        level: 1,
+      })
+    ).rejects.toThrow("pendientes de especificación oficial");
+  });
 });
+
 

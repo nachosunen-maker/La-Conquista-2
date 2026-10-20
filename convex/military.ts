@@ -27,7 +27,6 @@ import {
   resolveArmyUnitsIncorporation,
   calculateNextRegularSoldiers,
   isLivingRegularTroop,
-  type MilitaryUnitRule,
   type TrainingQueueEntry,
 } from "./militaryRules";
 import type { ResourceType } from "./economyCalculations";
@@ -99,24 +98,6 @@ export const trainUnits = mutation({
     unitType: v.string(),
     count: v.number(),
     level: v.optional(v.number()),
-    overrideRule: v.optional(
-      v.object({
-        unitType: v.string(),
-        level: v.number(),
-        costsPerUnit: v.union(
-          v.null(),
-          v.object({
-            gold: v.number(),
-            wood: v.number(),
-            stone: v.number(),
-            iron: v.number(),
-            food: v.number(),
-          })
-        ),
-        durationMsPerUnit: v.union(v.null(), v.number()),
-        prerequisites: v.any(),
-      })
-    ),
   },
   handler: async (ctx, args) => {
     // 1. Autorización estricta del propietario (P1) y rechazo absoluto de Iberia
@@ -235,7 +216,6 @@ export const trainUnits = mutation({
       activeTrainings: activeTrainings as TrainingQueueEntry[],
       buildingLevels,
       now,
-      customRule: args.overrideRule as MilitaryUnitRule | undefined,
       civilization: kingdom.civilization,
     });
 

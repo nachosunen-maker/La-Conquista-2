@@ -17,7 +17,7 @@ import {
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { isKingdomOwner } from "./kingdomAccess";
+import { isKingdomOwner, DEMO_USER_ID } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
 import { EXPLORATION, MAP, TERRAINS, type TerrainType } from "./balanceConfig";
 import {
@@ -241,7 +241,15 @@ export const getWorldMap = query({
     // Consulta con visibilidad y niebla de guerra por reino (P22)
     const kingdomId = args.kingdomId;
     const kingdom = await ctx.db.get(kingdomId);
-    const homeCoord = kingdom?.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
+    if (!kingdom) throw new Error("Reino no encontrado.");
+
+    const identity = await ctx.auth.getUserIdentity();
+    const isDemoRead = kingdom.userId === DEMO_USER_ID;
+    if (!isDemoRead && !isKingdomOwner(kingdom.userId, identity?.subject)) {
+      throw new Error("No autorizado: solo puede consultar la niebla de guerra de su propio reino.");
+    }
+
+    const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
 
     const [ownedCells, exploredRecords, activeQueue] = await Promise.all([
       ctx.db
@@ -372,7 +380,7 @@ export const getKingdomTerritories = query({
     const identity = await ctx.auth.getUserIdentity();
     const kingdom = await ctx.db.get(args.kingdomId);
     if (!kingdom) throw new Error("Reino no encontrado.");
-    const isDemoRead = kingdom.userId === "guest_g9ai8cz";
+    const isDemoRead = kingdom.userId === DEMO_USER_ID;
     if (!isDemoRead && !isKingdomOwner(kingdom.userId, identity?.subject)) {
       throw new Error("No autorizado: solo puede consultar su propio reino.");
     }
