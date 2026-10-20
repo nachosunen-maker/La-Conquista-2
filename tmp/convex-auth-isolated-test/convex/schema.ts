@@ -8,10 +8,18 @@ export default defineSchema({
     name: v.optional(v.string()),
     username: v.optional(v.string()),
     email: v.optional(v.string()),
-    emailVerificationTime: v.optional(v.number()),
-    image: v.optional(v.string()),
-    isAnonymous: v.optional(v.boolean()),
+  }),
+  identityMappings: defineTable({
+    provider: v.string(), // e.g., "google"
+    externalId: v.string(), // e.g., Google sub
+    canonicalUserId: v.id("users"),
+    verified: v.boolean(),
+    createdAt: v.number(),
   })
-    .index("by_email", ["email"])
-    .index("by_username", ["username"]),
+    .index("by_external_id", ["provider", "externalId"])
+    .index("by_canonical_user", ["canonicalUserId"]),
+  kingdoms: defineTable({
+    userId: v.string(), // Holds either Google sub or canonical user ID string
+    name: v.string(),
+  }),
 });

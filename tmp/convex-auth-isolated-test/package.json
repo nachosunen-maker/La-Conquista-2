@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "vitest run src/linking.test.ts"
+    "test": "vitest run src/adapter.test.ts"
   },
   "dependencies": {
     "@auth/core": "0.34.2",
