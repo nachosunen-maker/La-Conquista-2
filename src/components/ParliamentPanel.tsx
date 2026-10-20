@@ -138,9 +138,9 @@ export function ParliamentPanel(props: {
   dailyBonusHonor: number;
 }) {
   const { kingdomId, isOwner } = props;
-  const parliament = useQuery(getParliamentQuery, { kingdomId }) as ParliamentState | undefined;
-  const rivals = useQuery(listRivalsQuery, { kingdomId }) as RivalsState | undefined;
-  const battles = useQuery(getBattlesQuery, { kingdomId }) as BattleRecord[] | undefined;
+  const parliament = useQuery(getParliamentQuery, kingdomId ? { kingdomId } : "skip") as ParliamentState | undefined;
+  const rivals = useQuery(listRivalsQuery, kingdomId ? { kingdomId } : "skip") as RivalsState | undefined;
+  const battles = useQuery(getBattlesQuery, kingdomId ? { kingdomId } : "skip") as BattleRecord[] | undefined;
   const createChallenge = useMutation(createChallengeMutation);
   const acceptChallenge = useMutation(acceptChallengeMutation);
   const rejectChallenge = useMutation(rejectChallengeMutation);
