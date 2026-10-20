@@ -1,5 +1,4 @@
-import { query, mutation } from "./_generated/server";
-import { v } from "convex/values";
+import { query, mutation } from "./_generated/server.js";
 import { getAuthUserId } from "@convex-dev/auth/server";
 
 export const viewer = query({
@@ -9,19 +8,6 @@ export const viewer = query({
     if (!userId) {
       return null;
     }
-    const user = await ctx.db.get(userId);
-    return user;
-  },
-});
-
-export const checkUsernameAvailable = query({
-  args: { username: v.string() },
-  handler: async (ctx, args) => {
-    const normalized = args.username.trim().toLowerCase();
-    const existing = await ctx.db
-      .query("users")
-      .withIndex("username", (q) => q.eq("username", normalized))
-      .first();
-    return !existing;
+    return await ctx.db.get(userId);
   },
 });
