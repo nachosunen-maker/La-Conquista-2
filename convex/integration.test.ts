@@ -9,6 +9,7 @@ import { createTestBackend } from "./test.setup";
 import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT } from "./balanceConfig";
 import { costsForTargetLevel } from "./buildingRules";
 import { DEMO_USER_ID } from "./kingdomAccess";
+import { ensureHomeTerritory } from "./territories";
 
 const DAY = TIME.MS_PER_GAME_YEAR;
 const T0 = new Date("2026-10-17T10:00:00Z").getTime();
@@ -569,7 +570,7 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     expect(level2Unit.count).toBeGreaterThan(0);
   });
 
-  test("seguridad getWorldMap: prohíbe espiar la niebla de guerra de otro reino y permite mapa global sin kingdomId", async () => {
+  test("seguridad getWorldMap: prohíbe espiar la niebla de guerra de otro reino", async () => {
     const t = createTestBackend();
     const userA = await foundKingdom(t, "user-map-a", "Reino A");
     const userB = await foundKingdom(t, "user-map-b", "Reino B");
@@ -583,11 +584,71 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     const ownMap = await userA.asUser.query(api.territories.getWorldMap, { kingdomId: userA.kingdomId });
     expect(ownMap.cells.length).toBe(331);
     expect(ownMap.exploredCount).toBe(7);
+  });
 
-    // 3. Consulta global pública (sin kingdomId) devuelve el mapa general sin niebla
+  // PRUEBA 2: Mapa del reino demo por invitado anónimo en modo solo lectura
+  test("seguridad getWorldMap: invitado anónimo puede consultar el mapa del reino demo en modo solo lectura", async () => {
+    const t = createTestBackend();
+    // 1. Configurar el reino demo de forma directa en base de datos sin ejecutar mutaciones
+    const demoKingdomId = await t.run(async (ctx) => {
+      const kId = await ctx.db.insert("kingdoms", {
+        name: "Reino de Iberia",
+        civilization: "ingleses",
+        castleName: "Castillo de Zaragoza",
+        monarchName: "Rey Arturo",
+        userId: DEMO_USER_ID,
+        happiness: 70,
+        militaryMorale: 70,
+        taxPolicy: "normales",
+      });
+      await ensureHomeTerritory(ctx, kId);
+      return kId;
+    });
+
+    // 2. Consulta anónima (sin sesión ni autenticación)
+    const demoMap = await t.query(api.territories.getWorldMap, { kingdomId: demoKingdomId });
+    expect(demoMap).toBeDefined();
+    expect(demoMap.radius).toBe(10);
+    expect(demoMap.totalCells).toBe(331);
+    expect(demoMap.cells).toHaveLength(331);
+    expect(demoMap.exploredCount).toBe(7); // Capital y sus 6 vecinos iniciales
+    expect(demoMap.homeTerritoryId).toBe("0,0");
+    expect(demoMap.activeExpeditions).toEqual([]);
+
+    // Comprobar la celda capital del reino demo
+    const homeCell = demoMap.cells.find((c) => c.cellId === "0,0");
+    expect(homeCell).toBeDefined();
+    expect(homeCell?.state).toBe("owned");
+    expect(homeCell?.isHome).toBe(true);
+    expect(homeCell?.ownerKingdomId).toBe(demoKingdomId);
+  });
+
+  // PRUEBA 3: Mapa global neutral sin exponer datos privados de ningún reino
+  test("seguridad getWorldMap: consulta neutral sin kingdomId no expone datos privados de ningún reino", async () => {
+    const t = createTestBackend();
+    // 1. Crear un reino privado con reclamaciones pendientes y expedición activa
+    const { asUser, kingdomId } = await foundKingdom(t, "user-priv-map", "Reino Privado");
+    await t.run(async (ctx) => {
+      await ctx.db.patch(kingdomId, { pendingTerritoryClaims: 3 });
+    });
+    await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: "1,1" });
+
+    // 2. Consulta global pública/neutral (sin kingdomId)
     const publicMap = await t.query(api.territories.getWorldMap, {});
-    expect(publicMap.cells.length).toBe(331);
+
+    // Comprobar que no se filtran expediciones privadas, reclamaciones ni territorio principal
     expect(publicMap.activeExpeditions).toHaveLength(0);
+    expect(publicMap.pendingClaims).toBe(0);
+    expect(publicMap.homeTerritoryId).toBeNull();
+    expect(publicMap.totalCells).toBe(331);
+    expect(publicMap.cells).toHaveLength(331);
+
+    // Comprobar exhaustivamente cada una de las 331 celdas devueltas
+    for (const cell of publicMap.cells) {
+      expect(cell.canExplore).toBe(false);
+      expect(cell.explorationPlan).toBeNull();
+      expect(cell.expedition).toBeNull();
+    }
   });
 
   test("seguridad military:trainUnits: bloquea reinos ajenos y no permite inyección de reglas arbitrarias", async () => {
@@ -614,6 +675,37 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
         level: 1,
       })
     ).rejects.toThrow("pendientes de especificación oficial");
+  });
+
+  // PRUEBA 1: Rechazo de argumento retirado overrideRule por validación de argumentos
+  test("seguridad military:trainUnits: rechaza llamadas con overrideRule por error de validación de argumentos", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "user-override", "Reino Override");
+
+    let thrownError: any = null;
+    try {
+      await asUser.mutation(api.military.trainUnits, {
+        kingdomId,
+        unitType: "infanteria",
+        count: 10,
+        level: 1,
+        overrideRule: {
+          unitType: "infanteria",
+          level: 1,
+          costsPerUnit: { gold: 0, wood: 0, stone: 0, iron: 0, food: 0 },
+          durationMsPerUnit: 1,
+          prerequisites: {},
+        },
+      } as any);
+    } catch (err: any) {
+      thrownError = err;
+    }
+    expect(thrownError).not.toBeNull();
+    // Validar rechazo estricto a nivel de validador de argumentos por el campo 'overrideRule'
+    // sin alcanzar la lógica posterior del handler (ni fallo de reglas, ni de costes, ni de titularidad)
+    expect(thrownError.message).toContain("overrideRule");
+    expect(thrownError.message).not.toContain("pendientes de especificación oficial");
+    expect(thrownError.message).not.toContain("No autorizado");
   });
 });
 
