@@ -12,6 +12,7 @@ import { TAXES, WELLBEING, UNITS, TERRAINS, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL
 import { woundedRecoveryRatio } from "./battleRules";
 import { recoverFatigue } from "./territoryRules";
 import { isCivilizationId } from "./civilizations";
+import { normalizeCivilizationId } from "./civilizationRules";
 import { CIVILIZATIONS } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
 import {
@@ -163,6 +164,12 @@ export async function settleRelationalKingdomEconomy(
   await completeDueTraining(ctx, kingdom._id, now);
   await completeDueResearch(ctx, kingdom._id, now);
 
+  // [DECISIÓN 21-10-2026] Migración perezosa de identificadores de civilización antiguos (Navajos, Masáis).
+  const normalizedCivilization = normalizeCivilizationId(kingdom.civilization);
+  if (normalizedCivilization && normalizedCivilization !== kingdom.civilization) {
+    await ctx.db.patch(kingdom._id, { civilization: normalizedCivilization });
+    kingdom = { ...kingdom, civilization: normalizedCivilization };
+  }
   const state = await readRelationalKingdomState(ctx, kingdom._id);
   if (!state.resources) throw new Error("No existen recursos para el reino.");
   if (!state.population) {

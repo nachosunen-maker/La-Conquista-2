@@ -20,9 +20,9 @@ export const OFFICIAL_CIVILIZATIONS = [
   { id: 'mongoles', name: 'Mongoles', icon: '🏹', desc: 'Tiradores a caballo nómadas, movilidad extrema y asedio veloz' },
   { id: 'chinos', name: 'Chinos', icon: '🏯', desc: 'Pólvora temprana, burocracia eficiente y gran muralla' },
   { id: 'japoneses', name: 'Japoneses', icon: '⚔️', desc: 'Código de honor marcial, katanas forjadas y arqueros samurái' },
-  { id: 'indios_americanos', name: 'Indios Americanos', icon: '🦅', desc: 'Conocimiento del terreno, sigilo, caza y resistencia física' },
+  { id: 'navajos', name: 'Navajos', icon: '🦅', desc: 'Conocimiento del terreno, sigilo, caza y resistencia física' },
   { id: 'aztecas', name: 'Aztecas', icon: '☀️', desc: 'Guerreros águila y jaguar, templos y tenacidad en el combate' },
-  { id: 'keniatas', name: 'Keniatas', icon: '🦁', desc: 'Velocidad, lanzas ligeras, pastoreo y aguante territorial' },
+  { id: 'masais', name: 'Masáis', icon: '🦁', desc: 'Velocidad, lanzas ligeras, pastoreo y aguante territorial' },
 ];
 
 export function HomeScreen({ onEnterDemo, onEnterKingdom, onCreateKingdom, hasKingdom }: HomeScreenProps) {

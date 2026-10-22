@@ -125,7 +125,7 @@ const WINDOW_LABELS: Record<string, string> = {
 
 const CIVILIZATION_LABELS: Record<string, string> = {
   ingleses: 'Ingleses', romanos: 'Romanos', griegos: 'Griegos', vikingos: 'Vikingos', bizantinos: 'Bizantinos', arabes: 'Árabes',
-  mongoles: 'Mongoles', chinos: 'Chinos', japoneses: 'Japoneses', indiosAmericanos: 'Indios americanos', aztecas: 'Aztecas', keniatas: 'Keniatas',
+  mongoles: 'Mongoles', chinos: 'Chinos', japoneses: 'Japoneses', navajos: 'Navajos', aztecas: 'Aztecas', masais: 'Masáis',
 };
 
 export function ParliamentPanel(props: {

@@ -128,7 +128,7 @@ export function canStartExploration(input: {
     food: EXPLORATION.BASE_COSTS.food,
   };
 
-  // Aplicar bonificaciones pasivas culturales (p. ej. Vikingos −15 % duración, Indios americanos −20 % costes)
+  // Aplicar bonificaciones pasivas culturales (p. ej. Vikingos −15 % duración, Navajos −20 % costes)
   const civExploration = applyCivilizationExploration(baseCosts, baseDurationMs, input.civilization);
   const durationMs = civExploration.durationMs;
   const durationSeconds = Math.ceil(durationMs / 1000);
