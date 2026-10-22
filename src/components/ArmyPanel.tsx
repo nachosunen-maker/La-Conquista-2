@@ -169,13 +169,12 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
 
   const safeMercenaries = Number.isInteger(mercenaryCount) && mercenaryCount > 0 ? mercenaryCount : 0;
   const mercenaryCost = safeMercenaries * state.mercenaries.goldPerUnit;
-  const mercenarySalary = safeMercenaries * state.mercenaries.salaryGoldPerDay;
   const mercenaryRoom = Math.max(0, state.mercenaries.maxActive - state.mercenaries.active);
 
   const handleHire = () =>
     action.run('hire', async () => {
       const result = await hireMercenaries({ kingdomId, count: safeMercenaries });
-      return `${result.count} mercenarios contratados por ${result.cost} oro; contrato hasta ${new Date(result.contractEndsAt).toLocaleString('es-ES')} con salario de ${result.salaryGoldPerDay} oro/día.`;
+      return `${result.count} mercenarios contratados por ${result.cost} oro; contrato hasta ${new Date(result.contractEndsAt).toLocaleString('es-ES')} sin salario diario.`;
     });
 
   const handleEquipment = () =>
@@ -359,8 +358,8 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
           <div className={`${cardClass} space-y-1 text-[11px] text-[#c7beac]`}>
             <p><strong className="text-[#e6ded0]">Qué hace:</strong> contrata {UNIT_LABELS[state.mercenaries.unitType] ?? state.mercenaries.unitType} de nivel {state.mercenaries.level} que se suman al ejército y al censo de inmediato, sin consumir población civil.</p>
-            <p><strong className="text-[#e6ded0]">Cuánto cuesta:</strong> {state.mercenaries.goldPerUnit} oro por mercenario más un salario de {state.mercenaries.salaryGoldPerDay} oro por mercenario y día real, descontado en cada liquidación.</p>
-            <p><strong className="text-[#e6ded0]">Cuánto dura:</strong> contrato de {state.mercenaries.contractDays} días reales; al vencer, o si no se puede pagar el salario, desaparecen.</p>
+            <p><strong className="text-[#e6ded0]">Cuánto cuesta:</strong> {state.mercenaries.goldPerUnit} oro por mercenario, pagados al contratar; sin salario diario.</p>
+            <p><strong className="text-[#e6ded0]">Cuánto dura:</strong> contrato de {state.mercenaries.contractDays} días reales; al vencer desaparecen.</p>
             <p><strong className="text-[#e6ded0]">Límite:</strong> {state.mercenaries.maxActive} activos con la Taberna actual (50 por nivel). No generan natalidad.</p>
             {state.mercenaries.contracts.length > 0 && (
               <p className="text-[#8e816d]">
@@ -382,7 +381,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
               </label>
               <div className="rounded border border-[#2b2419] bg-[#100e0b] p-2.5 text-[11px] text-[#c7beac] space-y-1">
                 <p><strong className="text-[#e6ded0]">Coste inmediato:</strong> {mercenaryCost.toLocaleString('es-ES')} oro.</p>
-                <p><strong className="text-[#e6ded0]">Salario:</strong> {mercenarySalary.toLocaleString('es-ES')} oro por día real durante {state.mercenaries.contractDays} días.</p>
+                <p><strong className="text-[#e6ded0]">Mantenimiento:</strong> solo alimentos durante {state.mercenaries.contractDays} días; sin salario.</p>
                 <p><strong className="text-[#e6ded0]">Resultado:</strong> +{safeMercenaries} {UNIT_LABELS[state.mercenaries.unitType] ?? state.mercenaries.unitType} de nivel {state.mercenaries.level} activos hasta el fin del contrato.</p>
               </div>
               {state.mercenaries.tavernLevel < 1 ? (

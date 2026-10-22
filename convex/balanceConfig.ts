@@ -352,8 +352,12 @@ export const MERCENARIES = {
   /** Máximo de mercenarios activos por nivel de Taberna. */
   MAX_PER_TAVERN_LEVEL: 50,
   CONTRACT_DAYS: 7,
-  /** Salario por mercenario y día real, descontado en la liquidación; si no hay oro, desertan. */
-  SALARY_GOLD_PER_DAY: 1,
+  /**
+   * [DECISIÓN 21-10-2026] Sin salario diario: los mercenarios se pagan íntegramente al contratarlos
+   * (sección 21 de CLAUDE.md, «Sin salarios militares, incluidos los mercenarios»). Se conserva el
+   * parámetro a 0 para que la liquidación y la interfaz no cambien de forma.
+   */
+  SALARY_GOLD_PER_DAY: 0,
   /** No cuentan para la natalidad ni para la capacidad residencial. */
   COUNTS_FOR_GROWTH: false,
 } as const;
