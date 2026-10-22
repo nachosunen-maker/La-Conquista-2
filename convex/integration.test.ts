@@ -389,15 +389,15 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
   });
 });
 
-describe("Autenticación OIDC y Seguridad de Identidad Google (P1, P4, T-01)", () => {
-  test("getViewer devuelve null para invitados anónimos y la identidad verificada para usuarios Google", async () => {
+describe("Autenticación y seguridad de identidad (P1, P4, T-01): identidad simulada del servidor", () => {
+  test("getViewer devuelve null para invitados anónimos y la identidad verificada para usuarios con sesión", async () => {
     const t = createTestBackend();
 
     // 1. Invitado anónimo
     const anonymousViewer = await t.query(api.kingdoms.getViewer, {});
     expect(anonymousViewer).toBeNull();
 
-    // 2. Usuario con sesión OIDC Google verificada
+    // 2. Usuario con sesión verificada (identidad simulada; el inicio real por contraseña se prueba en account.test.ts)
     const googleUser = t.withIdentity({
       subject: "198291664207-user-12345",
       tokenIdentifier: "https://accounts.google.com|198291664207-user-12345",

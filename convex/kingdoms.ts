@@ -106,9 +106,15 @@ export const getViewer = query({
     if (!identity) {
       return null;
     }
+    // Nombre de gobernante: vive en la tabla users de Convex Auth (sección 5 de CLAUDE.md).
+    const userId = await getAuthUserId(ctx);
+    const normalizedUserId = userId ? ctx.db.normalizeId("users", userId) : null;
+    const user = normalizedUserId ? await ctx.db.get(normalizedUserId) : null;
     return {
       tokenIdentifier: identity.tokenIdentifier,
       subject: identity.subject,
+      userId: userId ?? identity.subject,
+      rulerName: user?.name ?? identity.name,
       email: identity.email,
       name: identity.name,
       pictureUrl: identity.pictureUrl,

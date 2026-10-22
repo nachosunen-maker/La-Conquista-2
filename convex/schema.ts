@@ -299,6 +299,17 @@ export default defineSchema({
       isMercenary: v.optional(v.boolean()), // [M-02] Contrato de mercenarios (P53)
       contractEndsAt: v.optional(v.number()),
     }).index("by_kingdom", ["kingdomId"]),
+
+    // Código de recuperación de la cuenta (sección 5 de CLAUDE.md, [DECISIÓN 21-10-2026]).
+    // Solo se guarda el hash SHA-256; el código en claro se muestra una única vez al jugador.
+    accountRecovery: defineTable({
+      userId: v.id("users"),
+      codeHash: v.string(),
+      issuedAt: v.number(),
+      lastUsedAt: v.optional(v.number()),
+      failedAttempts: v.number(),
+      lockedUntil: v.optional(v.number()),
+    }).index("by_user", ["userId"]),
   },
   {
     schemaValidation: false,
