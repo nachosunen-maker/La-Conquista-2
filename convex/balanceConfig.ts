@@ -352,8 +352,12 @@ export const MERCENARIES = {
   /** Máximo de mercenarios activos por nivel de Taberna. */
   MAX_PER_TAVERN_LEVEL: 50,
   CONTRACT_DAYS: 7,
-  /** Salario por mercenario y día real, descontado en la liquidación; si no hay oro, desertan. */
-  SALARY_GOLD_PER_DAY: 1,
+  /**
+   * [DECISIÓN 21-10-2026] Sin salario diario: los mercenarios se pagan íntegramente al contratarlos
+   * (sección 21 de CLAUDE.md, «Sin salarios militares, incluidos los mercenarios»). Se conserva el
+   * parámetro a 0 para que la liquidación y la interfaz no cambien de forma.
+   */
+  SALARY_GOLD_PER_DAY: 0,
   /** No cuentan para la natalidad ni para la capacidad residencial. */
   COUNTS_FOR_GROWTH: false,
 } as const;
@@ -548,9 +552,9 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   { id: "tech_civ_mongoles", name: "Tácticas de la estepa", branch: "civilizacion", universityLevel: 2, costs: { gold: 200, wood: 150, stone: 80, iron: 50, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { establo: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "mongoles", effect: { key: "marchSpeed", value: 0.15, description: "+15 % velocidad de marcha y maniobra envolvente" } },
   { id: "tech_civ_chinos", name: "Gran Muralla y pólvora", branch: "civilizacion", universityLevel: 2, costs: { gold: 220, wood: 150, stone: 300, iron: 50, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { castillo: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "chinos", effect: { key: "combatDefense", value: 0.06, description: "+6 % defensa militar y arquitectura defensiva" } },
   { id: "tech_civ_japoneses", name: "Acero Tamahagane y Bushido", branch: "civilizacion", universityLevel: 2, costs: { gold: 250, wood: 100, stone: 100, iron: 120, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { herreria: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "japoneses", effect: { key: "combatAttack", value: 0.05, description: "+5 % ataque militar por temple de hojas de acero" } },
-  { id: "tech_civ_indiosAmericanos", name: "Rastreadores del bosque", branch: "civilizacion", universityLevel: 2, costs: { gold: 150, wood: 250, stone: 100, iron: 30, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "indiosAmericanos", effect: { key: "marchFatigue", value: 0.20, description: "−20 % fatiga de marcha por sendas y bosques" } },
+  { id: "tech_civ_navajos", name: "Rastreadores del bosque", branch: "civilizacion", universityLevel: 2, costs: { gold: 150, wood: 250, stone: 100, iron: 30, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "navajos", effect: { key: "marchFatigue", value: 0.20, description: "−20 % fatiga de marcha por sendas y bosques" } },
   { id: "tech_civ_aztecas", name: "Chinampas y sacerdotes guerreros", branch: "civilizacion", universityLevel: 2, costs: { gold: 200, wood: 200, stone: 150, iron: 30, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "aztecas", effect: { key: "agricultureProduction", value: 0.08, description: "+8 % producción agrícola en huertos intensivos" } },
-  { id: "tech_civ_keniatas", name: "Resistencia Masai y sabana", branch: "civilizacion", universityLevel: 2, costs: { gold: 160, wood: 180, stone: 100, iron: 40, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "keniatas", effect: { key: "marchFatigue", value: 0.25, description: "−25 % fatiga en expediciones de larga distancia" } },
+  { id: "tech_civ_masais", name: "Resistencia masái y sabana", branch: "civilizacion", universityLevel: 2, costs: { gold: 160, wood: 180, stone: 100, iron: 40, food: 0 }, durationSeconds: 2 * DAY, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "masais", effect: { key: "marchFatigue", value: 0.25, description: "−25 % fatiga en expediciones de larga distancia" } },
 ];
 
 export const RESEARCH = {
@@ -894,8 +898,9 @@ export const CIVILIZATIONS = [
     uniqueTechnologyId: "tech_civ_japoneses",
   },
   {
-    id: "indiosAmericanos",
-    label: "Indios americanos",
+    // [DECISIÓN 21-10-2026] «Indios americanos» pasa a Navajos. Pasiva anterior conservada hasta su rediseño.
+    id: "navajos",
+    label: "Navajos",
     emblem: "🦅",
     style: "Rastreo ancestral, expediciones autosuficientes y bosques vivos",
     passive: {
@@ -914,7 +919,7 @@ export const CIVILIZATIONS = [
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
     },
-    uniqueTechnologyId: "tech_civ_indiosAmericanos",
+    uniqueTechnologyId: "tech_civ_navajos",
   },
   {
     id: "aztecas",
@@ -940,8 +945,9 @@ export const CIVILIZATIONS = [
     uniqueTechnologyId: "tech_civ_aztecas",
   },
   {
-    id: "keniatas",
-    label: "Keniatas",
+    // [DECISIÓN 21-10-2026] «Keniatas» pasa a Masáis. Pasiva anterior conservada hasta su rediseño.
+    id: "masais",
+    label: "Masáis",
     emblem: "🌾",
     style: "Fondo físico inagotable en marchas y ganadería/agricultura tenaz",
     passive: {
@@ -960,10 +966,21 @@ export const CIVILIZATIONS = [
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
     },
-    uniqueTechnologyId: "tech_civ_keniatas",
+    uniqueTechnologyId: "tech_civ_masais",
   },
 ] as const;
 
 export type CivilizationId = (typeof CIVILIZATIONS)[number]["id"];
+/** [DECISIÓN 21-10-2026] Identificadores antiguos aún presentes en reinos y progreso guardados. */
+export const LEGACY_CIVILIZATION_IDS: Readonly<Record<string, string>> = {
+  indiosAmericanos: "navajos",
+  indios_americanos: "navajos",
+  keniatas: "masais",
+};
+export const LEGACY_TECHNOLOGY_IDS: Readonly<Record<string, string>> = {
+  tech_civ_indiosAmericanos: "tech_civ_navajos",
+  tech_civ_keniatas: "tech_civ_masais",
+};
+
 export const CIVILIZATION_BONUSES_ENABLED = true;
 export const CIVILIZATION_IMMUTABLE = true;

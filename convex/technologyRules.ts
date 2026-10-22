@@ -12,8 +12,7 @@ import {
   TECHNOLOGIES,
   HOSPITAL_RECOVERY_CAP,
   type TechnologyBalance,
-  type TechnologyEffectKey,
-} from "./balanceConfig";
+  type TechnologyEffectKey, LEGACY_TECHNOLOGY_IDS } from "./balanceConfig";
 import { checkBuildingRequirements } from "./buildingRules";
 import {
   getCivilizationPassive,
@@ -26,8 +25,13 @@ export const TECHNOLOGY_CATALOG: Readonly<Record<string, TechnologyBalance>> = O
   TECHNOLOGIES.map((technology) => [technology.id, technology])
 );
 
+/** Traduce identificadores de tecnología antiguos (civilizaciones renombradas) al vigente. */
+export function normalizeTechnologyId(id: string): string {
+  return LEGACY_TECHNOLOGY_IDS[id] ?? id;
+}
+
 export function getTechnology(id: string): TechnologyBalance | null {
-  return TECHNOLOGY_CATALOG[id] ?? null;
+  return TECHNOLOGY_CATALOG[normalizeTechnologyId(id)] ?? null;
 }
 
 export interface ResearchQueueEntry {
@@ -85,7 +89,8 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     marchFatigueReduction: 0,
   };
   const seen = new Set<string>();
-  for (const id of completedIds) {
+  for (const rawId of completedIds) {
+    const id = normalizeTechnologyId(rawId);
     if (seen.has(id)) continue;
     seen.add(id);
     const technology = TECHNOLOGY_CATALOG[id];
@@ -168,7 +173,7 @@ export function createResearchPlan(input: {
   now: number;
   kingdomCivilization?: string | null;
 }): { success: true; plan: ResearchPlan } | { success: false; error: string } {
-  const technology = TECHNOLOGY_CATALOG[input.technologyId];
+  const technology = TECHNOLOGY_CATALOG[normalizeTechnologyId(input.technologyId)];
   if (!technology) return { success: false, error: `La tecnología '${input.technologyId}' no existe en el catálogo.` };
   if (!Number.isFinite(input.now) || input.now < 0) return { success: false, error: "Marca temporal inválida." };
 
@@ -254,7 +259,7 @@ export async function readCompletedTechnologyIds(ctx: { db: any }, kingdomId: un
       .collect();
     return docs
       .filter((doc) => doc.status === "completed" && typeof doc.technologyId === "string")
-      .map((doc) => doc.technologyId as string);
+      .map((doc) => normalizeTechnologyId(doc.technologyId as string));
   } catch {
     return [];
   }

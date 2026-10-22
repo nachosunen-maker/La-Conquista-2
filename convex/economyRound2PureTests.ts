@@ -114,11 +114,11 @@ export function runRound2EconomyTests(): Round2TestResult[] {
       details: `Gloria 25,5 tras 2 días: ${gloryDecay.glory.after} (moral +${gloryDecay.glory.moraleBonus}); moral con 45 de gloria: ${moraleWithGlory}; con 500: ${moraleCapGlory}`,
     },
     {
-      test: "Mercenarios (M-02): salario de 1 oro/día cada uno, sin natalidad propia, y deserción cuando el oro no alcanza",
-      passed: mercs.mercenaries.salaryDue === 100 && mercs.mercenaries.salaryPaid === 100 && !mercs.mercenaries.unpaid &&
-        mercs.population.births === expectedBirthsNoMercs && mercsBroke.mercenaries.unpaid && mercsBroke.mercenaries.salaryPaid < 100 &&
-        Math.abs(mercs.updatedResources.gold - (normal.updatedResources.gold - 100 + (mercs.taxesCollected - normal.taxesCollected))) < 1e-6,
-      details: `Salario debido/pagado: ${mercs.mercenaries.salaryDue}/${mercs.mercenaries.salaryPaid}; nacimientos sin contar mercenarios: ${mercs.population.births} (esperado ${expectedBirthsNoMercs}); sin oro: impagado ${mercsBroke.mercenaries.unpaid}`,
+      test: "Mercenarios (M-02 + decisión 21-10-2026): sin salario diario, sin natalidad propia y sin deserción por impago",
+      passed: mercs.mercenaries.salaryDue === 0 && mercs.mercenaries.salaryPaid === 0 && !mercs.mercenaries.unpaid &&
+        mercs.population.births === expectedBirthsNoMercs && !mercsBroke.mercenaries.unpaid &&
+        Math.abs(mercs.updatedResources.gold - (normal.updatedResources.gold + (mercs.taxesCollected - normal.taxesCollected))) < 1e-6,
+      details: `Salario debido ${mercs.mercenaries.salaryDue}; nacimientos sin contar mercenarios: ${mercs.population.births} (esperado ${expectedBirthsNoMercs}); sin oro no desertan: ${!mercsBroke.mercenaries.unpaid}`,
     },
     {
       test: "Estaciones informativas (M-05 B): cuatro estaciones de un cuarto de año de juego, cíclicas, sin efectos activos",

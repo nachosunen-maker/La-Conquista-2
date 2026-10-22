@@ -103,12 +103,11 @@ Resultados completos del banco (escenarios del Complemento §6): fuerzas iguales
 | M-06 murallas y almacén (opción A) | Murallas +5 %/nivel (máx. +50 %). Almacén: 10.000 por recurso + 2.000 por nivel de Mercado, ×1,10 con Almacenes reforzados; el excedente producido se pierde, las reservas previas no. `STORAGE`. |
 | M-07 profesiones (opción A) | medicina +1 pp de recuperación por 10 trabajadores (tope +10); religión y circo +1 felicidad/día por 20 (tope +3 cada una); panadería −5 % de consumo por 20 (tope −15 %); construcción −1 % de duración de obras por 10 (tope −20 %). Limitadas por la capacidad del edificio. Oficios asignables ampliados. `PROFESSION_EFFECTS`. |
 | M-08 apuestas | Se mantienen desactivadas (opción A). |
-| M-09 civilizaciones | Sin bonificaciones (opción A); el nombre "Indios americanos" sigue pendiente de decisión antes de publicar. |
+| M-09 civilizaciones | Nombres decididos el 21-10-2026: «Indios americanos» → Navajos y «Keniatas» → Masáis (identificadores antiguos migrados de forma perezosa). |
 | M-10 bots PvE | Sin bots (opción A); siguiente paso lógico una vez calibrado el combate. |
 | M-11 formación (opción A) | Matriz de contrapartidas caballería > arqueros > infantería > caballería (+25 % contra el tipo contrarrestado, proporcional a su presencia) y fracción de participación por tipo (`army:setFormation`). `UNIT_COUNTERS`, `COMBAT.FORMATION_COUNTER_BONUS`. |
 
 ### Sigue sin valor oficial
-- Nombre de la civilización "Indios americanos" (M-09).
 - Terreno intermedio en la marcha (R-14) y apuestas de territorio (M-08).
 - Bonificaciones por civilización (M-09) y bots PvE (M-10), pospuestos por decisión.
 - Inicio de sesión con correo y contraseña (T-01): requiere Convex Auth con secretos fuera del repositorio; Google OIDC ya está configurado.

@@ -1,7 +1,7 @@
 # CLAUDE.md — LA CONQUISTA
 
 Juego web multijugador de estrategia y gestión medieval, de partidas persistentes.
-**Versión de este documento: 20-10-2026.** Sustituye a cualquier CLAUDE.md anterior (el anterior hablaba de Appwrite, que se ha descartado).
+**Versión de este documento: 21-10-2026.** Sustituye a cualquier CLAUDE.md anterior (el anterior hablaba de Appwrite, que se ha descartado).
 
 Fuentes, de más antigua a más reciente:
 1. `LaConquista_Especificacion_Maestra_Puntos_1_al_73.docx` — especificación original (P1–P73). Tenía 1.000 habitantes en P10, temporadas competitivas, P56/P61 vacíos y P66 truncado.
@@ -11,7 +11,7 @@ Fuentes, de más antigua a más reciente:
 5. Exploración del mapa (18-10-2026) — registrada en `.aistudio/.../implementation_plan.md`.
 6. `LaConquista_Especificacion_Maestra_Actualizada_P1-P73_Convex.docx` (20-10-2026) — **especificación vigente**: 2.000 habitantes, estaciones en vez de temporadas, P66 restaurado, P56/P61 marcados «pendiente de aclaración».
 7. `La_Conquista_12_Civilizaciones_Historicas.pdf` (20-10-2026) — dossier histórico de las 12 civilizaciones: **propuestas de diseño, no aprobadas ni implementadas** (sección 6).
-8. Decisiones del responsable en conversación (20-10-2026) — sección 21. **Manda siempre la decisión más reciente.**
+8. Decisiones del responsable en conversación (20-10-2026 y 21-10-2026) — sección 21. **Manda siempre la decisión más reciente.**
 
 Las referencias `(P17)`, `(D-02)`, `(M-05)`… apuntan a esos documentos.
 Idioma de documentación, textos de interfaz y nombres visibles: **español**.
@@ -102,8 +102,8 @@ Idioma de documentación, textos de interfaz y nombres visibles: **español**.
 | Parlamento y desafíos (máquina de estados) | ✅ Implementado |
 | Combate automático (simulador determinista, 3 rondas) | ✅ Implementado y recalibrado (Ronda 2) |
 | Civilizaciones | 🟡 Parcial: bonificación pasiva + tecnología única por civilización. **Falta** equipo, tropas y edificios únicos |
-| Login | 🟡 Solo Google. **Hay que cambiarlo a nombre + contraseña, con crear cuenta, iniciar sesión e invitado en la pantalla de la maqueta** (sección 5) |
-| Misiones semanales y de progreso | ⛔ No implementadas |
+| Login | 🟡 Nombre de gobernante + contraseña decidido; comprobar implementación y pruebas. Sin Google/Gmail (sección 5) |
+| Misiones progresivas, diarias y secretas | ⛔ No implementadas; diseño funcional acordado el 21-10-2026 |
 | Despliegue real y pruebas contra el servidor de Convex (T-02) | ⛔ Pendiente (necesita autorización) |
 | Bots PvE · apuestas en desafíos · efectos del clima | ⛔ Descartados o desactivados por decisión |
 
@@ -113,7 +113,7 @@ Informes: 164 pruebas puras y 14 de integración superadas (18-10), 964 simulaci
 
 ## 5. Pantalla de inicio, inicio de sesión y creación del reino (P4–P9)
 
-**Decisiones del responsable (20-10-2026):**
+**Decisiones del responsable (20-10-2026 y actualización 21-10-2026):**
 - Cada jugador entra con **nombre de gobernante + contraseña** y **retoma su partida desde cualquier dispositivo o lugar**. La cuenta y todo el progreso viven en el servidor; el navegador solo guarda la sesión. **Sin verificación por Gmail/Google**: el inicio con Google actual debe retirarse.
 - Las opciones de entrada (**crear cuenta, iniciar sesión, entrar como invitado**) salen **en la misma pantalla de inicio de la maqueta**, no en pantallas aparte.
 - **Invitado permitido**, para ver cómo es una civilización o el juego, con **aviso obligatorio** de que el progreso no se guarda.
@@ -155,7 +155,7 @@ Informes: 164 pruebas puras y 14 de integración superadas (18-10), 964 simulaci
 
 ## 6. Civilizaciones (P6, D-43 a D-45, M-09)
 
-Ingleses · Romanos · Griegos · Vikingos · Bizantinos · Árabes · Mongoles · Chinos · Japoneses · Indios americanos · Aztecas · Keniatas.
+Ingleses · Romanos · Griegos · Vikingos · Bizantinos · Árabes · Mongoles · Chinos · Japoneses · Navajos · Aztecas · Masáis.
 
 **Reglas fijas:** cada una con bonificaciones y estilo propios; **ninguna objetivamente superior**; se elige al fundar y es inmutable; cada civilización debe tener **armas, armaduras, edificios y soldados personalizados** a su estilo, lo máximo posible. Los multiplicadores de calidad de armas/armaduras (P30–P31) y de nivel militar (P29) son **iguales para todas**: cambia el nombre, la estética y las bonificaciones.
 
@@ -172,9 +172,9 @@ Ingleses · Romanos · Griegos · Vikingos · Bizantinos · Árabes · Mongoles 
 | Mongoles | +15 % velocidad de marcha · −10 % duración de instrucción de caballería |
 | Chinos | +8 % alimentos · +5 % capacidad de viviendas |
 | Japoneses | +10 % hierro · +5 % poder ofensivo |
-| Indios americanos | −20 % costes de expedición · +8 % madera |
+| Navajos | Pasiva anterior pendiente de rediseño; no aplicar valores nuevos sin balance |
 | Aztecas | +12 % alimentos · +4 felicidad base |
-| Keniatas | −25 % fatiga en marchas · +6 % alimentos |
+| Masáis | Pasiva anterior pendiente de rediseño; no aplicar valores nuevos sin balance |
 
 **Pendiente de implementar (decisión del responsable, 20-10-2026):** las singularidades de **armas, armaduras, soldados y edificios** de cada civilización.
 
@@ -191,17 +191,17 @@ Ingleses · Romanos · Griegos · Vikingos · Bizantinos · Árabes · Mongoles 
 | Mongoles | Arco compuesto · cuero lacado | Ger del Kan (Viviendas) | Jinete arquero |
 | Chinos | Jian y ballesta · armadura laminada | Arrozal Imperial (Granja) | Ballestero |
 | Japoneses | Katana, yari y yumi · dō-maru / gusoku | Herrería del Maestro Forjador (Herrería) | Samurái (y ashigaru lancero) |
-| Indios americanos | Arco y tomahawk · peto y escudo de cuero decorado | Casa Larga (Viviendas) | Guerrero explorador |
+| Navajos | Equipo, edificio y tropa característicos por diseñar según el dossier histórico | Pendiente | Pendiente |
 | Aztecas | Macuahuitl · ichcahuipilli | Templo Mayor (Iglesia) | Guerrero Águila |
-| Keniatas | Lanza de hoja ancha y rungu · escudo de cuero | Casa de Curanderos (Hospital militar) | Lancero morán |
+| Masáis | Lanza y escudo; detalles por validar históricamente | Pendiente | Pendiente |
 
 La tabla completa de nombres por nivel de calidad (palo → acero avanzado; ninguna → acero) de cada civilización se define en ese bloque. Las bonificaciones deben revisarse en el balance (M-09 recomendaba ±5 % simétricos).
 
 **Reglas de diseño tomadas del dossier histórico (20-10-2026; propuestas, no aprobadas):**
-- **Una cronología y una región por facción** antes de implementar su equipo. Propuesta inicial: Ingleses siglos XI–XV · Romanos Imperio alto (siglos I–II) · Griegos época clásica (hoplitas) · Vikingos VIII–XI · Bizantinos periodo medio (kataphraktoi) · Árabes califatos (VII–XIII) · Mongoles XIII–XIV · Chinos dinastía Song · Japoneses periodo Sengoku · Aztecas/mexicas XIV–XVI prehispánico · Indios americanos y Keniatas: por definir (ver puntos abiertos).
+- **Una cronología y una región por facción** antes de implementar su equipo. Propuesta inicial: Ingleses siglos XI–XV · Romanos Imperio alto (siglos I–II) · Griegos época clásica (hoplitas) · Vikingos VIII–XI · Bizantinos periodo medio (kataphraktoi) · Árabes califatos (VII–XIII) · Mongoles XIII–XIV · Chinos dinastía Song · Japoneses periodo Sengoku · Aztecas/mexicas XIV–XVI prehispánico · Navajos y Masáis: cronología, región y equipamiento por documentar antes de implementar.
 - **No mezclar épocas ni materiales:** los aztecas no tienen caballos ni acero europeo; la pólvora china y el arcabuz japonés (teppō) solo se desbloquean por tecnología y época; los vikingos no llevan cascos con cuernos; la katana no es el arma universal (lanzas y arcos cuentan igual); el equipo romano no mezcla periodos.
 - **Un arma característica no es más poderosa:** los multiplicadores siguen siendo los generales (P30–P31). Solo cambian nombre, estética y bonificación.
-- **Cada pasiva lleva ventaja y debilidad** (ninguna civilización superior). Ejemplos del dossier: Ingleses con caballería pesada más cara · Romanos con caballería menos especializada · Vikingos peores en asedios largos · Mongoles débiles en defensa urbana fija · Bizantinos con élites caras · Aztecas sin caballería. **Hoy el código solo tiene ventajas**: falta añadir las debilidades.
+- **Cada pasiva lleva ventaja y debilidad** (ninguna civilización superior). Ejemplos del dossier: Ingleses con caballería pesada más cara · Romanos con caballería menos especializada · Vikingos peores en asedios largos · Mongoles débiles en defensa urbana fija · Bizantinos con élites caras · Aztecas sin caballería. **La configuración anterior solo tenía ventajas**: el diseño nuevo deberá incluir una debilidad por civilización. Los valores numéricos antiguos de Navajos/Masáis deben revisarse antes de aplicarlos.
 - Para mantener un tipo de tropa si la civilización no tiene caballería (p. ej. aztecas), sustituirlo por una unidad de élite equivalente del mismo tipo; a decidir en el bloque.
 
 ---
@@ -299,16 +299,16 @@ Los soldados consumen un **5 % más** (factor 1,05); las máquinas de asedio no 
 - Sin botín (D-31). Sin bots PvE (D-33, M-10).
 - Informe completo (P43): resultado, bajas por bando, supervivientes, explicación generada con los factores reales, honor, gloria, territorio, desgaste y recuperación prevista.
 
-**Formaciones — pendiente de diseñar (decisión del responsable: 3 o 4 tipos).** Propuesta del asistente, basada en formaciones históricas, que **no sustituye** la matriz entre tipos de unidad sino que se suma:
+**Formaciones — cuatro tipos aprobados el 21-10-2026: ofensiva, defensiva, equilibrada y flanqueo.** Los efectos, porcentajes y matriz de ventajas están pendientes de diseño y pruebas. Este sistema **no sustituye** la matriz entre tipos de unidad sino que se suma:
 
 | Formación | Idea | Fuerte contra | Débil contra |
 |---|---|---|---|
-| Muro de escudos | línea ancha de infantería con arqueros detrás | Pinza | Cuña |
-| Cuña | masa concentrada que rompe el centro | Muro de escudos | Cuadro |
-| Cuadro (falange) | bloque compacto de lanzas, anticaballería | Cuña | Pinza |
-| Pinza (flancos) | caballería y arqueros que envuelven | Cuadro | Muro de escudos |
+| Ofensiva | Prioriza infligir daño y romper la línea enemiga | Por calcular | Por calcular |
+| Defensiva | Prioriza reducir bajas propias y resistir | Por calcular | Por calcular |
+| Equilibrada | Sin especialización extrema; respuesta flexible | Por calcular | Por calcular |
+| Flanqueo | Busca atacar los laterales y desorganizar al rival | Por calcular | Por calcular |
 
-Cadena: Cuña > Muro > Pinza > Cuadro > Cuña; los cruces Cuña–Pinza y Muro–Cuadro son neutros. Modificador ±10 % (parámetro).
+No fijar todavía modificadores numéricos ni cruces de ventaja: deben calcularse, incorporarse a `balanceConfig.ts` y validarse con simulaciones.
 
 ---
 
@@ -346,9 +346,26 @@ Los heridos salen del ejército, no combaten y se muestran aparte. **Hospital mi
 
 ## 17. Misiones, honor y bonus (P3, P50, P51, P59)
 
-- **Bonus diario:** +5 honor, una vez cada 24 h; validado en servidor.
-- **Misiones — pendientes de implementar.** Concepto confirmado: se completan al construir ciertos edificios, llegar a ciertos niveles, entrenar tropas, etc.; **recompensas: recursos, honor y gloria**; reclamación manual validada en servidor; las semanales se renuevan cada semana (7 días reales). Recompensas modestas: no sustituyen al desarrollo.
-- Catálogo inicial propuesto por el asistente (ajustable): progreso, una sola vez — primera Vivienda · Granja nivel 3 · Castillo nivel 2 · entrenar 50 soldados · primera investigación · primer desafío · primera victoria · 5.000 habitantes. Semanales (5 activas) — 2 mejoras de edificio · entrenar 100 soldados · recuperar 50 heridos · 1 investigación · 1 desafío · bonus diario 5 veces · ganar 1 batalla. Recompensa por dificultad: fácil = recursos pequeños + 2 honor · media = recursos medios + 5 honor · difícil = recursos grandes + 10 honor + 5 gloria.
+### Decisiones funcionales cerradas (21-10-2026)
+
+- **Bonus diario existente:** +5 honor, una vez cada 24 h; validado en servidor. No confundirlo con las misiones diarias.
+- **Misiones progresivas por etapas:** se desbloquean poco a poco conforme el jugador avanza. No se muestran por adelantado todas las misiones futuras. Los objetivos pueden incluir edificios construidos o mejorados, niveles alcanzados, investigaciones completadas, tamaño del ejército, tropas entrenadas y batallas ganadas.
+- **Completado automático:** el servidor detecta el cumplimiento del objetivo, marca la misión completada y concede la recompensa automáticamente. No hay botón de reclamar. La recompensa de cada misión única se entrega una sola vez, mediante una operación atómica validada en servidor.
+- **Celebración visual:** al completar una misión aparece una animación breve con el nombre del logro y sus recompensas. No debe bloquear ni interrumpir la partida. Al terminar una etapa, se muestra también su premio final.
+- **Recompensas individuales y de etapa:** recursos, oro, honor y gloria; además, según dificultad y etapa, tropas gratuitas, objetos únicos o bonificaciones temporales. Completar todas las misiones requeridas de una etapa concede una recompensa adicional.
+- **Misiones secretas:** sus condiciones y existencia permanecen ocultas hasta que se cumplen. Entonces se revela el logro con una celebración y recompensa automática. Cada misión secreta única se concede una sola vez.
+- **Misiones secretas por civilización:** cada civilización tendrá el mismo número de misiones secretas exclusivas. Su temática y recompensas pueden reflejar su identidad histórica, pero el valor y la utilidad deben equilibrarse para que ninguna sea superior por tener más oportunidades.
+- **Misiones diarias:** se renuevan cada día y conceden recompensas adicionales. Todos los jugadores reciben el mismo conjunto de objetivos y las mismas recompensas, sin adaptación por nivel de reino. Los objetivos deberán elegirse para que sean razonablemente alcanzables por jugadores en distintas fases, sin exigir capacidades avanzadas a todos. El reinicio diario no borra el progreso permanente. La hora/zona de reinicio se fijará en el diseño técnico antes de implementar.
+- **Equilibrio y seguridad:** las cantidades de premios, duración de las bonificaciones y catálogo se deben definir y centralizar en `convex/balanceConfig.ts`, con etiqueta de origen `[DECISIÓN 2026-10-21]` o `[DERIVADO]`. El servidor es la autoridad; no confiar en el cliente para completar misiones, conceder premios o impedir duplicados.
+- **Estado:** estas reglas están aprobadas como diseño, pero el sistema de misiones sigue pendiente de implementación y verificación. No afirmar que ya funciona en el juego.
+
+### Catálogo inicial orientativo (a desarrollar y equilibrar)
+
+- **Progreso permanente:** primera Vivienda; Granja nivel 3; Castillo nivel 2; primera investigación; alcanzar una población determinada; entrenar un número acumulado de tropas; primer desafío; primera victoria; hitos de batallas ganadas.
+- **Objetivos militares y de desarrollo:** alcanzar umbrales de ejército, investigar tecnologías, subir edificios a niveles definidos y ganar varias batallas. Evitar objetivos ambiguos o que puedan contabilizarse dos veces.
+- **Diarias:** seleccionar un conjunto idéntico para todos, con objetivos de economía, construcción, investigación y actividad militar alcanzables. El catálogo y las cantidades concretas están pendientes.
+- **Secretas:** condiciones especiales no visibles antes de completarse; número idéntico por civilización, con tema y premio adaptados.
+- No fijar aún cantidades concretas de recursos, oro, honor, gloria, tropas, objetos ni duración de bonificaciones sin calcular su impacto en la economía y el equilibrio.
 
 ---
 
@@ -389,37 +406,37 @@ Todos en `convex/balanceConfig.ts`: población inicial, crecimiento, capacidad y
 ## 21. Decisiones, propuestas y puntos abiertos
 
 ### Decisiones cerradas (no reabrir)
-- **Población inicial 2.000.** Mundo **web y multijugador**, con el servidor como autoridad.
+- **Población inicial 2.000.** Mundo web multijugador persistente, con el servidor como autoridad.
 - **Backend: Convex.** Appwrite descartado.
-- **Inicio de sesión: nombre de gobernante + contraseña; sin verificación por Gmail/Google.** Cada jugador retoma su partida desde cualquier dispositivo. Crear cuenta, iniciar sesión e invitado salen en la pantalla de inicio de la maqueta (20-10-2026).
-- **Modo invitado permitido**, solo para ver una civilización o el juego, con aviso obligatorio de que no se guarda el progreso (20-10-2026).
-- **Obras: 2 simultáneas. Investigaciones: ranuras según Universidad (1/2/3).** Se mantienen los valores del código (20-10-2026); sustituyen a la regla antigua de «una a la vez».
-- **Costes de edificio +15 % por nivel; duración +1 % por nivel** (valores del código, aprobados el 17-10-2026 y confirmados el 20-10-2026). Sustituyen a +25 % / +10 %.
-- **Rechazar un desafío: −2 % de cada recurso** (mín. 10, máx. 500) (confirmado el 20-10-2026). Sustituye al 5 % entregado al retador.
-- **Exploración: en alcance e implementada.** Cambio decidido y aplicado por el responsable.
-- **Sin salario militar** (D-51 B). **Sin bots PvE.** **Sin apuestas.** **Estaciones solo informativas.** Sin temporadas competitivas ni rankings por temporada.
-- **Metalurgia = Forja = Herrería** (`herreria`); **Barracones = Cuartel**; **Hospital militar = Enfermería militar.**
-- **Combate:** valores de la Ronda 2 (k = 0,40, 3 rondas, exponentes 0,6/0,45/0,3/0,3/0,15, empate a 5 puntos).
-- **Honor/gloria:** tabla M-01. **Mercenarios:** M-02 (provisional, ver abiertos).
-- **Civilizaciones:** el diseño de bonificaciones y singularidades lo hace el asistente; ejemplos del responsable: Romanos = fortaleza militar, Japoneses = acero de mejor calidad, Aztecas = más madera. Cada una con armas, armaduras, edificios y soldados propios.
-- **Formaciones:** 3 o 4 tipos, a elección del asistente (propuesta en sección 13).
-- **Misiones:** por construir, subir de nivel, entrenar, etc.; recompensas de recursos, honor y gloria (propuesta en sección 17).
+- **Inicio de sesión:** nombre de gobernante + contraseña, sin verificación por Gmail/Google. Crear cuenta, iniciar sesión e invitado en la pantalla inicial. La implementación debe verificarse por separado.
+- **Recuperación de cuenta:** mostrar un código de recuperación una sola vez al crear la cuenta; el jugador debe guardarlo. No depender del correo. Implementación pendiente.
+- **Modo invitado permitido**, para ver el juego/civilizaciones con aviso claro de que el progreso no se guarda.
+- **Obras:** 2 simultáneas. **Investigaciones:** ranuras según Universidad (1/2/3).
+- **Costes de edificio +15 % por nivel; duración +1 % por nivel.** Sustituye a +25 % / +10 %.
+- **Rechazar un desafío:** −2 % de cada recurso, mínimo 10 y máximo 500.
+- **Exploración:** en alcance y reportada como implementada; mantener la distinción entre informe previo y verificación actual.
+- **Sin salarios militares**, incluidos los mercenarios: se paga al contratarlos y no hay sueldo diario. **Sin bots PvE, apuestas ni efectos climáticos por ahora.** Estaciones solo informativas. Sin temporadas competitivas ni rankings por temporada.
+- **Nombres de civilizaciones:** «Keniatas» pasa a **Masáis**; «Indios americanos» pasa a **Navajos**; **Aztecas** sigue siendo una civilización separada.
+- **Civilizaciones:** cada una tendrá una ventaja y una debilidad. Los porcentajes concretos se diseñarán y equilibrarán después. Se contemplan armas, armaduras, edificios y soldados propios, pendientes de diseño/implementación.
+- **Formaciones militares:** cuatro tipos: ofensiva, defensiva, equilibrada y flanqueo. Sus efectos y porcentajes quedan pendientes de diseño y pruebas.
+- **Misiones:** progresivas por etapas, desbloqueadas poco a poco; objetivos detectados automáticamente; recompensa automática sin reclamación manual ni duplicados; animación breve con nombre y premios; recompensa adicional al completar cada etapa; recompensas posibles de recursos, oro, honor, gloria, tropas, objetos únicos y bonificaciones temporales.
+- **Misiones secretas:** condiciones ocultas hasta completarse; recompensa y celebración automáticas; pueden conceder recompensas exclusivas relacionadas con la civilización. Todas las civilizaciones tendrán el mismo número de misiones secretas, con valor de recompensas equilibrado.
+- **Misiones diarias:** mismo conjunto de objetivos y mismas recompensas para todos los jugadores; se renuevan cada día; no borran el progreso permanente. La hora de reinicio, catálogo y cantidades están pendientes de especificación.
+- **Honor/gloria:** mantener como referencia la tabla M-01 hasta que una revisión de balance justifique cambios.
+- **P56 y P61:** siguen pendientes de aclaración documental; no inventar requisitos para esos puntos.
 
-### Propuestas del asistente pendientes de implementar (ajustables)
-- Singularidades de armas, armaduras, soldados y edificios por civilización, con cronología y reglas de coherencia histórica del dossier (sección 6).
-- Cuatro formaciones y su matriz de ventajas (sección 13).
-- Catálogo de misiones (sección 17).
-- Alcance del modo invitado: solo lectura sobre un reino de demostración y fichas de civilización, sin presencia en el mundo compartido (sección 5).
-- Mercenarios de varios tipos y precios ligados al nivel de la Taberna: Bisoño (nivel militar 1, coste 1) · Curtido (nivel 3, coste 3) · Veterano de compañía (nivel 4, coste 8), con proporciones de coste a fijar.
+### Propuestas pendientes de diseño o implementación (no son funciones ya disponibles)
+- Singularidades de armas, armaduras, soldados y edificios por civilización, respetando el dossier histórico.
+- Matriz de ventajas y desventajas de las cuatro formaciones.
+- Catálogo completo, etapas, condiciones secretas, recompensas, reglas de reinicio y pruebas del sistema de misiones.
+- Definir tipos y precios de mercenarios ligados al nivel de la Taberna; sin salario diario.
+- Aclarar el alcance exacto del modo invitado, manteniéndolo fuera del mundo compartido si no guarda progreso.
 
 ### Puntos abiertos (preguntar una sola vez, con propuesta)
-1. **Recuperación de contraseña sin correo.** Si alguien olvida su contraseña, perdería la cuenta. Propuesta: mostrar **un código de recuperación una sola vez al crear la cuenta** (el jugador lo guarda); alternativas: aceptar la pérdida, o permitir añadir un correo opcional y sin verificar desde Ajustes.
-2. **Salarios de mercenarios:** M-02 aplica 1 oro/día, pero el responsable pidió olvidar los salarios. ¿Se elimina también el de los mercenarios?
-3. **Nombres «Indios americanos» y «Keniatas»** (M-09 y dossier): son categorías muy amplias. Propuesta: Keniatas → **Masáis** (su tecnología única ya se llama «Resistencia Masai y sabana»); Indios americanos → un pueblo concreto distinto de los mexicas (que ya cubre Aztecas): **Incas**, Mayas o Lakota. Decidir antes de implementar su equipo y de publicar.
-4. **Equilibrio de las pasivas de civilización:** el código usa +5–25 % y solo ventajas; M-09 recomendaba ±5 % simétricos y el dossier pide una debilidad por civilización.
-5. **P56 y P61** siguen vacíos («pendiente de aclaración documental»). No convertirlos en requisitos.
-6. **Despliegue real de Convex y publicación del cliente web** (T-02): dónde y cuándo; necesita autorización expresa. Migración de reinos existentes con los botones ya implementados.
-7. **Terreno intermedio en las marchas** (R-14) y valores finales de murallas.
+1. **Despliegue real de Convex y publicación del cliente web (T-02):** requieren autorización expresa. Lo mismo para migraciones de reinos existentes.
+2. **Terreno intermedio en las marchas (R-14)** y valores finales de murallas.
+3. **Valores numéricos y equilibrio:** porcentajes de ventajas/debilidades de civilización, efectos de formaciones, cantidades de recompensas, límites y duración de bonificaciones temporales.
+4. **Misiones diarias:** fijar la hora de reinicio del servidor y el catálogo común antes de implementarlas.
 
 ### Fuera de alcance (descartado)
 - Salarios militares. Bots PvE. Apuestas. Efectos del clima (de momento). Temporadas competitivas, títulos y rankings de temporada.

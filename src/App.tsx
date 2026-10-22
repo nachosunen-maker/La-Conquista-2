@@ -1272,8 +1272,7 @@ function KingdomOverviewContent() {
               <span className="text-[#8e816d] uppercase tracking-wider text-[10px] block">Mercenarios (P53)</span>
               {lastSettlement.mercenaries && lastSettlement.mercenaries.count > 0 ? (
                 <>
-                  <span className="text-[#c7beac] block">{lastSettlement.mercenaries.count} contratados · salario debido {lastSettlement.mercenaries.salaryDue.toFixed(1)} oro · pagado {lastSettlement.mercenaries.salaryPaid.toFixed(1)}</span>
-                  {lastSettlement.mercenaries.unpaid && <span className="text-rose-300 block">Salario impagado: los mercenarios han desertado.</span>}
+                  <span className="text-[#c7beac] block">{lastSettlement.mercenaries.count} contratados · pagados al contratar, sin salario diario</span>
                 </>
               ) : <span className="text-[#8e816d]">Sin mercenarios contratados</span>}
             </div>

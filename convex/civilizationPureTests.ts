@@ -54,9 +54,9 @@ export function runCivilizationTests(): CivilizationTestResult[] {
     "mongoles",
     "chinos",
     "japoneses",
-    "indiosAmericanos",
+    "navajos",
     "aztecas",
-    "keniatas",
+    "masais",
   ];
 
   // 1. Integridad de las 12 civilizaciones canónicas (P6)
@@ -148,14 +148,14 @@ export function runCivilizationTests(): CivilizationTestResult[] {
   const baseCosts = { gold: 30, food: 40 };
   const baseExpDurationMs = 3600 * 1000;
   const vikingExp = applyCivilizationExploration(baseCosts, baseExpDurationMs, "vikingos");
-  const indianExp = applyCivilizationExploration(baseCosts, baseExpDurationMs, "indiosAmericanos");
+  const indianExp = applyCivilizationExploration(baseCosts, baseExpDurationMs, "navajos");
   record(
     "EXPLORACIÓN Y EXPEDICIONES (P22)",
     "7. Vikingos reducen duración de expedición (15 %) e indios americanos reducen provisiones (20 %)",
     vikingExp.durationMs === Math.ceil(3600 * 1000 * 0.85) &&
       indianExp.costs.gold === Math.ceil(30 * 0.80) &&
       indianExp.costs.food === Math.ceil(40 * 0.80),
-    `Vikingos dur: ${vikingExp.durationMs / 1000}s; Indios americanos costes: ${indianExp.costs.gold} oro / ${indianExp.costs.food} comida`
+    `Vikingos dur: ${vikingExp.durationMs / 1000}s; Navajos costes: ${indianExp.costs.gold} oro / ${indianExp.costs.food} comida`
   );
 
   // 8. Medicina árabe y recuperación en hospital militar (P44)
@@ -167,14 +167,14 @@ export function runCivilizationTests(): CivilizationTestResult[] {
     `Bonificación árabe de recuperación: +${Math.round(arabPassive.woundedRecoveryBonus * 100)} pp`
   );
 
-  // 9. Movilidad y fatiga (Mongoles y Keniatas, P32/P41)
+  // 9. Movilidad y fatiga (Mongoles y Masáis, P32/P41)
   const mongolMarch = applyCivilizationMarch(3600, 20, "mongoles");
-  const keniaMarch = applyCivilizationMarch(3600, 20, "keniatas");
+  const keniaMarch = applyCivilizationMarch(3600, 20, "masais");
   record(
     "MOVILIDAD Y RESISTENCIA (P32, P41)",
-    "9. Mongoles aumentan velocidad de marcha un 15 % y keniatas reducen fatiga un 25 %",
+    "9. Mongoles aumentan velocidad de marcha un 15 % y masáis reducen fatiga un 25 %",
     mongolMarch.durationSeconds < 3600 && keniaMarch.fatigueAccrued === Math.ceil(20 * 0.75),
-    `Mongoles: ${mongolMarch.durationSeconds}s (de 3600s); Keniatas fatiga: ${keniaMarch.fatigueAccrued} (de 20)`
+    `Mongoles: ${mongolMarch.durationSeconds}s (de 3600s); Masáis fatiga: ${keniaMarch.fatigueAccrued} (de 20)`
   );
 
   // 10. Exclusividad de tecnología única de civilización (P62)

@@ -18,16 +18,15 @@ export const getKingdomFull = query({
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
-    if (!userId) return null;
-    
-    // Resolve kingdom owner
-    const resolvedUserId = resolveKingdomQueryUserId(args.userId, userId);
+
+    // Iberia es la única consulta pública (modo invitado, sección 5 de CLAUDE.md);
+    // los reinos de usuario exigen sesión y solo devuelven el reino propio.
+    const resolvedUserId = resolveKingdomQueryUserId(args.userId, userId ?? undefined);
     if (!resolvedUserId) return null;
 
-    // Iberia es la única consulta pública; los reinos de usuario usan el subject validado.
     const kingdom = await ctx.db
       .query("kingdoms")
-      .withIndex("by_user_id", (q) => q.eq("userId", userId))
+      .withIndex("by_user_id", (q) => q.eq("userId", resolvedUserId))
       .first();
 
     if (!kingdom) {
@@ -136,7 +135,7 @@ export const getArmyUnits = query({
     const kingdom = await ctx.db.get(args.kingdomId);
     if (!kingdom) throw new Error("Reino no encontrado.");
     const isDemoRead = kingdom.userId === "guest_g9ai8cz";
-    if (!isDemoRead && !isKingdomOwner(kingdom.userId, userId)) {
+    if (!isDemoRead && !isKingdomOwner(kingdom.userId, userId ?? undefined)) {
       throw new Error("No autorizado: solo puede consultar su propio reino.");
     }
 

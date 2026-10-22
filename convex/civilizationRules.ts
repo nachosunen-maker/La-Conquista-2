@@ -13,8 +13,7 @@ import {
   type ProductiveJob,
   type UnitType,
   TECHNOLOGIES,
-  type TechnologyBalance,
-} from "./balanceConfig";
+  type TechnologyBalance, LEGACY_CIVILIZATION_IDS } from "./balanceConfig";
 
 export const NEUTRAL_PASSIVE: CivilizationPassiveConfig = {
   description: "Sin bonificaciones culturales activas",
@@ -40,9 +39,17 @@ export const CIVILIZATION_MAP: Readonly<Record<CivilizationId, CivilizationBalan
 ) as Record<CivilizationId, CivilizationBalance>;
 
 /** Obtiene la definición completa de una civilización o null si no existe. */
-export function getCivilization(id: string | null | undefined): CivilizationBalance | null {
+/** Traduce identificadores antiguos (indiosAmericanos, keniatas…) al vigente; devuelve el mismo id si ya es actual. */
+export function normalizeCivilizationId(id: string | null | undefined): string | null {
   if (!id || typeof id !== "string") return null;
-  return (CIVILIZATION_MAP as Record<string, CivilizationBalance>)[id.trim()] ?? null;
+  const trimmed = id.trim();
+  return LEGACY_CIVILIZATION_IDS[trimmed] ?? trimmed;
+}
+
+export function getCivilization(id: string | null | undefined): CivilizationBalance | null {
+  const normalized = normalizeCivilizationId(id);
+  if (!normalized) return null;
+  return (CIVILIZATION_MAP as Record<string, CivilizationBalance>)[normalized] ?? null;
 }
 
 /** Devuelve la configuración pasiva aplicable según el reino y el flag de bonificaciones. */
@@ -72,7 +79,7 @@ export function validateCivilizationTechAccess(
       error: `Tecnología reservada a la civilización ${requiredCiv?.label ?? civilizationRequirement}; el reino no tiene civilización asignada.`,
     };
   }
-  if (civilizationRequirement !== kingdomCivilization) {
+  if (normalizeCivilizationId(civilizationRequirement) !== normalizeCivilizationId(kingdomCivilization)) {
     const requiredCiv = getCivilization(civilizationRequirement);
     return {
       allowed: false,
