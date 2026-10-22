@@ -110,7 +110,7 @@ Resultados completos del banco (escenarios del Complemento §6): fuerzas iguales
 ### Sigue sin valor oficial
 - Terreno intermedio en la marcha (R-14) y apuestas de territorio (M-08).
 - Bonificaciones por civilización (M-09) y bots PvE (M-10), pospuestos por decisión.
-- Inicio de sesión con correo y contraseña (T-01): requiere Convex Auth con secretos fuera del repositorio; Google OIDC ya está configurado.
+- Inicio de sesión (T-01, 22-10-2026): implementado en código local por nombre de gobernante + contraseña con Convex Auth (`convex/auth.ts`, `convex/http.ts`, `convex/account.ts`) y código de recuperación mostrado una sola vez. Pendiente de aprobar el formato del código (16 símbolos en 4 grupos, 5 intentos y 15 min de bloqueo, `ACCOUNT.RECOVERY_CODE`, marcado `[DERIVADO]`) y de configurar en el panel de Convex las variables `JWT_PRIVATE_KEY`, `JWKS` y `SITE_URL` al desplegar (sin autorización todavía).
 
 ## 6. Observaciones técnicas
 

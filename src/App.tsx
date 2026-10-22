@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useConvex, useQuery, useMutation } from 'convex/react';
+import { useConvex, useQuery, useMutation, useAction } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { 
   Crown, 
@@ -29,7 +29,6 @@ import {
   TrendingUp,
   TrendingDown,
   AlertTriangle,
-  LogIn,
   LogOut,
   UserCheck,
   Database,
@@ -51,6 +50,7 @@ import { BUILDINGS, CIVILIZATIONS, DAILY_BONUS, PROFESSION_EFFECTS, REST_POLICIE
 import { TabNavigation, type MainTab } from './components/TabNavigation';
 import { FoundingWizard } from './components/FoundingWizard';
 import { HomeScreen } from './components/HomeScreen';
+import { RecoveryCodeCard, describeAuthError } from './components/AccessPanel';
 import { ArmyPanel } from './components/ArmyPanel';
 import { UniversityPanel } from './components/UniversityPanel';
 import { ParliamentPanel } from './components/ParliamentPanel';
@@ -236,37 +236,109 @@ const startConstructionMutation = makeFunctionReference<"mutation">("kingdoms:st
 const cancelConstructionMutation = makeFunctionReference<"mutation">("kingdoms:cancelConstruction");
 
 /* ==========================================================================
-   FORMULARIO DE ACCESO (USUARIO/CONTRASEÑA)
+   SESIÓN (sección 5 de CLAUDE.md): nombre del gobernante y cerrar sesión.
+   El acceso (crear cuenta / entrar / invitado) vive en la pantalla de inicio.
    ========================================================================== */
-export function PasswordAuthForm() {
-  const { signIn } = useAuthActions();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+const getRecoveryStatusQuery = makeFunctionReference<"query">("account:getRecoveryStatus");
+const issueRecoveryCodeAction = makeFunctionReference<"action">("account:issueRecoveryCode");
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      await signIn("password", { username, password, flow: "signIn" });
-    } catch (err: any) {
-      setError(err.message || "Error al iniciar sesión");
-    } finally {
-      setLoading(false);
-    }
-  };
+function SessionControls() {
+  const { isAuthenticated } = useConvexAuth();
+  const { signOut } = useAuthActions();
+  const viewer = useQuery(getViewerQuery) as { rulerName?: string | null } | null | undefined;
+  const [busy, setBusy] = useState(false);
+  if (!isAuthenticated) return null;
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="hidden sm:inline-flex items-center gap-1.5 text-[#e6ded0] font-serif" title="Gobernante con sesión iniciada">
+        <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+        {viewer?.rulerName ?? 'Gobernante'}
+      </span>
+      <button
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await signOut();
+          } finally {
+            setBusy(false);
+          }
+        }}
+        disabled={busy}
+        className="p-1.5 sm:px-2.5 sm:py-1.5 bg-[#1b1711] hover:bg-[#262017] border border-[#3b3121] rounded text-[#c5a059] hover:text-[#e8dfc8] transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+        title="Cerrar sesión en este dispositivo (tu reino sigue en el servidor)"
+      >
+        <LogOut className="w-3.5 h-3.5" />
+        <span className="hidden sm:inline">Cerrar sesión</span>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Código de recuperación [DECISIÓN 21-10-2026]: se muestra UNA SOLA VEZ nada más crear la
+ * cuenta. Mientras la cuenta no tenga código activo (recién creada), esta pantalla lo genera,
+ * lo enseña y exige confirmar que se ha guardado antes de seguir.
+ */
+function RecoveryCodeGate(props: { children: React.ReactNode }) {
+  const status = useQuery(getRecoveryStatusQuery) as { hasActiveCode: boolean } | null | undefined;
+  const issue = useAction(issueRecoveryCodeAction);
+  const [code, setCode] = useState<string | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (status === undefined) {
+    return (
+      <div className="min-h-[300px] flex items-center justify-center">
+        <Loader2 className="w-6 h-6 text-[#d4af37] animate-spin" />
+      </div>
+    );
+  }
+  if (status === null || status.hasActiveCode || acknowledged) return <>{props.children}</>;
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2 p-4 bg-[#1a1610] border border-[#3b3121] rounded-lg">
-      <input type="text" placeholder="Usuario" value={username} onChange={e => setUsername(e.target.value)} className="p-2 bg-neutral-900 border border-neutral-700 rounded text-xs text-white" />
-      <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="p-2 bg-neutral-900 border border-neutral-700 rounded text-xs text-white" />
-      <button type="submit" disabled={loading} className="px-4 py-2 bg-[#d4af37] text-black text-xs font-bold rounded">
-        {loading ? "Entrando..." : "Entrar"}
-      </button>
-      {error && <p className="text-rose-500 text-[10px]">{error}</p>}
-    </form>
+    <div className="max-w-md mx-auto bg-[#14120e] border-2 border-[#b8902a]/70 rounded-xl p-5 sm:p-6 shadow-2xl">
+      {code ? (
+        <RecoveryCodeCard
+          code={code}
+          title="Tu código de recuperación"
+          intro="Cuenta creada. Este código sustituye al correo: con tu nombre de gobernante y este código podrás fijar una contraseña nueva si la olvidas."
+          continueLabel="Continuar: elegir civilización"
+          onContinue={() => setAcknowledged(true)}
+        />
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-5 h-5 text-[#d4af37]" />
+            <h3 className="text-base font-serif font-bold text-[#f4eedb]">Antes de seguir: tu código de recuperación</h3>
+          </div>
+          <p className="text-xs text-[#c5b7a0] leading-relaxed">
+            No usamos correo electrónico. Para poder recuperar la cuenta si olvidas la contraseña, el servidor te entregará ahora un código que <strong>solo se muestra una vez</strong>.
+          </p>
+          {error && <p className="text-[11px] text-rose-400">{error}</p>}
+          <button
+            onClick={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                const result = (await issue({})) as { recoveryCode: string };
+                setCode(result.recoveryCode);
+              } catch (err) {
+                setError(describeAuthError(err));
+              } finally {
+                setBusy(false);
+              }
+            }}
+            disabled={busy}
+            className="w-full py-3 rounded-md bg-gradient-to-b from-[#e2c25c] to-[#b8902a] text-[#1a1407] font-serif font-bold text-sm uppercase tracking-wider shadow-md disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+          >
+            {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+            Generar y mostrar mi código
+          </button>
+          <p className="text-[10px] text-[#6e6352] text-center">Genera tu código · gratis · inmediato · se muestra una sola vez y pasas a elegir civilización.</p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -840,12 +912,7 @@ function KingdomOverviewContent() {
   // 1. Si el usuario no está autenticado y no ha elegido la demo, mostrar pantalla de inicio / bienvenida (P4)
   if (!isAuthenticated && !viewDemoKingdom) {
     return (
-      <HomeScreen
-        onEnterDemo={() => setViewDemoKingdom(true)}
-        onEnterKingdom={() => {}}
-        onCreateKingdom={() => {}}
-        hasKingdom={false}
-      />
+      <HomeScreen onEnterDemo={() => setViewDemoKingdom(true)} />
     );
   }
 
@@ -864,38 +931,40 @@ function KingdomOverviewContent() {
     );
   }
 
-  // 3. Si el usuario autenticado aún no tiene un reino propio: asistente de fundación (P4-P9)
+  // 3. Si el usuario autenticado aún no tiene un reino propio: código de recuperación (una vez) y asistente de fundación (P4-P9, paso 2)
   if (!kingdom && isAuthenticated && !viewDemoKingdom) {
     return (
-      <div className="space-y-4">
-        <div className="text-center text-xs text-[#8e816d]">
-          {viewer ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-800/40 text-emerald-400 font-mono">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Identidad verificada en Convex: {viewer.email || viewer.subject}</span>
-            </span>
-          ) : (
-            <div className="max-w-md mx-auto p-3 bg-amber-950/40 border border-amber-600/40 rounded-lg text-amber-200 text-xs text-left">
-              <div className="flex items-center gap-1.5 font-semibold text-amber-300">
-                <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                <span>Autenticación OIDC en espera de validación por Convex</span>
+      <RecoveryCodeGate>
+        <div className="space-y-4">
+          <div className="text-center text-xs text-[#8e816d]">
+            {viewer ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-800/40 text-emerald-400 font-serif">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Gobernante: {viewer.rulerName ?? viewer.name ?? 'sesión iniciada'}</span>
+              </span>
+            ) : (
+              <div className="max-w-md mx-auto p-3 bg-amber-950/40 border border-amber-600/40 rounded-lg text-amber-200 text-xs text-left">
+                <div className="flex items-center gap-1.5 font-semibold text-amber-300">
+                  <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                  <span>Sesión en espera de validación por el servidor</span>
+                </div>
+                <p className="mt-1 text-[11px] text-amber-300/80 leading-relaxed">
+                  El servidor aún no ha confirmado tu sesión. Si persiste, cierra sesión y vuelve a entrar.
+                </p>
               </div>
-              <p className="mt-1 text-[11px] text-amber-300/80 leading-relaxed">
-                El estado de autenticación no ha sido verificado completamente por Convex. Recuerda que la configuración de <code className="font-mono text-amber-200">convex/auth.config.ts</code> debe estar desplegada en el backend remoto.
-              </p>
-            </div>
-          )}
+            )}
+          </div>
+          <FoundingWizard defaultMonarchName={viewer?.rulerName ?? ''} onFounded={() => setActiveTab('aldea')} />
+          <div className="flex justify-center">
+            <button
+              onClick={() => setViewDemoKingdom(true)}
+              className="px-4 py-2 bg-[#1b1711] hover:bg-[#262017] border border-[#3b3121] rounded text-[#c5a059] text-xs font-serif transition-colors cursor-pointer"
+            >
+              Explorar el Reino de Iberia (demostración) sin fundar
+            </button>
+          </div>
         </div>
-        <FoundingWizard defaultMonarchName={''} onFounded={() => setActiveTab('aldea')} />
-        <div className="flex justify-center">
-          <button
-            onClick={() => setViewDemoKingdom(true)}
-            className="px-4 py-2 bg-[#1b1711] hover:bg-[#262017] border border-[#3b3121] rounded text-[#c5a059] text-xs font-serif transition-colors cursor-pointer"
-          >
-            Explorar el Reino de Iberia (demostración) sin fundar
-          </button>
-        </div>
-      </div>
+      </RecoveryCodeGate>
     );
   }
 
@@ -997,12 +1066,12 @@ function KingdomOverviewContent() {
             <ShieldAlert className="w-5 h-5 text-amber-400 flex-shrink-0" />
             <div>
               <span className="font-semibold text-amber-300 block font-serif">
-                {isAuthenticated ? 'Modo Demostración: Reino de Iberia (Solo Lectura)' : 'Modo Invitado: Reino de Iberia (Solo Lectura)'}
+                {isAuthenticated ? 'Modo Demostración: Reino de Iberia (Solo Lectura)' : 'Modo invitado · no se guarda tu progreso'}
               </span>
               <p className="text-[11px] text-[#a09480] mt-0.5">
                 {isAuthenticated
                   ? `Has iniciado sesión. Este reino de prueba se conserva intacto en modo solo lectura.`
-                  : 'Estás explorando el reino de demostración en modo estrictamente de solo lectura. Todas las mutaciones (obras, tropas, investigación, combate) están bloqueadas. Inicia sesión para fundar y gobernar tu propio reino.'}
+                  : 'Estás viendo el Reino de Iberia (demostración) en solo lectura: obras, tropas, investigación y combate están bloqueados y nada se guarda. Crea una cuenta para fundar y gobernar tu propio reino.'}
               </p>
             </div>
           </div>
@@ -1010,7 +1079,7 @@ function KingdomOverviewContent() {
             onClick={() => setViewDemoKingdom(false)}
             className="px-3.5 py-1.5 bg-[#251d13] hover:bg-[#342718] border border-[#d4af37]/40 rounded text-[#d4af37] text-xs font-serif transition-colors whitespace-nowrap self-start sm:self-center cursor-pointer"
           >
-            {isAuthenticated ? '← Volver a mi reino' : '← Volver a la pantalla de inicio'}
+            {isAuthenticated ? '← Volver a mi reino' : 'Crear cuenta o iniciar sesión'}
           </button>
         </div>
       )}
@@ -2223,7 +2292,7 @@ export default function App() {
               <RefreshCw className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Sincronizar</span>
             </button>
-            <PasswordAuthForm />
+            <SessionControls />
             <ConnectionStatusBadge />
           </div>
         </div>
