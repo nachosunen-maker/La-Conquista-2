@@ -27,10 +27,6 @@ function resolveConvexUrl(urlOrDeployment: string | undefined): string | null {
 const DEFAULT_CONVEX_URL = 'https://festive-dodo-429.eu-west-1.convex.cloud';
 const rawConvexUrl = import.meta.env.VITE_CONVEX_URL || DEFAULT_CONVEX_URL;
 const convexUrl = resolveConvexUrl(rawConvexUrl) || DEFAULT_CONVEX_URL;
-const googleClientId =
-  import.meta.env.VITE_GOOGLE_CLIENT_ID ||
-  '198291664207-573hkldm168ltr0h5rscs0k8iooilqul.apps.googleusercontent.com';
-
 const rootElement = document.getElementById('root')!;
 
 if (!convexUrl) {
