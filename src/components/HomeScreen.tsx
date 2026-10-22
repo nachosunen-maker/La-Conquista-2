@@ -93,7 +93,7 @@ export function HomeScreen({ onEnterDemo, onEnterKingdom, onCreateKingdom, hasKi
           {/* Advertencia P4 para invitados */}
           {!isAuthenticated && (
             <p className="text-[11px] text-[#8e816d] italic max-w-lg mx-auto">
-              * Nota (P4): El modo invitado te permite explorar el Reino de Iberia en modo de solo lectura. El progreso y las acciones de gobierno requieren iniciar sesión con Google para disponer de un reino propio persistente.
+              * Nota (P4): El modo invitado te permite explorar el Reino de Iberia en modo de solo lectura. El progreso y las acciones de gobierno requieren una cuenta con nombre de gobernante y contraseña para disponer de un reino propio persistente.
             </p>
           )}
 
