@@ -909,9 +909,13 @@ export interface CivilizationPassiveConfig {
   residentialCapacityMultiplier: number;
   storageCapacityMultiplier?: number;
   trainingDurationByUnit: Partial<Record<UnitType, number>>;
+  /** [DECISIÓN 21-10-2026] Debilidad: sobrecoste de instrucción por tipo de unidad (1,15 = +15 %). */
+  trainingCostByUnit?: Partial<Record<UnitType, number>>;
   combatAttackMultiplier: number;
   combatDefenseMultiplier: number;
   happinessBonus: number;
+  /** [DECISIÓN 21-10-2026] Texto de la debilidad de la civilización (null = pendiente de diseño). */
+  weakness?: string | null;
 }
 
 export interface CivilizationBalance {
@@ -946,9 +950,11 @@ export const CIVILIZATIONS = [
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
       trainingDurationByUnit: { arqueria: 0.90 },
+      trainingCostByUnit: { caballeria: 1.15 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Caballería pesada más cara: +15 % de coste de instrucción de caballería (dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_ingleses",
   },
@@ -968,10 +974,11 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { caballeria: 1.1 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Caballería menos especializada: +10 % de duración de instrucción de caballería (dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_romanos",
   },
@@ -992,9 +999,11 @@ export const CIVILIZATIONS = [
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
       trainingDurationByUnit: {},
+      trainingCostByUnit: { caballeria: 1.1 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 5,
+      weakness: "Ciudades-estado con poca caballería: +10 % de coste de instrucción de caballería [DERIVADO].",
     },
     uniqueTechnologyId: "tech_civ_griegos",
   },
@@ -1014,10 +1023,11 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { asedio: 1.15 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Peores en asedios largos: +15 % de duración de instrucción de asedio (dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_vikingos",
   },
@@ -1038,9 +1048,11 @@ export const CIVILIZATIONS = [
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
       trainingDurationByUnit: {},
+      trainingCostByUnit: { caballeria: 1.15 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.05,
       happinessBonus: 0,
+      weakness: "Élites caras: +15 % de coste de instrucción de caballería (catafractos; dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_bizantinos",
   },
@@ -1060,10 +1072,11 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { infanteria: 1.1 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Infantería pesada poco habitual: +10 % de duración de instrucción de infantería [DERIVADO].",
     },
     uniqueTechnologyId: "tech_civ_arabes",
   },
@@ -1085,8 +1098,9 @@ export const CIVILIZATIONS = [
       residentialCapacityMultiplier: 1.0,
       trainingDurationByUnit: { caballeria: 0.90 },
       combatAttackMultiplier: 1.0,
-      combatDefenseMultiplier: 1.0,
+      combatDefenseMultiplier: 0.95,
       happinessBonus: 0,
+      weakness: "Débiles en defensa urbana fija: −5 % de fuerza defensiva en combate (dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_mongoles",
   },
@@ -1107,9 +1121,11 @@ export const CIVILIZATIONS = [
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.05,
       trainingDurationByUnit: {},
+      trainingCostByUnit: { caballeria: 1.1 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Caballería dependiente de la estepa: +10 % de coste de instrucción de caballería [DERIVADO].",
     },
     uniqueTechnologyId: "tech_civ_chinos",
   },
@@ -1129,10 +1145,11 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { asedio: 1.1 },
       combatAttackMultiplier: 1.05,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Asedio poco desarrollado en el periodo Sengoku: +10 % de duración de instrucción de asedio [DERIVADO].",
     },
     uniqueTechnologyId: "tech_civ_japoneses",
   },
@@ -1157,6 +1174,7 @@ export const CIVILIZATIONS = [
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: null,
     },
     uniqueTechnologyId: "tech_civ_navajos",
   },
@@ -1176,10 +1194,11 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { caballeria: 1.15 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 4,
+      weakness: "Sin caballos: la plaza de caballería la ocupa la élite a pie (Guerreros Jaguar), +15 % de duración de instrucción (dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_aztecas",
   },
@@ -1204,11 +1223,105 @@ export const CIVILIZATIONS = [
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: null,
     },
     uniqueTechnologyId: "tech_civ_masais",
   },
 ] as const;
 
+
+/**
+ * [DECISIÓN 21-10-2026] Singularidades por civilización: nombres de armas y armaduras por nivel de
+ * calidad, edificio único (variante con nombre propio de un edificio base) y tropa característica.
+ * Solo cambian nombre y estética: los multiplicadores de P29–P31 son iguales para todas (P6).
+ * Cronologías del dossier histórico (propuesta): Ingleses XI–XV · Romanos alto Imperio · Griegos
+ * clásicos · Vikingos VIII–XI · Bizantinos periodo medio · Árabes califatos · Mongoles XIII–XIV ·
+ * Chinos Song · Japoneses Sengoku · Aztecas XIV–XVI. Sin mezclar épocas ni materiales (los aztecas
+ * no tienen acero ni caballos; los vikingos no llevan cuernos). Navajos y Masáis: pendientes de
+ * documentar antes de implementar (no se inventan).
+ */
+export interface CivilizationIdentity {
+  weapons: Record<WeaponTier, string>;
+  armors: Record<ArmorTier, string>;
+  uniqueBuilding: { buildingType: string; name: string; description: string };
+  signatureUnit: { unitType: UnitType; name: string; description: string };
+  /** Nombres de las cuatro plazas de tropa (solo estética). */
+  unitNames: Partial<Record<UnitType, string>>;
+}
+export const CIVILIZATION_IDENTITIES: Readonly<Record<string, CivilizationIdentity | null>> = {
+  ingleses: {
+    weapons: { palo: "Bastón de fresno", lanzaBasica: "Lanza de leva", espadaHierro: "Espada de armas", acero: "Arco largo y espada de acero", aceroAvanzado: "Arco largo de tejo y acero templado" },
+    armors: { ninguna: "Sin armadura", piel: "Gambesón", cueroReforzado: "Brigantina de cuero", hierro: "Cota de malla", acero: "Arnés de placas" },
+    uniqueBuilding: { buildingType: "cuartel", name: "Campo de Tiro", description: "Cuartel inglés donde se instruye a los arqueros de arco largo." },
+    signatureUnit: { unitType: "arqueria", name: "Arquero de arco largo", description: "Arquería de tiro largo y disciplina de campaña." },
+    unitNames: { infanteria: "Hombre de armas", arqueria: "Arquero de arco largo", caballeria: "Caballero", asedio: "Trabuquete" },
+  },
+  romanos: {
+    weapons: { palo: "Fustis", lanzaBasica: "Hasta", espadaHierro: "Gladius hispaniensis", acero: "Gladius y pilum de acero", aceroAvanzado: "Spatha de acero" },
+    armors: { ninguna: "Sin armadura", piel: "Túnica reforzada", cueroReforzado: "Lorica hamata ligera", hierro: "Lorica segmentata", acero: "Lorica segmentata de acero" },
+    uniqueBuilding: { buildingType: "cuartel", name: "Castra", description: "Campamento legionario: Cuartel romano de disciplina férrea." },
+    signatureUnit: { unitType: "infanteria", name: "Legionario", description: "Infantería pesada de formación cerrada con scutum." },
+    unitNames: { infanteria: "Legionario", arqueria: "Sagittarius", caballeria: "Eques", asedio: "Onagro" },
+  },
+  griegos: {
+    weapons: { palo: "Vara de olivo", lanzaBasica: "Dory", espadaHierro: "Xiphos de hierro", acero: "Dory y xiphos de acero", aceroAvanzado: "Panoplia hoplita de acero" },
+    armors: { ninguna: "Sin armadura", piel: "Linothorax", cueroReforzado: "Coraza de cuero y hoplon", hierro: "Coraza de bronce y hoplon", acero: "Coraza musculada y hoplon" },
+    uniqueBuilding: { buildingType: "universidad", name: "Liceo", description: "Universidad griega: escuela de filosofía y ciencia." },
+    signatureUnit: { unitType: "infanteria", name: "Hoplita", description: "Infantería cívica de falange con lanza y escudo redondo." },
+    unitNames: { infanteria: "Hoplita", arqueria: "Peltasta", caballeria: "Hippeis", asedio: "Oxybeles" },
+  },
+  vikingos: {
+    weapons: { palo: "Garrote", lanzaBasica: "Lanza nórdica", espadaHierro: "Hacha danesa de hierro", acero: "Hacha y espada de acero", aceroAvanzado: "Hacha danesa de acero pautado" },
+    armors: { ninguna: "Sin armadura", piel: "Pieles y casco de hierro", cueroReforzado: "Cuero reforzado y escudo redondo", hierro: "Brynja (cota de malla)", acero: "Brynja de acero y casco" },
+    uniqueBuilding: { buildingType: "taberna", name: "Salón Largo", description: "Taberna vikinga: hogar comunal donde se reclutan guerreros a sueldo." },
+    signatureUnit: { unitType: "infanteria", name: "Huscarl", description: "Guardia de élite con hacha, lanza y escudo redondo; cascos sin cuernos." },
+    unitNames: { infanteria: "Huscarl", arqueria: "Arquero del fiordo", caballeria: "Jinete del norte", asedio: "Ariete" },
+  },
+  bizantinos: {
+    weapons: { palo: "Vara", lanzaBasica: "Kontarion", espadaHierro: "Spathion de hierro", acero: "Spathion y kontos de acero", aceroAvanzado: "Paramerion de acero" },
+    armors: { ninguna: "Sin armadura", piel: "Kavadion acolchado", cueroReforzado: "Lorikion de cuero", hierro: "Klivanion lamelar", acero: "Klivanion de acero" },
+    uniqueBuilding: { buildingType: "circo", name: "Hipódromo", description: "Circo bizantino: carreras y facciones que animan a la ciudad." },
+    signatureUnit: { unitType: "caballeria", name: "Catafracto", description: "Caballería acorazada de carga con kontos." },
+    unitNames: { infanteria: "Skutatos", arqueria: "Toxotes", caballeria: "Catafracto", asedio: "Helépolis" },
+  },
+  arabes: {
+    weapons: { palo: "Bastón", lanzaBasica: "Lanza beduina", espadaHierro: "Sayf de hierro", acero: "Sayf y arco compuesto de acero", aceroAvanzado: "Sayf damasquino" },
+    armors: { ninguna: "Sin armadura", piel: "Túnica acolchada", cueroReforzado: "Cuero endurecido", hierro: "Dir' (cota de malla)", acero: "Coraza lamelar de acero" },
+    uniqueBuilding: { buildingType: "mercado", name: "Caravasar", description: "Mercado árabe: posada de caravanas y comercio de larga distancia." },
+    signatureUnit: { unitType: "caballeria", name: "Jinete ligero", description: "Arquero a caballo rápido con arco compuesto." },
+    unitNames: { infanteria: "Lancero del califato", arqueria: "Arquero árabe", caballeria: "Jinete ligero", asedio: "Manjaniq" },
+  },
+  mongoles: {
+    weapons: { palo: "Vara de estepa", lanzaBasica: "Lanza ligera", espadaHierro: "Sable de hierro", acero: "Arco compuesto y sable de acero", aceroAvanzado: "Arco compuesto reforzado y sable de acero" },
+    armors: { ninguna: "Sin armadura", piel: "Deel acolchado", cueroReforzado: "Cuero lacado", hierro: "Lamelar de hierro", acero: "Lamelar de acero" },
+    uniqueBuilding: { buildingType: "viviendas", name: "Ger del Kan", description: "Viviendas mongolas: campamento de tiendas en torno al kan." },
+    signatureUnit: { unitType: "caballeria", name: "Jinete arquero", description: "Caballería ligera de arco compuesto y movilidad extrema." },
+    unitNames: { infanteria: "Guardia de la horda", arqueria: "Arquero de la estepa", caballeria: "Jinete arquero", asedio: "Trabuquete de contrapeso" },
+  },
+  chinos: {
+    weapons: { palo: "Bastón", lanzaBasica: "Qiang", espadaHierro: "Jian de hierro", acero: "Jian y ballesta de acero", aceroAvanzado: "Jian de acero y ballesta pesada" },
+    armors: { ninguna: "Sin armadura", piel: "Túnica acolchada", cueroReforzado: "Cuero laminado", hierro: "Laminada de hierro", acero: "Laminada de acero (shanwenjia)" },
+    uniqueBuilding: { buildingType: "granja", name: "Arrozal Imperial", description: "Granja china: arrozales en terrazas de la dinastía Song." },
+    signatureUnit: { unitType: "arqueria", name: "Ballestero", description: "Tiradores de ballesta de la burocracia militar Song." },
+    unitNames: { infanteria: "Lancero Song", arqueria: "Ballestero", caballeria: "Jinete Song", asedio: "Catapulta de tracción" },
+  },
+  japoneses: {
+    weapons: { palo: "Bō de roble", lanzaBasica: "Yari", espadaHierro: "Katana de hierro", acero: "Katana, yari y yumi de acero", aceroAvanzado: "Katana de acero plegado (tamahagane)" },
+    armors: { ninguna: "Sin armadura", piel: "Haramaki acolchado", cueroReforzado: "Dō-maru de cuero", hierro: "Dō-maru lamelar", acero: "Gusoku de acero" },
+    uniqueBuilding: { buildingType: "herreria", name: "Herrería del Maestro Forjador", description: "Herrería japonesa: forja de acero plegado." },
+    signatureUnit: { unitType: "infanteria", name: "Samurái", description: "Guerrero de élite; la lanza y el arco cuentan tanto como la katana." },
+    unitNames: { infanteria: "Samurái", arqueria: "Ashigaru arquero", caballeria: "Samurái a caballo", asedio: "Ōzutsu" },
+  },
+  navajos: null,
+  aztecas: {
+    weapons: { palo: "Bastón de guerra", lanzaBasica: "Tepoztopilli", espadaHierro: "Macuahuitl de obsidiana", acero: "Macuahuitl y átlatl", aceroAvanzado: "Macuahuitl de obsidiana reforzado" },
+    armors: { ninguna: "Sin armadura", piel: "Ichcahuipilli ligero", cueroReforzado: "Ichcahuipilli reforzado", hierro: "Tlahuiztli y chimalli", acero: "Tlahuiztli de águila" },
+    uniqueBuilding: { buildingType: "iglesia", name: "Templo Mayor", description: "Iglesia mexica: gran templo escalonado de Tenochtitlan." },
+    signatureUnit: { unitType: "infanteria", name: "Guerrero Águila", description: "Infantería de élite; sin caballos ni acero europeo." },
+    unitNames: { infanteria: "Guerrero Águila", arqueria: "Hondero y atlatl", caballeria: "Guerrero Jaguar (élite a pie)", asedio: "Cuadrilla de asalto" },
+  },
+  masais: null,
+};
 export type CivilizationId = (typeof CIVILIZATIONS)[number]["id"];
 /** [DECISIÓN 21-10-2026] Identificadores antiguos aún presentes en reinos y progreso guardados. */
 export const LEGACY_CIVILIZATION_IDS: Readonly<Record<string, string>> = {

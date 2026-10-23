@@ -98,6 +98,9 @@ interface ArmyState {
     strategyCatalog: Record<string, { label: string; attack: number; defense: number; beats: string }>;
     tacticalFormation: string;
     tacticalFormationCatalog: Record<string, { label: string; attack: number; defense: number; beats: string | null; description: string }>;
+    civilization: string | null;
+    civilizationIdentity: { signatureUnit: { unitType: string; name: string; description: string }; uniqueBuilding: { buildingType: string; name: string } } | null;
+    civilizationWeakness: string | null;
   };
 }
 
@@ -533,8 +536,14 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
         </div>
         <p className="text-[11px] text-[#8e816d] flex items-center gap-1.5">
           <Activity className="w-3.5 h-3.5" />
-          Las armas y armaduras se desbloquean con Herrería, Mina de hierro y tecnologías; el equipo se congela 15 minutos antes de cada batalla.
+          Las armas y armaduras se desbloquean con Herrería, Mina de hierro y tecnologías; el equipo se congela 15 minutos antes de cada batalla. Los nombres son los de tu civilización; los multiplicadores son iguales para todas (P30, P31).
         </p>
+        {(state.equipment.civilizationIdentity || state.equipment.civilizationWeakness) && (
+          <p className="text-[11px] text-[#c7beac]">
+            {state.equipment.civilizationIdentity && <>Tropa característica: <strong className="text-[#e6ded0]">{state.equipment.civilizationIdentity.signatureUnit.name}</strong> ({state.equipment.civilizationIdentity.signatureUnit.description}). </>}
+            {state.equipment.civilizationWeakness && <>Debilidad: <span className="text-rose-200">{state.equipment.civilizationWeakness}</span></>}
+          </p>
+        )}
         {writable && (
           <button type="button" className={primaryButton} onClick={handleEquipment} disabled={!equipmentChanged || action.busy !== null}>
             {action.busy === 'equipment' ? 'Guardando…' : 'Guardar equipamiento'}

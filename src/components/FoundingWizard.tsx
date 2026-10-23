@@ -17,7 +17,7 @@ const STEPS: Step[] = ['origen', 'reino', 'castillo', 'monarca', 'confirmar'];
  */
 export function FoundingWizard(props: { defaultMonarchName: string; onFounded: () => void }) {
   const civilizationsData = useQuery(listCivilizationsQuery) as
-    | { civilizations: ReadonlyArray<{ id: string; label: string }>; bonusesEnabled: boolean; immutable: boolean }
+    | { civilizations: ReadonlyArray<{ id: string; label: string }>; profiles?: ReadonlyArray<{ id: string; advantage: string; weakness: string | null; identity: { signatureUnit: { name: string }; uniqueBuilding: { name: string } } | null }>; bonusesEnabled: boolean; immutable: boolean }
     | undefined;
   const civilizations = civilizationsData?.civilizations ?? CIVILIZATIONS;
   const found = useMutation(getOrInitializeKingdomMutation);
@@ -108,6 +108,17 @@ export function FoundingWizard(props: { defaultMonarchName: string; onFounded: (
               </button>
             ))}
           </div>
+          {civilization && (() => {
+            const profile = civilizationsData?.profiles?.find((p) => p.id === civilization);
+            if (!profile) return null;
+            return (
+              <div className="rounded border border-[#2b2419] bg-[#100e0b] p-2.5 text-[11px] text-[#c7beac] space-y-1">
+                <p><strong className="text-emerald-200">Ventaja:</strong> {profile.advantage}</p>
+                <p><strong className="text-rose-200">Debilidad:</strong> {profile.weakness ?? 'pendiente de diseño'}</p>
+                {profile.identity && <p><strong className="text-[#e6ded0]">Tropa y edificio propios:</strong> {profile.identity.signatureUnit.name} · {profile.identity.uniqueBuilding.name}</p>}
+              </div>
+            );
+          })()}
         </div>
       )}
 

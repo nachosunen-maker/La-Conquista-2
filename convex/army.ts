@@ -31,7 +31,8 @@ import {
   validateMercenaryHire,
   type TrainingQueueEntry,
 } from "./armyRules";
-import { ARMORS, DEFAULT_TACTICAL_FORMATION, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TACTICAL_FORMATIONS, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type UnitType } from "./balanceConfig";
+import { ARMORS, DEFAULT_TACTICAL_FORMATION, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TACTICAL_FORMATIONS, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type ArmorTier, type UnitType, type WeaponTier } from "./balanceConfig";
+import { civilizationArmorLabel, civilizationTrainingCostMultiplier, civilizationUnitLabel, civilizationWeaponLabel, getCivilizationIdentity, getCivilizationPassive } from "./civilizationRules";
 import type { ResourceType } from "./economyCalculations";
 import { readHomeCoord } from "./territories";
 import {
@@ -145,6 +146,8 @@ export const getArmyState = query({
     const summary = summarizeArmy(units);
     const slots = trainingQueueSlots(buildingLevels.cuartel ?? 0);
     const kingdomAny = kingdom as any;
+    const civPassive = getCivilizationPassive(kingdom.civilization);
+    const civIdentity = getCivilizationIdentity(kingdom.civilization);
     return {
       serverTimeMs,
       writable: isKingdomOwner(kingdom.userId, identity?.subject),
@@ -166,13 +169,21 @@ export const getArmyState = query({
         ...level,
         available: availableMilitaryLevels(buildingLevels).some((entry) => entry.level === level.level),
       })),
-      unitCatalog: UNIT_TYPES.map((unitType) => ({
-        unitType,
-        ...UNITS[unitType],
-        unitCosts: trainingCostsFor(unitType, 1),
-        unitDurationMs: trainingDurationMs(unitType, 1, modifiers.trainingDuration),
-        requirementsSatisfied: Object.entries(UNITS[unitType].requirements).every(([type, level]) => (buildingLevels[type] ?? 0) >= level),
-      })),
+      unitCatalog: UNIT_TYPES.map((unitType) => {
+        const civCost = civilizationTrainingCostMultiplier(unitType, kingdom.civilization);
+        const civDuration = civPassive.trainingDurationByUnit[unitType] ?? 1;
+        const baseCosts = trainingCostsFor(unitType, 1);
+        return {
+          unitType,
+          ...UNITS[unitType],
+          label: civilizationUnitLabel(kingdom.civilization, unitType),
+          unitCosts: Object.fromEntries(Object.entries(baseCosts).map(([resource, value]) => [resource, Math.ceil(value * civCost)])) as typeof baseCosts,
+          unitDurationMs: trainingDurationMs(unitType, 1, modifiers.trainingDuration * civDuration),
+          civilizationCostMultiplier: civCost,
+          civilizationDurationMultiplier: civDuration,
+          requirementsSatisfied: Object.entries(UNITS[unitType].requirements).every(([type, level]) => (buildingLevels[type] ?? 0) >= level),
+        };
+      }),
       trainingDurationModifier: modifiers.trainingDuration,
       formation: kingdomAny.formation ?? { infanteria: 1, arqueria: 1, caballeria: 1, asedio: 1 },
       mercenaries: {
@@ -199,8 +210,12 @@ export const getArmyState = query({
         fatigue: typeof kingdomAny.armyFatigue === "number" ? kingdomAny.armyFatigue : 0,
         availableWeapons: availableWeaponTiers(buildingLevels, modifiers.unlockedWeapons),
         availableArmors: availableArmorTiers(buildingLevels, modifiers.unlockedArmors),
-        weaponCatalog: WEAPONS,
-        armorCatalog: ARMORS,
+        // [Decisión 21-10-2026] Nombres propios de la civilización; multiplicadores iguales para todas (P30, P31).
+        weaponCatalog: Object.fromEntries(Object.entries(WEAPONS).map(([tier, info]) => [tier, { ...info, label: civilizationWeaponLabel(kingdom.civilization, tier as WeaponTier) }])),
+        armorCatalog: Object.fromEntries(Object.entries(ARMORS).map(([tier, info]) => [tier, { ...info, label: civilizationArmorLabel(kingdom.civilization, tier as ArmorTier) }])),
+        civilization: kingdom.civilization ?? null,
+        civilizationIdentity: civIdentity ? { signatureUnit: civIdentity.signatureUnit, uniqueBuilding: civIdentity.uniqueBuilding } : null,
+        civilizationWeakness: civPassive.weakness ?? null,
         strategyCatalog: STRATEGIES,
         tacticalFormation: isTacticalFormation(kingdomAny.tacticalFormation ?? "") ? kingdomAny.tacticalFormation : DEFAULT_TACTICAL_FORMATION,
         tacticalFormationCatalog: TACTICAL_FORMATIONS,
@@ -231,6 +246,9 @@ export const startTraining = mutation({
     const modifiers = computeTechnologyModifiers(completedTechnologies);
     const population = await ctx.db.get(settled.population._id);
     if (!population) throw new Error("No existe documento de población para el reino.");
+    // [P6, decisión 21-10-2026] Ventaja y debilidad de la civilización en la instrucción (duración y coste por tipo).
+    const civUnitType = normalizeUnitType(args.unitType);
+    const civDuration = civUnitType ? getCivilizationPassive(kingdom.civilization).trainingDurationByUnit[civUnitType] ?? 1 : 1;
     const planResult = createTrainingPlan({
       unitType: args.unitType,
       count: args.count,
@@ -240,7 +258,8 @@ export const startTraining = mutation({
       buildingLevels: collection.levels,
       activeTraining: queue as TrainingQueueEntry[],
       now,
-      durationModifier: modifiers.trainingDuration,
+      durationModifier: modifiers.trainingDuration * civDuration,
+      costModifier: civUnitType ? civilizationTrainingCostMultiplier(civUnitType, kingdom.civilization) : 1,
     });
     if (!planResult.success) throw new Error(planResult.error);
     const plan = planResult.plan;

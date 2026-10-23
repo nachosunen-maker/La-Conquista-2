@@ -200,6 +200,39 @@ describe("Entrenamiento (Bloque B)", () => {
   });
 });
 
+describe("Singularidades por civilización (decisión 21-10-2026)", () => {
+  test("los ingleses instruyen arqueros un 10 % más rápido y pagan la caballería un 15 % más cara; los romanos ven su Castra", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-eng"));
+    const english = await asUser.mutation(api.economy.getOrInitializeKingdom, { name: "Albión", civilization: "ingleses", castleName: "Torre", monarchName: "Ricardo" });
+    await setBuildingLevel(t, english._id as any, "castillo", 3);
+    await setBuildingLevel(t, english._id as any, "cuartel", 3);
+    await setBuildingLevel(t, english._id as any, "herreria", 1);
+    await t.run(async (ctx) => {
+      const res = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", english._id as any)).first();
+      if (res) await ctx.db.patch(res._id, { gold: 5_000, wood: 5_000, stone: 5_000, iron: 5_000, food: 5_000 });
+    });
+    const archers = await asUser.mutation(api.army.startTraining, { kingdomId: english._id as any, unitType: "arqueria", count: 10 });
+    expect(archers.durationMs).toBe(Math.ceil(UNITS.arqueria.trainingSecondsPerUnit * 1000 * 10 * 0.9));
+    const cavalry = await asUser.mutation(api.army.startTraining, { kingdomId: english._id as any, unitType: "caballeria", count: 10 });
+    expect(cavalry.costs.gold).toBe(Math.ceil(UNITS.caballeria.costs.gold * 10 * 1.15));
+    expect(cavalry.durationMs).toBe(UNITS.caballeria.trainingSecondsPerUnit * 1000 * 10);
+    const army = await asUser.query(api.army.getArmyState, { kingdomId: english._id as any });
+    expect(army.equipment.weaponCatalog.acero.label).toContain("Arco largo");
+    expect(army.equipment.weaponCatalog.acero.multiplier).toBe(1.15);
+    expect(army.equipment.civilizationWeakness).toContain("Caballería pesada");
+    expect(army.unitCatalog.find((u: any) => u.unitType === "arqueria")?.label).toBe("Arquero de arco largo (Arquería)");
+
+    const { asUser: roman, kingdomId } = await foundKingdom(t, "user-rom", "Roma");
+    const construction = await roman.query(api.kingdoms.getConstructionState, { kingdomId });
+    expect(construction.catalog.cuartel.label).toBe(`Castra (${BUILDINGS.cuartel.label})`);
+    expect(construction.catalog.granja.label).toBe(BUILDINGS.granja.label);
+    const civs = await t.query(api.civilizations.listCivilizations, {});
+    expect(civs.profiles.find((p: any) => p.id === "navajos")?.pendingDesign).toBe(true);
+    expect(civs.profiles.find((p: any) => p.id === "romanos")?.identity?.signatureUnit.name).toBe("Legionario");
+  });
+});
+
 describe("Investigación (Bloque C)", () => {
   test("exige Universidad, cobra el coste y aplica el efecto al completarse", async () => {
     const t = createTestBackend();

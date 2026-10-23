@@ -113,6 +113,8 @@ export function createTrainingPlan(input: {
   activeTraining: ReadonlyArray<TrainingQueueEntry>;
   now: number;
   durationModifier?: number;
+  /** [DECISIÓN 21-10-2026] Sobrecoste de la civilización para este tipo de unidad (1 = ninguno). */
+  costModifier?: number;
 }): { success: true; plan: TrainingPlan } | { success: false; error: string } {
   const unitType = normalizeUnitType(input.unitType);
   if (!unitType) return { success: false, error: `Tipo de unidad no admitido: '${input.unitType}'.` };
@@ -154,9 +156,10 @@ export function createTrainingPlan(input: {
   }
 
   const totalCosts = trainingCostsFor(unitType, input.count);
+  const costModifier = Number.isFinite(input.costModifier) && (input.costModifier as number) > 0 ? (input.costModifier as number) : 1;
   const costs: Partial<Record<ResourceType, number>> = {};
   for (const resource of ["gold", "wood", "stone", "iron", "food"] as const) {
-    const cost = totalCosts[resource];
+    const cost = Math.ceil(totalCosts[resource] * costModifier);
     const balance = input.resources[resource];
     if (!Number.isFinite(balance) || balance < 0) return { success: false, error: `Saldo inválido para '${resource}'.` };
     if (cost > 0) {

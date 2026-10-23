@@ -7,6 +7,7 @@
  * - Restricción autoritativa de tecnología única (P62) por civilización.
  */
 import {
+  BUILDINGS,
   CIVILIZATIONS,
   CIVILIZATION_BONUSES_ENABLED,
   type CivilizationId,
@@ -26,7 +27,15 @@ import {
   getUniqueTechForCivilization,
   NEUTRAL_PASSIVE,
   validateCivilizationTechAccess,
+  civilizationArmorLabel,
+  civilizationBuildingLabel,
+  civilizationTrainingCostMultiplier,
+  civilizationUnitLabel,
+  civilizationWeaponLabel,
+  describeCivilizationIdentity,
+  getCivilizationIdentity,
 } from "./civilizationRules";
+import { createTrainingPlan } from "./armyRules";
 import { computeTechnologyModifiers } from "./technologyRules";
 import { computeSideFactors, type BattleSide, emptyComposition } from "./battleRules";
 
@@ -239,6 +248,53 @@ export function runCivilizationTests(): CivilizationTestResult[] {
     "12. Los reinos sin civilización operan con multiplicadores neutros 1.0 sin penalización",
     neutralMatch,
     `Factores neutros: construccion=1.0, investigacion=1.0, ataque=1.0, defensa=1.0`
+  );
+
+  // Singularidades por civilización (decisión 21-10-2026)
+  const identified = CIVILIZATIONS.filter((c) => getCivilizationIdentity(c.id) !== null);
+  const pending = CIVILIZATIONS.filter((c) => getCivilizationIdentity(c.id) === null).map((c) => c.id);
+  const complete = identified.every((c) => {
+    const identity = getCivilizationIdentity(c.id)!;
+    const weaponsOk = (["palo", "lanzaBasica", "espadaHierro", "acero", "aceroAvanzado"] as const).every((tier) => identity.weapons[tier].length > 2);
+    const armorsOk = (["ninguna", "piel", "cueroReforzado", "hierro", "acero"] as const).every((tier) => identity.armors[tier].length > 2);
+    return weaponsOk && armorsOk && identity.uniqueBuilding.name.length > 2 && identity.signatureUnit.name.length > 2;
+  });
+  const weaknessOk = identified.every((c) => typeof c.passive.weakness === "string" && c.passive.weakness.length > 10);
+  const pendingNoWeakness = pending.every((id) => (getCivilization(id)?.passive.weakness ?? null) === null);
+  const aztecNoSteel = !Object.values(getCivilizationIdentity("aztecas")!.weapons).some((n) => /acero/i.test(n)) && !Object.values(getCivilizationIdentity("aztecas")!.armors).some((n) => /acero|hierro|malla/i.test(n));
+  const vikingNoHorns = !Object.values(getCivilizationIdentity("vikingos")!.armors).some((n) => /cuerno/i.test(n));
+  record(
+    "SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026)",
+    "11. Diez civilizaciones con equipo por nivel, edificio único, tropa característica y debilidad; Navajos y Masáis pendientes (no se inventan); sin acero ni caballos aztecas ni cuernos vikingos",
+    identified.length === 10 && pending.join(",") === "navajos,masais" && complete && weaknessOk && pendingNoWeakness && aztecNoSteel && vikingNoHorns,
+    `Con identidad: ${identified.length}; pendientes: ${pending.join(", ")}; completas: ${complete}; con debilidad: ${weaknessOk}; aztecas sin acero: ${aztecNoSteel}`
+  );
+
+  const roman = { weapon: civilizationWeaponLabel("romanos", "espadaHierro"), armor: civilizationArmorLabel("romanos", "hierro"), building: civilizationBuildingLabel("romanos", "cuartel"), other: civilizationBuildingLabel("romanos", "granja"), unit: civilizationUnitLabel("romanos", "infanteria") };
+  const navajo = { weapon: civilizationWeaponLabel("navajos", "espadaHierro"), building: civilizationBuildingLabel("navajos", "cuartel"), unit: civilizationUnitLabel("navajos", "infanteria") };
+  record(
+    "SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026)",
+    "12. Los nombres propios acompañan al nombre base (multiplicadores intactos) y las civilizaciones pendientes usan los nombres genéricos",
+    roman.weapon === "Gladius hispaniensis (Espada de hierro)" && roman.armor === "Lorica segmentata (Hierro)" && roman.building === `Castra (${BUILDINGS.cuartel.label})` && roman.other === BUILDINGS.granja.label && roman.unit === "Legionario (Infantería)" &&
+      navajo.weapon === "Espada de hierro" && navajo.building === BUILDINGS.cuartel.label && navajo.unit === "Infantería",
+    `Romanos: ${roman.weapon} · ${roman.armor} · ${roman.building} · ${roman.unit}; Navajos: ${navajo.weapon} · ${navajo.building} · ${navajo.unit}`
+  );
+
+  const englishCavalryCost = civilizationTrainingCostMultiplier("caballeria", "ingleses");
+  const englishInfantryCost = civilizationTrainingCostMultiplier("infanteria", "ingleses");
+  const plan = createTrainingPlan({ unitType: "caballeria", count: 10, level: 1, resources: { gold: 10_000, wood: 10_000, stone: 10_000, iron: 10_000, food: 10_000 }, availableCivil: 100, buildingLevels: { castillo: 3, cuartel: 2, herreria: 1 }, activeTraining: [], now: 1_000, costModifier: englishCavalryCost });
+  const planPlain = createTrainingPlan({ unitType: "caballeria", count: 10, level: 1, resources: { gold: 10_000, wood: 10_000, stone: 10_000, iron: 10_000, food: 10_000 }, availableCivil: 100, buildingLevels: { castillo: 3, cuartel: 2, herreria: 1 }, activeTraining: [], now: 1_000 });
+  const mongolDefense = getCivilizationPassive("mongoles").combatDefenseMultiplier;
+  const allHaveAdvantage = CIVILIZATIONS.every((c) => c.passive.description.length > 10);
+  const profileRomanos = describeCivilizationIdentity(getCivilization("romanos")!);
+  const profileNavajos = describeCivilizationIdentity(getCivilization("navajos")!);
+  record(
+    "SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026)",
+    "13. Debilidades aplicadas: caballería inglesa +15 % de coste (plan de instrucción), mongoles −5 % de defensa; toda civilización conserva su ventaja; la ficha pública marca las pendientes",
+    Math.abs(englishCavalryCost - 1.15) < 1e-9 && englishInfantryCost === 1 && plan.success && planPlain.success &&
+      plan.plan.costs.gold === Math.ceil(planPlain.plan.costs.gold! * 1.15) && plan.plan.durationMs === planPlain.plan.durationMs &&
+      Math.abs(mongolDefense - 0.95) < 1e-9 && allHaveAdvantage && !profileRomanos.pendingDesign && profileNavajos.pendingDesign && profileRomanos.identity?.uniqueBuilding.name === "Castra",
+    `Oro caballería inglesa: ${plan.success ? plan.plan.costs.gold : "-"} frente a ${planPlain.success ? planPlain.plan.costs.gold : "-"}; defensa mongola ×${mongolDefense}; Romanos pendiente: ${profileRomanos.pendingDesign}; Navajos pendiente: ${profileNavajos.pendingDesign}`
   );
 
   return results;

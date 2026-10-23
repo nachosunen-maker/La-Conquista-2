@@ -26,7 +26,7 @@ import {
 } from "./buildingRules";
 import { getConstructionDurationModifier, readCompletedTechnologyIds } from "./technologyRules";
 import { computeProfessionEffects, PROFESSION_BUILDING_CAPACITY } from "./economyExtended";
-import { getCivilizationPassive } from "./civilizationRules";
+import { civilizationBuildingLabel, getCivilizationPassive } from "./civilizationRules";
 import type { ResourceType } from "./economyCalculations";
 
 export async function requireOwner(ctx: MutationCtx, kingdomId: Id<"kingdoms">) {
@@ -107,7 +107,8 @@ export const getConstructionState = query({
       writable: isKingdomOwner(kingdom.userId, identity?.subject),
       availableBuildingTypes: Object.keys(BUILDING_RULES),
       pendingBuildingTypes: [] as string[],
-      catalog: BUILDING_RULES,
+      // [Decisión 21-10-2026] El edificio único de la civilización lleva su nombre propio (solo estética).
+      catalog: Object.fromEntries(Object.entries(BUILDING_RULES).map(([type, rule]) => [type, { ...rule, label: civilizationBuildingLabel(kingdom.civilization, type) }])),
       catalogForLevels: describeCatalogForLevels(buildingLevels, durationModifier),
       constructionDurationModifier: durationModifier,
       pendingParameters: BUILDING_PARAMETERS_PENDING,
