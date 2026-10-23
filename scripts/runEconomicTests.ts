@@ -5,9 +5,10 @@ import { runChallengeValidationTests as runChallengePureTests, type ChallengeTes
 import { runTerritoryValidationTests, type TerritoryTestResult } from "../convex/territoryPureTests";
 import { runExplorationValidationTests, type ExplorationTestResult } from "../convex/explorationPureTests";
 import { runCivilizationTests, type CivilizationTestResult } from "../convex/civilizationPureTests";
+import { runAccountTests, type AccountTestResult } from "../convex/accountPureTests";
 
 console.log("================================================================================");
-console.log("LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAMENTO + EXPLORACIÓN + CIVILIZACIONES)");
+console.log("LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAMENTO + EXPLORACIÓN + CIVILIZACIONES + CUENTA)");
 console.log("================================================================================\n");
 
 const startTime = Date.now();
@@ -18,6 +19,7 @@ const challengeResults: ChallengeTestResult[] = runChallengePureTests();
 const territoryResults = runTerritoryValidationTests().map((t) => ({ ...t, category: "MAPA Y TERRITORIOS D-22-D-26" }));
 const explorationResults: ExplorationTestResult[] = runExplorationValidationTests();
 const civilizationResults: CivilizationTestResult[] = runCivilizationTests();
+const accountResults: AccountTestResult[] = runAccountTests();
 const results = [
   ...economicResults,
   ...militaryResults,
@@ -26,6 +28,7 @@ const results = [
   ...territoryResults,
   ...explorationResults,
   ...civilizationResults,
+  ...accountResults,
 ];
 const durationMs = Date.now() - startTime;
 

@@ -4,13 +4,17 @@
  *
  * THIS CODE IS AUTOMATICALLY GENERATED.
  *
- * To regenerate, run `npx convex dev`.
+ * To regenerate, run `npx convex dev` (or `node scripts/regenerateConvexApi.mjs` offline).
  * @module
  */
 
+import type * as account from "../account.js";
+import type * as accountPureTests from "../accountPureTests.js";
+import type * as accountRules from "../accountRules.js";
 import type * as army from "../army.js";
 import type * as armyPureTests from "../armyPureTests.js";
 import type * as armyRules from "../armyRules.js";
+import type * as auth from "../auth.js";
 import type * as balanceConfig from "../balanceConfig.js";
 import type * as battlePureTests from "../battlePureTests.js";
 import type * as battleRules from "../battleRules.js";
@@ -34,6 +38,7 @@ import type * as explorationPureTests from "../explorationPureTests.js";
 import type * as explorationRules from "../explorationRules.js";
 import type * as foundationPureTests from "../foundationPureTests.js";
 import type * as foundationRules from "../foundationRules.js";
+import type * as http from "../http.js";
 import type * as kingdomAccess from "../kingdomAccess.js";
 import type * as kingdomReadModel from "../kingdomReadModel.js";
 import type * as kingdoms from "../kingdoms.js";
@@ -55,9 +60,13 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  account: typeof account;
+  accountPureTests: typeof accountPureTests;
+  accountRules: typeof accountRules;
   army: typeof army;
   armyPureTests: typeof armyPureTests;
   armyRules: typeof armyRules;
+  auth: typeof auth;
   balanceConfig: typeof balanceConfig;
   battlePureTests: typeof battlePureTests;
   battleRules: typeof battleRules;
@@ -81,6 +90,7 @@ declare const fullApi: ApiFromModules<{
   explorationRules: typeof explorationRules;
   foundationPureTests: typeof foundationPureTests;
   foundationRules: typeof foundationRules;
+  http: typeof http;
   kingdomAccess: typeof kingdomAccess;
   kingdomReadModel: typeof kingdomReadModel;
   kingdoms: typeof kingdoms;

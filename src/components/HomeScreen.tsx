@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
-import { Crown, Castle, Shield, Users, Wheat, Swords, Scroll, Clock, CheckCircle2, ArrowRight } from 'lucide-react';
-import { useConvexAuth } from "@convex-dev/auth/react";
+import { Crown, Shield, Scroll } from 'lucide-react';
+import { AccessPanel } from './AccessPanel';
 
 interface HomeScreenProps {
+  /** Entrar como invitado: reino de demostración Iberia en solo lectura. */
   onEnterDemo: () => void;
-  onEnterKingdom?: () => void;
-  onCreateKingdom?: () => void;
-  hasKingdom?: boolean;
 }
 
 // Las 12 Civilizaciones Oficiales de la Especificación Maestra (Punto 6)
@@ -25,89 +23,35 @@ export const OFFICIAL_CIVILIZATIONS = [
   { id: 'masais', name: 'Masáis', icon: '🦁', desc: 'Velocidad, lanzas ligeras, pastoreo y aguante territorial' },
 ];
 
-export function HomeScreen({ onEnterDemo, onEnterKingdom, onCreateKingdom, hasKingdom }: HomeScreenProps) {
-  const { isAuthenticated, isLoading } = useConvexAuth();
-  const user = null;
+export function HomeScreen({ onEnterDemo }: HomeScreenProps) {
   const [selectedCiv, setSelectedCiv] = useState<string | null>(null);
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto py-4">
       {/* ====================================================================
-          HERO PRINCIPAL (PUNTO 4: PANTALLA DE INICIO)
+          PANTALLA DE INICIO (sección 5 de CLAUDE.md): ilustración + panel de acceso
           ==================================================================== */}
-      <section className="bg-[#14120e] border border-[#382f20] rounded-xl p-6 sm:p-10 text-center shadow-xl relative overflow-hidden">
-        <div className="max-w-2xl mx-auto space-y-4">
-          <div className="inline-flex items-center justify-center p-3.5 bg-[#211a12] border border-[#d4af37]/40 rounded-xl text-[#d4af37] shadow-inner mb-2">
-            <Crown className="w-10 h-10" />
-          </div>
-
-          <div className="space-y-2">
-            <h1 className="text-3xl sm:text-5xl font-serif font-bold text-[#f7f2e4] tracking-wide">
-              LA CONQUISTA
-            </h1>
-            {/* Lema Oficial según Punto 4 */}
-            <p className="text-sm sm:text-base text-[#d4af37] font-serif tracking-widest uppercase font-semibold">
-              “Gobierna. Entrena. Negocia. Conquista.”
+      <section className="bg-[#14120e] border border-[#382f20] rounded-xl p-5 sm:p-8 shadow-xl relative overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-6 lg:gap-10 items-center">
+          <div className="text-center lg:text-left space-y-4">
+            <div className="inline-flex items-center justify-center p-3.5 bg-[#211a12] border border-[#d4af37]/40 rounded-xl text-[#d4af37] shadow-inner">
+              <Crown className="w-10 h-10" />
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-3xl sm:text-5xl font-serif font-bold text-[#f7f2e4] tracking-wide">LA CONQUISTA</h1>
+              <p className="text-sm sm:text-base text-[#d4af37] font-serif tracking-widest uppercase font-semibold">
+                Un reino. Una corona. Tu legado.
+              </p>
+              <p className="text-sm text-[#e6ded0] font-serif">Forja tu reino. Escribe tu historia.</p>
+              <p className="text-xs sm:text-sm text-[#baa890] leading-relaxed font-serif pt-1">
+                Juego de estrategia y gestión medieval de partidas persistentes. Mueve los hilos y tu población ejecutará las órdenes en el servidor en tiempo real.
+              </p>
+            </div>
+            <p className="text-[11px] text-[#8e816d] italic max-w-lg mx-auto lg:mx-0">
+              Tu cuenta y todo el progreso viven en el servidor: retoma la partida desde cualquier dispositivo con tu nombre de gobernante y tu contraseña. Sin correo ni Google.
             </p>
-            <p className="text-xs sm:text-sm text-[#baa890] leading-relaxed font-serif pt-1">
-              Juego de estrategia y gestión medieval de partidas persistentes. Mueve los hilos y tu población ejecutará las órdenes en el servidor en tiempo real.
-            </p>
           </div>
-
-          {/* Opciones de Entrada Principales */}
-          <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3.5">
-            {isAuthenticated ? (
-              hasKingdom ? (
-                <button
-                  onClick={onEnterKingdom}
-                  className="w-full sm:w-auto px-6 py-3 bg-[#382613] hover:bg-[#4d341a] border-2 border-[#d4af37] rounded-lg text-[#f4eedb] font-serif font-bold text-sm uppercase tracking-wider transition-colors shadow-lg flex items-center justify-center gap-2 group cursor-pointer"
-                >
-                  <span>👑 Entrar a Mi Reino</span>
-                  <ArrowRight className="w-4 h-4 text-[#d4af37] group-hover:translate-x-1 transition-transform" />
-                </button>
-              ) : (
-                <button
-                  onClick={onCreateKingdom || onEnterKingdom}
-                  className="w-full sm:w-auto px-6 py-3 bg-[#382613] hover:bg-[#4d341a] border-2 border-[#d4af37] rounded-lg text-[#f4eedb] font-serif font-bold text-sm uppercase tracking-wider transition-colors shadow-lg flex items-center justify-center gap-2 group cursor-pointer"
-                >
-                  <span>👑 Fundar Mi Reino (P5–P10)</span>
-                  <ArrowRight className="w-4 h-4 text-[#d4af37] group-hover:translate-x-1 transition-transform" />
-                </button>
-              )
-            ) : null}
-
-            <button
-              onClick={onEnterDemo}
-              className={`w-full sm:w-auto px-6 py-3 rounded-lg font-serif font-bold text-sm uppercase tracking-wider transition-colors shadow-lg flex items-center justify-center gap-2 group cursor-pointer ${
-                isAuthenticated && hasKingdom
-                  ? 'bg-[#1e1710] hover:bg-[#2c2014] border border-[#d4af37]/50 text-[#c5a059]'
-                  : 'bg-[#2a1f13] hover:bg-[#382b1b] border-2 border-[#d4af37] text-[#f4eedb]'
-              }`}
-              title="Explorar el Reino de Iberia en modo solo lectura"
-            >
-              <span>🏰 Empezar a jugar como invitado</span>
-              <ArrowRight className="w-4 h-4 text-[#d4af37] group-hover:translate-x-1 transition-transform" />
-            </button>
-          </div>
-
-          {/* Advertencia P4 para invitados */}
-          {!isAuthenticated && (
-            <p className="text-[11px] text-[#8e816d] italic max-w-lg mx-auto">
-              * Nota (P4): El modo invitado te permite explorar el Reino de Iberia en modo de solo lectura. El progreso y las acciones de gobierno requieren una cuenta con nombre de gobernante y contraseña para disponer de un reino propio persistente.
-            </p>
-          )}
-
-          {/* Estado de identidad actual */}
-          <div className="pt-2 text-xs text-[#8e816d] flex items-center justify-center gap-2">
-            {isAuthenticated ? (
-              <span className="inline-flex items-center gap-1.5 text-emerald-400 font-mono">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Soberano autenticado: autenticado.
-              </span>
-            ) : (
-              <span>Modo visitante: puedes empezar a jugar como invitado para explorar o iniciar sesión en la barra superior.</span>
-            )}
-          </div>
+          <AccessPanel onGuest={onEnterDemo} />
         </div>
       </section>
 
@@ -272,24 +216,6 @@ export function HomeScreen({ onEnterDemo, onEnterKingdom, onCreateKingdom, hasKi
               Territorios del reino, provincias libres, distancias y conquista.
             </p>
           </div>
-        </div>
-
-        {/* Acceso directo al Reino de Demostración */}
-        <div className="p-4 bg-[#1b150f] border border-[#453620] rounded-lg flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-          <div className="space-y-0.5 text-center sm:text-left">
-            <span className="font-serif font-semibold text-[#f4eedb]">
-              ¿Deseas explorar un reino activo en tiempo real?
-            </span>
-            <p className="text-[#8e816d]">
-              El Reino de Iberia funciona bajo las leyes oficiales con 2.000 habitantes y persistencia en Convex.
-            </p>
-          </div>
-          <button
-            onClick={onEnterDemo}
-            className="px-4 py-2 bg-[#2c2013] hover:bg-[#3a2c1b] border border-[#d4af37]/60 rounded text-[#d4af37] font-serif font-semibold transition-colors whitespace-nowrap cursor-pointer"
-          >
-            Empezar a jugar como invitado →
-          </button>
         </div>
       </section>
     </div>

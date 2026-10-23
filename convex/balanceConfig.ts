@@ -488,6 +488,52 @@ export const HOSPITAL_RECOVERY_CAP = 0.6;
 export const DAILY_BONUS = { HONOR: 5, COOLDOWN_MS: 24 * 60 * 60 * 1000 } as const;
 
 // ============================================================================
+// 5b. CUENTA DEL JUGADOR (P4, P5, sección 5 y 21 de CLAUDE.md)
+// ============================================================================
+/**
+ * Inicio de sesión por nombre de gobernante + contraseña, sin correo.
+ * El nombre de gobernante es único sin distinguir mayúsculas ni acentos
+ * [DECISIÓN 21-10-2026]. La contraseña nunca se almacena en texto plano (P5):
+ * la guarda Convex Auth con hash scrypt.
+ */
+export const ACCOUNT = {
+  /** [DECISIÓN 21-10-2026] Longitud del nombre de gobernante. */
+  RULER_NAME_MIN_LENGTH: 2,
+  RULER_NAME_MAX_LENGTH: 40,
+  /**
+   * [DERIVADO] Caracteres permitidos en el nombre de gobernante: letras (con
+   * acentos y ñ), dígitos, espacio, apóstrofo, punto y guion. Sin dos
+   * separadores seguidos ni separadores en los extremos.
+   */
+  RULER_NAME_PATTERN: /^[\p{L}\p{N}]+(?:[ '.\-][\p{L}\p{N}]+)*$/u,
+  /** [DECISIÓN 21-10-2026] Contraseña de mínimo 8 caracteres. */
+  PASSWORD_MIN_LENGTH: 8,
+  /** [DERIVADO] Límite superior defensivo para el hash de contraseña. */
+  PASSWORD_MAX_LENGTH: 128,
+  /** [DERIVADO] Intentos de inicio de sesión fallidos por hora y cuenta antes de rechazar (valor por defecto de Convex Auth; se recarga con el tiempo). */
+  SIGN_IN_MAX_FAILED_ATTEMPTS_PER_HOUR: 10,
+  /** [DERIVADO] Dominio sintético interno: Convex Auth identifica la cuenta por correo, que nunca se envía. */
+  SYNTHETIC_EMAIL_DOMAIN: "la-conquista.local",
+  /**
+   * Código de recuperación [DECISIÓN 21-10-2026: se muestra una sola vez al
+   * crear la cuenta; sin correo]. Formato [DERIVADO, pendiente de aprobación]:
+   * 16 símbolos en 4 grupos (XXXX-XXXX-XXXX-XXXX) de un alfabeto sin
+   * caracteres ambiguos (sin 0/O ni 1/I/L): 31 símbolos → ~79 bits de entropía. Se guarda solo
+   * su hash SHA-256; es de un solo uso y al usarlo se entrega otro nuevo.
+   */
+  RECOVERY_CODE: {
+    ALPHABET: "ABCDEFGHJKMNPQRSTUVWXYZ23456789",
+    LENGTH: 16,
+    GROUP_SIZE: 4,
+    SEPARATOR: "-",
+    /** [DERIVADO] Intentos fallidos seguidos antes de bloquear la recuperación. */
+    MAX_FAILED_ATTEMPTS: 5,
+    /** [DERIVADO] Duración del bloqueo tras agotar los intentos. */
+    LOCK_MS: 15 * 60 * 1000,
+  },
+} as const;
+
+// ============================================================================
 // 6. TECNOLOGÍAS (D-16 a D-21)
 // ============================================================================
 export type TechnologyBranch = "economica" | "civil" | "militar" | "inteligencia" | "civilizacion";
