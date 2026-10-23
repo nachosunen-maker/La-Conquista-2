@@ -113,6 +113,8 @@ Resultados completos del banco (escenarios del Complemento §6): fuerzas iguales
 - Implementado en código local el 23-10-2026, con valores `[DERIVADO]` pendientes de aprobación: formaciones tácticas (`TACTICAL_FORMATIONS`, contramedida ×1,15), tipos de mercenarios (`MERCENARIES.TYPES`), misiones (`MISSIONS`: 4 etapas, 3 diarias/día con reinicio 00:00 UTC, secretas 1 por civilización) y singularidades de civilización (`CIVILIZATION_IDENTITIES`, debilidades en `passive.weakness`/`trainingCostByUnit`). Navajos y Masáis siguen sin identidad ni debilidad (no se inventan).
 - Inicio de sesión (T-01, 22-10-2026): implementado en código local por nombre de gobernante + contraseña con Convex Auth (`convex/auth.ts`, `convex/http.ts`, `convex/account.ts`) y código de recuperación mostrado una sola vez. Pendiente de aprobar el formato del código (16 símbolos en 4 grupos, 5 intentos y 15 min de bloqueo, `ACCOUNT.RECOVERY_CODE`, marcado `[DERIVADO]`) y de configurar en el panel de Convex las variables `JWT_PRIVATE_KEY`, `JWKS` y `SITE_URL` al desplegar (sin autorización todavía).
 
+> **23-10-2026:** la lista actualizada de valores y puntos pendientes de aprobación está en `docs/DEFINICIONES_PENDIENTES.md`.
+
 ## 6. Observaciones técnicas
 
 1. `kingdoms.ts` reexporta la construcción desde `buildings.ts`; la interfaz sigue llamando a `kingdoms:startConstruction`.
