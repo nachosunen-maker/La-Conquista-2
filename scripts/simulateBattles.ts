@@ -6,7 +6,7 @@
  * Uso: npx tsx scripts/simulateBattles.ts [--json]
  */
 import { simulateBattle, type BattleSide } from "../convex/battleRules";
-import { COMBAT, STRATEGIES, type Strategy, type UnitType } from "../convex/balanceConfig";
+import { COMBAT, STRATEGIES, TACTICAL_FORMATIONS, type Strategy, type TacticalFormation, type UnitType } from "../convex/balanceConfig";
 
 type Outcome = "victoria" | "derrota" | "empate";
 interface Stats { n: number; victoria: number; derrota: number; empate: number; crushing: number; retreats: number; lossA: number; lossD: number; rounds: number }
@@ -131,6 +131,21 @@ const results: Record<string, Stats> = {};
   for (const tier of tiers) for (const f of fatigues) for (const m of morales)
     record(s, base("A", { foodTier: tier, fatigue: f, morale: m }), base("D"));
   results["8. Atacante con raciones/fatiga/moral variables vs defensor estándar"] = s;
+}
+
+// 9. Formaciones tácticas (decisión 21-10-2026): cada formación atacante contra cada formación defensora, resto igual
+{
+  const tacticals = Object.keys(TACTICAL_FORMATIONS) as TacticalFormation[];
+  for (const ta of tacticals) {
+    for (const td of tacticals) {
+      const s = stats();
+      // Mismo número y misma estrategia en ambos bandos: solo cambia la formación táctica.
+      for (const n of [600, 1000, 1500]) for (const st of strategies) for (const t of [1, 1.35])
+        record(s, base("A", { tacticalFormation: ta, strategy: st, trainingMultiplier: t, composition: { infanteria: n, arqueria: 0, caballeria: 0, asedio: 0 } }),
+          base("D", { tacticalFormation: td, strategy: st, trainingMultiplier: t, composition: { infanteria: n, arqueria: 0, caballeria: 0, asedio: 0 } }));
+      results[`9. Formación ${ta} (atacante) vs ${td} (defensor)`] = s;
+    }
+  }
 }
 
 let total = 0;

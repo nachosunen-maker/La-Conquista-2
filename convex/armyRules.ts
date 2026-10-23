@@ -16,6 +16,8 @@ import {
   type Strategy,
   type UnitType,
   type WeaponTier,
+  TACTICAL_FORMATIONS,
+  type TacticalFormation,
 } from "./balanceConfig";
 import { MAX_BUILDING_LEVEL, checkBuildingRequirements } from "./buildingRules";
 
@@ -297,6 +299,10 @@ export function isArmorTier(value: string): value is ArmorTier {
 }
 export function isStrategy(value: string): value is Strategy {
   return Object.hasOwn(STRATEGIES, value);
+}
+
+export function isTacticalFormation(value: string): value is TacticalFormation {
+  return Object.hasOwn(TACTICAL_FORMATIONS, value);
 }
 
 export function validateEquipmentSelection(input: {

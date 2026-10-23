@@ -13,12 +13,17 @@ import {
   STRATEGIES,
   STRATEGY_COUNTER_BONUS,
   STRATEGY_FACTOR_RANGE,
+  DEFAULT_TACTICAL_FORMATION,
+  TACTICAL_FORMATIONS,
+  TACTICAL_FORMATION_COUNTER_BONUS,
+  TACTICAL_FORMATION_FACTOR_RANGE,
   UNITS,
   UNIT_COUNTERS,
   UNIT_TYPES,
   WEAPONS,
   type ArmorTier,
   type Strategy,
+  type TacticalFormation,
   type UnitType,
   type WeaponTier,
 } from "./balanceConfig";
@@ -37,6 +42,8 @@ export interface BattleSide {
   weaponTier: WeaponTier;
   armorTier: ArmorTier;
   strategy: Strategy;
+  /** [DECISIÓN 21-10-2026] Formación táctica; si falta, equilibrada. */
+  tacticalFormation?: TacticalFormation;
   morale: number; // 0-100
   foodTier: string;
   fatigue: number; // 0-100
@@ -55,7 +62,9 @@ export interface SideFactors {
   training: number;
   weapons: number;
   armor: number;
+  /** Factor combinado estrategia × formación táctica (modo ataque). */
   formation: number;
+  tacticalFormation: TacticalFormation;
   morale: number;
   food: number;
   fatigue: number;
@@ -155,6 +164,25 @@ export function strategyFactor(own: Strategy, enemy: Strategy, mode: "attack" | 
   return Math.max(STRATEGY_FACTOR_RANGE.min, Math.min(STRATEGY_FACTOR_RANGE.max, value));
 }
 
+/** [DECISIÓN 21-10-2026] Factor de la formación táctica, acotado; contrarrestar da ×1,10. */
+export function tacticalFormationOf(side: Pick<BattleSide, "tacticalFormation">): TacticalFormation {
+  const value = side.tacticalFormation;
+  return value && Object.hasOwn(TACTICAL_FORMATIONS, value) ? value : DEFAULT_TACTICAL_FORMATION;
+}
+
+export function tacticalFormationFactor(own: TacticalFormation, enemy: TacticalFormation, mode: "attack" | "defense"): number {
+  const base = TACTICAL_FORMATIONS[own][mode];
+  return Math.max(TACTICAL_FORMATION_FACTOR_RANGE.min, Math.min(TACTICAL_FORMATION_FACTOR_RANGE.max, base));
+}
+
+/**
+ * Término «Contramedida» de la fórmula de potencia (Ronda 2): multiplicador directo cuando la
+ * formación táctica propia contrarresta a la enemiga; 1 en cualquier otro caso.
+ */
+export function tacticalCounterMultiplier(own: TacticalFormation, enemy: TacticalFormation): number {
+  return TACTICAL_FORMATIONS[own].beats === enemy ? TACTICAL_FORMATION_COUNTER_BONUS : 1;
+}
+
 export function moraleFactor(morale: number): number {
   const value = Number.isFinite(morale) ? Math.max(0, Math.min(100, morale)) : 50;
   return COMBAT.MORALE_FACTOR_BASE + value / COMBAT.MORALE_FACTOR_DIVISOR;
@@ -174,8 +202,10 @@ export function computeSideFactors(side: BattleSide, composition: Composition, e
   const training = Math.max(0.01, side.trainingMultiplier);
   const weapons = WEAPONS[side.weaponTier]?.multiplier ?? WEAPONS.palo.multiplier;
   const armor = ARMORS[side.armorTier]?.multiplier ?? ARMORS.ninguna.multiplier;
-  const formationAttack = strategyFactor(side.strategy, enemy.strategy, "attack");
-  const formationDefense = strategyFactor(side.strategy, enemy.strategy, "defense");
+  const ownTactical = tacticalFormationOf(side);
+  const enemyTactical = tacticalFormationOf(enemy);
+  const formationAttack = strategyFactor(side.strategy, enemy.strategy, "attack") * tacticalFormationFactor(ownTactical, enemyTactical, "attack");
+  const formationDefense = strategyFactor(side.strategy, enemy.strategy, "defense") * tacticalFormationFactor(ownTactical, enemyTactical, "defense");
   const morale = moraleFactor(side.morale);
   const food = foodFactor(side.foodTier);
   const fatigue = fatigueMultiplier(side.fatigue);
@@ -184,8 +214,9 @@ export function computeSideFactors(side: BattleSide, composition: Composition, e
     * morale ** E.morale * food ** E.food * fatigue ** E.fatigue;
   const wallsBonus = wallsDefenseBonus(side.wallsLevel);
   const terrain = 1 + Math.max(0, side.terrainDefenseBonus) + wallsBonus;
-  const offensivePower = effectives > 0 ? offensive ** E.number * formationAttack ** E.formation * common : 0;
-  const defensivePower = effectives > 0 ? (defensive * terrain) ** E.number * formationDefense ** E.formation * common : 0;
+  const counter = tacticalCounterMultiplier(ownTactical, enemyTactical);
+  const offensivePower = effectives > 0 ? offensive ** E.number * formationAttack ** E.formation * common * counter : 0;
+  const defensivePower = effectives > 0 ? (defensive * terrain) ** E.number * formationDefense ** E.formation * common * counter : 0;
   const W = COMBAT.WEIGHTS;
   const linearScore = W.number * (effectives / COMBAT.NUMBER_REFERENCE) + W.training * training
     + W.weapons * weapons + W.armor * armor + W.formation * formationAttack
@@ -198,6 +229,7 @@ export function computeSideFactors(side: BattleSide, composition: Composition, e
     weapons,
     armor,
     formation: formationAttack,
+    tacticalFormation: ownTactical,
     morale,
     food,
     fatigue,
@@ -318,6 +350,12 @@ export function simulateBattle(attacker: BattleSide, defender: BattleSide): Batt
   if (lastFactorsA.weapons !== lastFactorsD.weapons || lastFactorsA.armor !== lastFactorsD.armor) explanation.push(`Equipo: armas ${lastFactorsA.weapons}/${lastFactorsD.weapons}, armaduras ${lastFactorsA.armor}/${lastFactorsD.armor}.`);
   if (STRATEGIES[attacker.strategy].beats === defender.strategy) explanation.push(`La estrategia ${STRATEGIES[attacker.strategy].label} del atacante contrarrestó la ${STRATEGIES[defender.strategy].label} del defensor.`);
   if (STRATEGIES[defender.strategy].beats === attacker.strategy) explanation.push(`La estrategia ${STRATEGIES[defender.strategy].label} del defensor contrarrestó la ${STRATEGIES[attacker.strategy].label} del atacante.`);
+  {
+    const ta = tacticalFormationOf(attacker);
+    const td = tacticalFormationOf(defender);
+    if (TACTICAL_FORMATIONS[ta].beats === td) explanation.push(`La formación ${TACTICAL_FORMATIONS[ta].label} del atacante desbarató la ${TACTICAL_FORMATIONS[td].label} del defensor.`);
+    if (TACTICAL_FORMATIONS[td].beats === ta) explanation.push(`La formación ${TACTICAL_FORMATIONS[td].label} del defensor desbarató la ${TACTICAL_FORMATIONS[ta].label} del atacante.`);
+  }
   if (lastFactorsD.wallsBonus > 0) explanation.push(`Las murallas del defensor aportaron +${Math.round(lastFactorsD.wallsBonus * 100)} % de defensa.`);
   if (lastFactorsA.fatigue < 1) explanation.push(`La fatiga de la marcha penalizó al atacante (×${lastFactorsA.fatigue}).`);
   if (lastFactorsA.morale !== lastFactorsD.morale) explanation.push(`Moral: atacante ${attacker.morale}, defensor ${defender.morale}.`);

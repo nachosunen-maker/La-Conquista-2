@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { Swords, Shield, Users, Clock, Activity, Coins, Flag } from 'lucide-react';
-import { UNIT_COUNTERS, COMBAT } from '../../convex/balanceConfig';
+import { UNIT_COUNTERS, COMBAT, TACTICAL_FORMATION_COUNTER_BONUS } from '../../convex/balanceConfig';
 import {
   PanelSection,
   ProgressRow,
@@ -26,6 +26,7 @@ const cancelTrainingMutation = makeFunctionReference<"mutation">("army:cancelTra
 const setArmyEquipmentMutation = makeFunctionReference<"mutation">("army:setArmyEquipment");
 const hireMercenariesMutation = makeFunctionReference<"mutation">("army:hireMercenaries");
 const setFormationMutation = makeFunctionReference<"mutation">("army:setFormation");
+const setTacticalFormationMutation = makeFunctionReference<"mutation">("army:setTacticalFormation");
 
 interface ArmyState {
   serverTimeMs: number;
@@ -94,6 +95,8 @@ interface ArmyState {
     weaponCatalog: Record<string, { label: string; multiplier: number }>;
     armorCatalog: Record<string, { label: string; multiplier: number }>;
     strategyCatalog: Record<string, { label: string; attack: number; defense: number; beats: string }>;
+    tacticalFormation: string;
+    tacticalFormationCatalog: Record<string, { label: string; attack: number; defense: number; beats: string | null; description: string }>;
   };
 }
 
@@ -105,6 +108,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const setEquipment = useMutation(setArmyEquipmentMutation);
   const hireMercenaries = useMutation(hireMercenariesMutation);
   const setFormation = useMutation(setFormationMutation);
+  const setTacticalFormation = useMutation(setTacticalFormationMutation);
   const serverNow = useServerClock(state?.serverTimeMs);
   const action = useActionState();
 
@@ -115,6 +119,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const [armorTier, setArmorTier] = useState<string | null>(null);
   const [strategy, setStrategy] = useState<string | null>(null);
   const [formationDraft, setFormationDraft] = useState<Record<string, number> | null>(null);
+  const [tacticalDraft, setTacticalDraft] = useState<string | null>(null);
   const [mercenaryCount, setMercenaryCount] = useState<number>(10);
 
   if (!state) {
@@ -133,6 +138,15 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const currentWeapon = weaponTier ?? state.equipment.weaponTier;
   const currentArmor = armorTier ?? state.equipment.armorTier;
   const currentStrategy = strategy ?? state.equipment.strategy;
+  const currentTactical = tacticalDraft ?? state.equipment.tacticalFormation;
+  const tacticalInfo = state.equipment.tacticalFormationCatalog[currentTactical];
+  const tacticalWeakAgainst = Object.entries(state.equipment.tacticalFormationCatalog).find(([, info]) => info.beats === currentTactical)?.[1].label ?? null;
+  const handleTactical = () =>
+    action.run('tactical', async () => {
+      const result = await setTacticalFormation({ kingdomId, tacticalFormation: currentTactical });
+      setTacticalDraft(null);
+      return `Formación ${result.label} guardada: ataque ×${result.attack}, defensa ×${result.defense}.`;
+    });
   const equipmentChanged =
     currentWeapon !== state.equipment.weaponTier || currentArmor !== state.equipment.armorTier || currentStrategy !== state.equipment.strategy;
 
@@ -430,6 +444,34 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
             {action.busy === 'formation' ? 'Guardando…' : 'Guardar formación'}
           </button>
         )}
+
+        <div className={`${cardClass} space-y-2 text-xs mt-3`}>
+          <span className="font-semibold text-[#f0e8d4] block">Formación táctica (decisión 21-10-2026)</span>
+          <p className="text-[11px] text-[#c7beac]">
+            Cuatro formaciones que se suman a la estrategia y a la matriz entre tipos: cada una vence a otra y pierde contra otra; la equilibrada no tiene ventaja ni debilidad.
+          </p>
+          <label className="flex items-center justify-between gap-2">
+            <span className="text-[#a0937e]">Formación</span>
+            <select className={selectClass} value={currentTactical} disabled={!writable} onChange={(e) => setTacticalDraft(e.target.value)}>
+              {Object.entries(state.equipment.tacticalFormationCatalog).map(([id, info]) => (
+                <option key={id} value={id}>{info.label} (ataque ×{info.attack}, defensa ×{info.defense})</option>
+              ))}
+            </select>
+          </label>
+          {tacticalInfo && (
+            <div className="rounded border border-[#2b2419] bg-[#100e0b] p-2.5 text-[11px] text-[#c7beac] space-y-1">
+              <p><strong className="text-[#e6ded0]">Qué hace:</strong> {tacticalInfo.description}</p>
+              <p><strong className="text-[#e6ded0]">Cuánto cuesta:</strong> nada; cambiarla es gratis e inmediato.</p>
+              <p><strong className="text-[#e6ded0]">Cuánto dura:</strong> hasta que la cambies; se congela 15 minutos antes de cada batalla.</p>
+              <p><strong className="text-[#e6ded0]">Resultado:</strong> ataque ×{tacticalInfo.attack} y defensa ×{tacticalInfo.defense}; fuerte contra {tacticalInfo.beats ? state.equipment.tacticalFormationCatalog[tacticalInfo.beats]?.label : 'ninguna'} (potencia ×{TACTICAL_FORMATION_COUNTER_BONUS}) y débil contra {tacticalWeakAgainst ?? 'ninguna'}.</p>
+            </div>
+          )}
+          {writable && (
+            <button type="button" className={primaryButton} onClick={handleTactical} disabled={currentTactical === state.equipment.tacticalFormation || action.busy !== null}>
+              {action.busy === 'tactical' ? 'Guardando…' : 'Guardar formación táctica'}
+            </button>
+          )}
+        </div>
       </PanelSection>
 
       <PanelSection icon={<Shield className="w-4 h-4 text-emerald-400" />} title="Equipamiento y estrategia (P30, P31, P35)">

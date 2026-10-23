@@ -1,5 +1,5 @@
-import { applyFormation, computeSideFactors, simulateBattle, strategyFactor, wallsDefenseBonus, woundedRecoveryRatio, type BattleSide } from "./battleRules";
-import { BATTLE_REWARDS, COMBAT, HOSPITAL_RECOVERY_CAP, HOSPITAL_RECOVERY_PER_YEAR } from "./balanceConfig";
+import { applyFormation, computeSideFactors, simulateBattle, strategyFactor, tacticalCounterMultiplier, tacticalFormationFactor, wallsDefenseBonus, woundedRecoveryRatio, type BattleSide } from "./battleRules";
+import { BATTLE_REWARDS, COMBAT, HOSPITAL_RECOVERY_CAP, HOSPITAL_RECOVERY_PER_YEAR, TACTICAL_FORMATIONS, TACTICAL_FORMATION_COUNTER_BONUS, type TacticalFormation } from "./balanceConfig";
 
 export interface BattleTestResult {
   test: string;
@@ -63,6 +63,30 @@ export function runBattleValidationTests(): BattleTestResult[] {
   const factorPlain = strategyFactor("defensiva", "defensiva", "defense");
   const factorClampLow = strategyFactor("agresiva", "defensiva", "defense");
 
+  // Formaciones tácticas (decisión 21-10-2026)
+  const tacticalIds = Object.keys(TACTICAL_FORMATIONS) as TacticalFormation[];
+  const cycleClosed = tacticalIds.every((id) => {
+    const beats = TACTICAL_FORMATIONS[id].beats;
+    return beats === null || TACTICAL_FORMATIONS[beats].beats !== id;
+  }) && tacticalIds.filter((id) => TACTICAL_FORMATIONS[id].beats !== null).length === 3 && TACTICAL_FORMATIONS.equilibrada.beats === null;
+  const tacticalCounter = tacticalCounterMultiplier("ofensiva", "flanqueo");
+  const tacticalNoCounter = tacticalCounterMultiplier("ofensiva", "defensiva");
+  const tacticalPlain = tacticalFormationFactor("ofensiva", "ofensiva", "attack");
+  const tacticalBalanced = tacticalFormationFactor("equilibrada", "ofensiva", "attack");
+  const tacticalWins = tacticalIds.filter((id) => TACTICAL_FORMATIONS[id].beats !== null).every((id) => {
+    const report = simulateBattle(side({ kingdomId: "A", tacticalFormation: id }), side({ kingdomId: "B", tacticalFormation: TACTICAL_FORMATIONS[id].beats! }));
+    return report.outcome === "victoria" && !report.crushingVictory && report.defender.lossRatio - report.attacker.lossRatio > COMBAT.DRAW_TOLERANCE;
+  });
+  const noCounterDraws = tacticalIds.every((a) => tacticalIds.every((d) => {
+    if (TACTICAL_FORMATIONS[a].beats === d || TACTICAL_FORMATIONS[d].beats === a) return true;
+    return simulateBattle(side({ kingdomId: "A", tacticalFormation: a }), side({ kingdomId: "B", tacticalFormation: d })).outcome === "empate";
+  }));
+  const balancedNeverCrushed = tacticalIds.every((id) => {
+    const report = simulateBattle(side({ kingdomId: "A", tacticalFormation: id }), side({ kingdomId: "B", tacticalFormation: "equilibrada" }));
+    return !report.crushingVictory && report.defender.lossRatio < 0.6;
+  });
+  const defaultIsBalanced = computeSideFactors(side({ kingdomId: "x" }), { infanteria: 1000, arqueria: 0, caballeria: 0, asedio: 0 }, side({ kingdomId: "y" })).tacticalFormation === "equilibrada";
+
   const recovery1 = woundedRecoveryRatio(1, 0, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP);
   const recovery5 = woundedRecoveryRatio(7, 0, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP);
   const recoveryTech = woundedRecoveryRatio(5, 0.15, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP);
@@ -119,6 +143,12 @@ export function runBattleValidationTests(): BattleTestResult[] {
       test: "Estrategias (P35): contrarrestar da ventaja y el factor se mantiene en 0,80–1,25",
       passed: Math.abs(factorCounter - 1.25) < 1e-9 && Math.abs(factorPlain - 1.2) < 1e-9 && Math.abs(factorClampLow - 0.8) < 1e-9,
       details: `Defensiva vs agresiva: ${factorCounter}; defensiva vs defensiva: ${factorPlain}; agresiva en defensa: ${factorClampLow}`,
+    },
+    {
+      test: `Formaciones tácticas (decisión 21-10-2026): ciclo ofensiva > flanqueo > defensiva > ofensiva, equilibrada neutral, contramedida ×${TACTICAL_FORMATION_COUNTER_BONUS}; con ejércitos iguales contrarrestar gana sin aplastar y el resto empata`,
+      passed: cycleClosed && Math.abs(tacticalCounter - TACTICAL_FORMATION_COUNTER_BONUS) < 1e-9 && tacticalNoCounter === 1 && Math.abs(tacticalPlain - 1.12) < 1e-9 && tacticalBalanced === 1 &&
+        tacticalWins && noCounterDraws && balancedNeverCrushed && defaultIsBalanced,
+      details: `Ciclo cerrado: ${cycleClosed}; contramedida ofensiva vs flanqueo ×${tacticalCounter}, vs defensiva ×${tacticalNoCounter}; factor ofensiva ${tacticalPlain}; equilibrada ${tacticalBalanced}; contrarrestar vence sin aplastar: ${tacticalWins}; sin contramedida empata: ${noCounterDraws}; equilibrada nunca aplastada: ${balancedNeverCrushed}; por defecto equilibrada: ${defaultIsBalanced}`,
     },
     {
       test: "Heridos ≈65 % de las bajas (P44) y contabilidad cerrada de supervivientes; recuperación hospitalaria P45 con tope 60 %",

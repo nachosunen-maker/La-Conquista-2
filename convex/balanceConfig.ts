@@ -341,6 +341,31 @@ export const STRATEGIES: Readonly<Record<Strategy, { label: string; attack: numb
 export const STRATEGY_COUNTER_BONUS = 1.15; // [DERIVADO de P35: la estrategia adecuada produce ventaja]
 export const STRATEGY_FACTOR_RANGE = { min: 0.8, max: 1.25 } as const;
 
+/**
+ * [DECISIÓN 21-10-2026] Cuatro formaciones tácticas: ofensiva, defensiva, equilibrada y flanqueo.
+ * Se SUMAN a la estrategia (P35) y a la matriz entre tipos de unidad (M-11): el factor de
+ * formación de la fórmula de potencia es estrategia × formación táctica.
+ * Valores [DERIVADO, pendientes de aprobación], validados con scripts/simulateBattles.ts:
+ *  - Ofensiva: +12 % ataque / −10 % defensa; fuerte contra flanqueo, débil contra defensiva.
+ *  - Defensiva: −10 % ataque / +12 % defensa; fuerte contra ofensiva, débil contra flanqueo.
+ *  - Flanqueo: +6 % ataque / −4 % defensa; fuerte contra defensiva, débil contra ofensiva.
+ *  - Equilibrada: sin modificadores ni ventaja; nadie la contrarresta.
+ * Los modificadores entran en el término Formación^0,3 (acotado 0,85–1,25). Contrarrestar es el
+ * término «Contramedida» de la fórmula: ×1,15 directo sobre la potencia. Con ejércitos iguales,
+ * la formación que contrarresta gana por ~6,7 puntos de bajas (victoria clara, nunca aplastante);
+ * cualquier otro cruce queda en empate.
+ */
+export type TacticalFormation = "ofensiva" | "defensiva" | "equilibrada" | "flanqueo";
+export const TACTICAL_FORMATIONS: Readonly<Record<TacticalFormation, { label: string; attack: number; defense: number; beats: TacticalFormation | null; description: string }>> = {
+  ofensiva: { label: "Ofensiva", attack: 1.12, defense: 0.9, beats: "flanqueo", description: "Prioriza infligir daño y romper la línea enemiga." },
+  defensiva: { label: "Defensiva", attack: 0.9, defense: 1.12, beats: "ofensiva", description: "Prioriza reducir bajas propias y resistir." },
+  equilibrada: { label: "Equilibrada", attack: 1.0, defense: 1.0, beats: null, description: "Sin especialización extrema; respuesta flexible." },
+  flanqueo: { label: "Flanqueo", attack: 1.06, defense: 0.96, beats: "defensiva", description: "Busca atacar los laterales y desorganizar al rival." },
+};
+export const TACTICAL_FORMATION_COUNTER_BONUS = 1.15;
+export const TACTICAL_FORMATION_FACTOR_RANGE = { min: 0.85, max: 1.25 } as const;
+export const DEFAULT_TACTICAL_FORMATION: TacticalFormation = "equilibrada";
+
 // ============================================================================
 // 4b. MERCENARIOS, SUPERVISORES, DESCANSO, ESTACIONES, ALMACÉN Y PROFESIONES (ronda 2)
 // ============================================================================

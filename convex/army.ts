@@ -25,10 +25,11 @@ import {
   trainingProgress,
   trainingQueueSlots,
   unitLevelOf,
+  isTacticalFormation,
   validateEquipmentSelection,
   type TrainingQueueEntry,
 } from "./armyRules";
-import { ARMORS, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type UnitType } from "./balanceConfig";
+import { ARMORS, DEFAULT_TACTICAL_FORMATION, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TACTICAL_FORMATIONS, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type UnitType } from "./balanceConfig";
 import type { ResourceType } from "./economyCalculations";
 import { readHomeCoord } from "./territories";
 import {
@@ -193,6 +194,8 @@ export const getArmyState = query({
         weaponCatalog: WEAPONS,
         armorCatalog: ARMORS,
         strategyCatalog: STRATEGIES,
+        tacticalFormation: isTacticalFormation(kingdomAny.tacticalFormation ?? "") ? kingdomAny.tacticalFormation : DEFAULT_TACTICAL_FORMATION,
+        tacticalFormationCatalog: TACTICAL_FORMATIONS,
       },
     };
   },
@@ -388,6 +391,17 @@ export const hireMercenaries = mutation({
     const population = await ctx.db.get(settled.population._id);
     if (population) await ctx.db.patch(population._id, { total: population.total + args.count });
     return { success: true, count: args.count, cost, contractEndsAt, salaryGoldPerDay: MERCENARIES.SALARY_GOLD_PER_DAY * args.count };
+  },
+});
+
+/** [DECISIÓN 21-10-2026] Formación táctica del ejército: ofensiva, defensiva, equilibrada o flanqueo. */
+export const setTacticalFormation = mutation({
+  args: { kingdomId: v.id("kingdoms"), tacticalFormation: v.string() },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx, args.kingdomId);
+    if (!isTacticalFormation(args.tacticalFormation)) throw new Error(`Formación desconocida: '${args.tacticalFormation}'.`);
+    await ctx.db.patch(args.kingdomId, { tacticalFormation: args.tacticalFormation, updatedAt: Date.now() });
+    return { success: true, tacticalFormation: args.tacticalFormation, ...TACTICAL_FORMATIONS[args.tacticalFormation] };
   },
 });
 
@@ -616,6 +630,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     weaponTier: (attackerKingdom.weaponTier as any) ?? "palo",
     armorTier: (attackerKingdom.armorTier as any) ?? "ninguna",
     strategy: (attackerKingdom.strategy as any) ?? "defensiva",
+    tacticalFormation: isTacticalFormation(attackerKingdom.tacticalFormation ?? "") ? (attackerKingdom.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
     morale: typeof attackerKingdom.militaryMorale === "number" ? attackerKingdom.militaryMorale : 70,
     foodTier: attackerKingdom.foodTier ?? "normal",
     fatigue: newFatigue,
@@ -633,6 +648,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     weaponTier: (defenderKingdom.weaponTier as any) ?? "palo",
     armorTier: (defenderKingdom.armorTier as any) ?? "ninguna",
     strategy: (defenderKingdom.strategy as any) ?? "defensiva",
+    tacticalFormation: isTacticalFormation(defenderKingdom.tacticalFormation ?? "") ? (defenderKingdom.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
     morale: typeof defenderKingdom.militaryMorale === "number" ? defenderKingdom.militaryMorale : 70,
     foodTier: defenderKingdom.foodTier ?? "normal",
     fatigue: typeof defenderKingdom.armyFatigue === "number" ? defenderKingdom.armyFatigue : 0,

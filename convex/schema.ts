@@ -53,6 +53,7 @@ export default defineSchema({
       weaponTier: v.optional(v.string()),
       armorTier: v.optional(v.string()),
       strategy: v.optional(v.string()),
+      tacticalFormation: v.optional(v.string()), // [DECISIÓN 21-10-2026] ofensiva | defensiva | equilibrada | flanqueo
       armyFatigue: v.optional(v.number()),
       // Ronda 2: política de descanso (M-04) y formación de combate (P37, M-11)
       restPolicy: v.optional(v.string()),
