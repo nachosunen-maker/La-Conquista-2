@@ -1,6 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { completeDueConstructions, insertInitialBuildings } from "./buildings";
+import { evaluateKingdomMissions } from "./missions";
+import { activeProductionBonusMultiplier } from "./missionRules";
 import { completeDueTraining, readArmyUnitDocs, readArmyUnitsWithMigration } from "./army";
 import { completeDueResearch } from "./technologies";
 import { ensureHomeTerritory, releaseTerritories } from "./territories";
@@ -238,6 +240,7 @@ export async function settleRelationalKingdomEconomy(
         .filter((doc: any) => doc.isMercenary && Number.isInteger(doc.count))
         .reduce((sum: number, doc: any) => sum + Math.max(0, doc.count), 0),
       civilization: kingdom.civilization,
+      bonusProductionMultiplier: activeProductionBonusMultiplier(kingdom.temporaryBonuses, now),
     });
     settledResources = extended.updatedResources;
   }
@@ -307,6 +310,9 @@ export async function settleRelationalKingdomEconomy(
     // [M-02] Mercenarios: contratos vencidos o impagados desaparecen y salen del censo.
     await settleMercenaries(ctx, state.armyUnits, state.population._id, now, extended.mercenaries.unpaid);
   }
+
+  // [Misiones, decisión 2026-10-21] El servidor detecta y premia las misiones cumplidas en la misma transacción.
+  await evaluateKingdomMissions(ctx, kingdom._id, now);
 
   return { ...state, settlement, settledResources, extended };
 }

@@ -341,6 +341,31 @@ export const STRATEGIES: Readonly<Record<Strategy, { label: string; attack: numb
 export const STRATEGY_COUNTER_BONUS = 1.15; // [DERIVADO de P35: la estrategia adecuada produce ventaja]
 export const STRATEGY_FACTOR_RANGE = { min: 0.8, max: 1.25 } as const;
 
+/**
+ * [DECISIÓN 21-10-2026] Cuatro formaciones tácticas: ofensiva, defensiva, equilibrada y flanqueo.
+ * Se SUMAN a la estrategia (P35) y a la matriz entre tipos de unidad (M-11): el factor de
+ * formación de la fórmula de potencia es estrategia × formación táctica.
+ * Valores [DERIVADO, pendientes de aprobación], validados con scripts/simulateBattles.ts:
+ *  - Ofensiva: +12 % ataque / −10 % defensa; fuerte contra flanqueo, débil contra defensiva.
+ *  - Defensiva: −10 % ataque / +12 % defensa; fuerte contra ofensiva, débil contra flanqueo.
+ *  - Flanqueo: +6 % ataque / −4 % defensa; fuerte contra defensiva, débil contra ofensiva.
+ *  - Equilibrada: sin modificadores ni ventaja; nadie la contrarresta.
+ * Los modificadores entran en el término Formación^0,3 (acotado 0,85–1,25). Contrarrestar es el
+ * término «Contramedida» de la fórmula: ×1,15 directo sobre la potencia. Con ejércitos iguales,
+ * la formación que contrarresta gana por ~6,7 puntos de bajas (victoria clara, nunca aplastante);
+ * cualquier otro cruce queda en empate.
+ */
+export type TacticalFormation = "ofensiva" | "defensiva" | "equilibrada" | "flanqueo";
+export const TACTICAL_FORMATIONS: Readonly<Record<TacticalFormation, { label: string; attack: number; defense: number; beats: TacticalFormation | null; description: string }>> = {
+  ofensiva: { label: "Ofensiva", attack: 1.12, defense: 0.9, beats: "flanqueo", description: "Prioriza infligir daño y romper la línea enemiga." },
+  defensiva: { label: "Defensiva", attack: 0.9, defense: 1.12, beats: "ofensiva", description: "Prioriza reducir bajas propias y resistir." },
+  equilibrada: { label: "Equilibrada", attack: 1.0, defense: 1.0, beats: null, description: "Sin especialización extrema; respuesta flexible." },
+  flanqueo: { label: "Flanqueo", attack: 1.06, defense: 0.96, beats: "defensiva", description: "Busca atacar los laterales y desorganizar al rival." },
+};
+export const TACTICAL_FORMATION_COUNTER_BONUS = 1.15;
+export const TACTICAL_FORMATION_FACTOR_RANGE = { min: 0.85, max: 1.25 } as const;
+export const DEFAULT_TACTICAL_FORMATION: TacticalFormation = "equilibrada";
+
 // ============================================================================
 // 4b. MERCENARIOS, SUPERVISORES, DESCANSO, ESTACIONES, ALMACÉN Y PROFESIONES (ronda 2)
 // ============================================================================
@@ -360,7 +385,26 @@ export const MERCENARIES = {
   SALARY_GOLD_PER_DAY: 0,
   /** No cuentan para la natalidad ni para la capacidad residencial. */
   COUNTS_FOR_GROWTH: false,
+  /**
+   * [DECISIÓN 21-10-2026] Varios tipos, «unos más baratos y otros más caros», ligados al nivel de
+   * la Taberna y sin salario. Precio [DERIVADO, pendiente de aprobación]: parte del anclaje
+   * aprobado (lanceros = 25 oro, infantería nivel 2) y escala con el oro de instrucción de la
+   * unidad y con el multiplicador del nivel militar, redondeado a 5:
+   *   precio = redondear5( 25 × (oroInstrucción / 5) × (multiplicadorNivel / 1,15) ).
+   * El límite de activos (50 por nivel de Taberna) es común a todos los tipos.
+   */
+  TYPES: [
+    { id: "mesnada", label: "Mesnada a sueldo", unitType: "infanteria" as UnitType, level: 1, goldPerUnit: 20, minTavernLevel: 1, description: "Infantería de milicia (nivel 1): la opción más barata." },
+    { id: "lanceros", label: "Lanceros a sueldo", unitType: "infanteria" as UnitType, level: 2, goldPerUnit: 25, minTavernLevel: 1, description: "Infantería entrenada (nivel 2); el contrato de referencia." },
+    { id: "arqueros", label: "Arqueros de fortuna", unitType: "arqueria" as UnitType, level: 2, goldPerUnit: 30, minTavernLevel: 2, description: "Arquería entrenada (nivel 2)." },
+    { id: "jinetes", label: "Jinetes de fortuna", unitType: "caballeria" as UnitType, level: 2, goldPerUnit: 75, minTavernLevel: 3, description: "Caballería entrenada (nivel 2); cara pero rápida." },
+    { id: "veteranos", label: "Compañía veterana", unitType: "infanteria" as UnitType, level: 3, goldPerUnit: 30, minTavernLevel: 4, description: "Infantería veterana (nivel 3)." },
+    { id: "guardia", label: "Guardia mercenaria", unitType: "caballeria" as UnitType, level: 3, goldPerUnit: 90, minTavernLevel: 5, description: "Caballería veterana (nivel 3): la más cara." },
+  ],
+  /** Tipo por defecto (compatibilidad con la contratación anterior). */
+  DEFAULT_TYPE_ID: "lanceros",
 } as const;
+export type MercenaryTypeId = (typeof MERCENARIES.TYPES)[number]["id"];
 
 /** [DECISIÓN 17-10-2026, M-03 opción B] Ranuras de investigación según nivel de Universidad (P25). */
 export const RESEARCH_SLOTS_BY_UNIVERSITY: readonly { minLevel: number; slots: number }[] = [
@@ -486,6 +530,155 @@ export const HOSPITAL_RECOVERY_CAP = 0.6;
 
 /** [MAESTRA P59] Bonus diario: +5 honor una vez cada 24 h reales, validado en servidor. */
 export const DAILY_BONUS = { HONOR: 5, COOLDOWN_MS: 24 * 60 * 60 * 1000 } as const;
+
+// ============================================================================
+// 5c. MISIONES (P3, P50, P51, P59 · sección 17 de CLAUDE.md)
+// ============================================================================
+/**
+ * [DECISIÓN 2026-10-21] Misiones progresivas por etapas (se revela una etapa cada vez), diarias
+ * (mismo conjunto y premios para todos; se renuevan cada día) y secretas (ocultas hasta cumplirse;
+ * el mismo número por civilización). Completado y recompensa automáticos en servidor, una sola vez.
+ * Cantidades [DERIVADO, pendientes de aprobación]: escaladas a los recursos fundacionales
+ * (500 oro, 1.000 madera…) y a las recompensas de batalla (victoria +20 honor / +10 gloria).
+ */
+export type MissionCounterKey =
+  | "buildingsCompleted" | "troopsTrained" | "researchStarted" | "researchCompleted" | "battlesFought"
+  | "battlesWon" | "crushingVictories" | "challengesSent" | "explorationsCompleted" | "territoriesClaimed" | "dailyBonusClaimed";
+export type MissionConditionType =
+  | "buildingLevel" | "population" | "technologiesCompleted" | "technologyCompleted" | "armySize" | "happiness" | "honor" | "resourceStock" | "territoriesOwned"
+  | "lifetime" | "daily";
+export interface MissionCondition {
+  type: MissionConditionType;
+  value: number;
+  buildingType?: string;
+  technologyId?: string;
+  resource?: ResourceType;
+  /** Para "lifetime" y "daily": contador que se compara con value. */
+  counter?: MissionCounterKey;
+}
+export interface MissionReward {
+  resources?: Partial<ResourceCosts>;
+  honor?: number;
+  glory?: number;
+  troops?: { unitType: UnitType; level: number; count: number };
+  /** Bonificación temporal de producción (multiplicador × días reales). */
+  productionBonus?: { multiplier: number; days: number };
+}
+export interface MissionDefinition {
+  id: string;
+  title: string;
+  description: string;
+  condition: MissionCondition;
+  reward: MissionReward;
+  /** Solo para misiones secretas exclusivas de una civilización. */
+  civilization?: string;
+}
+export interface MissionStage {
+  stage: number;
+  title: string;
+  missions: readonly MissionDefinition[];
+  /** Premio adicional al completar todas las misiones de la etapa. */
+  reward: MissionReward;
+}
+
+export const MISSIONS = {
+  /** Las etapas se desbloquean una a una: solo se muestra la etapa en curso y las ya completadas. */
+  STAGES: [
+    {
+      stage: 1,
+      title: "Los primeros pasos",
+      missions: [
+        { id: "s1_castillo2", title: "Torres más altas", description: "Mejora el Castillo al nivel 2 (ningún edificio puede superar su nivel).", condition: { type: "buildingLevel", buildingType: "castillo", value: 2 }, reward: { resources: { stone: 200, wood: 150 }, honor: 5 } },
+        { id: "s1_cuartel", title: "Llamada a las armas", description: "Construye el Cuartel.", condition: { type: "buildingLevel", buildingType: "cuartel", value: 1 }, reward: { resources: { gold: 50, iron: 50 }, honor: 5 } },
+        { id: "s1_taberna", title: "Posada del reino", description: "Construye la Taberna.", condition: { type: "buildingLevel", buildingType: "taberna", value: 1 }, reward: { resources: { gold: 50, food: 100 }, honor: 5 } },
+        { id: "s1_tropas", title: "Primera leva", description: "Entrena 10 tropas en total.", condition: { type: "lifetime", counter: "troopsTrained", value: 10 }, reward: { resources: { gold: 50, food: 100 }, honor: 5 } },
+        { id: "s1_universidad", title: "Casa del saber", description: "Construye la Universidad (requiere Castillo 2).", condition: { type: "buildingLevel", buildingType: "universidad", value: 1 }, reward: { resources: { gold: 100 }, honor: 5 } },
+      ],
+      reward: { resources: { gold: 200, wood: 200, stone: 200, iron: 100, food: 300 }, honor: 10, glory: 5, troops: { unitType: "infanteria" as UnitType, level: 1, count: 20 } },
+    },
+    {
+      stage: 2,
+      title: "Un reino en marcha",
+      missions: [
+        { id: "s2_castillo3", title: "Sede del poder", description: "Mejora el Castillo al nivel 3.", condition: { type: "buildingLevel", buildingType: "castillo", value: 3 }, reward: { resources: { stone: 300 }, honor: 10 } },
+        { id: "s2_investigacion", title: "Primer descubrimiento", description: "Completa tu primera investigación.", condition: { type: "technologiesCompleted", value: 1 }, reward: { resources: { gold: 150 }, honor: 10 } },
+        { id: "s2_poblacion", title: "Ciudad creciente", description: "Alcanza 2.600 habitantes.", condition: { type: "population", value: 2600 }, reward: { resources: { food: 500 }, honor: 10 } },
+        { id: "s2_ejercito", title: "Guarnición", description: "Mantén 50 tropas activas.", condition: { type: "armySize", value: 50 }, reward: { resources: { iron: 100 }, honor: 10 } },
+        { id: "s2_parlamento", title: "Voz entre reinos", description: "Construye el Parlamento.", condition: { type: "buildingLevel", buildingType: "parlamento", value: 1 }, reward: { resources: { gold: 150 }, honor: 10 } },
+      ],
+      reward: { resources: { gold: 400, wood: 400, stone: 400, iron: 200, food: 600 }, honor: 20, glory: 10, productionBonus: { multiplier: 1.05, days: 1 } },
+    },
+    {
+      stage: 3,
+      title: "La corona se afirma",
+      missions: [
+        { id: "s3_castillo4", title: "Alcázar", description: "Mejora el Castillo al nivel 4.", condition: { type: "buildingLevel", buildingType: "castillo", value: 4 }, reward: { resources: { stone: 500 }, honor: 10 } },
+        { id: "s3_murallas", title: "Piedra sobre piedra", description: "Construye las Murallas.", condition: { type: "buildingLevel", buildingType: "murallas", value: 1 }, reward: { resources: { stone: 300, iron: 100 }, honor: 10 } },
+        { id: "s3_desafio", title: "Guante arrojado", description: "Envía tu primer desafío por el Parlamento.", condition: { type: "lifetime", counter: "challengesSent", value: 1 }, reward: { honor: 10 } },
+        { id: "s3_batalla", title: "Bautismo de fuego", description: "Libra tu primera batalla.", condition: { type: "lifetime", counter: "battlesFought", value: 1 }, reward: { resources: { food: 300 }, honor: 10 } },
+        { id: "s3_victoria", title: "Primera victoria", description: "Gana tu primera batalla.", condition: { type: "lifetime", counter: "battlesWon", value: 1 }, reward: { resources: { gold: 200 }, honor: 15, glory: 5 } },
+        { id: "s3_tecnologias", title: "Tres saberes", description: "Completa 3 investigaciones.", condition: { type: "technologiesCompleted", value: 3 }, reward: { resources: { gold: 200 }, honor: 10 } },
+      ],
+      reward: { resources: { gold: 600, wood: 600, stone: 600, iron: 300, food: 800 }, honor: 30, glory: 15, troops: { unitType: "arqueria" as UnitType, level: 2, count: 30 } },
+    },
+    {
+      stage: 4,
+      title: "Señor de la guerra",
+      missions: [
+        { id: "s4_castillo6", title: "Ciudadela", description: "Mejora el Castillo al nivel 6.", condition: { type: "buildingLevel", buildingType: "castillo", value: 6 }, reward: { resources: { stone: 800 }, honor: 15 } },
+        { id: "s4_ejercito", title: "Hueste real", description: "Mantén 300 tropas activas.", condition: { type: "armySize", value: 300 }, reward: { resources: { iron: 300, food: 500 }, honor: 15 } },
+        { id: "s4_victorias", title: "Cinco laureles", description: "Gana 5 batallas.", condition: { type: "lifetime", counter: "battlesWon", value: 5 }, reward: { resources: { gold: 400 }, honor: 20, glory: 10 } },
+        { id: "s4_aplastante", title: "Sin cuartel", description: "Logra una victoria aplastante.", condition: { type: "lifetime", counter: "crushingVictories", value: 1 }, reward: { honor: 20, glory: 10 } },
+        { id: "s4_territorio", title: "Nuevas tierras", description: "Reclama un territorio libre.", condition: { type: "lifetime", counter: "territoriesClaimed", value: 1 }, reward: { resources: { gold: 300, wood: 300 }, honor: 15 } },
+        { id: "s4_hospital", title: "Cuidar a los nuestros", description: "Construye el Hospital militar.", condition: { type: "buildingLevel", buildingType: "hospitalMilitar", value: 1 }, reward: { resources: { gold: 200 }, honor: 10 } },
+      ],
+      reward: { resources: { gold: 1000, wood: 800, stone: 800, iron: 500, food: 1000 }, honor: 50, glory: 25, troops: { unitType: "caballeria" as UnitType, level: 2, count: 30 }, productionBonus: { multiplier: 1.1, days: 1 } },
+    },
+  ] as readonly MissionStage[],
+
+  /** Diarias: mismo conjunto para todos, elegido de forma determinista por fecha; se renuevan cada día. */
+  DAILY: {
+    /** [DERIVADO, pendiente de aprobación] Reinicio diario a las 00:00 UTC. */
+    RESET_UTC_HOUR: 0,
+    PER_DAY: 3,
+    CATALOG: [
+      { id: "d_obra", title: "Manos a la obra", description: "Termina 1 obra hoy.", condition: { type: "daily", counter: "buildingsCompleted", value: 1 }, reward: { resources: { wood: 100, stone: 100 }, honor: 2 } },
+      { id: "d_tropas", title: "Instrucción diaria", description: "Entrena 20 tropas hoy.", condition: { type: "daily", counter: "troopsTrained", value: 20 }, reward: { resources: { food: 150 }, honor: 2 } },
+      { id: "d_investigar", title: "Hora de estudio", description: "Inicia 1 investigación hoy.", condition: { type: "daily", counter: "researchStarted", value: 1 }, reward: { resources: { gold: 60 }, honor: 2 } },
+      { id: "d_bonus", title: "Tributo diario", description: "Reclama el bonus diario.", condition: { type: "daily", counter: "dailyBonusClaimed", value: 1 }, reward: { resources: { gold: 40 }, honor: 2 } },
+      { id: "d_explorar", title: "Ojos en el horizonte", description: "Completa 1 expedición de exploración hoy.", condition: { type: "daily", counter: "explorationsCompleted", value: 1 }, reward: { resources: { food: 100, gold: 40 }, honor: 2 } },
+      { id: "d_batalla", title: "Al campo de batalla", description: "Libra 1 batalla hoy.", condition: { type: "daily", counter: "battlesFought", value: 1 }, reward: { resources: { gold: 80 }, honor: 3 } },
+    ] as readonly MissionDefinition[],
+  },
+
+  /** Secretas generales: condiciones ocultas hasta cumplirse. */
+  SECRET: [
+    { id: "x_felicidad", title: "Reino feliz", description: "Alcanzar 90 de felicidad.", condition: { type: "happiness", value: 90 }, reward: { resources: { food: 400 }, honor: 15, glory: 5 } },
+    { id: "x_tesoro", title: "Arcas rebosantes", description: "Acumular 5.000 de oro.", condition: { type: "resourceStock", resource: "gold", value: 5000 }, reward: { honor: 15, glory: 5 } },
+    { id: "x_honor", title: "Nombre respetado", description: "Alcanzar 100 de honor.", condition: { type: "honor", value: 100 }, reward: { resources: { gold: 300 }, glory: 10 } },
+    { id: "x_exploradores", title: "Cartógrafos", description: "Completar 5 expediciones.", condition: { type: "lifetime", counter: "explorationsCompleted", value: 5 }, reward: { resources: { gold: 200, food: 200 }, honor: 10 } },
+  ] as readonly MissionDefinition[],
+
+  /**
+   * Secretas por civilización: una por civilización (mismo número), misma estructura de premio
+   * [DERIVADO]: completar la tecnología única de la civilización.
+   */
+  SECRET_PER_CIVILIZATION_REWARD: { resources: { gold: 300, wood: 200, stone: 200, iron: 100, food: 300 }, honor: 20, glory: 10 } as MissionReward,
+  SECRET_PER_CIVILIZATION_TITLES: {
+    ingleses: "Herederos de Agincourt",
+    romanos: "Senatus Populusque",
+    griegos: "Luz de la Academia",
+    vikingos: "Saga de los mares",
+    bizantinos: "Púrpura imperial",
+    arabes: "Sabios del califato",
+    mongoles: "Jinetes de la estepa",
+    chinos: "Mandato del Cielo",
+    japoneses: "Camino del guerrero",
+    navajos: "Senderos sagrados",
+    aztecas: "Sol de Tenochtitlan",
+    masais: "Guardianes de la sabana",
+  } as Readonly<Record<string, string>>,
+} as const;
 
 // ============================================================================
 // 5b. CUENTA DEL JUGADOR (P4, P5, sección 5 y 21 de CLAUDE.md)
@@ -716,9 +909,13 @@ export interface CivilizationPassiveConfig {
   residentialCapacityMultiplier: number;
   storageCapacityMultiplier?: number;
   trainingDurationByUnit: Partial<Record<UnitType, number>>;
+  /** [DECISIÓN 21-10-2026] Debilidad: sobrecoste de instrucción por tipo de unidad (1,15 = +15 %). */
+  trainingCostByUnit?: Partial<Record<UnitType, number>>;
   combatAttackMultiplier: number;
   combatDefenseMultiplier: number;
   happinessBonus: number;
+  /** [DECISIÓN 21-10-2026] Texto de la debilidad de la civilización (null = pendiente de diseño). */
+  weakness?: string | null;
 }
 
 export interface CivilizationBalance {
@@ -753,9 +950,11 @@ export const CIVILIZATIONS = [
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
       trainingDurationByUnit: { arqueria: 0.90 },
+      trainingCostByUnit: { caballeria: 1.15 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Caballería pesada más cara: +15 % de coste de instrucción de caballería (dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_ingleses",
   },
@@ -775,10 +974,11 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { caballeria: 1.1 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Caballería menos especializada: +10 % de duración de instrucción de caballería (dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_romanos",
   },
@@ -799,9 +999,11 @@ export const CIVILIZATIONS = [
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
       trainingDurationByUnit: {},
+      trainingCostByUnit: { caballeria: 1.1 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 5,
+      weakness: "Ciudades-estado con poca caballería: +10 % de coste de instrucción de caballería [DERIVADO].",
     },
     uniqueTechnologyId: "tech_civ_griegos",
   },
@@ -821,10 +1023,11 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { asedio: 1.15 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Peores en asedios largos: +15 % de duración de instrucción de asedio (dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_vikingos",
   },
@@ -845,9 +1048,11 @@ export const CIVILIZATIONS = [
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
       trainingDurationByUnit: {},
+      trainingCostByUnit: { caballeria: 1.15 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.05,
       happinessBonus: 0,
+      weakness: "Élites caras: +15 % de coste de instrucción de caballería (catafractos; dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_bizantinos",
   },
@@ -867,10 +1072,11 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { infanteria: 1.1 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Infantería pesada poco habitual: +10 % de duración de instrucción de infantería [DERIVADO].",
     },
     uniqueTechnologyId: "tech_civ_arabes",
   },
@@ -892,8 +1098,9 @@ export const CIVILIZATIONS = [
       residentialCapacityMultiplier: 1.0,
       trainingDurationByUnit: { caballeria: 0.90 },
       combatAttackMultiplier: 1.0,
-      combatDefenseMultiplier: 1.0,
+      combatDefenseMultiplier: 0.95,
       happinessBonus: 0,
+      weakness: "Débiles en defensa urbana fija: −5 % de fuerza defensiva en combate (dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_mongoles",
   },
@@ -914,9 +1121,11 @@ export const CIVILIZATIONS = [
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.05,
       trainingDurationByUnit: {},
+      trainingCostByUnit: { caballeria: 1.1 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Caballería dependiente de la estepa: +10 % de coste de instrucción de caballería [DERIVADO].",
     },
     uniqueTechnologyId: "tech_civ_chinos",
   },
@@ -936,10 +1145,11 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { asedio: 1.1 },
       combatAttackMultiplier: 1.05,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: "Asedio poco desarrollado en el periodo Sengoku: +10 % de duración de instrucción de asedio [DERIVADO].",
     },
     uniqueTechnologyId: "tech_civ_japoneses",
   },
@@ -964,6 +1174,7 @@ export const CIVILIZATIONS = [
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: null,
     },
     uniqueTechnologyId: "tech_civ_navajos",
   },
@@ -983,10 +1194,11 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { caballeria: 1.15 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 4,
+      weakness: "Sin caballos: la plaza de caballería la ocupa la élite a pie (Guerreros Jaguar), +15 % de duración de instrucción (dossier histórico).",
     },
     uniqueTechnologyId: "tech_civ_aztecas",
   },
@@ -1011,11 +1223,105 @@ export const CIVILIZATIONS = [
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
+      weakness: null,
     },
     uniqueTechnologyId: "tech_civ_masais",
   },
 ] as const;
 
+
+/**
+ * [DECISIÓN 21-10-2026] Singularidades por civilización: nombres de armas y armaduras por nivel de
+ * calidad, edificio único (variante con nombre propio de un edificio base) y tropa característica.
+ * Solo cambian nombre y estética: los multiplicadores de P29–P31 son iguales para todas (P6).
+ * Cronologías del dossier histórico (propuesta): Ingleses XI–XV · Romanos alto Imperio · Griegos
+ * clásicos · Vikingos VIII–XI · Bizantinos periodo medio · Árabes califatos · Mongoles XIII–XIV ·
+ * Chinos Song · Japoneses Sengoku · Aztecas XIV–XVI. Sin mezclar épocas ni materiales (los aztecas
+ * no tienen acero ni caballos; los vikingos no llevan cuernos). Navajos y Masáis: pendientes de
+ * documentar antes de implementar (no se inventan).
+ */
+export interface CivilizationIdentity {
+  weapons: Record<WeaponTier, string>;
+  armors: Record<ArmorTier, string>;
+  uniqueBuilding: { buildingType: string; name: string; description: string };
+  signatureUnit: { unitType: UnitType; name: string; description: string };
+  /** Nombres de las cuatro plazas de tropa (solo estética). */
+  unitNames: Partial<Record<UnitType, string>>;
+}
+export const CIVILIZATION_IDENTITIES: Readonly<Record<string, CivilizationIdentity | null>> = {
+  ingleses: {
+    weapons: { palo: "Bastón de fresno", lanzaBasica: "Lanza de leva", espadaHierro: "Espada de armas", acero: "Arco largo y espada de acero", aceroAvanzado: "Arco largo de tejo y acero templado" },
+    armors: { ninguna: "Sin armadura", piel: "Gambesón", cueroReforzado: "Brigantina de cuero", hierro: "Cota de malla", acero: "Arnés de placas" },
+    uniqueBuilding: { buildingType: "cuartel", name: "Campo de Tiro", description: "Cuartel inglés donde se instruye a los arqueros de arco largo." },
+    signatureUnit: { unitType: "arqueria", name: "Arquero de arco largo", description: "Arquería de tiro largo y disciplina de campaña." },
+    unitNames: { infanteria: "Hombre de armas", arqueria: "Arquero de arco largo", caballeria: "Caballero", asedio: "Trabuquete" },
+  },
+  romanos: {
+    weapons: { palo: "Fustis", lanzaBasica: "Hasta", espadaHierro: "Gladius hispaniensis", acero: "Gladius y pilum de acero", aceroAvanzado: "Spatha de acero" },
+    armors: { ninguna: "Sin armadura", piel: "Túnica reforzada", cueroReforzado: "Lorica hamata ligera", hierro: "Lorica segmentata", acero: "Lorica segmentata de acero" },
+    uniqueBuilding: { buildingType: "cuartel", name: "Castra", description: "Campamento legionario: Cuartel romano de disciplina férrea." },
+    signatureUnit: { unitType: "infanteria", name: "Legionario", description: "Infantería pesada de formación cerrada con scutum." },
+    unitNames: { infanteria: "Legionario", arqueria: "Sagittarius", caballeria: "Eques", asedio: "Onagro" },
+  },
+  griegos: {
+    weapons: { palo: "Vara de olivo", lanzaBasica: "Dory", espadaHierro: "Xiphos de hierro", acero: "Dory y xiphos de acero", aceroAvanzado: "Panoplia hoplita de acero" },
+    armors: { ninguna: "Sin armadura", piel: "Linothorax", cueroReforzado: "Coraza de cuero y hoplon", hierro: "Coraza de bronce y hoplon", acero: "Coraza musculada y hoplon" },
+    uniqueBuilding: { buildingType: "universidad", name: "Liceo", description: "Universidad griega: escuela de filosofía y ciencia." },
+    signatureUnit: { unitType: "infanteria", name: "Hoplita", description: "Infantería cívica de falange con lanza y escudo redondo." },
+    unitNames: { infanteria: "Hoplita", arqueria: "Peltasta", caballeria: "Hippeis", asedio: "Oxybeles" },
+  },
+  vikingos: {
+    weapons: { palo: "Garrote", lanzaBasica: "Lanza nórdica", espadaHierro: "Hacha danesa de hierro", acero: "Hacha y espada de acero", aceroAvanzado: "Hacha danesa de acero pautado" },
+    armors: { ninguna: "Sin armadura", piel: "Pieles y casco de hierro", cueroReforzado: "Cuero reforzado y escudo redondo", hierro: "Brynja (cota de malla)", acero: "Brynja de acero y casco" },
+    uniqueBuilding: { buildingType: "taberna", name: "Salón Largo", description: "Taberna vikinga: hogar comunal donde se reclutan guerreros a sueldo." },
+    signatureUnit: { unitType: "infanteria", name: "Huscarl", description: "Guardia de élite con hacha, lanza y escudo redondo; cascos sin cuernos." },
+    unitNames: { infanteria: "Huscarl", arqueria: "Arquero del fiordo", caballeria: "Jinete del norte", asedio: "Ariete" },
+  },
+  bizantinos: {
+    weapons: { palo: "Vara", lanzaBasica: "Kontarion", espadaHierro: "Spathion de hierro", acero: "Spathion y kontos de acero", aceroAvanzado: "Paramerion de acero" },
+    armors: { ninguna: "Sin armadura", piel: "Kavadion acolchado", cueroReforzado: "Lorikion de cuero", hierro: "Klivanion lamelar", acero: "Klivanion de acero" },
+    uniqueBuilding: { buildingType: "circo", name: "Hipódromo", description: "Circo bizantino: carreras y facciones que animan a la ciudad." },
+    signatureUnit: { unitType: "caballeria", name: "Catafracto", description: "Caballería acorazada de carga con kontos." },
+    unitNames: { infanteria: "Skutatos", arqueria: "Toxotes", caballeria: "Catafracto", asedio: "Helépolis" },
+  },
+  arabes: {
+    weapons: { palo: "Bastón", lanzaBasica: "Lanza beduina", espadaHierro: "Sayf de hierro", acero: "Sayf y arco compuesto de acero", aceroAvanzado: "Sayf damasquino" },
+    armors: { ninguna: "Sin armadura", piel: "Túnica acolchada", cueroReforzado: "Cuero endurecido", hierro: "Dir' (cota de malla)", acero: "Coraza lamelar de acero" },
+    uniqueBuilding: { buildingType: "mercado", name: "Caravasar", description: "Mercado árabe: posada de caravanas y comercio de larga distancia." },
+    signatureUnit: { unitType: "caballeria", name: "Jinete ligero", description: "Arquero a caballo rápido con arco compuesto." },
+    unitNames: { infanteria: "Lancero del califato", arqueria: "Arquero árabe", caballeria: "Jinete ligero", asedio: "Manjaniq" },
+  },
+  mongoles: {
+    weapons: { palo: "Vara de estepa", lanzaBasica: "Lanza ligera", espadaHierro: "Sable de hierro", acero: "Arco compuesto y sable de acero", aceroAvanzado: "Arco compuesto reforzado y sable de acero" },
+    armors: { ninguna: "Sin armadura", piel: "Deel acolchado", cueroReforzado: "Cuero lacado", hierro: "Lamelar de hierro", acero: "Lamelar de acero" },
+    uniqueBuilding: { buildingType: "viviendas", name: "Ger del Kan", description: "Viviendas mongolas: campamento de tiendas en torno al kan." },
+    signatureUnit: { unitType: "caballeria", name: "Jinete arquero", description: "Caballería ligera de arco compuesto y movilidad extrema." },
+    unitNames: { infanteria: "Guardia de la horda", arqueria: "Arquero de la estepa", caballeria: "Jinete arquero", asedio: "Trabuquete de contrapeso" },
+  },
+  chinos: {
+    weapons: { palo: "Bastón", lanzaBasica: "Qiang", espadaHierro: "Jian de hierro", acero: "Jian y ballesta de acero", aceroAvanzado: "Jian de acero y ballesta pesada" },
+    armors: { ninguna: "Sin armadura", piel: "Túnica acolchada", cueroReforzado: "Cuero laminado", hierro: "Laminada de hierro", acero: "Laminada de acero (shanwenjia)" },
+    uniqueBuilding: { buildingType: "granja", name: "Arrozal Imperial", description: "Granja china: arrozales en terrazas de la dinastía Song." },
+    signatureUnit: { unitType: "arqueria", name: "Ballestero", description: "Tiradores de ballesta de la burocracia militar Song." },
+    unitNames: { infanteria: "Lancero Song", arqueria: "Ballestero", caballeria: "Jinete Song", asedio: "Catapulta de tracción" },
+  },
+  japoneses: {
+    weapons: { palo: "Bō de roble", lanzaBasica: "Yari", espadaHierro: "Katana de hierro", acero: "Katana, yari y yumi de acero", aceroAvanzado: "Katana de acero plegado (tamahagane)" },
+    armors: { ninguna: "Sin armadura", piel: "Haramaki acolchado", cueroReforzado: "Dō-maru de cuero", hierro: "Dō-maru lamelar", acero: "Gusoku de acero" },
+    uniqueBuilding: { buildingType: "herreria", name: "Herrería del Maestro Forjador", description: "Herrería japonesa: forja de acero plegado." },
+    signatureUnit: { unitType: "infanteria", name: "Samurái", description: "Guerrero de élite; la lanza y el arco cuentan tanto como la katana." },
+    unitNames: { infanteria: "Samurái", arqueria: "Ashigaru arquero", caballeria: "Samurái a caballo", asedio: "Ōzutsu" },
+  },
+  navajos: null,
+  aztecas: {
+    weapons: { palo: "Bastón de guerra", lanzaBasica: "Tepoztopilli", espadaHierro: "Macuahuitl de obsidiana", acero: "Macuahuitl y átlatl", aceroAvanzado: "Macuahuitl de obsidiana reforzado" },
+    armors: { ninguna: "Sin armadura", piel: "Ichcahuipilli ligero", cueroReforzado: "Ichcahuipilli reforzado", hierro: "Tlahuiztli y chimalli", acero: "Tlahuiztli de águila" },
+    uniqueBuilding: { buildingType: "iglesia", name: "Templo Mayor", description: "Iglesia mexica: gran templo escalonado de Tenochtitlan." },
+    signatureUnit: { unitType: "infanteria", name: "Guerrero Águila", description: "Infantería de élite; sin caballos ni acero europeo." },
+    unitNames: { infanteria: "Guerrero Águila", arqueria: "Hondero y atlatl", caballeria: "Guerrero Jaguar (élite a pie)", asedio: "Cuadrilla de asalto" },
+  },
+  masais: null,
+};
 export type CivilizationId = (typeof CIVILIZATIONS)[number]["id"];
 /** [DECISIÓN 21-10-2026] Identificadores antiguos aún presentes en reinos y progreso guardados. */
 export const LEGACY_CIVILIZATION_IDS: Readonly<Record<string, string>> = {

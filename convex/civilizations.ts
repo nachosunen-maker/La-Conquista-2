@@ -21,11 +21,14 @@ export function getCivilizationById(id: string) {
 }
 
 export { getCivilizationStrategicMatrix } from "./civilizationRules";
+import { describeCivilizationIdentity } from "./civilizationRules";
 
 export const listCivilizations = query({
   args: {},
   handler: async () => ({
     civilizations: CIVILIZATIONS,
+    // [Decisión 21-10-2026] Ficha pública: ventaja, debilidad, equipo, edificio único y tropa (visible para invitados).
+    profiles: CIVILIZATIONS.map((civ) => describeCivilizationIdentity(civ)),
     bonusesEnabled: CIVILIZATION_BONUSES_ENABLED,
     immutable: CIVILIZATION_IMMUTABLE,
   }),

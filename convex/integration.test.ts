@@ -182,10 +182,54 @@ describe("Entrenamiento (Bloque B)", () => {
     const before = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     const hired = await asUser.mutation(api.army.hireMercenaries, { kingdomId, count: 5 });
     expect(hired.cost).toBe(125);
+    expect(hired.typeId).toBe("lanceros");
     const after = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     expect(after!.population?.total).toBe(before!.population!.total + 5);
     const army = await asUser.query(api.army.getArmyState, { kingdomId });
     expect(army.mercenaries.active).toBe(5);
+    // Tipos ligados al nivel de Taberna (decisión 21-10-2026): los jinetes exigen Taberna 3.
+    await expect(asUser.mutation(api.army.hireMercenaries, { kingdomId, count: 2, typeId: "jinetes" })).rejects.toThrow(/Taberna nivel 3/);
+    await setBuildingLevel(t, kingdomId, "taberna", 3);
+    const riders = await asUser.mutation(api.army.hireMercenaries, { kingdomId, count: 2, typeId: "jinetes" });
+    expect(riders.cost).toBe(150);
+    expect(riders.unitType).toBe("caballeria");
+    const armyAfter = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(armyAfter.mercenaries.active).toBe(7);
+    expect(armyAfter.summary.byType.caballeria.active).toBe(2);
+    expect(armyAfter.mercenaries.types.filter((type: any) => type.available).map((type: any) => type.id)).toEqual(["mesnada", "lanceros", "arqueros", "jinetes"]);
+  });
+});
+
+describe("Singularidades por civilización (decisión 21-10-2026)", () => {
+  test("los ingleses instruyen arqueros un 10 % más rápido y pagan la caballería un 15 % más cara; los romanos ven su Castra", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-eng"));
+    const english = await asUser.mutation(api.economy.getOrInitializeKingdom, { name: "Albión", civilization: "ingleses", castleName: "Torre", monarchName: "Ricardo" });
+    await setBuildingLevel(t, english._id as any, "castillo", 3);
+    await setBuildingLevel(t, english._id as any, "cuartel", 3);
+    await setBuildingLevel(t, english._id as any, "herreria", 1);
+    await t.run(async (ctx) => {
+      const res = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", english._id as any)).first();
+      if (res) await ctx.db.patch(res._id, { gold: 5_000, wood: 5_000, stone: 5_000, iron: 5_000, food: 5_000 });
+    });
+    const archers = await asUser.mutation(api.army.startTraining, { kingdomId: english._id as any, unitType: "arqueria", count: 10 });
+    expect(archers.durationMs).toBe(Math.ceil(UNITS.arqueria.trainingSecondsPerUnit * 1000 * 10 * 0.9));
+    const cavalry = await asUser.mutation(api.army.startTraining, { kingdomId: english._id as any, unitType: "caballeria", count: 10 });
+    expect(cavalry.costs.gold).toBe(Math.ceil(UNITS.caballeria.costs.gold * 10 * 1.15));
+    expect(cavalry.durationMs).toBe(UNITS.caballeria.trainingSecondsPerUnit * 1000 * 10);
+    const army = await asUser.query(api.army.getArmyState, { kingdomId: english._id as any });
+    expect(army.equipment.weaponCatalog.acero.label).toContain("Arco largo");
+    expect(army.equipment.weaponCatalog.acero.multiplier).toBe(1.15);
+    expect(army.equipment.civilizationWeakness).toContain("Caballería pesada");
+    expect(army.unitCatalog.find((u: any) => u.unitType === "arqueria")?.label).toBe("Arquero de arco largo (Arquería)");
+
+    const { asUser: roman, kingdomId } = await foundKingdom(t, "user-rom", "Roma");
+    const construction = await roman.query(api.kingdoms.getConstructionState, { kingdomId });
+    expect(construction.catalog.cuartel.label).toBe(`Castra (${BUILDINGS.cuartel.label})`);
+    expect(construction.catalog.granja.label).toBe(BUILDINGS.granja.label);
+    const civs = await t.query(api.civilizations.listCivilizations, {});
+    expect(civs.profiles.find((p: any) => p.id === "navajos")?.pendingDesign).toBe(true);
+    expect(civs.profiles.find((p: any) => p.id === "romanos")?.identity?.signatureUnit.name).toBe("Legionario");
   });
 });
 
@@ -277,7 +321,12 @@ describe("Parlamento y batalla (Bloques E y F)", () => {
     expect(report.attacker.survivors + report.attacker.casualties).toBe(600);
     const parliamentA = await a.asUser.query(api.parliament.getParliament, { kingdomId: a.kingdomId });
     expect(parliamentA.challenges[0].status).toBe("RESOLVED");
-    expect(parliamentA.honor).toBe(report.honorAwarded.attacker);
+    // Honor de batalla más el de las misiones completadas por el camino (tropas entrenadas, batalla del día).
+    const missionHonorA = await t.run(async (ctx) => {
+      const docs = await ctx.db.query("missionProgress").withIndex("by_kingdom", (q) => q.eq("kingdomId", a.kingdomId)).collect();
+      return docs.reduce((sum, doc) => sum + (Number(/\+(\d+) honor/.exec(doc.rewardSummary)?.[1] ?? 0)), 0);
+    });
+    expect(parliamentA.honor).toBe(report.honorAwarded.attacker + missionHonorA);
     const armyA = await a.asUser.query(api.army.getArmyState, { kingdomId: a.kingdomId });
     expect(armyA.summary.byType.infanteria.active).toBe(report.attacker.survivors);
     expect(armyA.summary.byType.infanteria.wounded).toBe(report.attacker.wounded);

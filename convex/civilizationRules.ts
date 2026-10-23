@@ -13,7 +13,16 @@ import {
   type ProductiveJob,
   type UnitType,
   TECHNOLOGIES,
-  type TechnologyBalance, LEGACY_CIVILIZATION_IDS } from "./balanceConfig";
+  type TechnologyBalance, LEGACY_CIVILIZATION_IDS,
+  CIVILIZATION_IDENTITIES,
+  type CivilizationIdentity,
+  type ArmorTier,
+  type WeaponTier,
+  ARMORS,
+  BUILDINGS,
+  UNITS,
+  WEAPONS,
+} from "./balanceConfig";
 
 export const NEUTRAL_PASSIVE: CivilizationPassiveConfig = {
   description: "Sin bonificaciones culturales activas",
@@ -197,4 +206,71 @@ export function getCivilizationStrategicMatrix() {
         : null,
     };
   });
+}
+
+// ----------------------------------------------------------------------------
+// Singularidades por civilización (decisión 21-10-2026): solo nombre y estética
+// ----------------------------------------------------------------------------
+/** Identidad (equipo, edificio único, tropa) o null si está pendiente de documentar (Navajos, Masáis). */
+export function getCivilizationIdentity(id: string | null | undefined): CivilizationIdentity | null {
+  const normalized = normalizeCivilizationId(id);
+  if (!normalized) return null;
+  return CIVILIZATION_IDENTITIES[normalized] ?? null;
+}
+
+export function civilizationWeaponLabel(civId: string | null | undefined, tier: WeaponTier): string {
+  const identity = getCivilizationIdentity(civId);
+  const generic = WEAPONS[tier]?.label ?? tier;
+  return identity ? `${identity.weapons[tier]} (${generic})` : generic;
+}
+
+export function civilizationArmorLabel(civId: string | null | undefined, tier: ArmorTier): string {
+  const identity = getCivilizationIdentity(civId);
+  const generic = ARMORS[tier]?.label ?? tier;
+  return identity ? `${identity.armors[tier]} (${generic})` : generic;
+}
+
+/** Nombre del edificio para la civilización: el único lleva su nombre propio y el base entre paréntesis. */
+export function civilizationBuildingLabel(civId: string | null | undefined, buildingType: string): string {
+  const generic = BUILDINGS[buildingType]?.label ?? buildingType;
+  const identity = getCivilizationIdentity(civId);
+  if (identity && identity.uniqueBuilding.buildingType === buildingType) return `${identity.uniqueBuilding.name} (${generic})`;
+  return generic;
+}
+
+export function civilizationUnitLabel(civId: string | null | undefined, unitType: UnitType): string {
+  const generic = UNITS[unitType]?.label ?? unitType;
+  const identity = getCivilizationIdentity(civId);
+  const own = identity?.unitNames[unitType];
+  return own ? `${own} (${generic})` : generic;
+}
+
+/** [DECISIÓN 21-10-2026] Debilidad: sobrecoste de instrucción por tipo de unidad (1 si no aplica). */
+export function civilizationTrainingCostMultiplier(unitType: UnitType, civId?: string | null): number {
+  const passive = getCivilizationPassive(civId);
+  const value = passive.trainingCostByUnit?.[unitType];
+  return typeof value === "number" && value > 0 ? value : 1;
+}
+
+/** Ficha pública de una civilización (para invitados y asistente de fundación). */
+export function describeCivilizationIdentity(civ: CivilizationBalance) {
+  const identity = getCivilizationIdentity(civ.id);
+  return {
+    id: civ.id,
+    label: civ.label,
+    emblem: civ.emblem,
+    style: civ.style,
+    advantage: civ.passive.description,
+    weakness: civ.passive.weakness ?? null,
+    identity: identity
+      ? {
+          weapons: identity.weapons,
+          armors: identity.armors,
+          uniqueBuilding: { ...identity.uniqueBuilding, baseLabel: BUILDINGS[identity.uniqueBuilding.buildingType]?.label ?? identity.uniqueBuilding.buildingType },
+          signatureUnit: { ...identity.signatureUnit, baseLabel: UNITS[identity.signatureUnit.unitType]?.label ?? identity.signatureUnit.unitType },
+          unitNames: identity.unitNames,
+        }
+      : null,
+    pendingDesign: !identity || !civ.passive.weakness,
+  };
 }

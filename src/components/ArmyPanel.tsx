@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { Swords, Shield, Users, Clock, Activity, Coins, Flag } from 'lucide-react';
-import { UNIT_COUNTERS, COMBAT } from '../../convex/balanceConfig';
+import { UNIT_COUNTERS, COMBAT, TACTICAL_FORMATION_COUNTER_BONUS } from '../../convex/balanceConfig';
 import {
   PanelSection,
   ProgressRow,
@@ -26,6 +26,7 @@ const cancelTrainingMutation = makeFunctionReference<"mutation">("army:cancelTra
 const setArmyEquipmentMutation = makeFunctionReference<"mutation">("army:setArmyEquipment");
 const hireMercenariesMutation = makeFunctionReference<"mutation">("army:hireMercenaries");
 const setFormationMutation = makeFunctionReference<"mutation">("army:setFormation");
+const setTacticalFormationMutation = makeFunctionReference<"mutation">("army:setTacticalFormation");
 
 interface ArmyState {
   serverTimeMs: number;
@@ -75,7 +76,8 @@ interface ArmyState {
   formation: Partial<Record<string, number>>;
   mercenaries: {
     active: number;
-    contracts: Array<{ count: number; contractEndsAt: number | null }>;
+    contracts: Array<{ count: number; contractEndsAt: number | null; typeId?: string; label?: string }>;
+    types: Array<{ id: string; label: string; unitType: string; level: number; goldPerUnit: number; minTavernLevel: number; description: string; available: boolean }>;
     maxActive: number;
     goldPerUnit: number;
     salaryGoldPerDay: number;
@@ -94,6 +96,11 @@ interface ArmyState {
     weaponCatalog: Record<string, { label: string; multiplier: number }>;
     armorCatalog: Record<string, { label: string; multiplier: number }>;
     strategyCatalog: Record<string, { label: string; attack: number; defense: number; beats: string }>;
+    tacticalFormation: string;
+    tacticalFormationCatalog: Record<string, { label: string; attack: number; defense: number; beats: string | null; description: string }>;
+    civilization: string | null;
+    civilizationIdentity: { signatureUnit: { unitType: string; name: string; description: string }; uniqueBuilding: { buildingType: string; name: string } } | null;
+    civilizationWeakness: string | null;
   };
 }
 
@@ -105,6 +112,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const setEquipment = useMutation(setArmyEquipmentMutation);
   const hireMercenaries = useMutation(hireMercenariesMutation);
   const setFormation = useMutation(setFormationMutation);
+  const setTacticalFormation = useMutation(setTacticalFormationMutation);
   const serverNow = useServerClock(state?.serverTimeMs);
   const action = useActionState();
 
@@ -115,7 +123,9 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const [armorTier, setArmorTier] = useState<string | null>(null);
   const [strategy, setStrategy] = useState<string | null>(null);
   const [formationDraft, setFormationDraft] = useState<Record<string, number> | null>(null);
+  const [tacticalDraft, setTacticalDraft] = useState<string | null>(null);
   const [mercenaryCount, setMercenaryCount] = useState<number>(10);
+  const [mercenaryTypeId, setMercenaryTypeId] = useState<string | null>(null);
 
   if (!state) {
     return <p className="text-xs text-[#8e816d] italic p-4">Consultando el ejército en el servidor…</p>;
@@ -133,6 +143,15 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const currentWeapon = weaponTier ?? state.equipment.weaponTier;
   const currentArmor = armorTier ?? state.equipment.armorTier;
   const currentStrategy = strategy ?? state.equipment.strategy;
+  const currentTactical = tacticalDraft ?? state.equipment.tacticalFormation;
+  const tacticalInfo = state.equipment.tacticalFormationCatalog[currentTactical];
+  const tacticalWeakAgainst = Object.entries(state.equipment.tacticalFormationCatalog).find(([, info]) => info.beats === currentTactical)?.[1].label ?? null;
+  const handleTactical = () =>
+    action.run('tactical', async () => {
+      const result = await setTacticalFormation({ kingdomId, tacticalFormation: currentTactical });
+      setTacticalDraft(null);
+      return `Formación ${result.label} guardada: ataque ×${result.attack}, defensa ×${result.defense}.`;
+    });
   const equipmentChanged =
     currentWeapon !== state.equipment.weaponTier || currentArmor !== state.equipment.armorTier || currentStrategy !== state.equipment.strategy;
 
@@ -168,13 +187,18 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
     });
 
   const safeMercenaries = Number.isInteger(mercenaryCount) && mercenaryCount > 0 ? mercenaryCount : 0;
-  const mercenaryCost = safeMercenaries * state.mercenaries.goldPerUnit;
+  const mercenaryTypes = state.mercenaries.types ?? [];
+  const selectedMercenaryType =
+    mercenaryTypes.find((type) => type.id === mercenaryTypeId && type.available) ??
+    [...mercenaryTypes].reverse().find((type) => type.available) ??
+    mercenaryTypes[0];
+  const mercenaryCost = safeMercenaries * (selectedMercenaryType?.goldPerUnit ?? state.mercenaries.goldPerUnit);
   const mercenaryRoom = Math.max(0, state.mercenaries.maxActive - state.mercenaries.active);
 
   const handleHire = () =>
     action.run('hire', async () => {
-      const result = await hireMercenaries({ kingdomId, count: safeMercenaries });
-      return `${result.count} mercenarios contratados por ${result.cost} oro; contrato hasta ${new Date(result.contractEndsAt).toLocaleString('es-ES')} sin salario diario.`;
+      const result = await hireMercenaries({ kingdomId, count: safeMercenaries, typeId: selectedMercenaryType?.id });
+      return `${result.count} ${result.label ?? 'mercenarios'} contratados por ${result.cost} oro; contrato hasta ${new Date(result.contractEndsAt).toLocaleString('es-ES')} sin salario diario.`;
     });
 
   const handleEquipment = () =>
@@ -357,13 +381,20 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
           <div className={`${cardClass} space-y-1 text-[11px] text-[#c7beac]`}>
-            <p><strong className="text-[#e6ded0]">Qué hace:</strong> contrata {UNIT_LABELS[state.mercenaries.unitType] ?? state.mercenaries.unitType} de nivel {state.mercenaries.level} que se suman al ejército y al censo de inmediato, sin consumir población civil.</p>
-            <p><strong className="text-[#e6ded0]">Cuánto cuesta:</strong> {state.mercenaries.goldPerUnit} oro por mercenario, pagados al contratar; sin salario diario.</p>
+            <p><strong className="text-[#e6ded0]">Qué hace:</strong> contrata tropas a sueldo que se suman al ejército y al censo de inmediato, sin consumir población civil. Cada tipo exige un nivel de Taberna.</p>
+            <p><strong className="text-[#e6ded0]">Cuánto cuesta:</strong> el precio del tipo por mercenario, pagado al contratar; sin salario diario.</p>
             <p><strong className="text-[#e6ded0]">Cuánto dura:</strong> contrato de {state.mercenaries.contractDays} días reales; al vencer desaparecen.</p>
-            <p><strong className="text-[#e6ded0]">Límite:</strong> {state.mercenaries.maxActive} activos con la Taberna actual (50 por nivel). No generan natalidad.</p>
+            <p><strong className="text-[#e6ded0]">Límite:</strong> {state.mercenaries.maxActive} activos entre todos los tipos con la Taberna actual (50 por nivel). No generan natalidad.</p>
+            <div className="pt-1 space-y-0.5">
+              {mercenaryTypes.map((type) => (
+                <p key={type.id} className={type.available ? 'text-emerald-300' : 'text-[#8e816d]'}>
+                  {type.label}: {UNIT_LABELS[type.unitType] ?? type.unitType} nivel {type.level} · {type.goldPerUnit} oro · Taberna {type.minTavernLevel}{type.available ? '' : ' · bloqueado'}
+                </p>
+              ))}
+            </div>
             {state.mercenaries.contracts.length > 0 && (
               <p className="text-[#8e816d]">
-                Contratos: {state.mercenaries.contracts.map((c) => `${c.count} hasta ${c.contractEndsAt ? new Date(c.contractEndsAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : 'sin fecha'}`).join(' · ')}
+                Contratos: {state.mercenaries.contracts.map((c) => `${c.count} ${c.label ?? ''} hasta ${c.contractEndsAt ? new Date(c.contractEndsAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : 'sin fecha'}`).join(' · ')}
               </p>
             )}
           </div>
@@ -376,13 +407,23 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
               }}
             >
               <label className="flex items-center justify-between gap-2">
+                <span className="text-[#a0937e]">Tipo</span>
+                <select className={selectClass} value={selectedMercenaryType?.id ?? ''} onChange={(e) => setMercenaryTypeId(e.target.value)} disabled={state.mercenaries.tavernLevel < 1}>
+                  {mercenaryTypes.map((type) => (
+                    <option key={type.id} value={type.id} disabled={!type.available}>
+                      {type.label} · {type.goldPerUnit} oro{type.available ? '' : ` (Taberna ${type.minTavernLevel})`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center justify-between gap-2">
                 <span className="text-[#a0937e]">Mercenarios a contratar</span>
                 <input className={`${inputClass} w-24 text-right`} type="number" min={1} max={Math.max(1, mercenaryRoom)} step={1} value={mercenaryCount} onChange={(e) => setMercenaryCount(Number(e.target.value))} disabled={state.mercenaries.tavernLevel < 1} />
               </label>
               <div className="rounded border border-[#2b2419] bg-[#100e0b] p-2.5 text-[11px] text-[#c7beac] space-y-1">
                 <p><strong className="text-[#e6ded0]">Coste inmediato:</strong> {mercenaryCost.toLocaleString('es-ES')} oro.</p>
                 <p><strong className="text-[#e6ded0]">Mantenimiento:</strong> solo alimentos durante {state.mercenaries.contractDays} días; sin salario.</p>
-                <p><strong className="text-[#e6ded0]">Resultado:</strong> +{safeMercenaries} {UNIT_LABELS[state.mercenaries.unitType] ?? state.mercenaries.unitType} de nivel {state.mercenaries.level} activos hasta el fin del contrato.</p>
+                <p><strong className="text-[#e6ded0]">Resultado:</strong> +{safeMercenaries} {selectedMercenaryType ? `${UNIT_LABELS[selectedMercenaryType.unitType] ?? selectedMercenaryType.unitType} de nivel ${selectedMercenaryType.level} (${selectedMercenaryType.label})` : 'mercenarios'} activos hasta el fin del contrato.</p>
               </div>
               {state.mercenaries.tavernLevel < 1 ? (
                 <p className="text-amber-300 text-[11px]">Se necesita una Taberna para contratar mercenarios.</p>
@@ -430,6 +471,34 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
             {action.busy === 'formation' ? 'Guardando…' : 'Guardar formación'}
           </button>
         )}
+
+        <div className={`${cardClass} space-y-2 text-xs mt-3`}>
+          <span className="font-semibold text-[#f0e8d4] block">Formación táctica (decisión 21-10-2026)</span>
+          <p className="text-[11px] text-[#c7beac]">
+            Cuatro formaciones que se suman a la estrategia y a la matriz entre tipos: cada una vence a otra y pierde contra otra; la equilibrada no tiene ventaja ni debilidad.
+          </p>
+          <label className="flex items-center justify-between gap-2">
+            <span className="text-[#a0937e]">Formación</span>
+            <select className={selectClass} value={currentTactical} disabled={!writable} onChange={(e) => setTacticalDraft(e.target.value)}>
+              {Object.entries(state.equipment.tacticalFormationCatalog).map(([id, info]) => (
+                <option key={id} value={id}>{info.label} (ataque ×{info.attack}, defensa ×{info.defense})</option>
+              ))}
+            </select>
+          </label>
+          {tacticalInfo && (
+            <div className="rounded border border-[#2b2419] bg-[#100e0b] p-2.5 text-[11px] text-[#c7beac] space-y-1">
+              <p><strong className="text-[#e6ded0]">Qué hace:</strong> {tacticalInfo.description}</p>
+              <p><strong className="text-[#e6ded0]">Cuánto cuesta:</strong> nada; cambiarla es gratis e inmediato.</p>
+              <p><strong className="text-[#e6ded0]">Cuánto dura:</strong> hasta que la cambies; se congela 15 minutos antes de cada batalla.</p>
+              <p><strong className="text-[#e6ded0]">Resultado:</strong> ataque ×{tacticalInfo.attack} y defensa ×{tacticalInfo.defense}; fuerte contra {tacticalInfo.beats ? state.equipment.tacticalFormationCatalog[tacticalInfo.beats]?.label : 'ninguna'} (potencia ×{TACTICAL_FORMATION_COUNTER_BONUS}) y débil contra {tacticalWeakAgainst ?? 'ninguna'}.</p>
+            </div>
+          )}
+          {writable && (
+            <button type="button" className={primaryButton} onClick={handleTactical} disabled={currentTactical === state.equipment.tacticalFormation || action.busy !== null}>
+              {action.busy === 'tactical' ? 'Guardando…' : 'Guardar formación táctica'}
+            </button>
+          )}
+        </div>
       </PanelSection>
 
       <PanelSection icon={<Shield className="w-4 h-4 text-emerald-400" />} title="Equipamiento y estrategia (P30, P31, P35)">
@@ -467,8 +536,14 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
         </div>
         <p className="text-[11px] text-[#8e816d] flex items-center gap-1.5">
           <Activity className="w-3.5 h-3.5" />
-          Las armas y armaduras se desbloquean con Herrería, Mina de hierro y tecnologías; el equipo se congela 15 minutos antes de cada batalla.
+          Las armas y armaduras se desbloquean con Herrería, Mina de hierro y tecnologías; el equipo se congela 15 minutos antes de cada batalla. Los nombres son los de tu civilización; los multiplicadores son iguales para todas (P30, P31).
         </p>
+        {(state.equipment.civilizationIdentity || state.equipment.civilizationWeakness) && (
+          <p className="text-[11px] text-[#c7beac]">
+            {state.equipment.civilizationIdentity && <>Tropa característica: <strong className="text-[#e6ded0]">{state.equipment.civilizationIdentity.signatureUnit.name}</strong> ({state.equipment.civilizationIdentity.signatureUnit.description}). </>}
+            {state.equipment.civilizationWeakness && <>Debilidad: <span className="text-rose-200">{state.equipment.civilizationWeakness}</span></>}
+          </p>
+        )}
         {writable && (
           <button type="button" className={primaryButton} onClick={handleEquipment} disabled={!equipmentChanged || action.busy !== null}>
             {action.busy === 'equipment' ? 'Guardando…' : 'Guardar equipamiento'}

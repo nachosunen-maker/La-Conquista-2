@@ -7,6 +7,7 @@ import { internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { recordMissionEvent } from "./missions";
 import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
 import {
@@ -25,7 +26,7 @@ import {
 } from "./buildingRules";
 import { getConstructionDurationModifier, readCompletedTechnologyIds } from "./technologyRules";
 import { computeProfessionEffects, PROFESSION_BUILDING_CAPACITY } from "./economyExtended";
-import { getCivilizationPassive } from "./civilizationRules";
+import { civilizationBuildingLabel, getCivilizationPassive } from "./civilizationRules";
 import type { ResourceType } from "./economyCalculations";
 
 export async function requireOwner(ctx: MutationCtx, kingdomId: Id<"kingdoms">) {
@@ -106,7 +107,8 @@ export const getConstructionState = query({
       writable: isKingdomOwner(kingdom.userId, identity?.subject),
       availableBuildingTypes: Object.keys(BUILDING_RULES),
       pendingBuildingTypes: [] as string[],
-      catalog: BUILDING_RULES,
+      // [Decisión 21-10-2026] El edificio único de la civilización lleva su nombre propio (solo estética).
+      catalog: Object.fromEntries(Object.entries(BUILDING_RULES).map(([type, rule]) => [type, { ...rule, label: civilizationBuildingLabel(kingdom.civilization, type) }])),
       catalogForLevels: describeCatalogForLevels(buildingLevels, durationModifier),
       constructionDurationModifier: durationModifier,
       pendingParameters: BUILDING_PARAMETERS_PENDING,
@@ -256,6 +258,7 @@ export const completeConstruction = internalMutation({
       });
     }
     await ctx.db.delete(args.constructionId);
+    await recordMissionEvent(ctx, construction.kingdomId, "buildingsCompleted", 1);
     return { success: true, completed: true, buildingType: construction.buildingType, level: construction.targetLevel };
   },
 });
@@ -298,6 +301,8 @@ export async function completeDueConstructions(ctx: MutationCtx, kingdomId: Id<"
     }
     await ctx.db.delete(construction._id);
     completed.push(construction.buildingType);
+    // La liquidación evalúa las misiones al final; aquí solo se cuenta el evento.
+    await recordMissionEvent(ctx, kingdomId, "buildingsCompleted", 1, false);
   }
   return completed;
 }

@@ -18,6 +18,8 @@ import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./techno
 import { distanceBetweenKingdoms, readHomeCoord } from "./territories";
 import { marchFatigue, marchTimeSeconds, armyMarchMultiplier } from "./territoryRules";
 import { applyFormation, emptyComposition, simulateBattle, type BattleSide, type Composition } from "./battleRules";
+import { isTacticalFormation } from "./armyRules";
+import { evaluateKingdomMissions, recordMissionEvent } from "./missions";
 import {
   approximateEstimate,
   approximatePopulation,
@@ -31,7 +33,7 @@ import {
   validateNewChallenge,
   type ChallengeStatus,
 } from "./challengeRules";
-import { MORALE, PARLIAMENT, PREDEFINED_MESSAGES, TERRAINS, UNITS, UNIT_TYPES, WELLBEING, type UnitType } from "./balanceConfig";
+import { DEFAULT_TACTICAL_FORMATION, MORALE, PARLIAMENT, PREDEFINED_MESSAGES, TERRAINS, UNITS, UNIT_TYPES, WELLBEING, type UnitType } from "./balanceConfig";
 import type { ResourceType } from "./economyCalculations";
 
 type ChallengeDoc = Doc<"challenges">;
@@ -231,6 +233,7 @@ export const createChallenge = mutation({
       messages: [],
     });
     await ctx.scheduler.runAt(expiresAt, internal.parliament.expireChallenge, { challengeId });
+    await recordMissionEvent(ctx, args.challengerKingdomId, "challengesSent", 1);
     return { success: true, challengeId, expiresAt, distance };
   },
 });
@@ -363,6 +366,7 @@ async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, role: "
     weaponTier: (refreshed.weaponTier as BattleSide["weaponTier"]) ?? "palo",
     armorTier: (refreshed.armorTier as BattleSide["armorTier"]) ?? "ninguna",
     strategy: (refreshed.strategy as BattleSide["strategy"]) ?? "defensiva",
+    tacticalFormation: isTacticalFormation(refreshed.tacticalFormation ?? "") ? (refreshed.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
     morale: typeof refreshed.militaryMorale === "number" ? refreshed.militaryMorale : WELLBEING.INITIAL_MORALE,
     foodTier: refreshed.foodTier ?? "normal",
     fatigue: role === "attacker" ? marchFatigue(currentFatigue, distance, 1) : currentFatigue,
@@ -480,6 +484,13 @@ export const resolveChallenge = internalMutation({
     }
 
     await ctx.db.patch(args.challengeId, { status: "RESOLVED", resolvedAt: now, battleId });
+    // [Misiones] Contadores de batalla y evaluación para ambos reinos.
+    for (const side of [current.challengerKingdomId, current.targetKingdomId]) {
+      await recordMissionEvent(ctx, side, "battlesFought", 1, false);
+      if (report.winnerKingdomId === side) await recordMissionEvent(ctx, side, "battlesWon", 1, false);
+      if (report.winnerKingdomId === side && report.crushingVictory) await recordMissionEvent(ctx, side, "crushingVictories", 1, false);
+      await evaluateKingdomMissions(ctx, side, now);
+    }
     return { resolved: true, battleId, outcome: report.outcome };
   },
 });

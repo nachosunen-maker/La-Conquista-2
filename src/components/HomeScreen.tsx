@@ -1,6 +1,24 @@
 import React, { useState } from 'react';
 import { Crown, Shield, Scroll } from 'lucide-react';
 import { AccessPanel } from './AccessPanel';
+import { useQuery } from 'convex/react';
+import { makeFunctionReference } from 'convex/server';
+
+const listCivilizationsQuery = makeFunctionReference<'query'>('civilizations:listCivilizations');
+
+interface CivilizationProfile {
+  id: string;
+  label: string;
+  advantage: string;
+  weakness: string | null;
+  identity: {
+    weapons: Record<string, string>;
+    armors: Record<string, string>;
+    uniqueBuilding: { name: string; baseLabel: string; description: string };
+    signatureUnit: { name: string; baseLabel: string; description: string };
+  } | null;
+  pendingDesign: boolean;
+}
 
 interface HomeScreenProps {
   /** Entrar como invitado: reino de demostración Iberia en solo lectura. */
@@ -25,6 +43,9 @@ export const OFFICIAL_CIVILIZATIONS = [
 
 export function HomeScreen({ onEnterDemo }: HomeScreenProps) {
   const [selectedCiv, setSelectedCiv] = useState<string | null>(null);
+  // Ficha pública de civilizaciones (consulta de solo lectura; también para invitados).
+  const civData = useQuery(listCivilizationsQuery) as { profiles?: CivilizationProfile[] } | undefined;
+  const selectedProfile = civData?.profiles?.find((p) => p.id === selectedCiv) ?? null;
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto py-4">
@@ -113,16 +134,32 @@ export function HomeScreen({ onEnterDemo }: HomeScreenProps) {
         </div>
 
         {selectedCiv && (
-          <div className="p-3 bg-[#1e1710] border border-[#4a3a24] rounded-lg text-xs text-[#c5b7a0] flex items-center justify-between gap-3">
-            <div>
-              <span className="font-serif font-semibold text-[#f4eedb]">
-                {OFFICIAL_CIVILIZATIONS.find(c => c.id === selectedCiv)?.name}
-              </span>
-              : {OFFICIAL_CIVILIZATIONS.find(c => c.id === selectedCiv)?.desc}.
+          <div className="p-3 bg-[#1e1710] border border-[#4a3a24] rounded-lg text-xs text-[#c5b7a0] space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <span className="font-serif font-semibold text-[#f4eedb]">{OFFICIAL_CIVILIZATIONS.find(c => c.id === selectedCiv)?.name}</span>
+                : {OFFICIAL_CIVILIZATIONS.find(c => c.id === selectedCiv)?.desc}.
+              </div>
+              <span className="text-[10px] text-[#d4af37] whitespace-nowrap font-serif">Se elige al fundar el reino</span>
             </div>
-            <span className="text-[10px] text-[#d4af37] whitespace-nowrap font-serif">
-              Disponible en la creación del reino (P6–P9)
-            </span>
+            {selectedProfile ? (
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                <div><dt className="text-[#8e816d] inline">Ventaja: </dt><dd className="inline text-emerald-200">{selectedProfile.advantage}</dd></div>
+                <div><dt className="text-[#8e816d] inline">Debilidad: </dt><dd className="inline text-rose-200">{selectedProfile.weakness ?? 'pendiente de diseño'}</dd></div>
+                {selectedProfile.identity ? (
+                  <>
+                    <div><dt className="text-[#8e816d] inline">Tropa característica: </dt><dd className="inline text-[#f0e8d4]">{selectedProfile.identity.signatureUnit.name} ({selectedProfile.identity.signatureUnit.baseLabel})</dd></div>
+                    <div><dt className="text-[#8e816d] inline">Edificio único: </dt><dd className="inline text-[#f0e8d4]">{selectedProfile.identity.uniqueBuilding.name} ({selectedProfile.identity.uniqueBuilding.baseLabel})</dd></div>
+                    <div className="sm:col-span-2"><dt className="text-[#8e816d] inline">Armas: </dt><dd className="inline">{Object.values(selectedProfile.identity.weapons).join(' → ')}</dd></div>
+                    <div className="sm:col-span-2"><dt className="text-[#8e816d] inline">Armaduras: </dt><dd className="inline">{Object.values(selectedProfile.identity.armors).join(' → ')}</dd></div>
+                  </>
+                ) : (
+                  <div className="sm:col-span-2 text-[#8e816d] italic">Equipo, edificio y tropa característicos pendientes de documentar según el dossier histórico.</div>
+                )}
+              </dl>
+            ) : (
+              <p className="text-[11px] text-[#8e816d] italic">Consultando la ficha en el servidor…</p>
+            )}
           </div>
         )}
       </section>

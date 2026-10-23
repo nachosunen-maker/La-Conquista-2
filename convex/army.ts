@@ -9,6 +9,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
+import { evaluateKingdomMissions, recordMissionEvent } from "./missions";
 import { requireOwner } from "./buildings";
 import { validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
@@ -25,10 +26,13 @@ import {
   trainingProgress,
   trainingQueueSlots,
   unitLevelOf,
+  isTacticalFormation,
   validateEquipmentSelection,
+  validateMercenaryHire,
   type TrainingQueueEntry,
 } from "./armyRules";
-import { ARMORS, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type UnitType } from "./balanceConfig";
+import { ARMORS, DEFAULT_TACTICAL_FORMATION, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TACTICAL_FORMATIONS, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type ArmorTier, type UnitType, type WeaponTier } from "./balanceConfig";
+import { civilizationArmorLabel, civilizationTrainingCostMultiplier, civilizationUnitLabel, civilizationWeaponLabel, getCivilizationIdentity, getCivilizationPassive } from "./civilizationRules";
 import type { ResourceType } from "./economyCalculations";
 import { readHomeCoord } from "./territories";
 import {
@@ -142,6 +146,8 @@ export const getArmyState = query({
     const summary = summarizeArmy(units);
     const slots = trainingQueueSlots(buildingLevels.cuartel ?? 0);
     const kingdomAny = kingdom as any;
+    const civPassive = getCivilizationPassive(kingdom.civilization);
+    const civIdentity = getCivilizationIdentity(kingdom.civilization);
     return {
       serverTimeMs,
       writable: isKingdomOwner(kingdom.userId, identity?.subject),
@@ -163,18 +169,32 @@ export const getArmyState = query({
         ...level,
         available: availableMilitaryLevels(buildingLevels).some((entry) => entry.level === level.level),
       })),
-      unitCatalog: UNIT_TYPES.map((unitType) => ({
-        unitType,
-        ...UNITS[unitType],
-        unitCosts: trainingCostsFor(unitType, 1),
-        unitDurationMs: trainingDurationMs(unitType, 1, modifiers.trainingDuration),
-        requirementsSatisfied: Object.entries(UNITS[unitType].requirements).every(([type, level]) => (buildingLevels[type] ?? 0) >= level),
-      })),
+      unitCatalog: UNIT_TYPES.map((unitType) => {
+        const civCost = civilizationTrainingCostMultiplier(unitType, kingdom.civilization);
+        const civDuration = civPassive.trainingDurationByUnit[unitType] ?? 1;
+        const baseCosts = trainingCostsFor(unitType, 1);
+        return {
+          unitType,
+          ...UNITS[unitType],
+          label: civilizationUnitLabel(kingdom.civilization, unitType),
+          unitCosts: Object.fromEntries(Object.entries(baseCosts).map(([resource, value]) => [resource, Math.ceil(value * civCost)])) as typeof baseCosts,
+          unitDurationMs: trainingDurationMs(unitType, 1, modifiers.trainingDuration * civDuration),
+          civilizationCostMultiplier: civCost,
+          civilizationDurationMultiplier: civDuration,
+          requirementsSatisfied: Object.entries(UNITS[unitType].requirements).every(([type, level]) => (buildingLevels[type] ?? 0) >= level),
+        };
+      }),
       trainingDurationModifier: modifiers.trainingDuration,
       formation: kingdomAny.formation ?? { infanteria: 1, arqueria: 1, caballeria: 1, asedio: 1 },
       mercenaries: {
         active: units.filter((doc) => doc.isMercenary).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0),
-        contracts: units.filter((doc) => doc.isMercenary).map((doc) => ({ count: doc.count, contractEndsAt: doc.contractEndsAt ?? null })),
+        contracts: units.filter((doc) => doc.isMercenary).map((doc) => ({
+          count: doc.count,
+          contractEndsAt: doc.contractEndsAt ?? null,
+          typeId: doc.mercenaryTypeId ?? MERCENARIES.DEFAULT_TYPE_ID,
+          label: MERCENARIES.TYPES.find((type) => type.id === (doc.mercenaryTypeId ?? MERCENARIES.DEFAULT_TYPE_ID))?.label ?? "Mercenarios",
+        })),
+        types: MERCENARIES.TYPES.map((type) => ({ ...type, available: (buildingLevels.taberna ?? 0) >= type.minTavernLevel })),
         maxActive: MERCENARIES.MAX_PER_TAVERN_LEVEL * (buildingLevels.taberna ?? 0),
         goldPerUnit: MERCENARIES.GOLD_PER_UNIT,
         salaryGoldPerDay: MERCENARIES.SALARY_GOLD_PER_DAY,
@@ -190,9 +210,15 @@ export const getArmyState = query({
         fatigue: typeof kingdomAny.armyFatigue === "number" ? kingdomAny.armyFatigue : 0,
         availableWeapons: availableWeaponTiers(buildingLevels, modifiers.unlockedWeapons),
         availableArmors: availableArmorTiers(buildingLevels, modifiers.unlockedArmors),
-        weaponCatalog: WEAPONS,
-        armorCatalog: ARMORS,
+        // [Decisión 21-10-2026] Nombres propios de la civilización; multiplicadores iguales para todas (P30, P31).
+        weaponCatalog: Object.fromEntries(Object.entries(WEAPONS).map(([tier, info]) => [tier, { ...info, label: civilizationWeaponLabel(kingdom.civilization, tier as WeaponTier) }])),
+        armorCatalog: Object.fromEntries(Object.entries(ARMORS).map(([tier, info]) => [tier, { ...info, label: civilizationArmorLabel(kingdom.civilization, tier as ArmorTier) }])),
+        civilization: kingdom.civilization ?? null,
+        civilizationIdentity: civIdentity ? { signatureUnit: civIdentity.signatureUnit, uniqueBuilding: civIdentity.uniqueBuilding } : null,
+        civilizationWeakness: civPassive.weakness ?? null,
         strategyCatalog: STRATEGIES,
+        tacticalFormation: isTacticalFormation(kingdomAny.tacticalFormation ?? "") ? kingdomAny.tacticalFormation : DEFAULT_TACTICAL_FORMATION,
+        tacticalFormationCatalog: TACTICAL_FORMATIONS,
       },
     };
   },
@@ -220,6 +246,9 @@ export const startTraining = mutation({
     const modifiers = computeTechnologyModifiers(completedTechnologies);
     const population = await ctx.db.get(settled.population._id);
     if (!population) throw new Error("No existe documento de población para el reino.");
+    // [P6, decisión 21-10-2026] Ventaja y debilidad de la civilización en la instrucción (duración y coste por tipo).
+    const civUnitType = normalizeUnitType(args.unitType);
+    const civDuration = civUnitType ? getCivilizationPassive(kingdom.civilization).trainingDurationByUnit[civUnitType] ?? 1 : 1;
     const planResult = createTrainingPlan({
       unitType: args.unitType,
       count: args.count,
@@ -229,7 +258,8 @@ export const startTraining = mutation({
       buildingLevels: collection.levels,
       activeTraining: queue as TrainingQueueEntry[],
       now,
-      durationModifier: modifiers.trainingDuration,
+      durationModifier: modifiers.trainingDuration * civDuration,
+      costModifier: civUnitType ? civilizationTrainingCostMultiplier(civUnitType, kingdom.civilization) : 1,
     });
     if (!planResult.success) throw new Error(planResult.error);
     const plan = planResult.plan;
@@ -279,7 +309,7 @@ export const cancelTraining = mutation({
   },
 });
 
-async function finalizeTraining(ctx: MutationCtx, entry: any, now: number): Promise<boolean> {
+async function finalizeTraining(ctx: MutationCtx, entry: any, now: number, evaluateMissionsNow: boolean = true): Promise<boolean> {
   if (
     typeof entry.startedAt !== "number" || typeof entry.durationMs !== "number" ||
     typeof entry.count !== "number" || typeof entry.unitType !== "string" ||
@@ -291,6 +321,7 @@ async function finalizeTraining(ctx: MutationCtx, entry: any, now: number): Prom
   if (!unitType) throw new Error(`Tipo de unidad persistido no válido: '${entry.unitType}'.`);
   await addUnits(ctx, entry.kingdomId, unitType, unitLevelOf({ level: entry.level }), entry.count);
   await ctx.db.delete(entry._id);
+  await recordMissionEvent(ctx, entry.kingdomId, "troopsTrained", entry.count, evaluateMissionsNow);
   return true;
 }
 
@@ -310,7 +341,7 @@ export async function completeDueTraining(ctx: MutationCtx, kingdomId: Id<"kingd
   const queue = await readTrainingQueue(ctx, kingdomId);
   let completed = 0;
   for (const entry of queue) {
-    if (await finalizeTraining(ctx, entry, now)) completed += 1;
+    if (await finalizeTraining(ctx, entry, now, false)) completed += 1;
   }
   return completed;
 }
@@ -349,45 +380,66 @@ export const setArmyEquipment = mutation({
 });
 
 /**
- * [DECISIÓN 17-10-2026, M-02 opción A] Contratación de mercenarios en la Taberna (P53):
- * 25 oro por mercenario (infantería nivel 2), hasta 50 activos por nivel de Taberna, contrato
- * de 7 días reales con salario de 1 oro/día. Se suman al censo pero no generan natalidad.
+ * [M-02 + DECISIÓN 21-10-2026] Contratación de mercenarios en la Taberna (P53) por tipo:
+ * varios tipos y precios ligados al nivel de la Taberna (MERCENARIES.TYPES), hasta 50 activos por
+ * nivel entre todos los tipos, contrato de 7 días reales, pago íntegro al contratar y sin salario.
+ * Se suman al censo pero no generan natalidad.
  */
 export const hireMercenaries = mutation({
-  args: { kingdomId: v.id("kingdoms"), count: v.number() },
+  args: { kingdomId: v.id("kingdoms"), count: v.number(), typeId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
-    if (!Number.isInteger(args.count) || args.count < 1) throw new Error("La cantidad debe ser un entero positivo.");
     const now = Date.now();
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
     const collection = validateBuildingCollection(buildings);
     if (!collection.success) throw new Error(collection.error);
     const tavernLevel = collection.levels.taberna ?? 0;
-    if (tavernLevel < 1) throw new Error("Se necesita una Taberna para contratar mercenarios (P13, P53).");
     const units = await readArmyUnitsWithMigration(ctx, args.kingdomId);
     const active = units.filter((doc) => doc.isMercenary).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
-    const maxActive = MERCENARIES.MAX_PER_TAVERN_LEVEL * tavernLevel;
-    if (active + args.count > maxActive) {
-      throw new Error(`La Taberna nivel ${tavernLevel} admite ${maxActive} mercenarios activos; hay ${active}.`);
-    }
-    const cost = MERCENARIES.GOLD_PER_UNIT * args.count;
-    if (settled.settledResources.gold < cost) {
-      throw new Error(`Oro insuficiente: ${args.count} mercenarios cuestan ${cost} y hay ${Math.floor(settled.settledResources.gold)}.`);
-    }
-    await ctx.db.patch(settled.resources._id, { ...settled.settledResources, gold: settled.settledResources.gold - cost });
+    const hire = validateMercenaryHire({
+      typeId: args.typeId,
+      count: args.count,
+      tavernLevel,
+      activeMercenaries: active,
+      gold: settled.settledResources.gold,
+    });
+    if (!hire.success) throw new Error(hire.error);
+    await ctx.db.patch(settled.resources._id, { ...settled.settledResources, gold: settled.settledResources.gold - hire.cost });
     const contractEndsAt = now + MERCENARIES.CONTRACT_DAYS * TIME.MS_PER_GAME_YEAR;
     await ctx.db.insert("armyUnits", {
       kingdomId: args.kingdomId,
-      unitType: MERCENARIES.UNIT_TYPE,
-      level: MERCENARIES.LEVEL,
+      unitType: hire.type.unitType,
+      level: hire.type.level,
       count: args.count,
       isMercenary: true,
+      mercenaryTypeId: hire.type.id,
       contractEndsAt,
     });
     const population = await ctx.db.get(settled.population._id);
     if (population) await ctx.db.patch(population._id, { total: population.total + args.count });
-    return { success: true, count: args.count, cost, contractEndsAt, salaryGoldPerDay: MERCENARIES.SALARY_GOLD_PER_DAY * args.count };
+    return {
+      success: true,
+      typeId: hire.type.id,
+      label: hire.type.label,
+      unitType: hire.type.unitType,
+      level: hire.type.level,
+      count: args.count,
+      cost: hire.cost,
+      contractEndsAt,
+      salaryGoldPerDay: MERCENARIES.SALARY_GOLD_PER_DAY * args.count,
+    };
+  },
+});
+
+/** [DECISIÓN 21-10-2026] Formación táctica del ejército: ofensiva, defensiva, equilibrada o flanqueo. */
+export const setTacticalFormation = mutation({
+  args: { kingdomId: v.id("kingdoms"), tacticalFormation: v.string() },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx, args.kingdomId);
+    if (!isTacticalFormation(args.tacticalFormation)) throw new Error(`Formación desconocida: '${args.tacticalFormation}'.`);
+    await ctx.db.patch(args.kingdomId, { tacticalFormation: args.tacticalFormation, updatedAt: Date.now() });
+    return { success: true, tacticalFormation: args.tacticalFormation, ...TACTICAL_FORMATIONS[args.tacticalFormation] };
   },
 });
 
@@ -616,6 +668,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     weaponTier: (attackerKingdom.weaponTier as any) ?? "palo",
     armorTier: (attackerKingdom.armorTier as any) ?? "ninguna",
     strategy: (attackerKingdom.strategy as any) ?? "defensiva",
+    tacticalFormation: isTacticalFormation(attackerKingdom.tacticalFormation ?? "") ? (attackerKingdom.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
     morale: typeof attackerKingdom.militaryMorale === "number" ? attackerKingdom.militaryMorale : 70,
     foodTier: attackerKingdom.foodTier ?? "normal",
     fatigue: newFatigue,
@@ -633,6 +686,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     weaponTier: (defenderKingdom.weaponTier as any) ?? "palo",
     armorTier: (defenderKingdom.armorTier as any) ?? "ninguna",
     strategy: (defenderKingdom.strategy as any) ?? "defensiva",
+    tacticalFormation: isTacticalFormation(defenderKingdom.tacticalFormation ?? "") ? (defenderKingdom.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
     morale: typeof defenderKingdom.militaryMorale === "number" ? defenderKingdom.militaryMorale : 70,
     foodTier: defenderKingdom.foodTier ?? "normal",
     fatigue: typeof defenderKingdom.armyFatigue === "number" ? defenderKingdom.armyFatigue : 0,
@@ -720,6 +774,12 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   await removeDeadFromPopulation(ctx, defenderKingdomId, report.defender.casualtiesComposition, report.defender.woundedComposition);
 
   const wonAttacker = report.winnerKingdomId === march.kingdomId;
+  // [Misiones] Batalla librada por ambos; victoria y aplastante para quien corresponda.
+  await recordMissionEvent(ctx, march.kingdomId, "battlesFought", 1, false);
+  await recordMissionEvent(ctx, defenderKingdomId, "battlesFought", 1, false);
+  if (report.winnerKingdomId === march.kingdomId) await recordMissionEvent(ctx, march.kingdomId, "battlesWon", 1, false);
+  if (report.winnerKingdomId === defenderKingdomId) await recordMissionEvent(ctx, defenderKingdomId, "battlesWon", 1, false);
+  if (report.crushingVictory && report.winnerKingdomId) await recordMissionEvent(ctx, report.winnerKingdomId as Id<"kingdoms">, "crushingVictories", 1, false);
   if (wonAttacker && report.crushingVictory) {
     await ctx.db.patch(march.kingdomId, {
       pendingTerritoryClaims: (attackerKingdom.pendingTerritoryClaims ?? 0) + 1,
@@ -732,6 +792,8 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     status: "completada",
     battleResult: { battleId, outcome: report.outcome, crushingVictory: report.crushingVictory },
   });
+  await evaluateKingdomMissions(ctx, march.kingdomId);
+  await evaluateKingdomMissions(ctx, defenderKingdomId);
 
   return { success: true, battleId, outcome: report.outcome };
 }

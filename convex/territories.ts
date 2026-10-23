@@ -17,6 +17,7 @@ import {
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { recordMissionEvent } from "./missions";
 import { isKingdomOwner, DEMO_USER_ID } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
 import { EXPLORATION, MAP, TERRAINS, type TerrainType } from "./balanceConfig";
@@ -171,6 +172,7 @@ export async function completeExpedition(ctx: MutationCtx, expeditionId: Id<"exp
 
   // 6. Eliminar la tarea completada de la cola
   await ctx.db.delete(expeditionId);
+  await recordMissionEvent(ctx, expedition.kingdomId, "explorationsCompleted", 1);
 
   return {
     success: true,
@@ -689,6 +691,7 @@ export const claimFreeTerritory = mutation({
       });
     }
 
+    await recordMissionEvent(ctx, args.kingdomId, "territoriesClaimed", 1);
     return { success: true, cellId: target.cellId, terrain: target.terrain, remainingClaims: (kingdom.pendingTerritoryClaims ?? 0) - 1 };
   },
 });
