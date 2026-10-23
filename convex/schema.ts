@@ -226,6 +226,7 @@ export default defineSchema({
       targetQ: v.number(),
       targetR: v.number(),
       distance: v.number(),
+      terrainMultiplier: v.optional(v.number()), // [R-14] media del terreno del camino
       units: v.array(v.object({
         unitType: v.string(),
         level: v.optional(v.number()),
@@ -257,6 +258,7 @@ export default defineSchema({
       resolvedAt: v.optional(v.number()),
       distance: v.optional(v.number()),
       marchSeconds: v.optional(v.number()),
+      terrainMultiplier: v.optional(v.number()), // [R-14] media del terreno del camino
       battleId: v.optional(v.id("Battle")),
       penaltyApplied: v.optional(v.any()),
       frozen: v.optional(v.any()),

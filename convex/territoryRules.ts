@@ -185,6 +185,51 @@ export function marchFatigue(currentFatigue: number, distance: number, terrainMu
   return Math.min(100, current + FATIGUE.PER_HEX * Math.max(0, distance) * terrainMultiplier);
 }
 
+/**
+ * [DECISIÓN 23-10-2026, R-14] Celdas de la línea recta hexagonal entre dos coordenadas (interpolación
+ * cúbica redondeada), sin incluir el origen e incluyendo el destino. Para distancia 0 no hay celdas.
+ */
+export function hexLine(from: HexCoord, to: HexCoord): HexCoord[] {
+  const distance = hexDistance(from, to);
+  if (distance <= 0) return [];
+  const cells: HexCoord[] = [];
+  const fromCube = { x: from.q, z: from.r, y: -from.q - from.r };
+  const toCube = { x: to.q, z: to.r, y: -to.q - to.r };
+  for (let i = 1; i <= distance; i++) {
+    const t = i / distance;
+    const x = fromCube.x + (toCube.x - fromCube.x) * t;
+    const y = fromCube.y + (toCube.y - fromCube.y) * t;
+    const z = fromCube.z + (toCube.z - fromCube.z) * t;
+    let rx = Math.round(x);
+    let ry = Math.round(y);
+    let rz = Math.round(z);
+    const dx = Math.abs(rx - x);
+    const dy = Math.abs(ry - y);
+    const dz = Math.abs(rz - z);
+    if (dx > dy && dx > dz) rx = -ry - rz;
+    else if (dy > dz) ry = -rx - rz;
+    else rz = -rx - ry;
+    cells.push({ q: rx, r: rz });
+  }
+  return cells;
+}
+
+/**
+ * [DECISIÓN 23-10-2026, R-14] Multiplicador de terreno de una marcha: media de los multiplicadores de
+ * las celdas del camino (origen excluido, destino incluido). Celdas desconocidas cuentan como 1.
+ * Con los valores vigentes de TERRAINS (todos 1,0) el resultado es 1 hasta que se aprueben valores.
+ */
+export function pathTerrainMultiplier(from: HexCoord, to: HexCoord, terrainByCell: ReadonlyMap<string, TerrainType | string>): number {
+  const cells = hexLine(from, to);
+  if (cells.length === 0) return 1;
+  let total = 0;
+  for (const cell of cells) {
+    const terrain = terrainByCell.get(cellId(cell.q, cell.r));
+    total += terrain ? terrainMarchMultiplier(terrain as TerrainType) : 1;
+  }
+  return Math.round((total / cells.length) * 1000) / 1000;
+}
+
 /** [MAESTRA P32] Multiplicador por fatiga. */
 export function fatigueMultiplier(fatigue: number): number {
   const value = Number.isFinite(fatigue) ? Math.max(0, Math.min(100, fatigue)) : 0;

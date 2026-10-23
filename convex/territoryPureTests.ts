@@ -5,7 +5,9 @@ import {
   fatigueMultiplier,
   generateWorldCells,
   hexDistance,
+  hexLine,
   hexNeighbors,
+  pathTerrainMultiplier,
   marchFatigue,
   marchTimeSeconds,
   parseCellId,
@@ -53,7 +55,20 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
   const recoveredNormal = recoverFatigue(50, 2, "normal");
   const recoveredMinima = recoverFatigue(50, 2, "minima");
 
+  // R-14: línea hexagonal y media del terreno del camino
+  const line = hexLine({ q: 0, r: 0 }, { q: 3, r: -1 });
+  const lineOk = line.length === 3 && line.every((c, i) => hexDistance({ q: 0, r: 0 }, c) === i + 1) && line[2].q === 3 && line[2].r === -1;
+  const terrainMap = new Map<string, string>([["1,0", "llanura"], ["2,-1", "montana"], ["3,-1", "bosque"]]);
+  const allOnes = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 3, r: -1 }, terrainMap);
+  const weighted = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 2, r: 0 }, new Map([["1,0", "x"], ["2,0", "y"]]));
+  const zero = pathTerrainMultiplier({ q: 2, r: 2 }, { q: 2, r: 2 }, terrainMap);
+
   return [
+    {
+      test: "R-14 (decisión 23-10-2026): la marcha usa la media del terreno de las celdas del camino (origen excluido, destino incluido); con los valores vigentes (1,0) no cambia nada",
+      passed: lineOk && allOnes === 1 && weighted === 1 && zero === 1 && hexLine({ q: 1, r: 1 }, { q: 1, r: 1 }).length === 0,
+      details: `Línea (0,0)→(3,-1): ${line.map((c) => `${c.q},${c.r}`).join(" ")}; media con TERRAINS vigentes: ${allOnes}; distancia 0: ${zero}`,
+    },
     {
       test: "Mundo hexagonal de radio 10 con 331 celdas únicas y terreno reproducible por semilla (D-23, D-25)",
       passed: world.length === 331 && ids.size === 331 && world.every((cell, index) => cell.terrain === worldAgain[index].terrain) &&
