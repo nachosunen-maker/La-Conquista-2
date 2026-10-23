@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useMutation, useQuery } from 'convex/react';
+import { useMutation, useQuery_experimental } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { Award, CheckCircle2, Circle, EyeOff, Sparkles, Trophy } from 'lucide-react';
 import { PanelSection, cardClass } from './shared';
@@ -35,6 +35,55 @@ interface MissionsState {
   history: Array<{ progressId: string; title: string; kind: string; rewardSummary: string; completedAt: number }>;
 }
 
+interface MissionsErrorBoundaryProps {
+  children: React.ReactNode;
+  fallback?: React.ReactNode;
+}
+
+interface MissionsErrorBoundaryState {
+  hasError: boolean;
+}
+
+export class MissionsErrorBoundary extends React.Component<MissionsErrorBoundaryProps, MissionsErrorBoundaryState> {
+  constructor(props: MissionsErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): MissionsErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.warn('Misiones no disponibles en backend remoto:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      if (this.props.fallback !== undefined) {
+        return this.props.fallback;
+      }
+      return (
+        <PanelSection
+          icon={<Trophy className="w-4 h-4 text-[#d4af37]" />}
+          title="Misiones"
+          aside={<span className="text-[#8e816d] text-[11px]">Módulo en preparación</span>}
+        >
+          <div className="bg-[#18140f] border border-[#2b2419] rounded-lg p-3.5 space-y-2 text-xs text-[#c7beac]">
+            <div className="flex items-center gap-2 text-[#d4af37] font-semibold text-xs">
+              <span>📜 Sistema de Misiones (P50, P51, P59)</span>
+            </div>
+            <p className="text-[11px] leading-relaxed">
+              El sistema de misiones por etapas, diarias y secretas está implementado en la lógica del juego. El backend remoto conectado aún no tiene desplegado el módulo autoritativo en Convex.
+            </p>
+          </div>
+        </PanelSection>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function MissionRow({ mission }: { mission: MissionView }) {
   const pct = mission.progress.target > 0 ? Math.min(100, Math.round((mission.progress.current / mission.progress.target) * 100)) : 0;
   return (
@@ -59,16 +108,49 @@ function MissionRow({ mission }: { mission: MissionView }) {
   );
 }
 
-export function MissionsPanel(props: { kingdomId: string; isOwner: boolean }) {
+function MissionsPanelInner(props: { kingdomId: string; isOwner: boolean }) {
   const { kingdomId, isOwner } = props;
-  const state = useQuery(getMissionsQuery, { kingdomId }) as MissionsState | undefined;
+  const result = useQuery_experimental({
+    query: getMissionsQuery,
+    args: kingdomId ? { kingdomId } : 'skip',
+    throwOnError: false,
+  });
   const refresh = useMutation(refreshMissionsMutation);
 
-  // Al abrir el panel, el propietario pide una reevaluación (el servidor decide; no se confía en el cliente).
+  // Al abrir el panel, el propietario pide una reevaluación si el módulo está disponible en el servidor.
   useEffect(() => {
-    if (isOwner) refresh({ kingdomId }).catch(() => undefined);
-  }, [kingdomId, isOwner, refresh]);
+    if (isOwner && result.status === 'success') {
+      refresh({ kingdomId }).catch(() => undefined);
+    }
+  }, [kingdomId, isOwner, refresh, result.status]);
 
+  if (result.status === 'pending') {
+    return <p className="text-xs text-[#8e816d] italic p-4">Consultando las misiones en el servidor…</p>;
+  }
+
+  if (result.status === 'error') {
+    return (
+      <PanelSection
+        icon={<Trophy className="w-4 h-4 text-[#d4af37]" />}
+        title="Misiones"
+        aside={<span className="text-[#8e816d] text-[11px]">Módulo en preparación</span>}
+      >
+        <div className="bg-[#18140f] border border-[#2b2419] rounded-lg p-3.5 space-y-2 text-xs text-[#c7beac]">
+          <div className="flex items-center gap-2 text-[#d4af37] font-semibold text-xs">
+            <span>📜 Sistema de Misiones (P50, P51, P59)</span>
+          </div>
+          <p className="text-[11px] leading-relaxed">
+            El sistema de misiones por etapas, diarias y secretas está implementado en la lógica del juego. El backend remoto conectado aún no dispone del módulo desplegado en Convex.
+          </p>
+          <p className="text-[10px] text-[#8e816d]">
+            Las misiones se activarán de inmediato en cuanto se despliegue el módulo en el servidor con autorización expresa.
+          </p>
+        </div>
+      </PanelSection>
+    );
+  }
+
+  const state = result.data as MissionsState | undefined;
   if (!state) return <p className="text-xs text-[#8e816d] italic p-4">Consultando las misiones en el servidor…</p>;
 
   const resetIn = Math.max(0, state.daily.resetsAt - state.serverTimeMs);
@@ -127,12 +209,24 @@ export function MissionsPanel(props: { kingdomId: string; isOwner: boolean }) {
   );
 }
 
-/** Celebración breve y no bloqueante de las misiones completadas; se marca como vista en el servidor. */
-export function MissionCelebrations(props: { kingdomId: string; enabled: boolean }) {
+export function MissionsPanel(props: { kingdomId: string; isOwner: boolean }) {
+  return (
+    <MissionsErrorBoundary>
+      <MissionsPanelInner {...props} />
+    </MissionsErrorBoundary>
+  );
+}
+
+function MissionCelebrationsInner(props: { kingdomId: string; enabled: boolean }) {
   const { kingdomId, enabled } = props;
-  const pending = useQuery(getCelebrationsQuery, enabled ? { kingdomId } : 'skip') as
-    | Array<{ id: string; progressId: string; title: string; kind: string; stage: number | null; rewardSummary: string; completedAt: number }>
-    | undefined;
+  const result = useQuery_experimental({
+    query: getCelebrationsQuery,
+    args: enabled && kingdomId ? { kingdomId } : 'skip',
+    throwOnError: false,
+  });
+  const pending = result.status === 'success'
+    ? (result.data as Array<{ id: string; progressId: string; title: string; kind: string; stage: number | null; rewardSummary: string; completedAt: number }> | undefined)
+    : undefined;
   const markSeen = useMutation(markSeenMutation);
   const [visible, setVisible] = useState<Array<{ id: string; title: string; kind: string; rewardSummary: string }>>([]);
 
@@ -163,3 +257,13 @@ export function MissionCelebrations(props: { kingdomId: string; enabled: boolean
     </div>
   );
 }
+
+/** Celebración breve y no bloqueante de las misiones completadas; se marca como vista en el servidor. */
+export function MissionCelebrations(props: { kingdomId: string; enabled: boolean }) {
+  return (
+    <MissionsErrorBoundary fallback={null}>
+      <MissionCelebrationsInner {...props} />
+    </MissionsErrorBoundary>
+  );
+}
+

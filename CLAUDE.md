@@ -1,7 +1,7 @@
 # CLAUDE.md — LA CONQUISTA
 
 Juego web multijugador de estrategia y gestión medieval, de partidas persistentes.
-**Versión de este documento: 21-10-2026.** Sustituye a cualquier CLAUDE.md anterior (el anterior hablaba de Appwrite, que se ha descartado).
+**Versión de este documento: 23-10-2026.** Sustituye a cualquier CLAUDE.md anterior (el anterior hablaba de Appwrite, que se ha descartado).
 
 Fuentes, de más antigua a más reciente:
 1. `LaConquista_Especificacion_Maestra_Puntos_1_al_73.docx` — especificación original (P1–P73). Tenía 1.000 habitantes en P10, temporadas competitivas, P56/P61 vacíos y P66 truncado.
@@ -11,7 +11,8 @@ Fuentes, de más antigua a más reciente:
 5. Exploración del mapa (18-10-2026) — registrada en `.aistudio/.../implementation_plan.md`.
 6. `LaConquista_Especificacion_Maestra_Actualizada_P1-P73_Convex.docx` (20-10-2026) — **especificación vigente**: 2.000 habitantes, estaciones en vez de temporadas, P66 restaurado, P56/P61 marcados «pendiente de aclaración».
 7. `La_Conquista_12_Civilizaciones_Historicas.pdf` (20-10-2026) — dossier histórico de las 12 civilizaciones: **propuestas de diseño, no aprobadas ni implementadas** (sección 6).
-8. Decisiones del responsable en conversación (20-10-2026 y 21-10-2026) — sección 21. **Manda siempre la decisión más reciente.**
+8. `docs/DEFINICIONES_PENDIENTES.md` e `INFORME_VALIDACION_LOCAL.md` (23-10-2026) — valores propuestos pendientes de aprobación (apartados A1–A6) y resultados de verificación local del equipo.
+9. Decisiones del responsable en conversación (20, 21 y 23-10-2026) — sección 21. **Manda siempre la decisión más reciente.**
 
 Las referencias `(P17)`, `(D-02)`, `(M-05)`… apuntan a esos documentos.
 Idioma de documentación, textos de interfaz y nombres visibles: **español**.
@@ -30,6 +31,31 @@ Idioma de documentación, textos de interfaz y nombres visibles: **español**.
 8. **Cada acción de la interfaz indica** (P70): qué hace → cuánto cuesta → cuánto tarda → qué resultado tendrá.
 9. **Personas y herramientas.** El responsable es **principiante y trabaja solo desde móvil/tablet**: no ejecuta comandos; explicar con lenguaje sencillo y pasos cortos. Un colaborador con Claude premium resuelve los cálculos difíciles y ejecuta comandos; el código se comparte en GitHub. Mantener los cambios pequeños para que sean fáciles de revisar desde el móvil.
 10. **Respuestas útiles y breves.** Empezar por la respuesta; sin rodeos ni repetir lo ya acordado.
+
+### Protocolo obligatorio de continuidad y verificación
+
+11. **Consultar antes de actuar.** Antes de cada tarea, revisar este archivo, la especificación maestra vigente y el registro de avances relacionado con el bloque. Consultar el código actual cuando la tarea afecte a la implementación. No pedir al responsable información que ya conste en las fuentes disponibles.
+
+12. **Resolver contradicciones con trazabilidad.** Distinguir entre decisiones aprobadas, propuestas, informes de ejecución y estado real del código. Aplicar la decisión vigente más reciente cuando su autoridad y alcance sean claros. Si existe una contradicción real que no pueda resolverse con las fuentes, exponerla de forma concreta y preguntar una sola vez.
+
+13. **Una tarea por bloque.** Identificar el objetivo, el estado inicial, los archivos que previsiblemente se modificarán y los criterios de aceptación. No ampliar el alcance ni empezar el bloque siguiente hasta cerrar el actual.
+
+14. **Estados de trabajo obligatorios.** Cada tarea se registra como:
+- PENDIENTE: no iniciada.
+- EN CURSO: con cambios en marcha.
+- IMPLEMENTADA: cambios realizados, todavía sin verificación completa.
+- VERIFICADA: pruebas pertinentes ejecutadas y resultados documentados.
+- BLOQUEADA: falta un requisito, acceso, decisión o autorización.
+
+15. **No afirmar sin evidencia.** Diferenciar siempre documentación, código local, pruebas locales, pruebas de integración y backend desplegado. Un informe anterior no demuestra por sí solo que el código actual siga igual. No afirmar que una prueba se ejecutó si no se ejecutó en la sesión correspondiente.
+
+16. **Cierre de cada bloque.** Registrar fecha, cambios, archivos afectados, pruebas y resultados, incidencias, estado final y siguiente paso. Actualizar este documento o el registro de estado cuando cambie una decisión o el estado del proyecto; evitar duplicar la especificación completa.
+
+17. **Control de cambios y seguridad.** Revisar el estado de Git y conservar una copia recuperable antes de cambios importantes. No desplegar, migrar, borrar datos ni modificar el reino Iberia sin autorización expresa. No incluir secretos en el repositorio.
+
+18. **Comunicación eficiente.** Responder primero con el resultado y la acción necesaria. No repetir el contexto ya documentado, no reabrir decisiones cerradas y no sustituir la ejecución por explicaciones largas. Si una tarea está bloqueada, indicar el impedimento concreto y la mínima acción necesaria para continuar.
+
+*Registro de estado: mientras no exista un archivo aparte, la sección 4 de este documento hace de registro de estado del proyecto.*
 
 ---
 
@@ -74,47 +100,55 @@ Idioma de documentación, textos de interfaz y nombres visibles: **español**.
 | `convex/buildings.ts` (ruta canónica), `army.ts`, `military.ts`, `technologies.ts`, `territories.ts`, `parliament.ts`, `civilizations.ts`, `kingdoms.ts` | Mutaciones y consultas |
 | `convex/schema.ts` | Tablas (`schemaValidation: false`) |
 | `src/App.tsx` y `src/components/*` | Interfaz (Aldea, Ejército, Universidad, Parlamento, Mapa, asistentes de fundación) |
-| `src/auth.tsx`, `convex/auth.config.ts` | Autenticación (hoy solo Google; ver sección 5) |
+| `src/auth.tsx`, `convex/auth.ts`, `convex/auth.config.ts`, `convex/http.ts` | Autenticación (Convex Auth con contraseña; sección 5) |
+| `convex/account.ts`, `convex/accountRules.ts` | Cuenta del jugador y código de recuperación |
+| `convex/missions.ts`, `convex/missionRules.ts` | Misiones (sección 17) |
+| `src/components/AccessPanel.tsx`, `MissionsPanel.tsx` | Pantalla de acceso (crear / entrar / recuperar / invitado) y panel de misiones |
 | `scripts/` | Pruebas económicas, simulador de batallas, generación offline de la API |
 | `docs/` | Especificación, complemento, decisiones, auditorías |
 
 **Deuda técnica conocida:**
 - La carpeta `convex_backup/` es una copia de `convex/`: **no editarla**; candidata a borrarse con autorización.
-- `.gitignore` solo ignora `.env.local`; el `.env` actual contiene únicamente datos públicos (URL de Convex y Client ID de Google). Añadir `.env` al `.gitignore` antes de guardar cualquier secreto.
+- `.gitignore`: el zip validado del 23-10 solo ignora `.env.local` (la versión v5 sí ignoraba `.env`). **Restaurar `.env` en `.gitignore`.** El inicio con Google ya se retiró del código y de `.env.example`.
+- **Riesgo abierto:** el redondeo del crecimiento de población al liquidar por tramos puede dar resultados ligeramente distintos según la frecuencia de sincronización (informe de revisión profunda, 23-10-2026); no consta cerrado.
+- Los zips de distribución excluyen `node_modules/`, `.git/`, `.env*`, `.aistudio/`, `dist/` y `tmp/`.
 - Fuente única de tropas: `armyUnits`. La tabla heredada `Armyunits` y el campo `regularSoldiers` se mantienen solo por migración; **nunca sumar ambos**.
 - Protección de Iberia (`DEMO_USER_ID` / nombre «Iberia»): las mutaciones destructivas la rechazan en servidor.
 
 ---
 
-## 4. Estado del proyecto a 20-10-2026
+## 4. Estado del proyecto a 23-10-2026
 
-*Basado en los documentos y en la lectura del código. Las cifras de pruebas son las de los informes; no se han ejecutado en esta revisión.*
+*Base: `la-conquista-validado.zip` (23-10-2026, 10:21). Lectura del código y de los informes del equipo, más **ejecución propia el 23-10 de la batería de pruebas puras** (`tsx scripts/runEconomicTests.ts`): **200/200 superadas**; el simulador de batallas terminó sin errores. Se ejecutó con módulos externos simulados por no haber red; esas pruebas no los usan. **Lint, compilación y las 40 pruebas de integración constan solo en el informe del equipo** (`INFORME_VALIDACION_LOCAL.md`); no se han ejecutado en esta revisión.*
+
+*Estados según el protocolo (punto 14): ✅ = **IMPLEMENTADA** (pruebas puras ejecutadas por nosotros; integración, lint y compilación solo según informe) · 🟡 = parcial · ⛔ = **PENDIENTE** o **BLOQUEADA**. Ninguna área figura como **VERIFICADA** contra el servidor real.*
 
 | Área | Estado |
 |---|---|
-| Fundación del reino (P4–P10), censo inicial 2.000 | ✅ Implementado |
-| Economía temporal continua, población, alimentación, felicidad, inanición, impuestos | ✅ Implementado |
-| Edificios (18) y cola de construcción | ✅ Implementado |
-| Ejército, entrenamiento, heridos, hospital, mercenarios (un solo tipo) | ✅ Implementado / 🟡 mercenarios por ampliar |
-| Tecnologías (13 generales + 12 de civilización) | ✅ Implementado |
-| Mapa hexagonal (331 celdas), territorios, reclamación | ✅ Implementado |
-| Exploración con niebla de guerra | ✅ Implementado (18-10) |
-| Parlamento y desafíos (máquina de estados) | ✅ Implementado |
-| Combate automático (simulador determinista, 3 rondas) | ✅ Implementado y recalibrado (Ronda 2) |
-| Civilizaciones | 🟡 Parcial: bonificación pasiva + tecnología única por civilización. **Falta** equipo, tropas y edificios únicos |
-| Login | 🟡 Nombre de gobernante + contraseña decidido; comprobar implementación y pruebas. Sin Google/Gmail (sección 5) |
-| Misiones progresivas, diarias y secretas | ⛔ No implementadas; diseño funcional acordado el 21-10-2026 |
-| Despliegue real y pruebas contra el servidor de Convex (T-02) | ⛔ Pendiente (necesita autorización) |
+| Fundación, economía continua y tiempo (liquidación por tramos, protección ante retroceso del reloj, inanición por fases) | ✅ Riesgo abierto: redondeo de población por tramos (sección 3) |
+| Edificios (18) y cola de construcción | ✅ |
+| Ejército, entrenamiento, heridos, hospital | ✅ |
+| Mercenarios: seis tipos sin salario, ligados a la Taberna | ✅ Valores por aprobar (A3) |
+| Tecnologías (13 generales + 12 de civilización) | ✅ |
+| Mapa, territorios, exploración, terreno en las marchas | ✅ Multiplicadores de terreno por aprobar (A6) |
+| Parlamento y desafíos | ✅ |
+| Combate (3 rondas) y cuatro formaciones tácticas | ✅ Valores por aprobar (A2) |
+| Cuenta y acceso: nombre + contraseña, código de recuperación, pantalla de acceso con crear / entrar / recuperar / invitado | ✅ Valores por aprobar (A1); falta configurar las claves de Convex Auth y probar contra el servidor real |
+| Misiones (etapas, diarias, secretas) | ✅ Cantidades y hora de reinicio por aprobar (A4); objetos únicos sin catálogo |
+| Civilizaciones | 🟡 Pasiva + debilidad (10 de 12) + tecnología única. **Falta:** equipo, armas, armaduras, edificios y tropas propios; **Navajos y Masáis** sin debilidad ni singularidades |
+| Despliegue real y pruebas contra el servidor de Convex (T-02) | ⛔ Decisión 23-10-2026: todavía no |
 | Bots PvE · apuestas en desafíos · efectos del clima | ⛔ Descartados o desactivados por decisión |
 
-Informes: 164 pruebas puras y 14 de integración superadas (18-10), 964 simulaciones de combate. **Nunca se ha jugado contra el servidor real.**
+Informes del equipo (23-10-2026): lint y compilación limpios · 200 pruebas puras · 40 de integración (6 de cuenta, 28 integrales, 6 de misiones) · banco de simulaciones de combate. **Nunca se ha jugado contra el servidor real.**
 
 ---
 
 ## 5. Pantalla de inicio, inicio de sesión y creación del reino (P4–P9)
 
+**Estado (23-10-2026): IMPLEMENTADO en el código** (`AccessPanel.tsx`, `account.ts`, `accountRules.ts`) con pruebas puras superadas; falta configurar las claves de Convex Auth y probarlo contra el servidor real.
+
 **Decisiones del responsable (20-10-2026 y actualización 21-10-2026):**
-- Cada jugador entra con **nombre de gobernante + contraseña** y **retoma su partida desde cualquier dispositivo o lugar**. La cuenta y todo el progreso viven en el servidor; el navegador solo guarda la sesión. **Sin verificación por Gmail/Google**: el inicio con Google actual debe retirarse.
+- Cada jugador entra con **nombre de gobernante + contraseña** y **retoma su partida desde cualquier dispositivo o lugar**. La cuenta y todo el progreso viven en el servidor; el navegador solo guarda la sesión. **Sin verificación por Gmail/Google**: el inicio con Google ya se retiró del código (23-10-2026).
 - Las opciones de entrada (**crear cuenta, iniciar sesión, entrar como invitado**) salen **en la misma pantalla de inicio de la maqueta**, no en pantallas aparte.
 - **Invitado permitido**, para ver cómo es una civilización o el juego, con **aviso obligatorio** de que el progreso no se guarda.
 
@@ -129,9 +163,9 @@ Informes: 164 pruebas puras y 14 de integración superadas (18-10), 964 simulaci
 **Reglas de la cuenta:**
 - El **nombre de gobernante es único** (sin distinguir mayúsculas) porque es el nombre con el que se inicia sesión. Longitud 2–40; los caracteres permitidos se definen en el bloque.
 - Contraseña de mínimo 8 caracteres, gestionada por el sistema de autenticación y **nunca almacenada ni mostrada en texto plano** (P5).
-- Errores genéricos («Nombre o contraseña incorrectos»), sin revelar cuál falla; límite de intentos fallidos *(propuesta)*.
+- Errores genéricos («Nombre o contraseña incorrectos»), sin revelar cuál falla. Normalización del nombre sin distinguir mayúsculas ni acentos.
 - Sesión persistente en el dispositivo y opción de **Cerrar sesión**. Varias sesiones a la vez en distintos dispositivos: el servidor es la autoridad y valida cada acción (sin duplicados).
-- Sin correo no hay recuperación de contraseña: **ver punto abierto 1 de la sección 21**.
+- **Recuperación con código (decisión 21-10-2026, implementada):** al crear la cuenta se muestra **una sola vez** un código de **16 símbolos en 4 grupos** (`XXXX-XXXX-XXXX-XXXX`, sin 0/O ni 1/I/L) con la casilla «He guardado mi código de recuperación en un lugar seguro» antes de continuar. El servidor guarda solo su huella (hash). En la pantalla de acceso, el modo **recuperar** pide nombre de gobernante + código + nueva contraseña; el código usado se invalida. **5 intentos fallidos seguidos bloquean 15 minutos**; el inicio de sesión admite 10 fallos por hora (valor por defecto de Convex Auth). *Valores `[DERIVADO]` por aprobar (A1 de `docs/DEFINICIONES_PENDIENTES.md`).*
 
 **Modo invitado** *(alcance propuesto por el asistente, ajustable)*:
 - Al pulsar **Entrar como invitado** aparece un aviso: «Como invitado puedes ver cómo es una civilización y el juego, pero **no se guardará tu progreso**. Si cierras o recargas, lo perderás. Crea una cuenta para conservarlo.» Botones: **Continuar como invitado** · **Crear cuenta**.
@@ -148,7 +182,7 @@ Informes: 164 pruebas puras y 14 de integración superadas (18-10), 964 simulaci
 
 **Notas técnicas para quien implemente:**
 - Proveedor recomendado (Ronda 2, T-01 B): **Convex Auth con proveedor de contraseña**. Por defecto identifica la cuenta con un correo: para iniciar con *nombre de gobernante* hay que usar un identificador propio o un identificador interno sintético (no se envía ningún correo). **Comprobar la documentación vigente de Convex Auth antes de implementar.** Los secretos de firma van en las variables de entorno de Convex, nunca en el repositorio.
-- Retirar el inicio con Google: `convex/auth.config.ts`, `src/auth.tsx`, `.env.example` (Client ID).
+- Inicio con Google retirado (23-10-2026). Identificador interno sintético: nombre normalizado + dominio interno; no se envía ningún correo. Al desplegar, `JWT_PRIVATE_KEY`, `JWKS` y `SITE_URL` se configuran en el panel de Convex (los genera el asistente de Convex Auth) y **nunca van al repositorio**.
 - El invitado **no tiene identidad en Convex**: solo usa consultas públicas de lectura.
 
 ---
@@ -159,7 +193,7 @@ Ingleses · Romanos · Griegos · Vikingos · Bizantinos · Árabes · Mongoles 
 
 **Reglas fijas:** cada una con bonificaciones y estilo propios; **ninguna objetivamente superior**; se elige al fundar y es inmutable; cada civilización debe tener **armas, armaduras, edificios y soldados personalizados** a su estilo, lo máximo posible. Los multiplicadores de calidad de armas/armaduras (P30–P31) y de nivel militar (P29) son **iguales para todas**: cambia el nombre, la estética y las bonificaciones.
 
-**Ya en el código** (`balanceConfig.ts → CIVILIZATIONS`, `CIVILIZATION_BONUSES_ENABLED = true`): una pasiva doble y una tecnología única por civilización.
+**Ya en el código** (`balanceConfig.ts → CIVILIZATIONS`, `CIVILIZATION_BONUSES_ENABLED = true`): una pasiva doble, **una debilidad (10 de 12 civilizaciones)** y una tecnología única por civilización.
 
 | Civilización | Pasiva actual |
 |---|---|
@@ -176,7 +210,9 @@ Ingleses · Romanos · Griegos · Vikingos · Bizantinos · Árabes · Mongoles 
 | Aztecas | +12 % alimentos · +4 felicidad base |
 | Masáis | Pasiva anterior pendiente de rediseño; no aplicar valores nuevos sin balance |
 
-**Pendiente de implementar (decisión del responsable, 20-10-2026):** las singularidades de **armas, armaduras, soldados y edificios** de cada civilización.
+**Debilidades en el código (23-10-2026; valores por aprobar, A5):** Ingleses caballería +15 % de coste de instrucción · Romanos caballería +10 % de duración · Vikingos asedio +15 % de duración · Bizantinos caballería +15 % de coste · Mongoles −5 % de fuerza defensiva · Aztecas plaza de caballería ocupada por élite a pie, +15 % de duración (las seis, del dossier) · Griegos caballería +10 % de coste · Árabes infantería +10 % de duración · Chinos caballería +10 % de coste · Japoneses asedio +10 % de duración (las cuatro `[DERIVADO]`) · **Navajos y Masáis: pendientes.**
+
+**Sigue pendiente de implementar (decisión del responsable, 20-10-2026):** las singularidades de **armas, armaduras, soldados y edificios** de cada civilización; la configuración no tiene aún campos de equipo, edificio único ni tropa propios. **Navajos y Masáis** necesitan un texto histórico (cronología, región y equipamiento): el dossier del 20-10 los trata con los nombres antiguos y recomienda concretar un pueblo.
 
 **Base de diseño para ese bloque** *(propuesta anterior del asistente; no aprobada, ajustable)*. Equipo emblemático (arma · armadura), edificio único (variante con nombre y estética propios de un edificio base) y tropa característica:
 
@@ -201,7 +237,7 @@ La tabla completa de nombres por nivel de calidad (palo → acero avanzado; ning
 - **Una cronología y una región por facción** antes de implementar su equipo. Propuesta inicial: Ingleses siglos XI–XV · Romanos Imperio alto (siglos I–II) · Griegos época clásica (hoplitas) · Vikingos VIII–XI · Bizantinos periodo medio (kataphraktoi) · Árabes califatos (VII–XIII) · Mongoles XIII–XIV · Chinos dinastía Song · Japoneses periodo Sengoku · Aztecas/mexicas XIV–XVI prehispánico · Navajos y Masáis: cronología, región y equipamiento por documentar antes de implementar.
 - **No mezclar épocas ni materiales:** los aztecas no tienen caballos ni acero europeo; la pólvora china y el arcabuz japonés (teppō) solo se desbloquean por tecnología y época; los vikingos no llevan cascos con cuernos; la katana no es el arma universal (lanzas y arcos cuentan igual); el equipo romano no mezcla periodos.
 - **Un arma característica no es más poderosa:** los multiplicadores siguen siendo los generales (P30–P31). Solo cambian nombre, estética y bonificación.
-- **Cada pasiva lleva ventaja y debilidad** (ninguna civilización superior). Ejemplos del dossier: Ingleses con caballería pesada más cara · Romanos con caballería menos especializada · Vikingos peores en asedios largos · Mongoles débiles en defensa urbana fija · Bizantinos con élites caras · Aztecas sin caballería. **La configuración anterior solo tenía ventajas**: el diseño nuevo deberá incluir una debilidad por civilización. Los valores numéricos antiguos de Navajos/Masáis deben revisarse antes de aplicarlos.
+- **Cada pasiva lleva ventaja y debilidad** (ninguna civilización superior). Ejemplos del dossier: Ingleses con caballería pesada más cara · Romanos con caballería menos especializada · Vikingos peores en asedios largos · Mongoles débiles en defensa urbana fija · Bizantinos con élites caras · Aztecas sin caballería. **Estado 23-10-2026:** 10 de 12 civilizaciones ya tienen debilidad; faltan Navajos y Masáis, cuyos valores antiguos deben revisarse antes de aplicarlos.
 - Para mantener un tipo de tropa si la civilización no tiene caballería (p. ej. aztecas), sustituirlo por una unidad de élite equivalente del mismo tipo; a decidir en el bloque.
 
 ---
@@ -282,7 +318,7 @@ Los soldados consumen un **5 % más** (factor 1,05); las máquinas de asedio no 
 - **Armas:** palo 0,70 · lanza básica 0,90 · espada de hierro 1,00 · acero 1,15 · acero avanzado 1,30. **Armaduras:** ninguna 0,70 · piel 0,85 · cuero reforzado 0,95 · hierro 1,10 · acero 1,25. El desbloqueo depende de Herrería, Mina de hierro y tecnologías (R-09 A). El equipo se elige para todo el ejército y de momento no tiene coste de fabricación.
 - **Fatiga:** 0–10 % sin penalización · 11–25 % −3 % · 26–40 % −8 % · 41–60 % −15 % · 61–75 % −25 % · 76–90 % −40 % · >90 % −55 %.
 - **Moral** depende de alimentación, descanso, impuestos, victorias, derrotas, felicidad, liderazgo, religión y situación general.
-- **Mercenarios (hoy):** Taberna; 25 oro por unidad (infantería nivel 2); hasta 50 por nivel de Taberna; contrato de 7 días reales; desaparecen al expirar; sin natalidad. El jugador pidió **varios tipos «unos más baratos y otros más caros»**: ampliar (ver sección 21).
+- **Mercenarios (implementado 23-10-2026; valores por aprobar, A3):** se contratan en la Taberna y **se pagan íntegros al contratar: sin salario diario**. Contrato de 7 días reales; desaparecen al vencer; sin natalidad; tope común de 50 activos por nivel de Taberna. Seis tipos: Mesnada a sueldo (infantería N1, 20 oro, Taberna 1) · Lanceros a sueldo (infantería N2, 25 oro, Taberna 1; anclaje aprobado) · Arqueros de fortuna (arquería N2, 30, Taberna 2) · Jinetes de fortuna (caballería N2, 75, Taberna 3) · Compañía veterana (infantería N3, 30, Taberna 4) · Guardia mercenaria (caballería N3, 90, Taberna 5).
 - **Modo «A TOPE» (P55):** política intensiva del Castillo + prioridad militar; con consecuencias económicas y sociales.
 
 ---
@@ -299,16 +335,17 @@ Los soldados consumen un **5 % más** (factor 1,05); las máquinas de asedio no 
 - Sin botín (D-31). Sin bots PvE (D-33, M-10).
 - Informe completo (P43): resultado, bajas por bando, supervivientes, explicación generada con los factores reales, honor, gloria, territorio, desgaste y recuperación prevista.
 
-**Formaciones — cuatro tipos aprobados el 21-10-2026: ofensiva, defensiva, equilibrada y flanqueo.** Los efectos, porcentajes y matriz de ventajas están pendientes de diseño y pruebas. Este sistema **no sustituye** la matriz entre tipos de unidad sino que se suma:
+**Formaciones tácticas — cuatro tipos aprobados el 21-10-2026 (ofensiva, defensiva, equilibrada y flanqueo); implementadas el 23-10-2026 con valores por aprobar (A2).** Se suman a la matriz entre tipos de unidad, no la sustituyen. Constantes `TACTICAL_FORMATIONS` y `TACTICAL_FORMATION_COUNTER_BONUS` en `balanceConfig.ts`.
 
-| Formación | Idea | Fuerte contra | Débil contra |
-|---|---|---|---|
-| Ofensiva | Prioriza infligir daño y romper la línea enemiga | Por calcular | Por calcular |
-| Defensiva | Prioriza reducir bajas propias y resistir | Por calcular | Por calcular |
-| Equilibrada | Sin especialización extrema; respuesta flexible | Por calcular | Por calcular |
-| Flanqueo | Busca atacar los laterales y desorganizar al rival | Por calcular | Por calcular |
+| Formación | Ataque | Defensa | Fuerte contra | Débil contra |
+|---|---|---|---|---|
+| Ofensiva | ×1,12 | ×0,90 | Flanqueo | Defensiva |
+| Defensiva | ×0,90 | ×1,12 | Ofensiva | Flanqueo |
+| Flanqueo | ×1,06 | ×0,96 | Defensiva | Ofensiva |
+| Equilibrada | ×1,00 | ×1,00 | Ninguna | Ninguna |
 
-No fijar todavía modificadores numéricos ni cruces de ventaja: deben calcularse, incorporarse a `balanceConfig.ts` y validarse con simulaciones.
+Contrarrestar: ×1,15 sobre la potencia (término «Contramedida»). Según el simulador, con ejércitos iguales la formación que contrarresta gana por unos 7 puntos de bajas (victoria clara, nunca aplastante); cualquier otro cruce empata.
+
 
 ---
 
@@ -322,7 +359,7 @@ No fijar todavía modificadores numéricos ni cruces de ventaja: deben calculars
 - **Límites:** máximo 3 desafíos pendientes por reino; enfriamiento de 24 h reales contra el mismo rival.
 - **Apuestas:** desactivadas (M-08). Sin apuestas ni territorio en juego.
 - **Espionaje (D-39):** sin Espionaje I, intervalo de efectivos con error ±25 %; con I, ±15 %; con II, ±7 %. Coste por informe: 100 oro (I) / 250 oro (II). Caduca a las 24 h.
-- **Distancia (P41):** hexagonal. Marcha: `1.800 s × distancia × multiplicador`; fatiga por marcha `+2 × d` (terreno neutro, R-14).
+- **Distancia (P41):** hexagonal. Marcha: `1.800 s × distancia × multiplicador`; fatiga por marcha `+2 × d × multiplicador de terreno`. **Terreno (decisión 23-10-2026):** media del terreno del camino, tanto en el Parlamento como en el mapa. Multiplicadores propuestos (por aprobar, A6): llanura ×1,0 · río ×1,1 · costa ×1,1 · bosque ×1,2 · colina ×1,25 · montaña ×1,5.
 - **Notificaciones:** insignia en Parlamento con los desafíos pendientes (`Parlamento 🔴1`).
 - **Comunicación (P60):** sin chat libre; solo cinco mensajes: «¿Te atreves a retarme?» · «Mi reino está preparado.» · «Buena suerte.» · «¿Eso es todo?» · «Nos veremos en el campo de batalla.»
 
@@ -357,7 +394,7 @@ Los heridos salen del ejército, no combaten y se muestran aparte. **Hospital mi
 - **Misiones secretas por civilización:** cada civilización tendrá el mismo número de misiones secretas exclusivas. Su temática y recompensas pueden reflejar su identidad histórica, pero el valor y la utilidad deben equilibrarse para que ninguna sea superior por tener más oportunidades.
 - **Misiones diarias:** se renuevan cada día y conceden recompensas adicionales. Todos los jugadores reciben el mismo conjunto de objetivos y las mismas recompensas, sin adaptación por nivel de reino. Los objetivos deberán elegirse para que sean razonablemente alcanzables por jugadores en distintas fases, sin exigir capacidades avanzadas a todos. El reinicio diario no borra el progreso permanente. La hora/zona de reinicio se fijará en el diseño técnico antes de implementar.
 - **Equilibrio y seguridad:** las cantidades de premios, duración de las bonificaciones y catálogo se deben definir y centralizar en `convex/balanceConfig.ts`, con etiqueta de origen `[DECISIÓN 2026-10-21]` o `[DERIVADO]`. El servidor es la autoridad; no confiar en el cliente para completar misiones, conceder premios o impedir duplicados.
-- **Estado:** estas reglas están aprobadas como diseño, pero el sistema de misiones sigue pendiente de implementación y verificación. No afirmar que ya funciona en el juego.
+- **Estado (23-10-2026): implementado en el código** (`missions.ts`, `missionRules.ts`, `MissionsPanel.tsx`) con 6 pruebas puras superadas por nosotros y 6 de integración según informe. Sin reclamar a mano. Valores vigentes propuestos (por aprobar, A4): reinicio de las diarias a las **00:00 UTC**; **3 diarias** al día de un catálogo de 6; **4 etapas** con premio final; **4 secretas generales** y **1 secreta por civilización** (completar su tecnología única, mismo premio para todas); los objetos únicos están previstos pero **sin catálogo**. No probado contra el servidor real.
 
 ### Catálogo inicial orientativo (a desarrollar y equilibrar)
 
@@ -365,7 +402,7 @@ Los heridos salen del ejército, no combaten y se muestran aparte. **Hospital mi
 - **Objetivos militares y de desarrollo:** alcanzar umbrales de ejército, investigar tecnologías, subir edificios a niveles definidos y ganar varias batallas. Evitar objetivos ambiguos o que puedan contabilizarse dos veces.
 - **Diarias:** seleccionar un conjunto idéntico para todos, con objetivos de economía, construcción, investigación y actividad militar alcanzables. El catálogo y las cantidades concretas están pendientes.
 - **Secretas:** condiciones especiales no visibles antes de completarse; número idéntico por civilización, con tema y premio adaptados.
-- No fijar aún cantidades concretas de recursos, oro, honor, gloria, tropas, objetos ni duración de bonificaciones sin calcular su impacto en la economía y el equilibrio.
+- Las cantidades vigentes están en `balanceConfig.ts` (misiones), marcadas `[DERIVADO]` hasta su aprobación; cualquier cambio exige calcular su impacto en la economía y el equilibrio.
 
 ---
 
@@ -409,7 +446,7 @@ Todos en `convex/balanceConfig.ts`: población inicial, crecimiento, capacidad y
 - **Población inicial 2.000.** Mundo web multijugador persistente, con el servidor como autoridad.
 - **Backend: Convex.** Appwrite descartado.
 - **Inicio de sesión:** nombre de gobernante + contraseña, sin verificación por Gmail/Google. Crear cuenta, iniciar sesión e invitado en la pantalla inicial. La implementación debe verificarse por separado.
-- **Recuperación de cuenta:** mostrar un código de recuperación una sola vez al crear la cuenta; el jugador debe guardarlo. No depender del correo. Implementación pendiente.
+- **Recuperación de cuenta:** código de recuperación mostrado una sola vez al crear la cuenta; el jugador debe guardarlo. No depender del correo. Implementado el 23-10-2026 (valores por aprobar, A1).
 - **Modo invitado permitido**, para ver el juego/civilizaciones con aviso claro de que el progreso no se guarda.
 - **Obras:** 2 simultáneas. **Investigaciones:** ranuras según Universidad (1/2/3).
 - **Costes de edificio +15 % por nivel; duración +1 % por nivel.** Sustituye a +25 % / +10 %.
@@ -418,25 +455,25 @@ Todos en `convex/balanceConfig.ts`: población inicial, crecimiento, capacidad y
 - **Sin salarios militares**, incluidos los mercenarios: se paga al contratarlos y no hay sueldo diario. **Sin bots PvE, apuestas ni efectos climáticos por ahora.** Estaciones solo informativas. Sin temporadas competitivas ni rankings por temporada.
 - **Nombres de civilizaciones:** «Keniatas» pasa a **Masáis**; «Indios americanos» pasa a **Navajos**; **Aztecas** sigue siendo una civilización separada.
 - **Civilizaciones:** cada una tendrá una ventaja y una debilidad. Los porcentajes concretos se diseñarán y equilibrarán después. Se contemplan armas, armaduras, edificios y soldados propios, pendientes de diseño/implementación.
-- **Formaciones militares:** cuatro tipos: ofensiva, defensiva, equilibrada y flanqueo. Sus efectos y porcentajes quedan pendientes de diseño y pruebas.
+- **Formaciones militares:** cuatro tipos: ofensiva, defensiva, equilibrada y flanqueo. Implementadas el 23-10-2026 con porcentajes propuestos (A2).
 - **Misiones:** progresivas por etapas, desbloqueadas poco a poco; objetivos detectados automáticamente; recompensa automática sin reclamación manual ni duplicados; animación breve con nombre y premios; recompensa adicional al completar cada etapa; recompensas posibles de recursos, oro, honor, gloria, tropas, objetos únicos y bonificaciones temporales.
 - **Misiones secretas:** condiciones ocultas hasta completarse; recompensa y celebración automáticas; pueden conceder recompensas exclusivas relacionadas con la civilización. Todas las civilizaciones tendrán el mismo número de misiones secretas, con valor de recompensas equilibrado.
 - **Misiones diarias:** mismo conjunto de objetivos y mismas recompensas para todos los jugadores; se renuevan cada día; no borran el progreso permanente. La hora de reinicio, catálogo y cantidades están pendientes de especificación.
 - **Honor/gloria:** mantener como referencia la tabla M-01 hasta que una revisión de balance justifique cambios.
 - **P56 y P61:** siguen pendientes de aclaración documental; no inventar requisitos para esos puntos.
+- **Cerrado el 23-10-2026:** terreno en las marchas = media del camino · despliegue real: **todavía no** · `convex_backup/`: **se mantiene** (no se usa ni se edita) · Navajos y Masáis: **pendientes hasta tener documentación histórica**.
 
-### Propuestas pendientes de diseño o implementación (no son funciones ya disponibles)
-- Singularidades de armas, armaduras, soldados y edificios por civilización, respetando el dossier histórico.
-- Matriz de ventajas y desventajas de las cuatro formaciones.
-- Catálogo completo, etapas, condiciones secretas, recompensas, reglas de reinicio y pruebas del sistema de misiones.
-- Definir tipos y precios de mercenarios ligados al nivel de la Taberna; sin salario diario.
-- Aclarar el alcance exacto del modo invitado, manteniéndolo fuera del mundo compartido si no guarda progreso.
+### Propuestas pendientes de aprobación o de implementación
+- **Implementadas con valores propuestos, por aprobar** (detalle en `docs/DEFINICIONES_PENDIENTES.md`): A1 cuenta y código de recuperación · A2 formaciones · A3 mercenarios · A4 misiones · A5 debilidades de civilización · A6 terreno en las marchas. Si no se dice nada, se mantiene lo propuesto.
+- **Sin implementar:** singularidades de armas, armaduras, soldados y edificios por civilización, respetando el dossier histórico; debilidad y singularidades de Navajos y Masáis; catálogo de objetos únicos de las misiones.
+- Alcance exacto del modo invitado: solo lectura de Iberia y fichas de civilización, fuera del mundo compartido.
 
 ### Puntos abiertos (preguntar una sola vez, con propuesta)
-1. **Despliegue real de Convex y publicación del cliente web (T-02):** requieren autorización expresa. Lo mismo para migraciones de reinos existentes.
-2. **Terreno intermedio en las marchas (R-14)** y valores finales de murallas.
-3. **Valores numéricos y equilibrio:** porcentajes de ventajas/debilidades de civilización, efectos de formaciones, cantidades de recompensas, límites y duración de bonificaciones temporales.
-4. **Misiones diarias:** fijar la hora de reinicio del servidor y el catálogo común antes de implementarlas.
+1. **Despliegue real de Convex y publicación del cliente web (T-02):** requieren autorización expresa (hoy: todavía no). Al autorizarlo: ejecutar el despliegue, configurar `JWT_PRIVATE_KEY`, `JWKS` y `SITE_URL` en Convex y probar el flujo completo (crear cuenta, código de recuperación, fundar reino, una obra, un desafío). Lo mismo para migraciones de reinos existentes.
+2. **Aprobación de los valores propuestos A1–A6** y de los valores finales de murallas.
+3. **Texto histórico de Navajos y Masáis** (cronología, región, equipamiento) para diseñar su equipo, edificio único, tropa y debilidad.
+4. **Redondeo del crecimiento de población por tramos:** definir una política de fracciones o acumulación para que el resultado no dependa de la frecuencia de sincronización.
+5. **P56 y P61:** indicar qué debían contener o darlos por eliminados.
 
 ### Fuera de alcance (descartado)
 - Salarios militares. Bots PvE. Apuestas. Efectos del clima (de momento). Temporadas competitivas, títulos y rankings de temporada.
