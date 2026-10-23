@@ -55,6 +55,7 @@ import { ArmyPanel } from './components/ArmyPanel';
 import { UniversityPanel } from './components/UniversityPanel';
 import { ParliamentPanel } from './components/ParliamentPanel';
 import { MapPanel } from './components/MapPanel';
+import { MissionsPanel, MissionCelebrations } from './components/MissionsPanel';
 import { formatCosts, formatRequirements } from './components/shared';
 
 const CIVILIZATION_LABELS: Record<string, string> = Object.fromEntries(CIVILIZATIONS.map((c) => [c.id, c.label]));
@@ -1180,6 +1181,7 @@ function KingdomOverviewContent() {
       </section>
 
       <TabNavigation active={activeTab} onChange={setActiveTab} parliamentBadge={parliamentBadge?.badgeCount ?? 0} />
+      <MissionCelebrations kingdomId={kingdom._id} enabled={isOwner} />
 
       {activeTab === 'ejercito' && (
         <ArmyPanel kingdomId={kingdom._id} isOwner={isOwner} buildingLabels={buildingLabels} />
@@ -1203,6 +1205,7 @@ function KingdomOverviewContent() {
       )}
 
       {activeTab === 'aldea' && (<>
+      <MissionsPanel kingdomId={kingdom._id} isOwner={isOwner} />
       {/* ====================================================================
           2. PANEL DE RECURSOS DEL REINO (5 RECURSOS PRIMARIOS)
           ==================================================================== */}

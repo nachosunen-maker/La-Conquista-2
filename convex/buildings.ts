@@ -7,6 +7,7 @@ import { internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { recordMissionEvent } from "./missions";
 import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
 import {
@@ -256,6 +257,7 @@ export const completeConstruction = internalMutation({
       });
     }
     await ctx.db.delete(args.constructionId);
+    await recordMissionEvent(ctx, construction.kingdomId, "buildingsCompleted", 1);
     return { success: true, completed: true, buildingType: construction.buildingType, level: construction.targetLevel };
   },
 });
@@ -298,6 +300,8 @@ export async function completeDueConstructions(ctx: MutationCtx, kingdomId: Id<"
     }
     await ctx.db.delete(construction._id);
     completed.push(construction.buildingType);
+    // La liquidación evalúa las misiones al final; aquí solo se cuenta el evento.
+    await recordMissionEvent(ctx, kingdomId, "buildingsCompleted", 1, false);
   }
   return completed;
 }

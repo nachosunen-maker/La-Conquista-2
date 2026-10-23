@@ -7,6 +7,7 @@ import { internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { recordMissionEvent } from "./missions";
 import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
 import { requireOwner } from "./buildings";
@@ -119,6 +120,7 @@ export const researchTechnology = mutation({
       costs: plan.costs,
     });
     await ctx.scheduler.runAt(plan.completesAt, internal.technologies.completeResearch, { progressId });
+    await recordMissionEvent(ctx, args.kingdomId, "researchStarted", 1);
     return { success: true, progressId, ...plan };
   },
 });
@@ -144,7 +146,7 @@ export const cancelResearch = mutation({
   },
 });
 
-async function finalizeResearch(ctx: MutationCtx, doc: any, now: number): Promise<boolean> {
+async function finalizeResearch(ctx: MutationCtx, doc: any, now: number, evaluateMissionsNow: boolean = true): Promise<boolean> {
   if (doc.status !== "researching") return false;
   if (typeof doc.startedAt !== "number" || typeof doc.durationMs !== "number") return false;
   if (researchProgress(doc as ResearchQueueEntry, now) !== 100) return false;
@@ -156,6 +158,7 @@ async function finalizeResearch(ctx: MutationCtx, doc: any, now: number): Promis
     return true;
   }
   await ctx.db.patch(doc._id, { status: "completed", completedAt: now });
+  await recordMissionEvent(ctx, doc.kingdomId, "researchCompleted", 1, evaluateMissionsNow);
   return true;
 }
 
@@ -176,7 +179,7 @@ export async function completeDueResearch(ctx: MutationCtx, kingdomId: Id<"kingd
   const progress = await readProgress(ctx, kingdomId);
   let completed = 0;
   for (const doc of progress) {
-    if (await finalizeResearch(ctx, doc, now)) completed += 1;
+    if (await finalizeResearch(ctx, doc, now, false)) completed += 1;
   }
   return completed;
 }

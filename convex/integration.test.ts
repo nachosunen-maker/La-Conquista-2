@@ -288,7 +288,12 @@ describe("Parlamento y batalla (Bloques E y F)", () => {
     expect(report.attacker.survivors + report.attacker.casualties).toBe(600);
     const parliamentA = await a.asUser.query(api.parliament.getParliament, { kingdomId: a.kingdomId });
     expect(parliamentA.challenges[0].status).toBe("RESOLVED");
-    expect(parliamentA.honor).toBe(report.honorAwarded.attacker);
+    // Honor de batalla más el de las misiones completadas por el camino (tropas entrenadas, batalla del día).
+    const missionHonorA = await t.run(async (ctx) => {
+      const docs = await ctx.db.query("missionProgress").withIndex("by_kingdom", (q) => q.eq("kingdomId", a.kingdomId)).collect();
+      return docs.reduce((sum, doc) => sum + (Number(/\+(\d+) honor/.exec(doc.rewardSummary)?.[1] ?? 0)), 0);
+    });
+    expect(parliamentA.honor).toBe(report.honorAwarded.attacker + missionHonorA);
     const armyA = await a.asUser.query(api.army.getArmyState, { kingdomId: a.kingdomId });
     expect(armyA.summary.byType.infanteria.active).toBe(report.attacker.survivors);
     expect(armyA.summary.byType.infanteria.wounded).toBe(report.attacker.wounded);

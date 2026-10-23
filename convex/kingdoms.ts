@@ -6,6 +6,7 @@ import { createAggregatePopulationFallback } from "./kingdomReadModel";
 import { readArmyUnitDocs } from "./army";
 import { validateMilitaryUnitInput as validateMilitaryUnitInputRule } from "./armyRules";
 import { requireOwner } from "./buildings";
+import { recordMissionEvent } from "./missions";
 import { DAILY_BONUS, SEASONS, TIME } from "./balanceConfig";
 import { seasonAt } from "./economyExtended";
 
@@ -181,6 +182,7 @@ export const claimDailyBonus = mutation({
     }
     const honor = (kingdom.honor ?? 0) + DAILY_BONUS.HONOR;
     await ctx.db.patch(args.kingdomId, { honor, lastDailyBonusAt: now, updatedAt: now });
+    await recordMissionEvent(ctx, args.kingdomId, "dailyBonusClaimed", 1);
     return { success: true, honor, awarded: DAILY_BONUS.HONOR, nextAvailableAt: now + DAILY_BONUS.COOLDOWN_MS };
   },
 });

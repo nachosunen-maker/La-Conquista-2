@@ -9,6 +9,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
+import { evaluateKingdomMissions, recordMissionEvent } from "./missions";
 import { requireOwner } from "./buildings";
 import { validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
@@ -289,7 +290,7 @@ export const cancelTraining = mutation({
   },
 });
 
-async function finalizeTraining(ctx: MutationCtx, entry: any, now: number): Promise<boolean> {
+async function finalizeTraining(ctx: MutationCtx, entry: any, now: number, evaluateMissionsNow: boolean = true): Promise<boolean> {
   if (
     typeof entry.startedAt !== "number" || typeof entry.durationMs !== "number" ||
     typeof entry.count !== "number" || typeof entry.unitType !== "string" ||
@@ -301,6 +302,7 @@ async function finalizeTraining(ctx: MutationCtx, entry: any, now: number): Prom
   if (!unitType) throw new Error(`Tipo de unidad persistido no válido: '${entry.unitType}'.`);
   await addUnits(ctx, entry.kingdomId, unitType, unitLevelOf({ level: entry.level }), entry.count);
   await ctx.db.delete(entry._id);
+  await recordMissionEvent(ctx, entry.kingdomId, "troopsTrained", entry.count, evaluateMissionsNow);
   return true;
 }
 
@@ -320,7 +322,7 @@ export async function completeDueTraining(ctx: MutationCtx, kingdomId: Id<"kingd
   const queue = await readTrainingQueue(ctx, kingdomId);
   let completed = 0;
   for (const entry of queue) {
-    if (await finalizeTraining(ctx, entry, now)) completed += 1;
+    if (await finalizeTraining(ctx, entry, now, false)) completed += 1;
   }
   return completed;
 }
@@ -753,6 +755,12 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   await removeDeadFromPopulation(ctx, defenderKingdomId, report.defender.casualtiesComposition, report.defender.woundedComposition);
 
   const wonAttacker = report.winnerKingdomId === march.kingdomId;
+  // [Misiones] Batalla librada por ambos; victoria y aplastante para quien corresponda.
+  await recordMissionEvent(ctx, march.kingdomId, "battlesFought", 1, false);
+  await recordMissionEvent(ctx, defenderKingdomId, "battlesFought", 1, false);
+  if (report.winnerKingdomId === march.kingdomId) await recordMissionEvent(ctx, march.kingdomId, "battlesWon", 1, false);
+  if (report.winnerKingdomId === defenderKingdomId) await recordMissionEvent(ctx, defenderKingdomId, "battlesWon", 1, false);
+  if (report.crushingVictory && report.winnerKingdomId) await recordMissionEvent(ctx, report.winnerKingdomId as Id<"kingdoms">, "crushingVictories", 1, false);
   if (wonAttacker && report.crushingVictory) {
     await ctx.db.patch(march.kingdomId, {
       pendingTerritoryClaims: (attackerKingdom.pendingTerritoryClaims ?? 0) + 1,
@@ -765,6 +773,8 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     status: "completada",
     battleResult: { battleId, outcome: report.outcome, crushingVictory: report.crushingVictory },
   });
+  await evaluateKingdomMissions(ctx, march.kingdomId);
+  await evaluateKingdomMissions(ctx, defenderKingdomId);
 
   return { success: true, battleId, outcome: report.outcome };
 }

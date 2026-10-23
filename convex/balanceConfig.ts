@@ -532,6 +532,155 @@ export const HOSPITAL_RECOVERY_CAP = 0.6;
 export const DAILY_BONUS = { HONOR: 5, COOLDOWN_MS: 24 * 60 * 60 * 1000 } as const;
 
 // ============================================================================
+// 5c. MISIONES (P3, P50, P51, P59 · sección 17 de CLAUDE.md)
+// ============================================================================
+/**
+ * [DECISIÓN 2026-10-21] Misiones progresivas por etapas (se revela una etapa cada vez), diarias
+ * (mismo conjunto y premios para todos; se renuevan cada día) y secretas (ocultas hasta cumplirse;
+ * el mismo número por civilización). Completado y recompensa automáticos en servidor, una sola vez.
+ * Cantidades [DERIVADO, pendientes de aprobación]: escaladas a los recursos fundacionales
+ * (500 oro, 1.000 madera…) y a las recompensas de batalla (victoria +20 honor / +10 gloria).
+ */
+export type MissionCounterKey =
+  | "buildingsCompleted" | "troopsTrained" | "researchStarted" | "researchCompleted" | "battlesFought"
+  | "battlesWon" | "crushingVictories" | "challengesSent" | "explorationsCompleted" | "territoriesClaimed" | "dailyBonusClaimed";
+export type MissionConditionType =
+  | "buildingLevel" | "population" | "technologiesCompleted" | "technologyCompleted" | "armySize" | "happiness" | "honor" | "resourceStock" | "territoriesOwned"
+  | "lifetime" | "daily";
+export interface MissionCondition {
+  type: MissionConditionType;
+  value: number;
+  buildingType?: string;
+  technologyId?: string;
+  resource?: ResourceType;
+  /** Para "lifetime" y "daily": contador que se compara con value. */
+  counter?: MissionCounterKey;
+}
+export interface MissionReward {
+  resources?: Partial<ResourceCosts>;
+  honor?: number;
+  glory?: number;
+  troops?: { unitType: UnitType; level: number; count: number };
+  /** Bonificación temporal de producción (multiplicador × días reales). */
+  productionBonus?: { multiplier: number; days: number };
+}
+export interface MissionDefinition {
+  id: string;
+  title: string;
+  description: string;
+  condition: MissionCondition;
+  reward: MissionReward;
+  /** Solo para misiones secretas exclusivas de una civilización. */
+  civilization?: string;
+}
+export interface MissionStage {
+  stage: number;
+  title: string;
+  missions: readonly MissionDefinition[];
+  /** Premio adicional al completar todas las misiones de la etapa. */
+  reward: MissionReward;
+}
+
+export const MISSIONS = {
+  /** Las etapas se desbloquean una a una: solo se muestra la etapa en curso y las ya completadas. */
+  STAGES: [
+    {
+      stage: 1,
+      title: "Los primeros pasos",
+      missions: [
+        { id: "s1_castillo2", title: "Torres más altas", description: "Mejora el Castillo al nivel 2 (ningún edificio puede superar su nivel).", condition: { type: "buildingLevel", buildingType: "castillo", value: 2 }, reward: { resources: { stone: 200, wood: 150 }, honor: 5 } },
+        { id: "s1_cuartel", title: "Llamada a las armas", description: "Construye el Cuartel.", condition: { type: "buildingLevel", buildingType: "cuartel", value: 1 }, reward: { resources: { gold: 50, iron: 50 }, honor: 5 } },
+        { id: "s1_taberna", title: "Posada del reino", description: "Construye la Taberna.", condition: { type: "buildingLevel", buildingType: "taberna", value: 1 }, reward: { resources: { gold: 50, food: 100 }, honor: 5 } },
+        { id: "s1_tropas", title: "Primera leva", description: "Entrena 10 tropas en total.", condition: { type: "lifetime", counter: "troopsTrained", value: 10 }, reward: { resources: { gold: 50, food: 100 }, honor: 5 } },
+        { id: "s1_universidad", title: "Casa del saber", description: "Construye la Universidad (requiere Castillo 2).", condition: { type: "buildingLevel", buildingType: "universidad", value: 1 }, reward: { resources: { gold: 100 }, honor: 5 } },
+      ],
+      reward: { resources: { gold: 200, wood: 200, stone: 200, iron: 100, food: 300 }, honor: 10, glory: 5, troops: { unitType: "infanteria" as UnitType, level: 1, count: 20 } },
+    },
+    {
+      stage: 2,
+      title: "Un reino en marcha",
+      missions: [
+        { id: "s2_castillo3", title: "Sede del poder", description: "Mejora el Castillo al nivel 3.", condition: { type: "buildingLevel", buildingType: "castillo", value: 3 }, reward: { resources: { stone: 300 }, honor: 10 } },
+        { id: "s2_investigacion", title: "Primer descubrimiento", description: "Completa tu primera investigación.", condition: { type: "technologiesCompleted", value: 1 }, reward: { resources: { gold: 150 }, honor: 10 } },
+        { id: "s2_poblacion", title: "Ciudad creciente", description: "Alcanza 2.600 habitantes.", condition: { type: "population", value: 2600 }, reward: { resources: { food: 500 }, honor: 10 } },
+        { id: "s2_ejercito", title: "Guarnición", description: "Mantén 50 tropas activas.", condition: { type: "armySize", value: 50 }, reward: { resources: { iron: 100 }, honor: 10 } },
+        { id: "s2_parlamento", title: "Voz entre reinos", description: "Construye el Parlamento.", condition: { type: "buildingLevel", buildingType: "parlamento", value: 1 }, reward: { resources: { gold: 150 }, honor: 10 } },
+      ],
+      reward: { resources: { gold: 400, wood: 400, stone: 400, iron: 200, food: 600 }, honor: 20, glory: 10, productionBonus: { multiplier: 1.05, days: 1 } },
+    },
+    {
+      stage: 3,
+      title: "La corona se afirma",
+      missions: [
+        { id: "s3_castillo4", title: "Alcázar", description: "Mejora el Castillo al nivel 4.", condition: { type: "buildingLevel", buildingType: "castillo", value: 4 }, reward: { resources: { stone: 500 }, honor: 10 } },
+        { id: "s3_murallas", title: "Piedra sobre piedra", description: "Construye las Murallas.", condition: { type: "buildingLevel", buildingType: "murallas", value: 1 }, reward: { resources: { stone: 300, iron: 100 }, honor: 10 } },
+        { id: "s3_desafio", title: "Guante arrojado", description: "Envía tu primer desafío por el Parlamento.", condition: { type: "lifetime", counter: "challengesSent", value: 1 }, reward: { honor: 10 } },
+        { id: "s3_batalla", title: "Bautismo de fuego", description: "Libra tu primera batalla.", condition: { type: "lifetime", counter: "battlesFought", value: 1 }, reward: { resources: { food: 300 }, honor: 10 } },
+        { id: "s3_victoria", title: "Primera victoria", description: "Gana tu primera batalla.", condition: { type: "lifetime", counter: "battlesWon", value: 1 }, reward: { resources: { gold: 200 }, honor: 15, glory: 5 } },
+        { id: "s3_tecnologias", title: "Tres saberes", description: "Completa 3 investigaciones.", condition: { type: "technologiesCompleted", value: 3 }, reward: { resources: { gold: 200 }, honor: 10 } },
+      ],
+      reward: { resources: { gold: 600, wood: 600, stone: 600, iron: 300, food: 800 }, honor: 30, glory: 15, troops: { unitType: "arqueria" as UnitType, level: 2, count: 30 } },
+    },
+    {
+      stage: 4,
+      title: "Señor de la guerra",
+      missions: [
+        { id: "s4_castillo6", title: "Ciudadela", description: "Mejora el Castillo al nivel 6.", condition: { type: "buildingLevel", buildingType: "castillo", value: 6 }, reward: { resources: { stone: 800 }, honor: 15 } },
+        { id: "s4_ejercito", title: "Hueste real", description: "Mantén 300 tropas activas.", condition: { type: "armySize", value: 300 }, reward: { resources: { iron: 300, food: 500 }, honor: 15 } },
+        { id: "s4_victorias", title: "Cinco laureles", description: "Gana 5 batallas.", condition: { type: "lifetime", counter: "battlesWon", value: 5 }, reward: { resources: { gold: 400 }, honor: 20, glory: 10 } },
+        { id: "s4_aplastante", title: "Sin cuartel", description: "Logra una victoria aplastante.", condition: { type: "lifetime", counter: "crushingVictories", value: 1 }, reward: { honor: 20, glory: 10 } },
+        { id: "s4_territorio", title: "Nuevas tierras", description: "Reclama un territorio libre.", condition: { type: "lifetime", counter: "territoriesClaimed", value: 1 }, reward: { resources: { gold: 300, wood: 300 }, honor: 15 } },
+        { id: "s4_hospital", title: "Cuidar a los nuestros", description: "Construye el Hospital militar.", condition: { type: "buildingLevel", buildingType: "hospitalMilitar", value: 1 }, reward: { resources: { gold: 200 }, honor: 10 } },
+      ],
+      reward: { resources: { gold: 1000, wood: 800, stone: 800, iron: 500, food: 1000 }, honor: 50, glory: 25, troops: { unitType: "caballeria" as UnitType, level: 2, count: 30 }, productionBonus: { multiplier: 1.1, days: 1 } },
+    },
+  ] as readonly MissionStage[],
+
+  /** Diarias: mismo conjunto para todos, elegido de forma determinista por fecha; se renuevan cada día. */
+  DAILY: {
+    /** [DERIVADO, pendiente de aprobación] Reinicio diario a las 00:00 UTC. */
+    RESET_UTC_HOUR: 0,
+    PER_DAY: 3,
+    CATALOG: [
+      { id: "d_obra", title: "Manos a la obra", description: "Termina 1 obra hoy.", condition: { type: "daily", counter: "buildingsCompleted", value: 1 }, reward: { resources: { wood: 100, stone: 100 }, honor: 2 } },
+      { id: "d_tropas", title: "Instrucción diaria", description: "Entrena 20 tropas hoy.", condition: { type: "daily", counter: "troopsTrained", value: 20 }, reward: { resources: { food: 150 }, honor: 2 } },
+      { id: "d_investigar", title: "Hora de estudio", description: "Inicia 1 investigación hoy.", condition: { type: "daily", counter: "researchStarted", value: 1 }, reward: { resources: { gold: 60 }, honor: 2 } },
+      { id: "d_bonus", title: "Tributo diario", description: "Reclama el bonus diario.", condition: { type: "daily", counter: "dailyBonusClaimed", value: 1 }, reward: { resources: { gold: 40 }, honor: 2 } },
+      { id: "d_explorar", title: "Ojos en el horizonte", description: "Completa 1 expedición de exploración hoy.", condition: { type: "daily", counter: "explorationsCompleted", value: 1 }, reward: { resources: { food: 100, gold: 40 }, honor: 2 } },
+      { id: "d_batalla", title: "Al campo de batalla", description: "Libra 1 batalla hoy.", condition: { type: "daily", counter: "battlesFought", value: 1 }, reward: { resources: { gold: 80 }, honor: 3 } },
+    ] as readonly MissionDefinition[],
+  },
+
+  /** Secretas generales: condiciones ocultas hasta cumplirse. */
+  SECRET: [
+    { id: "x_felicidad", title: "Reino feliz", description: "Alcanzar 90 de felicidad.", condition: { type: "happiness", value: 90 }, reward: { resources: { food: 400 }, honor: 15, glory: 5 } },
+    { id: "x_tesoro", title: "Arcas rebosantes", description: "Acumular 5.000 de oro.", condition: { type: "resourceStock", resource: "gold", value: 5000 }, reward: { honor: 15, glory: 5 } },
+    { id: "x_honor", title: "Nombre respetado", description: "Alcanzar 100 de honor.", condition: { type: "honor", value: 100 }, reward: { resources: { gold: 300 }, glory: 10 } },
+    { id: "x_exploradores", title: "Cartógrafos", description: "Completar 5 expediciones.", condition: { type: "lifetime", counter: "explorationsCompleted", value: 5 }, reward: { resources: { gold: 200, food: 200 }, honor: 10 } },
+  ] as readonly MissionDefinition[],
+
+  /**
+   * Secretas por civilización: una por civilización (mismo número), misma estructura de premio
+   * [DERIVADO]: completar la tecnología única de la civilización.
+   */
+  SECRET_PER_CIVILIZATION_REWARD: { resources: { gold: 300, wood: 200, stone: 200, iron: 100, food: 300 }, honor: 20, glory: 10 } as MissionReward,
+  SECRET_PER_CIVILIZATION_TITLES: {
+    ingleses: "Herederos de Agincourt",
+    romanos: "Senatus Populusque",
+    griegos: "Luz de la Academia",
+    vikingos: "Saga de los mares",
+    bizantinos: "Púrpura imperial",
+    arabes: "Sabios del califato",
+    mongoles: "Jinetes de la estepa",
+    chinos: "Mandato del Cielo",
+    japoneses: "Camino del guerrero",
+    navajos: "Senderos sagrados",
+    aztecas: "Sol de Tenochtitlan",
+    masais: "Guardianes de la sabana",
+  } as Readonly<Record<string, string>>,
+} as const;
+
+// ============================================================================
 // 5b. CUENTA DEL JUGADOR (P4, P5, sección 5 y 21 de CLAUDE.md)
 // ============================================================================
 /**

@@ -69,6 +69,7 @@ export default defineSchema({
       glory: v.optional(v.number()),
       lastDailyBonusAt: v.optional(v.number()),
       moraleEffects: v.optional(v.array(v.object({ amount: v.number(), expiresAt: v.number() }))),
+      temporaryBonuses: v.optional(v.array(v.object({ type: v.string(), multiplier: v.number(), expiresAt: v.number() }))), // Misiones: bonificaciones temporales
       // Bloque G: territorio principal y reclamaciones pendientes (P47)
       homeTerritoryId: v.optional(v.string()),
       pendingTerritoryClaims: v.optional(v.number()),
@@ -300,6 +301,29 @@ export default defineSchema({
       isMercenary: v.optional(v.boolean()), // [M-02] Contrato de mercenarios (P53)
       mercenaryTypeId: v.optional(v.string()), // [DECISIÓN 21-10-2026] Tipo contratado (MERCENARIES.TYPES)
       contractEndsAt: v.optional(v.number()),
+    }).index("by_kingdom", ["kingdomId"]),
+
+    // Misiones (sección 17 de CLAUDE.md, decisión 2026-10-21): cada misión concedida una sola vez.
+    missionProgress: defineTable({
+      kingdomId: v.id("kingdoms"),
+      progressId: v.string(), // id de misión; "daily:<id>:<día>" para diarias; "stage:<n>" para premios de etapa
+      missionId: v.string(),
+      kind: v.string(), // stage | daily | secret | stageReward
+      stage: v.optional(v.number()),
+      title: v.string(),
+      rewardSummary: v.string(),
+      completedAt: v.number(),
+      rewardGranted: v.boolean(),
+      seenAt: v.optional(v.number()),
+    })
+      .index("by_kingdom", ["kingdomId"])
+      .index("by_kingdom_and_progress", ["kingdomId", "progressId"]),
+    missionCounters: defineTable({
+      kingdomId: v.id("kingdoms"),
+      dayKey: v.string(),
+      lifetime: v.any(),
+      daily: v.any(),
+      updatedAt: v.number(),
     }).index("by_kingdom", ["kingdomId"]),
 
     // Código de recuperación de la cuenta (sección 5 de CLAUDE.md, [DECISIÓN 21-10-2026]).

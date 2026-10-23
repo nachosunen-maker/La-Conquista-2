@@ -66,6 +66,8 @@ export interface ExtendedEconomyInput {
   mercenaryCount?: number;
   /** [Bloque 10, P6] Identificador de civilización oficial para aplicar bonificaciones culturales. */
   civilization?: string;
+  /** [Misiones] Multiplicador de las bonificaciones temporales de producción vigentes (1 = ninguna). */
+  bonusProductionMultiplier?: number;
 }
 
 export interface ProfessionEffects {
@@ -266,7 +268,8 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   const rest = REST_POLICIES[restPolicy];
   const starvationBefore = Number.isFinite(input.starvationSeconds) && input.starvationSeconds > 0 ? input.starvationSeconds : 0;
   const phaseBefore = starvationPhase(starvationBefore);
-  const productivity = productivityMultiplier(taxRate, phaseBefore, restPolicy);
+  const bonusProduction = Number.isFinite(input.bonusProductionMultiplier) && (input.bonusProductionMultiplier as number) > 0 ? (input.bonusProductionMultiplier as number) : 1;
+  const productivity = productivityMultiplier(taxRate, phaseBefore, restPolicy) * bonusProduction;
   const terrain = input.terrainBonuses ?? {};
   const civPassive = getCivilizationPassive(input.civilization);
   const professions = computeProfessionEffects(state.jobCounts, input.buildingLevels, PROFESSION_BUILDING_CAPACITY);

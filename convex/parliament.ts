@@ -19,6 +19,7 @@ import { distanceBetweenKingdoms, readHomeCoord } from "./territories";
 import { marchFatigue, marchTimeSeconds, armyMarchMultiplier } from "./territoryRules";
 import { applyFormation, emptyComposition, simulateBattle, type BattleSide, type Composition } from "./battleRules";
 import { isTacticalFormation } from "./armyRules";
+import { evaluateKingdomMissions, recordMissionEvent } from "./missions";
 import {
   approximateEstimate,
   approximatePopulation,
@@ -232,6 +233,7 @@ export const createChallenge = mutation({
       messages: [],
     });
     await ctx.scheduler.runAt(expiresAt, internal.parliament.expireChallenge, { challengeId });
+    await recordMissionEvent(ctx, args.challengerKingdomId, "challengesSent", 1);
     return { success: true, challengeId, expiresAt, distance };
   },
 });
@@ -482,6 +484,13 @@ export const resolveChallenge = internalMutation({
     }
 
     await ctx.db.patch(args.challengeId, { status: "RESOLVED", resolvedAt: now, battleId });
+    // [Misiones] Contadores de batalla y evaluación para ambos reinos.
+    for (const side of [current.challengerKingdomId, current.targetKingdomId]) {
+      await recordMissionEvent(ctx, side, "battlesFought", 1, false);
+      if (report.winnerKingdomId === side) await recordMissionEvent(ctx, side, "battlesWon", 1, false);
+      if (report.winnerKingdomId === side && report.crushingVictory) await recordMissionEvent(ctx, side, "crushingVictories", 1, false);
+      await evaluateKingdomMissions(ctx, side, now);
+    }
     return { resolved: true, battleId, outcome: report.outcome };
   },
 });
