@@ -182,10 +182,21 @@ describe("Entrenamiento (Bloque B)", () => {
     const before = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     const hired = await asUser.mutation(api.army.hireMercenaries, { kingdomId, count: 5 });
     expect(hired.cost).toBe(125);
+    expect(hired.typeId).toBe("lanceros");
     const after = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     expect(after!.population?.total).toBe(before!.population!.total + 5);
     const army = await asUser.query(api.army.getArmyState, { kingdomId });
     expect(army.mercenaries.active).toBe(5);
+    // Tipos ligados al nivel de Taberna (decisión 21-10-2026): los jinetes exigen Taberna 3.
+    await expect(asUser.mutation(api.army.hireMercenaries, { kingdomId, count: 2, typeId: "jinetes" })).rejects.toThrow(/Taberna nivel 3/);
+    await setBuildingLevel(t, kingdomId, "taberna", 3);
+    const riders = await asUser.mutation(api.army.hireMercenaries, { kingdomId, count: 2, typeId: "jinetes" });
+    expect(riders.cost).toBe(150);
+    expect(riders.unitType).toBe("caballeria");
+    const armyAfter = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(armyAfter.mercenaries.active).toBe(7);
+    expect(armyAfter.summary.byType.caballeria.active).toBe(2);
+    expect(armyAfter.mercenaries.types.filter((type: any) => type.available).map((type: any) => type.id)).toEqual(["mesnada", "lanceros", "arqueros", "jinetes"]);
   });
 });
 

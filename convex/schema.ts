@@ -298,6 +298,7 @@ export default defineSchema({
       wounded: v.optional(v.number()), // Heridos (P44) separados de los disponibles
       recoveryProgress: v.optional(v.number()), // Fracción acumulada de recuperación hospitalaria (P45)
       isMercenary: v.optional(v.boolean()), // [M-02] Contrato de mercenarios (P53)
+      mercenaryTypeId: v.optional(v.string()), // [DECISIÓN 21-10-2026] Tipo contratado (MERCENARIES.TYPES)
       contractEndsAt: v.optional(v.number()),
     }).index("by_kingdom", ["kingdomId"]),
 

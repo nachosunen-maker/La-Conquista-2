@@ -385,7 +385,26 @@ export const MERCENARIES = {
   SALARY_GOLD_PER_DAY: 0,
   /** No cuentan para la natalidad ni para la capacidad residencial. */
   COUNTS_FOR_GROWTH: false,
+  /**
+   * [DECISIÓN 21-10-2026] Varios tipos, «unos más baratos y otros más caros», ligados al nivel de
+   * la Taberna y sin salario. Precio [DERIVADO, pendiente de aprobación]: parte del anclaje
+   * aprobado (lanceros = 25 oro, infantería nivel 2) y escala con el oro de instrucción de la
+   * unidad y con el multiplicador del nivel militar, redondeado a 5:
+   *   precio = redondear5( 25 × (oroInstrucción / 5) × (multiplicadorNivel / 1,15) ).
+   * El límite de activos (50 por nivel de Taberna) es común a todos los tipos.
+   */
+  TYPES: [
+    { id: "mesnada", label: "Mesnada a sueldo", unitType: "infanteria" as UnitType, level: 1, goldPerUnit: 20, minTavernLevel: 1, description: "Infantería de milicia (nivel 1): la opción más barata." },
+    { id: "lanceros", label: "Lanceros a sueldo", unitType: "infanteria" as UnitType, level: 2, goldPerUnit: 25, minTavernLevel: 1, description: "Infantería entrenada (nivel 2); el contrato de referencia." },
+    { id: "arqueros", label: "Arqueros de fortuna", unitType: "arqueria" as UnitType, level: 2, goldPerUnit: 30, minTavernLevel: 2, description: "Arquería entrenada (nivel 2)." },
+    { id: "jinetes", label: "Jinetes de fortuna", unitType: "caballeria" as UnitType, level: 2, goldPerUnit: 75, minTavernLevel: 3, description: "Caballería entrenada (nivel 2); cara pero rápida." },
+    { id: "veteranos", label: "Compañía veterana", unitType: "infanteria" as UnitType, level: 3, goldPerUnit: 30, minTavernLevel: 4, description: "Infantería veterana (nivel 3)." },
+    { id: "guardia", label: "Guardia mercenaria", unitType: "caballeria" as UnitType, level: 3, goldPerUnit: 90, minTavernLevel: 5, description: "Caballería veterana (nivel 3): la más cara." },
+  ],
+  /** Tipo por defecto (compatibilidad con la contratación anterior). */
+  DEFAULT_TYPE_ID: "lanceros",
 } as const;
+export type MercenaryTypeId = (typeof MERCENARIES.TYPES)[number]["id"];
 
 /** [DECISIÓN 17-10-2026, M-03 opción B] Ranuras de investigación según nivel de Universidad (P25). */
 export const RESEARCH_SLOTS_BY_UNIVERSITY: readonly { minLevel: number; slots: number }[] = [

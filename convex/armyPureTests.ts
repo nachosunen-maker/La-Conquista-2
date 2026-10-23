@@ -6,9 +6,12 @@ import {
   trainingDurationMs,
   trainingQueueSlots,
   validateEquipmentSelection,
+  availableMercenaryTypes,
+  derivedMercenaryPrice,
+  validateMercenaryHire,
   type TrainingQueueEntry,
 } from "./armyRules";
-import { UNITS } from "./balanceConfig";
+import { MERCENARIES, UNITS } from "./balanceConfig";
 import type { ResourceType } from "./economyCalculations";
 
 export interface ArmyTestResult {
@@ -66,7 +69,28 @@ export function runArmyValidationTests(): ArmyTestResult[] {
   const equipmentLocked = validateEquipmentSelection({ weaponTier: "acero", armorTier: "ninguna", strategy: "agresiva", buildingLevels: { herreria: 4 }, unlockedWeapons: [], unlockedArmors: [] });
   const equipmentOpen = validateEquipmentSelection({ weaponTier: "acero", armorTier: "piel", strategy: "agresiva", buildingLevels: { herreria: 4 }, unlockedWeapons: ["acero"], unlockedArmors: [] });
 
+  // Mercenarios por tipo (decisión 21-10-2026)
+  const priceTableMatchesFormula = MERCENARIES.TYPES.every((type) => derivedMercenaryPrice(type.unitType, type.level) === type.goldPerUnit);
+  const pricesVary = Math.min(...MERCENARIES.TYPES.map((t) => t.goldPerUnit)) < MERCENARIES.GOLD_PER_UNIT && Math.max(...MERCENARIES.TYPES.map((t) => t.goldPerUnit)) > MERCENARIES.GOLD_PER_UNIT;
+  const tavern1 = availableMercenaryTypes(1).map((t) => t.id);
+  const tavern5 = availableMercenaryTypes(5).length;
+  const hireLocked = validateMercenaryHire({ typeId: "jinetes", count: 5, tavernLevel: 2, activeMercenaries: 0, gold: 10_000 });
+  const hireOk = validateMercenaryHire({ typeId: "jinetes", count: 5, tavernLevel: 3, activeMercenaries: 0, gold: 10_000 });
+  const hireFull = validateMercenaryHire({ typeId: "mesnada", count: 60, tavernLevel: 1, activeMercenaries: 0, gold: 10_000 });
+  const hireDefault = validateMercenaryHire({ typeId: undefined, count: 5, tavernLevel: 1, activeMercenaries: 0, gold: 125 });
+  const hirePoor = validateMercenaryHire({ typeId: undefined, count: 5, tavernLevel: 1, activeMercenaries: 0, gold: 124 });
+
   return [
+    {
+      test: "Mercenarios por tipo (decisión 21-10-2026): la tabla de precios sigue la fórmula derivada del anclaje de 25 oro, hay tipos más baratos y más caros, y el nivel de Taberna los desbloquea",
+      passed: priceTableMatchesFormula && pricesVary && tavern1.join(",") === "mesnada,lanceros" && tavern5 === MERCENARIES.TYPES.length && availableMercenaryTypes(0).length === 0,
+      details: `Precios: ${MERCENARIES.TYPES.map((t) => `${t.label} ${t.goldPerUnit}`).join(" · ")}; fórmula coincide: ${priceTableMatchesFormula}; Taberna 1: ${tavern1.join("/")}; Taberna 5: ${tavern5} tipos`,
+    },
+    {
+      test: "Contratar mercenarios: exige el nivel de Taberna del tipo, respeta el tope común de 50 por nivel, usa lanceros por defecto y cobra el precio del tipo",
+      passed: !hireLocked.success && hireOk.success && hireOk.cost === 375 && !hireFull.success && hireDefault.success && hireDefault.type.id === "lanceros" && hireDefault.cost === 125 && !hirePoor.success,
+      details: `Jinetes con Taberna 2: ${hireLocked.success ? "aceptado" : hireLocked.error}; con Taberna 3: coste ${hireOk.success ? hireOk.cost : "rechazado"}; 60 con Taberna 1: ${hireFull.success ? "aceptado" : "rechazado"}; por defecto ${hireDefault.success ? hireDefault.type.id : "rechazado"}; sin oro: ${!hirePoor.success}`,
+    },
     {
       test: "Entrenamiento válido: coste unitario × cantidad, duración lineal (D-08) y población civil reservada",
       passed: valid.success && valid.plan.costs.gold === 50 && valid.plan.costs.iron === 20 && valid.plan.costs.food === 20 &&

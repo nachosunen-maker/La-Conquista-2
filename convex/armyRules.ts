@@ -18,6 +18,7 @@ import {
   type WeaponTier,
   TACTICAL_FORMATIONS,
   type TacticalFormation,
+  MERCENARIES,
 } from "./balanceConfig";
 import { MAX_BUILDING_LEVEL, checkBuildingRequirements } from "./buildingRules";
 
@@ -303,6 +304,56 @@ export function isStrategy(value: string): value is Strategy {
 
 export function isTacticalFormation(value: string): value is TacticalFormation {
   return Object.hasOwn(TACTICAL_FORMATIONS, value);
+}
+
+// ----------------------------------------------------------------------------
+// Mercenarios por tipo (P53, decisión 21-10-2026)
+// ----------------------------------------------------------------------------
+export type MercenaryType = (typeof MERCENARIES.TYPES)[number];
+
+export function getMercenaryType(id: string | null | undefined): MercenaryType | null {
+  const wanted = id ?? MERCENARIES.DEFAULT_TYPE_ID;
+  return MERCENARIES.TYPES.find((type) => type.id === wanted) ?? null;
+}
+
+/** Tipos contratables con el nivel de Taberna indicado (sin Taberna, ninguno). */
+export function availableMercenaryTypes(tavernLevel: number): MercenaryType[] {
+  return MERCENARIES.TYPES.filter((type) => tavernLevel >= type.minTavernLevel);
+}
+
+/** [DERIVADO] Fórmula de precio documentada en MERCENARIES.TYPES; sirve para auditar la tabla. */
+export function derivedMercenaryPrice(unitType: UnitType, level: number): number {
+  const anchor = MERCENARIES.GOLD_PER_UNIT;
+  const anchorGold = UNITS[MERCENARIES.UNIT_TYPE].costs.gold;
+  const anchorMultiplier = MILITARY_LEVELS.find((row) => row.level === MERCENARIES.LEVEL)?.multiplier ?? 1;
+  const levelMultiplier = MILITARY_LEVELS.find((row) => row.level === level)?.multiplier ?? 1;
+  const raw = anchor * (UNITS[unitType].costs.gold / anchorGold) * (levelMultiplier / anchorMultiplier);
+  return Math.round(raw / 5) * 5;
+}
+
+export function validateMercenaryHire(input: {
+  typeId: string | undefined;
+  count: number;
+  tavernLevel: number;
+  activeMercenaries: number;
+  gold: number;
+}): { success: true; type: MercenaryType; cost: number } | { success: false; error: string } {
+  if (!Number.isInteger(input.count) || input.count < 1) return { success: false, error: "La cantidad debe ser un entero positivo." };
+  if (input.tavernLevel < 1) return { success: false, error: "Se necesita una Taberna para contratar mercenarios (P13, P53)." };
+  const type = getMercenaryType(input.typeId);
+  if (!type) return { success: false, error: `Tipo de mercenario desconocido: '${input.typeId}'.` };
+  if (input.tavernLevel < type.minTavernLevel) {
+    return { success: false, error: `${type.label} exige Taberna nivel ${type.minTavernLevel} (actual: ${input.tavernLevel}).` };
+  }
+  const maxActive = MERCENARIES.MAX_PER_TAVERN_LEVEL * input.tavernLevel;
+  if (input.activeMercenaries + input.count > maxActive) {
+    return { success: false, error: `La Taberna nivel ${input.tavernLevel} admite ${maxActive} mercenarios activos; hay ${input.activeMercenaries}.` };
+  }
+  const cost = type.goldPerUnit * input.count;
+  if (input.gold < cost) {
+    return { success: false, error: `Oro insuficiente: ${input.count} ${type.label} cuestan ${cost} y hay ${Math.floor(input.gold)}.` };
+  }
+  return { success: true, type, cost };
 }
 
 export function validateEquipmentSelection(input: {

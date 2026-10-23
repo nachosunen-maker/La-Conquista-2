@@ -27,6 +27,7 @@ import {
   unitLevelOf,
   isTacticalFormation,
   validateEquipmentSelection,
+  validateMercenaryHire,
   type TrainingQueueEntry,
 } from "./armyRules";
 import { ARMORS, DEFAULT_TACTICAL_FORMATION, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TACTICAL_FORMATIONS, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type UnitType } from "./balanceConfig";
@@ -175,7 +176,13 @@ export const getArmyState = query({
       formation: kingdomAny.formation ?? { infanteria: 1, arqueria: 1, caballeria: 1, asedio: 1 },
       mercenaries: {
         active: units.filter((doc) => doc.isMercenary).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0),
-        contracts: units.filter((doc) => doc.isMercenary).map((doc) => ({ count: doc.count, contractEndsAt: doc.contractEndsAt ?? null })),
+        contracts: units.filter((doc) => doc.isMercenary).map((doc) => ({
+          count: doc.count,
+          contractEndsAt: doc.contractEndsAt ?? null,
+          typeId: doc.mercenaryTypeId ?? MERCENARIES.DEFAULT_TYPE_ID,
+          label: MERCENARIES.TYPES.find((type) => type.id === (doc.mercenaryTypeId ?? MERCENARIES.DEFAULT_TYPE_ID))?.label ?? "Mercenarios",
+        })),
+        types: MERCENARIES.TYPES.map((type) => ({ ...type, available: (buildingLevels.taberna ?? 0) >= type.minTavernLevel })),
         maxActive: MERCENARIES.MAX_PER_TAVERN_LEVEL * (buildingLevels.taberna ?? 0),
         goldPerUnit: MERCENARIES.GOLD_PER_UNIT,
         salaryGoldPerDay: MERCENARIES.SALARY_GOLD_PER_DAY,
@@ -352,45 +359,55 @@ export const setArmyEquipment = mutation({
 });
 
 /**
- * [DECISIÓN 17-10-2026, M-02 opción A] Contratación de mercenarios en la Taberna (P53):
- * 25 oro por mercenario (infantería nivel 2), hasta 50 activos por nivel de Taberna, contrato
- * de 7 días reales con salario de 1 oro/día. Se suman al censo pero no generan natalidad.
+ * [M-02 + DECISIÓN 21-10-2026] Contratación de mercenarios en la Taberna (P53) por tipo:
+ * varios tipos y precios ligados al nivel de la Taberna (MERCENARIES.TYPES), hasta 50 activos por
+ * nivel entre todos los tipos, contrato de 7 días reales, pago íntegro al contratar y sin salario.
+ * Se suman al censo pero no generan natalidad.
  */
 export const hireMercenaries = mutation({
-  args: { kingdomId: v.id("kingdoms"), count: v.number() },
+  args: { kingdomId: v.id("kingdoms"), count: v.number(), typeId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
-    if (!Number.isInteger(args.count) || args.count < 1) throw new Error("La cantidad debe ser un entero positivo.");
     const now = Date.now();
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
     const collection = validateBuildingCollection(buildings);
     if (!collection.success) throw new Error(collection.error);
     const tavernLevel = collection.levels.taberna ?? 0;
-    if (tavernLevel < 1) throw new Error("Se necesita una Taberna para contratar mercenarios (P13, P53).");
     const units = await readArmyUnitsWithMigration(ctx, args.kingdomId);
     const active = units.filter((doc) => doc.isMercenary).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
-    const maxActive = MERCENARIES.MAX_PER_TAVERN_LEVEL * tavernLevel;
-    if (active + args.count > maxActive) {
-      throw new Error(`La Taberna nivel ${tavernLevel} admite ${maxActive} mercenarios activos; hay ${active}.`);
-    }
-    const cost = MERCENARIES.GOLD_PER_UNIT * args.count;
-    if (settled.settledResources.gold < cost) {
-      throw new Error(`Oro insuficiente: ${args.count} mercenarios cuestan ${cost} y hay ${Math.floor(settled.settledResources.gold)}.`);
-    }
-    await ctx.db.patch(settled.resources._id, { ...settled.settledResources, gold: settled.settledResources.gold - cost });
+    const hire = validateMercenaryHire({
+      typeId: args.typeId,
+      count: args.count,
+      tavernLevel,
+      activeMercenaries: active,
+      gold: settled.settledResources.gold,
+    });
+    if (!hire.success) throw new Error(hire.error);
+    await ctx.db.patch(settled.resources._id, { ...settled.settledResources, gold: settled.settledResources.gold - hire.cost });
     const contractEndsAt = now + MERCENARIES.CONTRACT_DAYS * TIME.MS_PER_GAME_YEAR;
     await ctx.db.insert("armyUnits", {
       kingdomId: args.kingdomId,
-      unitType: MERCENARIES.UNIT_TYPE,
-      level: MERCENARIES.LEVEL,
+      unitType: hire.type.unitType,
+      level: hire.type.level,
       count: args.count,
       isMercenary: true,
+      mercenaryTypeId: hire.type.id,
       contractEndsAt,
     });
     const population = await ctx.db.get(settled.population._id);
     if (population) await ctx.db.patch(population._id, { total: population.total + args.count });
-    return { success: true, count: args.count, cost, contractEndsAt, salaryGoldPerDay: MERCENARIES.SALARY_GOLD_PER_DAY * args.count };
+    return {
+      success: true,
+      typeId: hire.type.id,
+      label: hire.type.label,
+      unitType: hire.type.unitType,
+      level: hire.type.level,
+      count: args.count,
+      cost: hire.cost,
+      contractEndsAt,
+      salaryGoldPerDay: MERCENARIES.SALARY_GOLD_PER_DAY * args.count,
+    };
   },
 });
 
