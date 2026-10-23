@@ -15,7 +15,7 @@ import { readArmyUnitDocs, readArmyUnitsWithMigration } from "./army";
 import { normalizeUnitType, summarizeArmy, unitLevelOf } from "./armyRules";
 import { validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
-import { distanceBetweenKingdoms, readHomeCoord } from "./territories";
+import { distanceBetweenKingdoms, pathTerrainBetweenKingdoms, readHomeCoord } from "./territories";
 import { marchFatigue, marchTimeSeconds, armyMarchMultiplier } from "./territoryRules";
 import { applyFormation, emptyComposition, simulateBattle, type BattleSide, type Composition } from "./battleRules";
 import { isTacticalFormation } from "./armyRules";
@@ -251,8 +251,10 @@ export const acceptChallenge = mutation({
     if (now >= challenge.expiresAt) throw new Error("El desafío ha caducado.");
     const { scheduledAt, freezeAt } = scheduleFor(now, args.window);
     const attackerUnits = await readArmyUnitDocs(ctx, challenge.challengerKingdomId);
-    const marchSeconds = marchTimeSeconds(challenge.distance ?? 0, 1, armyMarchMultiplier(activeComposition(attackerUnits)));
-    await ctx.db.patch(args.challengeId, { status: "ACCEPTED", respondedAt: now, window: args.window, scheduledAt, freezeAt, marchSeconds });
+    // [R-14, decisión 23-10-2026] Terreno medio del camino entre los territorios principales.
+    const terrainMultiplier = await pathTerrainBetweenKingdoms(ctx, challenge.challengerKingdomId, challenge.targetKingdomId);
+    const marchSeconds = marchTimeSeconds(challenge.distance ?? 0, terrainMultiplier, armyMarchMultiplier(activeComposition(attackerUnits)));
+    await ctx.db.patch(args.challengeId, { status: "ACCEPTED", respondedAt: now, window: args.window, scheduledAt, freezeAt, marchSeconds, terrainMultiplier });
     await ctx.scheduler.runAt(freezeAt, internal.parliament.freezeChallenge, { challengeId: args.challengeId });
     await ctx.scheduler.runAt(scheduledAt, internal.parliament.resolveChallenge, { challengeId: args.challengeId });
     return { success: true, scheduledAt, freezeAt, marchSeconds };
@@ -342,7 +344,7 @@ export const expireChallenge = internalMutation({
   },
 });
 
-async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, role: "attacker" | "defender", distance: number): Promise<BattleSide> {
+async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, role: "attacker" | "defender", distance: number, terrainMultiplier: number = 1): Promise<BattleSide> {
   const kingdom = await ctx.db.get(kingdomId);
   if (!kingdom) throw new Error("Reino participante no encontrado.");
   await settleRelationalKingdomEconomy(ctx, kingdom, kingdom.userId, Date.now());
@@ -369,7 +371,7 @@ async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, role: "
     tacticalFormation: isTacticalFormation(refreshed.tacticalFormation ?? "") ? (refreshed.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
     morale: typeof refreshed.militaryMorale === "number" ? refreshed.militaryMorale : WELLBEING.INITIAL_MORALE,
     foodTier: refreshed.foodTier ?? "normal",
-    fatigue: role === "attacker" ? marchFatigue(currentFatigue, distance, 1) : currentFatigue,
+    fatigue: role === "attacker" ? marchFatigue(currentFatigue, distance, terrainMultiplier) : currentFatigue,
     wallsLevel: role === "defender" ? levels.murallas ?? 0 : 0,
     terrainDefenseBonus: role === "defender" ? terrainDefenseBonus : 0,
   };
@@ -384,7 +386,7 @@ export const freezeChallenge = internalMutation({
     const transition = assertTransition(challenge.status as ChallengeStatus, "FROZEN");
     if (!transition.success) return { frozen: false, reason: transition.error };
     const distance = challenge.distance ?? 0;
-    const attacker = await snapshotSide(ctx, challenge.challengerKingdomId, "attacker", distance);
+    const attacker = await snapshotSide(ctx, challenge.challengerKingdomId, "attacker", distance, challenge.terrainMultiplier ?? 1);
     const defender = await snapshotSide(ctx, challenge.targetKingdomId, "defender", distance);
     await ctx.db.patch(args.challengeId, { status: "FROZEN", frozenAt: Date.now(), frozen: { attacker, defender } });
     return { frozen: true };
@@ -434,7 +436,7 @@ export const resolveChallenge = internalMutation({
     if (challenge.status === "ACCEPTED") {
       // El scheduler de congelación no se ejecutó: congelar ahora y continuar (idempotente).
       const distance = challenge.distance ?? 0;
-      const attacker = await snapshotSide(ctx, challenge.challengerKingdomId, "attacker", distance);
+      const attacker = await snapshotSide(ctx, challenge.challengerKingdomId, "attacker", distance, challenge.terrainMultiplier ?? 1);
       const defender = await snapshotSide(ctx, challenge.targetKingdomId, "defender", distance);
       await ctx.db.patch(args.challengeId, { status: "FROZEN", frozenAt: Date.now(), frozen: { attacker, defender } });
     }

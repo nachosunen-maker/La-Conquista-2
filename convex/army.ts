@@ -34,13 +34,12 @@ import {
 import { ARMORS, DEFAULT_TACTICAL_FORMATION, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TACTICAL_FORMATIONS, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type ArmorTier, type UnitType, type WeaponTier } from "./balanceConfig";
 import { civilizationArmorLabel, civilizationTrainingCostMultiplier, civilizationUnitLabel, civilizationWeaponLabel, getCivilizationIdentity, getCivilizationPassive } from "./civilizationRules";
 import type { ResourceType } from "./economyCalculations";
-import { readHomeCoord } from "./territories";
+import { readHomeCoord, readPathTerrainMultiplier } from "./territories";
 import {
   armyMarchMultiplier,
   hexDistance,
   marchFatigue,
   marchTimeSeconds,
-  terrainMarchMultiplier,
 } from "./territoryRules";
 import {
   applyFormation,
@@ -573,7 +572,8 @@ export const launchAttack = mutation({
       }
     }
 
-    const terrainMul = terrainMarchMultiplier(target.terrain as any);
+    // [R-14, decisión 23-10-2026] Media del terreno del camino (origen excluido, destino incluido).
+    const terrainMul = await readPathTerrainMultiplier(ctx, homeCoord, { q: target.q, r: target.r });
     const unitMul = armyMarchMultiplier(requestedComposition);
     const durationSeconds = marchTimeSeconds(distance, terrainMul, unitMul);
     const durationMs = Math.round(durationSeconds * 1000);
@@ -585,6 +585,7 @@ export const launchAttack = mutation({
       targetQ: target.q,
       targetR: target.r,
       distance,
+      terrainMultiplier: terrainMul,
       units: args.units,
       startedAt: now,
       durationMs,
@@ -621,7 +622,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     .first();
 
   const currentFatigue = typeof attackerKingdom.armyFatigue === "number" ? attackerKingdom.armyFatigue : 0;
-  const newFatigue = marchFatigue(currentFatigue, march.distance, 1);
+  const newFatigue = marchFatigue(currentFatigue, march.distance, typeof march.terrainMultiplier === "number" ? march.terrainMultiplier : 1);
   await ctx.db.patch(march.kingdomId, { armyFatigue: newFatigue });
 
   if (!targetCell || !targetCell.ownerKingdomId || targetCell.ownerKingdomId === march.kingdomId) {

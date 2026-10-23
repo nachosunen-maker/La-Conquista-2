@@ -31,6 +31,8 @@ import {
   cellId,
   type HexCoord,
   type WorldCell,
+  hexLine,
+  pathTerrainMultiplier,
 } from "./territoryRules";
 import {
   canStartExploration,
@@ -91,6 +93,25 @@ export async function readHomeCoord(ctx: QueryCtx | MutationCtx, kingdomId: Id<"
     .collect();
   const cell = home.find((entry) => entry.isHome) ?? home[0];
   return cell ? { q: cell.q, r: cell.r } : null;
+}
+
+/** [R-14] Multiplicador medio de terreno del camino entre dos coordenadas, leyendo las celdas del mundo. */
+export async function readPathTerrainMultiplier(ctx: QueryCtx | MutationCtx, from: HexCoord, to: HexCoord): Promise<number> {
+  const line = hexLine(from, to);
+  const terrainByCell = new Map<string, string>();
+  for (const coord of line) {
+    const id = `${coord.q},${coord.r}`;
+    const cell = await ctx.db.query("territories").withIndex("by_cell", (q) => q.eq("cellId", id)).first();
+    if (cell) terrainByCell.set(id, cell.terrain);
+  }
+  return pathTerrainMultiplier(from, to, terrainByCell);
+}
+
+/** [R-14] Multiplicador de terreno de la marcha entre los territorios principales de dos reinos (1 si falta alguno). */
+export async function pathTerrainBetweenKingdoms(ctx: QueryCtx | MutationCtx, a: Id<"kingdoms">, b: Id<"kingdoms">): Promise<number> {
+  const [homeA, homeB] = await Promise.all([readHomeCoord(ctx, a), readHomeCoord(ctx, b)]);
+  if (!homeA || !homeB) return 1;
+  return readPathTerrainMultiplier(ctx, homeA, homeB);
 }
 
 /** Distancia hexagonal entre los territorios principales de dos reinos (P41); null si alguno no tiene. */
