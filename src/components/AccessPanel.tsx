@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useAction, useQuery } from 'convex/react';
+import { useAction, useQuery, useQuery_experimental } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { useAuthActions } from '@convex-dev/auth/react';
@@ -172,10 +172,14 @@ export function AccessPanel(props: { onGuest: () => void; initialMode?: Mode }) 
   const [issuedCode, setIssuedCode] = useState<string | null>(null);
 
   const trimmedName = rulerName.trim();
-  const availability = useQuery(
-    isRulerNameAvailableQuery,
-    mode === 'crear' && trimmedName.length >= ACCOUNT.RULER_NAME_MIN_LENGTH ? { rulerName: trimmedName } : 'skip'
-  ) as { available: boolean; error: string | null } | undefined;
+  const availabilityResult = useQuery_experimental({
+    query: isRulerNameAvailableQuery,
+    args: mode === 'crear' && trimmedName.length >= ACCOUNT.RULER_NAME_MIN_LENGTH ? { rulerName: trimmedName } : 'skip',
+    throwOnError: false,
+  });
+  const availability = availabilityResult.status === 'success'
+    ? (availabilityResult.data as { available: boolean; error: string | null })
+    : undefined;
 
   const switchMode = (next: Mode) => {
     setMode(next);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useConvex, useQuery, useMutation, useAction } from 'convex/react';
+import { useConvex, useQuery, useQuery_experimental, useMutation, useAction } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { 
   Crown, 
@@ -281,7 +281,17 @@ function SessionControls() {
  * lo enseña y exige confirmar que se ha guardado antes de seguir.
  */
 function RecoveryCodeGate(props: { children: React.ReactNode }) {
-  const status = useQuery(getRecoveryStatusQuery) as { hasActiveCode: boolean } | null | undefined;
+  const statusResult = useQuery_experimental({
+    query: getRecoveryStatusQuery,
+    args: {},
+    throwOnError: false,
+  });
+  const status =
+    statusResult.status === 'success'
+      ? (statusResult.data as { hasActiveCode: boolean } | null)
+      : statusResult.status === 'error'
+        ? null
+        : undefined;
   const issue = useAction(issueRecoveryCodeAction);
   const [code, setCode] = useState<string | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);

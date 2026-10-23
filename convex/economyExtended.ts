@@ -16,6 +16,7 @@ import {
   SECONDS_PER_GAME_YEAR,
   type KingdomResources,
   type KingdomState,
+  type WorkersDistribution,
 } from "./economyCalculations";
 import {
   BATTLE_REWARDS,
@@ -24,9 +25,11 @@ import {
   MORALE,
   POPULATION,
   PRODUCTION_PER_WORKER_PER_DAY,
+  PROFESSION_BUILDING_CAPACITY,
   PROFESSION_EFFECTS,
   REST_POLICIES,
   STARVATION,
+  STARVATION_JOB_REDUCTION_PRIORITY,
   STORAGE,
   TAXES,
   WELLBEING,
@@ -68,6 +71,12 @@ export interface ExtendedEconomyInput {
   civilization?: string;
   /** [Misiones] Multiplicador de las bonificaciones temporales de producción vigentes (1 = ninguna). */
   bonusProductionMultiplier?: number;
+  /** [DECISIÓN 23-10-2026] Fracción residual de nacimientos previa (0 <= birthFraction < 1). */
+  birthFraction?: number;
+  /** [DECISIÓN 23-10-2026] Fracción residual de muertes por inanición previa (0 <= deathFraction < 1). */
+  deathFraction?: number;
+  /** [DECISIÓN 23-10-2026] Fracción residual de deserción militar previa (0 <= desertionFraction < 1). */
+  desertionFraction?: number;
 }
 
 export interface ProfessionEffects {
@@ -107,6 +116,12 @@ export interface ExtendedEconomyResult {
     deaths: number;
     growthCappedByHousing: boolean;
     residentialCapacity: number | null;
+    birthFraction: number;
+    deathFraction: number;
+    desertionFraction: number;
+    updatedWorkers: KingdomState["workers"];
+    updatedJobCounts?: Record<string, number>;
+    jobDeductions: Record<string, number>;
   };
   happiness: { before: number; after: number; dailyDelta: number };
   morale: number;
@@ -191,21 +206,55 @@ export function computeMorale(input: {
   return clamp(Math.round(morale * 100) / 100, WELLBEING.MIN, WELLBEING.MAX);
 }
 
-/** [MAESTRA P12 + COMPLEMENTO D-50] P_objetivo = floor(P × 1,30^t), limitado por capacidad residencial. */
+/** [MAESTRA P12 + COMPLEMENTO D-50 + DECISIÓN 23-10-2026] P_objetivo con acumulador fraccionario continuo, limitado por capacidad residencial. */
 export function computePopulationGrowth(input: {
   total: number;
   elapsedDays: number;
   residentialCapacity: number | null;
-}): { births: number; cappedByHousing: boolean } {
+  birthFraction?: number;
+}): { births: number; cappedByHousing: boolean; nextBirthFraction: number } {
+  const initialFraction = Number.isFinite(input.birthFraction) && input.birthFraction! >= 0
+    ? input.birthFraction!
+    : 0;
   if (!Number.isInteger(input.total) || input.total <= 0 || !(input.elapsedDays > 0)) {
-    return { births: 0, cappedByHousing: false };
+    return { births: 0, cappedByHousing: false, nextBirthFraction: initialFraction };
   }
-  const target = Math.floor(input.total * (1 + POPULATION.ANNUAL_GROWTH_RATE) ** input.elapsedDays);
+  const currentVirtual = input.total + initialFraction;
+  const targetVirtual = currentVirtual * (1 + POPULATION.ANNUAL_GROWTH_RATE) ** input.elapsedDays;
   const capacity = input.residentialCapacity;
-  if (capacity === null) return { births: Math.max(0, target - input.total), cappedByHousing: false };
-  if (input.total >= capacity) return { births: 0, cappedByHousing: true };
-  const allowed = Math.min(target, capacity);
-  return { births: Math.max(0, allowed - input.total), cappedByHousing: target > capacity };
+
+  if (capacity !== null && input.total >= capacity) {
+    return { births: 0, cappedByHousing: true, nextBirthFraction: 0 };
+  }
+
+  let effectiveTarget = targetVirtual;
+  let cappedByHousing = false;
+  if (capacity !== null && targetVirtual >= capacity) {
+    effectiveTarget = capacity;
+    cappedByHousing = true;
+  }
+
+  const totalGrown = effectiveTarget - input.total;
+  if (totalGrown <= 0) {
+    return { births: 0, cappedByHousing, nextBirthFraction: 0 };
+  }
+
+  let births = Math.floor(totalGrown + 1e-9);
+  if (capacity !== null) {
+    births = Math.min(births, Math.max(0, capacity - input.total));
+  }
+
+  let nextBirthFraction = Math.max(0, totalGrown - births);
+  nextBirthFraction = Math.round(nextBirthFraction * 1e9) / 1e9;
+  if (nextBirthFraction >= 1) {
+    births += Math.floor(nextBirthFraction);
+    nextBirthFraction = nextBirthFraction % 1;
+  }
+  if (capacity !== null && input.total + births >= capacity) {
+    nextBirthFraction = 0;
+  }
+
+  return { births, cappedByHousing, nextBirthFraction };
 }
 
 /** [M-06 opción A] Tope de almacén por recurso: base + nivel de Mercado, multiplicado por tecnología. */
@@ -251,13 +300,8 @@ function daysInPhase3(secondsBefore: number, secondsAfter: number): number {
   return Math.max(0, after - before) / SECONDS_PER_GAME_YEAR;
 }
 
-/** Capacidades de trabajadores por nivel de los edificios con profesión (para computeProfessionEffects). */
-export const PROFESSION_BUILDING_CAPACITY: Readonly<Record<string, number>> = {
-  hospitalMilitar: 50,
-  iglesia: 40,
-  circo: 40,
-  panaderia: 40,
-};
+/** Re-exportación de PROFESSION_BUILDING_CAPACITY (definida en balanceConfig.ts) por compatibilidad. */
+export { PROFESSION_BUILDING_CAPACITY };
 
 export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEconomyResult {
   const state = input.kingdomState;
@@ -332,14 +376,14 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
     }
   }
 
-  // 4. Inanición (D-48): el déficit se acumula mientras las reservas están a cero y se reinicia
-  //    en cuanto las reservas vuelven a cubrir el consumo del intervalo completo.
+  // 4. Inanición (D-48): se exige al menos 1 día real de consumo para considerarse recuperado [DECISIÓN 23-10-2026]
   const secondsThisInterval = foodSim.starvationSeconds;
-  const recovered = elapsedSeconds > 0 && secondsThisInterval === 0 && foodSim.updatedResources.food > 0;
+  const oneDayConsumption = foodSim.dailyFoodConsumption;
+  const recovered = elapsedSeconds > 0 && secondsThisInterval === 0 && foodSim.updatedResources.food >= oneDayConsumption;
   const starvationAfter = recovered ? 0 : starvationBefore + secondsThisInterval;
   const phaseAfter = starvationPhase(starvationAfter);
 
-  // 5. Población (D-50): crecimiento compuesto limitado por viviendas (los mercenarios no generan natalidad); pérdidas en fase 3.
+  // 5. Población (D-50): crecimiento compuesto limitado por viviendas; fracciones acumuladas.
   const growthBase = Math.max(0, state.population - mercenaryCount);
   const effectiveResidentialCapacity = input.residentialCapacity === null
     ? null
@@ -348,17 +392,69 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
     total: growthBase,
     elapsedDays,
     residentialCapacity: effectiveResidentialCapacity === null ? null : Math.max(0, effectiveResidentialCapacity - mercenaryCount),
+    birthFraction: input.birthFraction,
   });
   const phase3Days = daysInPhase3(starvationBefore, starvationAfter);
   const civilPopulation = Math.max(0, state.population - state.regularSoldiers);
-  // [DERIVADO R-13] Las muertes civiles salen de la reserva libre (nacimientos incluidos).
-  const theoreticalDeaths = phase3Days > 0 ? Math.floor(civilPopulation * STARVATION.DAILY_CIVIL_LOSS_RATE * phase3Days) : 0;
-  const deaths = Math.min(theoreticalDeaths, Math.max(0, state.unassignedCivil + growth.births));
-  const militaryDesertion = phase3Days > 0
-    ? Math.min(input.militaryPersonnel, Math.floor(input.militaryPersonnel * STARVATION.DAILY_MILITARY_DESERTION_RATE * phase3Days))
-    : 0;
+
+  // [DECISIÓN 23-10-2026] Fracciones de muertes civiles y deserciones militares
+  const deathFractionBefore = Number.isFinite(input.deathFraction) && input.deathFraction! >= 0 ? input.deathFraction! : 0;
+  const desertionFractionBefore = Number.isFinite(input.desertionFraction) && input.desertionFraction! >= 0 ? input.desertionFraction! : 0;
+
+  let theoreticalDeaths = 0;
+  let nextDeathFraction = recovered ? 0 : deathFractionBefore;
+  if (phase3Days > 0 && civilPopulation > 0) {
+    const rawDeaths = civilPopulation * STARVATION.DAILY_CIVIL_LOSS_RATE * phase3Days;
+    const accumulatedDeaths = deathFractionBefore + rawDeaths;
+    theoreticalDeaths = Math.floor(accumulatedDeaths + 1e-9);
+    nextDeathFraction = Math.max(0, accumulatedDeaths - theoreticalDeaths);
+    nextDeathFraction = Math.round(nextDeathFraction * 1e9) / 1e9;
+  }
+
+  let militaryDesertion = 0;
+  let nextDesertionFraction = recovered ? 0 : desertionFractionBefore;
+  if (phase3Days > 0 && input.militaryPersonnel > 0) {
+    const rawDesertions = input.militaryPersonnel * STARVATION.DAILY_MILITARY_DESERTION_RATE * phase3Days;
+    const accumulatedDesertions = desertionFractionBefore + rawDesertions;
+    militaryDesertion = Math.min(input.militaryPersonnel, Math.floor(accumulatedDesertions + 1e-9));
+    nextDesertionFraction = Math.max(0, accumulatedDesertions - militaryDesertion);
+    nextDesertionFraction = Math.round(nextDesertionFraction * 1e9) / 1e9;
+  }
+
+  // [DECISIÓN 23-10-2026] Descontar muertes primero de disponibles y luego de puestos asignados según prioridad vital
+  const maxPossibleCivilDeaths = Math.min(civilPopulation + growth.births, theoreticalDeaths);
+  const availableWithBirths = Math.max(0, state.unassignedCivil + growth.births);
+  const fromAvailable = Math.min(maxPossibleCivilDeaths, availableWithBirths);
+  let excessDeaths = maxPossibleCivilDeaths - fromAvailable;
+  const availableAfter = availableWithBirths - fromAvailable;
+
+  const updatedWorkers: WorkersDistribution = { ...state.workers };
+  const updatedJobCounts: Record<string, number> = { ...(state.jobCounts ?? {}) };
+  const jobDeductions: Record<string, number> = {};
+
+  if (excessDeaths > 0) {
+    for (const job of STARVATION_JOB_REDUCTION_PRIORITY) {
+      if (excessDeaths <= 0) break;
+      const count = updatedJobCounts[job] ?? (job in updatedWorkers ? updatedWorkers[job as keyof WorkersDistribution] : 0);
+      if (count > 0) {
+        const toDeduct = Math.min(count, excessDeaths);
+        if (job in updatedJobCounts) {
+          updatedJobCounts[job] -= toDeduct;
+        }
+        if (job in updatedWorkers) {
+          updatedWorkers[job as keyof WorkersDistribution] = Math.max(0, updatedWorkers[job as keyof WorkersDistribution] - toDeduct);
+        } else {
+          updatedWorkers.other = Math.max(0, updatedWorkers.other - toDeduct);
+        }
+        jobDeductions[job] = (jobDeductions[job] ?? 0) + toDeduct;
+        excessDeaths -= toDeduct;
+      }
+    }
+  }
+
+  const actualWorkforceDeaths = (maxPossibleCivilDeaths - fromAvailable) - excessDeaths;
+  const deaths = fromAvailable + actualWorkforceDeaths;
   const totalAfter = state.population + growth.births - deaths;
-  const availableAfter = Math.max(0, state.unassignedCivil + growth.births - deaths);
 
   // 6. Felicidad (D-49, R-03/R-04, M-04, M-07): contribuciones diarias limitadas a ±5 puntos por día.
   const happinessBefore = Number.isFinite(input.happiness) ? clamp(input.happiness, WELLBEING.MIN, WELLBEING.MAX) : WELLBEING.INITIAL_HAPPINESS;
@@ -422,6 +518,12 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
       deaths,
       growthCappedByHousing: growth.cappedByHousing,
       residentialCapacity: input.residentialCapacity,
+      birthFraction: growth.nextBirthFraction,
+      deathFraction: nextDeathFraction,
+      desertionFraction: nextDesertionFraction,
+      updatedWorkers,
+      updatedJobCounts,
+      jobDeductions,
     },
     happiness: { before: happinessBefore, after: happinessAfter, dailyDelta },
     morale,

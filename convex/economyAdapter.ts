@@ -64,6 +64,9 @@ export interface RemotePopulationDoc {
   starving?: boolean;
   /** Segundos reales acumulados de déficit alimentario (D-48), persistidos por el servidor. */
   starvationSeconds?: number;
+  birthFraction?: number;
+  deathFraction?: number;
+  desertionFraction?: number;
 }
 
 export interface RemotePopulationJobDoc {

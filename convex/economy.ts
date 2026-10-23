@@ -232,6 +232,9 @@ export async function settleRelationalKingdomEconomy(
       happiness: typeof kingdom.happiness === "number" ? kingdom.happiness : WELLBEING.INITIAL_HAPPINESS,
       moraleEffects: Array.isArray(kingdom.moraleEffects) ? kingdom.moraleEffects : [],
       starvationSeconds: typeof state.population.starvationSeconds === "number" ? state.population.starvationSeconds : 0,
+      birthFraction: typeof state.population.birthFraction === "number" ? state.population.birthFraction : 0,
+      deathFraction: typeof state.population.deathFraction === "number" ? state.population.deathFraction : 0,
+      desertionFraction: typeof state.population.desertionFraction === "number" ? state.population.desertionFraction : 0,
       buildingLevels,
       militaryPersonnel: adapted.militaryClassification.regularSoldiers,
       restPolicy: typeof kingdom.restPolicy === "string" ? (kingdom.restPolicy as any) : "normal",
@@ -258,8 +261,36 @@ export async function settleRelationalKingdomEconomy(
     if (extended.population.totalAfter !== state.population.total) populationPatch.total = extended.population.totalAfter;
     if (extended.population.availableAfter !== state.population.available) populationPatch.available = extended.population.availableAfter;
     if ((state.population.starvationSeconds ?? 0) !== extended.starvation.secondsAfter) populationPatch.starvationSeconds = extended.starvation.secondsAfter;
+    if ((state.population.birthFraction ?? 0) !== extended.population.birthFraction) populationPatch.birthFraction = extended.population.birthFraction;
+    if ((state.population.deathFraction ?? 0) !== extended.population.deathFraction) populationPatch.deathFraction = extended.population.deathFraction;
+    if ((state.population.desertionFraction ?? 0) !== extended.population.desertionFraction) populationPatch.desertionFraction = extended.population.desertionFraction;
   }
   if (Object.keys(populationPatch).length > 0) await ctx.db.patch(state.population._id, populationPatch);
+
+  if (extended && extended.population.updatedJobCounts) {
+    const existingJobsMap = new Map<string, any>();
+    for (const jobDoc of state.populationJobs) {
+      existingJobsMap.set(jobDoc.jobType, jobDoc);
+    }
+    for (const [jobType, count] of Object.entries(extended.population.updatedJobCounts)) {
+      const existing = existingJobsMap.get(jobType);
+      if (existing) {
+        if (count > 0) {
+          if (existing.assignedCount !== count) {
+            await ctx.db.patch(existing._id, { assignedCount: count });
+          }
+        } else {
+          await ctx.db.delete(existing._id);
+        }
+      } else if (count > 0) {
+        await ctx.db.insert("populationJobs" as any, {
+          kingdomId: kingdom._id,
+          jobType,
+          assignedCount: count,
+        });
+      }
+    }
+  }
 
   if (extended) {
     const kingdomPatch: Record<string, unknown> = {};

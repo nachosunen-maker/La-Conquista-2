@@ -451,6 +451,35 @@ export const PROFESSION_EFFECTS = {
 } as const;
 export type ProfessionJob = keyof typeof PROFESSION_EFFECTS;
 
+/** [M-07] Capacidades de trabajadores por nivel de los edificios con profesión. */
+export const PROFESSION_BUILDING_CAPACITY: Readonly<Record<string, number>> = {
+  hospitalMilitar: BUILDINGS.hospitalMilitar.workerCapacityPerLevel,
+  iglesia: BUILDINGS.iglesia.workerCapacityPerLevel,
+  circo: BUILDINGS.circo.workerCapacityPerLevel,
+  panaderia: BUILDINGS.panaderia.workerCapacityPerLevel,
+};
+
+/**
+ * [DECISIÓN 23-10-2026] Prioridad de reducción de trabajadores asignados ante muertes por inanición:
+ * De menor prioridad vital a mayor prioridad vital. La agricultura se preserva hasta el final.
+ */
+export const STARVATION_JOB_REDUCTION_PRIORITY: readonly string[] = [
+  "entertainment",
+  "religion",
+  "scholars",
+  "construction",
+  "gold",
+  "medicine",
+  "wood",
+  "stone",
+  "iron",
+  "mining",
+  "military",
+  "other",
+  "bakery",
+  "agriculture",
+];
+
 // ============================================================================
 // 5. COMBATE (P34, P44-P47, D-27 a D-32)
 // ============================================================================

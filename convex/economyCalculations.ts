@@ -5,32 +5,28 @@
  * recursos principales (P3), censo inicial (P10) y factor militar de consumo (P18).
  */
 
-// Constantes oficiales de la especificación maestra
-export const SECONDS_PER_GAME_YEAR = 86400; // 1 día real (86.400 s) = 1 año de juego (OFICIAL, P2)
-export const MILITARY_FOOD_FACTOR = 1.05; // Soldados regulares consumen exactamente 5% más (OFICIAL, P18)
+import {
+  TIME,
+  FOOD,
+  PRODUCTION_PER_WORKER_PER_DAY,
+} from "./balanceConfig";
+
+// Constantes oficiales de la especificación maestra (centralizadas en balanceConfig.ts, P72)
+export const SECONDS_PER_GAME_YEAR = TIME.SECONDS_PER_GAME_YEAR;
+export const MILITARY_FOOD_FACTOR = FOOD.MILITARY_FACTOR;
 
 // Tasas aprobadas para esta economía: 1 ración por habitante y 2 por agricultor/día real.
-export const BASE_FOOD_CONSUMPTION_PER_DAY = 1.0;
-export const BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY = 2.0;
+export const BASE_FOOD_CONSUMPTION_PER_DAY = FOOD.BASE_CONSUMPTION_PER_DAY;
+export const BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY = PRODUCTION_PER_WORKER_PER_DAY.agriculture;
 
 /**
  * Regímenes alimentarios: Los cuatro regímenes (mínima, normal, abundante, excelente)
- * están definidos conceptualmente en P17.
- * Valores oficiales aprobados en especificación:
- * - Mínima: 0,75
- * - Normal: 1,00
- * - Abundante: 1,10
- * - Excelente: 1,20
+ * están definidos conceptualmente en P17 y centralizados en FOOD.TIER_FACTORS.
  */
 export const DEFAULT_FOOD_TIER = "normal";
 export const PROVISIONAL_DEFAULT_FOOD_TIER = DEFAULT_FOOD_TIER;
 
-export const FOOD_TIER_FACTORS: Record<string, number> = {
-  minima: 0.75,    // OFICIAL APROBADO: Factor 0,75
-  normal: 1.00,    // OFICIAL APROBADO: Factor 1,00 (referencia base)
-  abundante: 1.10, // OFICIAL APROBADO: Factor 1,10
-  excelente: 1.20, // OFICIAL APROBADO: Factor 1,20
-};
+export const FOOD_TIER_FACTORS: Record<string, number> = FOOD.TIER_FACTORS;
 
 // Alias de retrocompatibilidad con importaciones existentes
 export const PROVISIONAL_FOOD_TIER_FACTORS = FOOD_TIER_FACTORS;

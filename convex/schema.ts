@@ -98,6 +98,9 @@ export default defineSchema({
       capacity: v.optional(v.number()),
       starving: v.optional(v.boolean()),
       starvationSeconds: v.optional(v.number()),
+      birthFraction: v.optional(v.number()),
+      deathFraction: v.optional(v.number()),
+      desertionFraction: v.optional(v.number()),
     }).index("by_kingdom", ["kingdomId"]),
     populationJobs: defineTable({
       kingdomId: v.id("kingdoms"),

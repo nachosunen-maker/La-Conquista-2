@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { Swords, Shield, Users, Clock, Activity, Coins, Flag } from 'lucide-react';
-import { UNIT_COUNTERS, COMBAT, TACTICAL_FORMATION_COUNTER_BONUS } from '../../convex/balanceConfig';
+import { UNIT_COUNTERS, COMBAT, TACTICAL_FORMATION_COUNTER_BONUS, TACTICAL_FORMATIONS } from '../../convex/balanceConfig';
 import {
   PanelSection,
   ProgressRow,
@@ -140,12 +140,13 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const batchDurationSeconds = selectedUnit?.unitDurationMs ? (selectedUnit.unitDurationMs * safeCount) / 1000 : null;
   const populationNeeded = (selectedUnit?.populationPerUnit ?? 0) * safeCount;
 
-  const currentWeapon = weaponTier ?? state.equipment.weaponTier;
-  const currentArmor = armorTier ?? state.equipment.armorTier;
-  const currentStrategy = strategy ?? state.equipment.strategy;
-  const currentTactical = tacticalDraft ?? state.equipment.tacticalFormation;
-  const tacticalInfo = state.equipment.tacticalFormationCatalog[currentTactical];
-  const tacticalWeakAgainst = Object.entries(state.equipment.tacticalFormationCatalog).find(([, info]) => info.beats === currentTactical)?.[1].label ?? null;
+  const currentWeapon = weaponTier ?? state.equipment?.weaponTier ?? 'espadaHierro';
+  const currentArmor = armorTier ?? state.equipment?.armorTier ?? 'cueroReforzado';
+  const currentStrategy = strategy ?? state.equipment?.strategy ?? 'defensiva';
+  const currentTactical = tacticalDraft ?? state.equipment?.tacticalFormation ?? 'equilibrada';
+  const tacticalCatalog = state.equipment?.tacticalFormationCatalog ?? TACTICAL_FORMATIONS;
+  const tacticalInfo = tacticalCatalog[currentTactical] ?? TACTICAL_FORMATIONS.equilibrada;
+  const tacticalWeakAgainst = Object.entries(tacticalCatalog).find(([, info]) => info.beats === currentTactical)?.[1]?.label ?? null;
   const handleTactical = () =>
     action.run('tactical', async () => {
       const result = await setTacticalFormation({ kingdomId, tacticalFormation: currentTactical });
@@ -153,7 +154,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
       return `Formación ${result.label} guardada: ataque ×${result.attack}, defensa ×${result.defense}.`;
     });
   const equipmentChanged =
-    currentWeapon !== state.equipment.weaponTier || currentArmor !== state.equipment.armorTier || currentStrategy !== state.equipment.strategy;
+    currentWeapon !== state.equipment?.weaponTier || currentArmor !== state.equipment?.armorTier || currentStrategy !== state.equipment?.strategy;
 
   const handleTrain = () =>
     action.run('train', async () => {
@@ -480,7 +481,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
           <label className="flex items-center justify-between gap-2">
             <span className="text-[#a0937e]">Formación</span>
             <select className={selectClass} value={currentTactical} disabled={!writable} onChange={(e) => setTacticalDraft(e.target.value)}>
-              {Object.entries(state.equipment.tacticalFormationCatalog).map(([id, info]) => (
+              {Object.entries(tacticalCatalog).map(([id, info]) => (
                 <option key={id} value={id}>{info.label} (ataque ×{info.attack}, defensa ×{info.defense})</option>
               ))}
             </select>
@@ -490,11 +491,11 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
               <p><strong className="text-[#e6ded0]">Qué hace:</strong> {tacticalInfo.description}</p>
               <p><strong className="text-[#e6ded0]">Cuánto cuesta:</strong> nada; cambiarla es gratis e inmediato.</p>
               <p><strong className="text-[#e6ded0]">Cuánto dura:</strong> hasta que la cambies; se congela 15 minutos antes de cada batalla.</p>
-              <p><strong className="text-[#e6ded0]">Resultado:</strong> ataque ×{tacticalInfo.attack} y defensa ×{tacticalInfo.defense}; fuerte contra {tacticalInfo.beats ? state.equipment.tacticalFormationCatalog[tacticalInfo.beats]?.label : 'ninguna'} (potencia ×{TACTICAL_FORMATION_COUNTER_BONUS}) y débil contra {tacticalWeakAgainst ?? 'ninguna'}.</p>
+              <p><strong className="text-[#e6ded0]">Resultado:</strong> ataque ×{tacticalInfo.attack} y defensa ×{tacticalInfo.defense}; fuerte contra {tacticalInfo.beats ? tacticalCatalog[tacticalInfo.beats]?.label : 'ninguna'} (potencia ×{TACTICAL_FORMATION_COUNTER_BONUS}) y débil contra {tacticalWeakAgainst ?? 'ninguna'}.</p>
             </div>
           )}
           {writable && (
-            <button type="button" className={primaryButton} onClick={handleTactical} disabled={currentTactical === state.equipment.tacticalFormation || action.busy !== null}>
+            <button type="button" className={primaryButton} onClick={handleTactical} disabled={currentTactical === (state.equipment?.tacticalFormation ?? 'equilibrada') || action.busy !== null}>
               {action.busy === 'tactical' ? 'Guardando…' : 'Guardar formación táctica'}
             </button>
           )}
@@ -506,9 +507,9 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
           <label className={`${cardClass} space-y-1`}>
             <span className="text-[#a0937e] block">Armas</span>
             <select className={`${selectClass} w-full`} value={currentWeapon} disabled={!writable} onChange={(e) => setWeaponTier(e.target.value)}>
-              {Object.entries(state.equipment.weaponCatalog).map(([tier, info]) => (
-                <option key={tier} value={tier} disabled={!state.equipment.availableWeapons.includes(tier)}>
-                  {info.label} (×{info.multiplier}){state.equipment.availableWeapons.includes(tier) ? '' : ' · bloqueada'}
+              {Object.entries(state.equipment?.weaponCatalog ?? {}).map(([tier, info]) => (
+                <option key={tier} value={tier} disabled={!(state.equipment?.availableWeapons ?? []).includes(tier)}>
+                  {info.label} (×{info.multiplier}){(state.equipment?.availableWeapons ?? []).includes(tier) ? '' : ' · bloqueada'}
                 </option>
               ))}
             </select>
@@ -516,9 +517,9 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
           <label className={`${cardClass} space-y-1`}>
             <span className="text-[#a0937e] block">Armaduras</span>
             <select className={`${selectClass} w-full`} value={currentArmor} disabled={!writable} onChange={(e) => setArmorTier(e.target.value)}>
-              {Object.entries(state.equipment.armorCatalog).map(([tier, info]) => (
-                <option key={tier} value={tier} disabled={!state.equipment.availableArmors.includes(tier)}>
-                  {info.label} (×{info.multiplier}){state.equipment.availableArmors.includes(tier) ? '' : ' · bloqueada'}
+              {Object.entries(state.equipment?.armorCatalog ?? {}).map(([tier, info]) => (
+                <option key={tier} value={tier} disabled={!(state.equipment?.availableArmors ?? []).includes(tier)}>
+                  {info.label} (×{info.multiplier}){(state.equipment?.availableArmors ?? []).includes(tier) ? '' : ' · bloqueada'}
                 </option>
               ))}
             </select>
@@ -526,9 +527,9 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
           <label className={`${cardClass} space-y-1`}>
             <span className="text-[#a0937e] block">Estrategia</span>
             <select className={`${selectClass} w-full`} value={currentStrategy} disabled={!writable} onChange={(e) => setStrategy(e.target.value)}>
-              {Object.entries(state.equipment.strategyCatalog).map(([id, info]) => (
+              {Object.entries(state.equipment?.strategyCatalog ?? {}).map(([id, info]) => (
                 <option key={id} value={id}>
-                  {info.label} (ataque ×{info.attack}, defensa ×{info.defense}, contrarresta {state.equipment.strategyCatalog[info.beats]?.label ?? info.beats})
+                  {info.label} (ataque ×{info.attack}, defensa ×{info.defense}, contrarresta {(state.equipment?.strategyCatalog ?? {})[info.beats]?.label ?? info.beats})
                 </option>
               ))}
             </select>
@@ -538,10 +539,10 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
           <Activity className="w-3.5 h-3.5" />
           Las armas y armaduras se desbloquean con Herrería, Mina de hierro y tecnologías; el equipo se congela 15 minutos antes de cada batalla. Los nombres son los de tu civilización; los multiplicadores son iguales para todas (P30, P31).
         </p>
-        {(state.equipment.civilizationIdentity || state.equipment.civilizationWeakness) && (
+        {(state.equipment?.civilizationIdentity || state.equipment?.civilizationWeakness) && (
           <p className="text-[11px] text-[#c7beac]">
-            {state.equipment.civilizationIdentity && <>Tropa característica: <strong className="text-[#e6ded0]">{state.equipment.civilizationIdentity.signatureUnit.name}</strong> ({state.equipment.civilizationIdentity.signatureUnit.description}). </>}
-            {state.equipment.civilizationWeakness && <>Debilidad: <span className="text-rose-200">{state.equipment.civilizationWeakness}</span></>}
+            {state.equipment?.civilizationIdentity && <>Tropa característica: <strong className="text-[#e6ded0]">{state.equipment.civilizationIdentity.signatureUnit.name}</strong> ({state.equipment.civilizationIdentity.signatureUnit.description}). </>}
+            {state.equipment?.civilizationWeakness && <>Debilidad: <span className="text-rose-200">{state.equipment.civilizationWeakness}</span></>}
           </p>
         )}
         {writable && (
