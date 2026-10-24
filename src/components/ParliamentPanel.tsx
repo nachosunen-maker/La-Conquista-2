@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
-import { Landmark, Swords, Scroll, Eye, Coins, Award } from 'lucide-react';
+import { Landmark, Swords, Scroll, Eye, Coins, Award, Trophy } from 'lucide-react';
 import {
   PanelSection,
   StatusMessages,
@@ -22,6 +22,7 @@ import {
 const getParliamentQuery = makeFunctionReference<"query">("parliament:getParliament");
 const listRivalsQuery = makeFunctionReference<"query">("parliament:listRivals");
 const getBattlesQuery = makeFunctionReference<"query">("parliament:getBattles");
+const getLeaderboardQuery = makeFunctionReference<"query">("parliament:getLeaderboard");
 const createChallengeMutation = makeFunctionReference<"mutation">("parliament:createChallenge");
 const acceptChallengeMutation = makeFunctionReference<"mutation">("parliament:acceptChallenge");
 const rejectChallengeMutation = makeFunctionReference<"mutation">("parliament:rejectChallenge");
@@ -74,6 +75,20 @@ interface RivalsState {
     honor: number;
     distance: number | null;
     espionageReport: { level: number; expiresAt: number; composition: Record<string, { min: number; max: number }> | null } | null;
+  }>;
+}
+
+interface LeaderboardState {
+  serverTimeMs: number;
+  rankings: Array<{
+    rank: number;
+    kingdomId: string;
+    name: string;
+    monarchName: string;
+    civilization: string | null;
+    honor: number;
+    glory: number;
+    isPlayer: boolean;
   }>;
 }
 
@@ -141,6 +156,7 @@ export function ParliamentPanel(props: {
   const parliament = useQuery(getParliamentQuery, kingdomId ? { kingdomId } : "skip") as ParliamentState | undefined;
   const rivals = useQuery(listRivalsQuery, kingdomId ? { kingdomId } : "skip") as RivalsState | undefined;
   const battles = useQuery(getBattlesQuery, kingdomId ? { kingdomId } : "skip") as BattleRecord[] | undefined;
+  const leaderboard = useQuery(getLeaderboardQuery, kingdomId ? { kingdomId } : "skip") as LeaderboardState | undefined;
   const createChallenge = useMutation(createChallengeMutation);
   const acceptChallenge = useMutation(acceptChallengeMutation);
   const rejectChallenge = useMutation(rejectChallengeMutation);
@@ -428,6 +444,44 @@ export function ParliamentPanel(props: {
                 )}
               </div>
             ))}
+          </div>
+        )}
+      </PanelSection>
+
+      <PanelSection icon={<Trophy className="w-4 h-4 text-[#d4af37]" />} title="Clasificación Global de Reinos (Honor)">
+        {!leaderboard ? (
+          <p className="text-xs text-[#8e816d] italic">Consultando clasificación mundial…</p>
+        ) : leaderboard.rankings.length === 0 ? (
+          <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">No hay reinos registrados en la clasificación.</p>
+        ) : (
+          <div className="space-y-1.5 overflow-x-auto">
+            <table className="w-full text-xs text-left border-collapse">
+              <thead>
+                <tr className="border-b border-[#2b2419] text-[#8e816d] font-serif uppercase tracking-wider text-[10px]">
+                  <th className="py-2 px-3">Pos.</th>
+                  <th className="py-2 px-3">Reino / Monarca</th>
+                  <th className="py-2 px-3">Civilización</th>
+                  <th className="py-2 px-3 text-right">Honor</th>
+                  <th className="py-2 px-3 text-right">Gloria</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#2b2419]/50">
+                {leaderboard.rankings.map((r) => (
+                  <tr key={r.kingdomId} className={r.isPlayer ? 'bg-[#251e13] text-[#f0e8d4] font-semibold' : 'text-[#c7beac] hover:bg-[#18140f]'}>
+                    <td className="py-2 px-3 font-serif text-[#d4af37]">
+                      {r.rank === 1 ? '🥇 1º' : r.rank === 2 ? '🥈 2º' : r.rank === 3 ? '🥉 3º' : `${r.rank}º`}
+                    </td>
+                    <td className="py-2 px-3">
+                      <span className="text-[#f0e8d4]">{r.name}</span>
+                      <span className="block text-[10px] text-[#8e816d]">Monarca: {r.monarchName}{r.isPlayer ? ' (Tú)' : ''}</span>
+                    </td>
+                    <td className="py-2 px-3 text-[#8e816d]">{r.civilization ? CIVILIZATION_LABELS[r.civilization] ?? r.civilization : '—'}</td>
+                    <td className="py-2 px-3 text-right font-bold text-amber-300">{r.honor.toLocaleString('es-ES')}</td>
+                    <td className="py-2 px-3 text-right text-purple-300">{r.glory.toLocaleString('es-ES')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </PanelSection>

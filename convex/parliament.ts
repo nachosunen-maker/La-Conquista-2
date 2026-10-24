@@ -496,3 +496,45 @@ export const resolveChallenge = internalMutation({
     return { resolved: true, battleId, outcome: report.outcome };
   },
 });
+
+/** [BLOQUE 15] Clasificación global de reinos por honor y gloria. */
+export const getLeaderboard = query({
+  args: { kingdomId: v.optional(v.id("kingdoms")) },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    let viewerKingdomId = args.kingdomId;
+    if (!viewerKingdomId && identity) {
+      const userKingdom = await ctx.db
+        .query("kingdoms")
+        .withIndex("by_user_id", (q) => q.eq("userId", identity.subject))
+        .first();
+      if (userKingdom) viewerKingdomId = userKingdom._id;
+    }
+
+    const kingdoms = await ctx.db.query("kingdoms").collect();
+    const sorted = kingdoms.sort((a, b) => {
+      const honorA = typeof a.honor === "number" ? a.honor : 0;
+      const honorB = typeof b.honor === "number" ? b.honor : 0;
+      if (honorB !== honorA) return honorB - honorA;
+      const gloryA = typeof a.glory === "number" ? a.glory : 0;
+      const gloryB = typeof b.glory === "number" ? b.glory : 0;
+      if (gloryB !== gloryA) return gloryB - gloryA;
+      return a.name.localeCompare(b.name);
+    });
+
+    return {
+      serverTimeMs: Date.now(),
+      rankings: sorted.map((k, index) => ({
+        rank: index + 1,
+        kingdomId: k._id,
+        name: k.name,
+        monarchName: k.monarchName ?? "Monarca desconocido",
+        civilization: k.civilization ?? null,
+        honor: typeof k.honor === "number" ? k.honor : 0,
+        glory: typeof k.glory === "number" ? k.glory : 0,
+        isPlayer: viewerKingdomId ? k._id === viewerKingdomId : false,
+      })),
+    };
+  },
+});
+

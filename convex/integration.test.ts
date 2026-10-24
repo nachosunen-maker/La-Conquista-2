@@ -758,4 +758,51 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
   });
 });
 
+describe("Clasificación global de reinos (Bloque 15)", () => {
+  test("ordena reinos de mayor a menor honor, maneja empates y reinos vacíos", async () => {
+    const t = createTestBackend();
+    
+    // 1. Caso sin reinos: tabla vacía
+    const emptyBoard = await t.query(api.parliament.getLeaderboard, {});
+    expect(emptyBoard.rankings).toHaveLength(0);
+
+    // 2. Crear reinos con diferentes niveles de honor y gloria
+    const a = await foundKingdom(t, "user-lead-a", "Reino Bajo Honor");
+    const b = await foundKingdom(t, "user-lead-b", "Reino Alto Honor");
+    const c = await foundKingdom(t, "user-lead-c", "Reino Empate Honor 1");
+    const d = await foundKingdom(t, "user-lead-d", "Reino Empate Honor 2");
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(a.kingdomId, { honor: 10, glory: 5 });
+      await ctx.db.patch(b.kingdomId, { honor: 100, glory: 20 });
+      // Empate en honor (50), pero distinto en gloria
+      await ctx.db.patch(c.kingdomId, { honor: 50, glory: 10 });
+      await ctx.db.patch(d.kingdomId, { honor: 50, glory: 30 });
+    });
+
+    const board = await b.asUser.query(api.parliament.getLeaderboard, { kingdomId: b.kingdomId });
+    expect(board.rankings).toHaveLength(4);
+    // Orden descendente por honor: b (100), d (50, glory 30), c (50, glory 10), a (10)
+    expect(board.rankings[0].name).toBe("Reino Alto Honor");
+    expect(board.rankings[0].honor).toBe(100);
+    expect(board.rankings[0].rank).toBe(1);
+    expect(board.rankings[0].isPlayer).toBe(true);
+
+    expect(board.rankings[1].name).toBe("Reino Empate Honor 2"); // Mayor gloria (30 > 10)
+    expect(board.rankings[1].honor).toBe(50);
+    expect(board.rankings[1].glory).toBe(30);
+    expect(board.rankings[1].rank).toBe(2);
+
+    expect(board.rankings[2].name).toBe("Reino Empate Honor 1");
+    expect(board.rankings[2].honor).toBe(50);
+    expect(board.rankings[2].glory).toBe(10);
+    expect(board.rankings[2].rank).toBe(3);
+
+    expect(board.rankings[3].name).toBe("Reino Bajo Honor");
+    expect(board.rankings[3].honor).toBe(10);
+    expect(board.rankings[3].rank).toBe(4);
+  });
+});
+
+
 
