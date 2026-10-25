@@ -66,7 +66,12 @@ export function runExtendedEconomyTests(): ExtendedEconomyTestResult[] {
   const growthCapped = computePopulationGrowth({ total: 2000, elapsedDays: 1, residentialCapacity: 2100 });
   const growthFull = computePopulationGrowth({ total: 2000, elapsedDays: 1, residentialCapacity: 2000 });
   const growthHalfDay = computePopulationGrowth({ total: 2000, elapsedDays: 0.5, residentialCapacity: 10_000 });
-  const twoHalves = computePopulationGrowth({ total: 2000 + growthHalfDay.births, elapsedDays: 0.5, residentialCapacity: 10_000 });
+  const twoHalves = computePopulationGrowth({
+    total: 2000 + growthHalfDay.births,
+    elapsedDays: 0.5,
+    residentialCapacity: 10_000,
+    birthFraction: growthHalfDay.nextBirthFraction,
+  });
   const growthSim = simulateExtendedEconomy(baseInput({ residentialCapacity: 10_000 }));
 
   // Inanición: sin alimentos ni agricultores, 2.000 personas consumen 2.000/día.
@@ -120,10 +125,11 @@ export function runExtendedEconomyTests(): ExtendedEconomyTestResult[] {
       passed: growthFree.births === 600 && !growthFree.cappedByHousing &&
         growthCapped.births === 100 && growthCapped.cappedByHousing &&
         growthFull.births === 0 && growthFull.cappedByHousing &&
-        Math.abs((growthHalfDay.births + twoHalves.births) - 600) <= 1 &&
+        (growthHalfDay.births + twoHalves.births) === 600 &&
+        twoHalves.nextBirthFraction === 0 &&
         growthSim.population.totalAfter === 2600 && growthSim.population.availableAfter === 250 + 600 &&
         oneDay.population.births === 0 && oneDay.population.growthCappedByHousing,
-      details: `Sin tope: +${growthFree.births}; tope 2.100: +${growthCapped.births}; lleno: +${growthFull.births}; dos medios días: +${growthHalfDay.births + twoHalves.births}; simulación: ${growthSim.population.totalAfter}`,
+      details: `Sin tope: +${growthFree.births}; tope 2.100: +${growthCapped.births}; lleno: +${growthFull.births}; dos medios días: +${growthHalfDay.births + twoHalves.births} (fracción final: ${twoHalves.nextBirthFraction}); simulación: ${growthSim.population.totalAfter}`,
     },
     {
       test: "Inanición por fases (D-48): acumulación persistida, −10 % productividad en fase 2, pérdidas y deserción en fase 3, reinicio al recuperarse",
