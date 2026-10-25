@@ -349,17 +349,18 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   const dailyTaxIncome = taxableDailyBase * taxRate;
   const taxesCollected = dailyTaxIncome * elapsedDays;
 
-  // 3b. [M-02] Salario de mercenarios: se paga con el oro disponible tras producción e impuestos; si no alcanza, desertan.
-  const salaryDue = mercenaryCount * MERCENARIES.SALARY_GOLD_PER_DAY * elapsedDays;
-  const goldBeforeSalary = state.resources.gold + dailyProduction.gold * elapsedDays + taxesCollected;
-  const salaryPaid = Math.min(salaryDue, Math.max(0, goldBeforeSalary));
-  const unpaid = salaryDue > 0 && salaryPaid + 1e-9 < salaryDue;
+  // 3b. [DECISIÓN 21-10-2026] Sin salarios diarios para mercenarios: se pagan íntegros al contratar.
+  // salaryDue, salaryPaid y unpaid se mantienen en 0 por compatibilidad de contrato con la interfaz y pruebas.
+  const salaryDue = 0;
+  const salaryPaid = 0;
+  const unpaid = false;
+  const totalGoldAfterIncome = state.resources.gold + dailyProduction.gold * elapsedDays + taxesCollected;
 
   // 3c. [M-06] Tope de almacén (con bonificación de civilización si procede).
   const storageTechMultiplier = input.technologyModifiers.storageCapacity * (civPassive.storageCapacityMultiplier ?? 1.0);
   const capacity = storageCapacity(input.buildingLevels.mercado ?? 0, storageTechMultiplier);
   const rawResources: KingdomResources = {
-    gold: goldBeforeSalary - salaryPaid,
+    gold: totalGoldAfterIncome,
     wood: state.resources.wood + dailyProduction.wood * elapsedDays,
     stone: state.resources.stone + dailyProduction.stone * elapsedDays,
     iron: state.resources.iron + dailyProduction.iron * elapsedDays,

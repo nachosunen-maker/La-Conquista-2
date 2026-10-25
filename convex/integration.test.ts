@@ -344,6 +344,157 @@ describe("Liquidación económica (Bloque D)", () => {
     expect(full2d?.population?.total).toBe(2100);
     expect(full2d?.population?.available).toBe(350);
   });
+
+  test("capacidad de almacén: no supera el tope, descarta excedente, conserva reservas previas y amplía con Mercado (M-06)", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "user-storage", "Reino Almacén");
+
+    // 1. Conservación de reservas preexistentes por encima del tope:
+    // Fijar madera en 15.000 (superior al tope base de 10.000 con Mercado nivel 0)
+    await t.run(async (ctx) => {
+      const resDoc = await ctx.db.query("resources").filter((q) => q.eq(q.field("kingdomId"), kingdomId)).first();
+      await ctx.db.patch(resDoc!._id, { wood: 15_000, stone: 9_900 });
+    });
+
+    // Avanzar 1 hora y liquidar
+    vi.setSystemTime(T0 + 3600 * 1000);
+    const settled1 = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+
+    // La madera preexistente de 15.000 no se destruye por el tope
+    expect(settled1.resources.wood).toBeGreaterThanOrEqual(15_000);
+
+    // 2. Producción no supera el tope base (10.000 con Mercado 0):
+    // La piedra arrancó en 9.900 y genera ~206/día (romanos).
+    // Avanzar a 1 día completo (T0 + DAY)
+    vi.setSystemTime(T0 + DAY);
+    const settledDay = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+
+    // La piedra queda estrictamente acotada a 10.000 y el excedente se descarta
+    expect(settledDay.resources.stone).toBe(10_000);
+    const fullCheck = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-storage" });
+    expect(fullCheck?.resources.stone).toBe(10_000);
+
+    // 3. Ampliación del Mercado eleva la capacidad efectiva: 10.000 + 2.000 * 1 = 12.000
+    await setBuildingLevel(t, kingdomId, "mercado", 1);
+    vi.setSystemTime(T0 + 2 * DAY);
+    const settledExpanded = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+
+    // Ahora la piedra puede crecer por encima de 10.000 hacia 12.000
+    expect(settledExpanded.resources.stone).toBeGreaterThan(10_000);
+    expect(settledExpanded.resources.stone).toBeLessThanOrEqual(12_000);
+  });
+
+  test("inanición prolongada en base de datos: transiciones de fase, bajas civiles, deserción militar e idempotencia (D-48)", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "user-starve", "Reino Inanición");
+
+    // Preparar estado de hambruna total:
+    // - Comida en 0
+    // - Agricultores en 0 (pasan a disponibles para asegurar 0 producción de comida)
+    // - Tropa regular: 100 infantes
+    await t.run(async (ctx) => {
+      const resDoc = await ctx.db.query("resources").filter((q) => q.eq(q.field("kingdomId"), kingdomId)).first();
+      await ctx.db.patch(resDoc!._id, { food: 0 });
+
+      const agriJob = await ctx.db.query("populationJobs")
+        .filter((q) => q.and(q.eq(q.field("kingdomId"), kingdomId), q.eq(q.field("jobType"), "agriculture")))
+        .first();
+      if (agriJob) {
+        await ctx.db.patch(agriJob._id, { assignedCount: 0 });
+      }
+
+      await ctx.db.insert("armyUnits", {
+        kingdomId,
+        unitType: "infanteria",
+        level: 1,
+        count: 100,
+      });
+
+      const popDoc = await ctx.db.query("population").filter((q) => q.eq(q.field("kingdomId"), kingdomId)).first();
+      await ctx.db.patch(popDoc!._id, { available: 1250 });
+    });
+
+    // Día 1 (86.400s): entra en Fase 2 (1 día de déficit acumulado)
+    vi.setSystemTime(T0 + DAY);
+    const settledDay1 = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+    expect(settledDay1.isStarving).toBe(true);
+    expect(settledDay1.starvationPhase).toBe(2);
+    expect(settledDay1.starvationSeconds).toBe(86_400);
+
+    const fullD1 = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-starve" });
+    expect(fullD1?.population?.total).toBe(2000);
+    const armyD1 = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(armyD1.units.find((u: any) => u.unitType === "infanteria")?.count).toBe(100);
+
+    // Día 2 (172.800s): sigue en Fase 2
+    vi.setSystemTime(T0 + 2 * DAY);
+    const settledDay2 = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+    expect(settledDay2.starvationPhase).toBe(2);
+    expect(settledDay2.starvationSeconds).toBe(172_800);
+
+    // Día 3 (259.200s): alcanza el umbral de Fase 3 (3 días acumulados)
+    vi.setSystemTime(T0 + 3 * DAY);
+    const settledDay3 = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+    expect(settledDay3.starvationPhase).toBe(3);
+    expect(settledDay3.starvationSeconds).toBe(259_200);
+
+    // Día 4 (345.600s): 1 día completo transcurrido dentro de Fase 3
+    // Pérdidas: 0,5 % civil/día sobre 1.900 civiles = 9 bajas
+    // Deserción militar: 1,0 % sobre 100 soldados = 1 deserción
+    vi.setSystemTime(T0 + 4 * DAY);
+    const settledDay4 = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+    expect(settledDay4.starvationPhase).toBe(3);
+    expect(settledDay4.starvationSeconds).toBe(345_600);
+    expect(settledDay4.population?.deaths).toBe(9);
+    expect(settledDay4.militaryDesertion).toBe(1);
+
+    // Verificar persistencia en tablas population y armyUnits
+    const fullD4 = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-starve" });
+    expect(fullD4?.population?.total).toBe(1990); // 2000 - 9 civiles - 1 desertor
+    const armyD4 = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(armyD4.units.find((u: any) => u.unitType === "infanteria")?.count).toBe(99);
+
+    // Idempotencia: liquidar en el mismo instante no duplica pérdidas
+    const settledRepeat = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+    expect(settledRepeat.population?.deaths).toBe(0);
+    expect(settledRepeat.militaryDesertion).toBe(0);
+    const fullRepeat = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-starve" });
+    expect(fullRepeat?.population?.total).toBe(1990);
+    const armyRepeat = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(armyRepeat.units.find((u: any) => u.unitType === "infanteria")?.count).toBe(99);
+  });
+
+  test("los mercenarios no cobran salarios diarios durante la liquidación continua del tiempo", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "user-mercs", "Reino Mercenarios");
+
+    await setBuildingLevel(t, kingdomId, "taberna", 1);
+    await t.run(async (ctx) => {
+      const resDoc = await ctx.db.query("resources").filter((q) => q.eq(q.field("kingdomId"), kingdomId)).first();
+      await ctx.db.patch(resDoc!._id, { gold: 1000 });
+    });
+
+    const hired = await asUser.mutation(api.army.hireMercenaries, {
+      kingdomId,
+      typeId: "lanceros",
+      count: 10,
+    });
+    expect(hired.success).toBe(true);
+
+    const afterHire = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-mercs" });
+    const goldAfterHire = afterHire!.resources.gold;
+    expect(goldAfterHire).toBeCloseTo(750, 2);
+
+    vi.setSystemTime(T0 + 2 * DAY);
+    const settled = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+
+    expect(settled.mercenaries?.salaryDue).toBe(0);
+    expect(settled.mercenaries?.salaryPaid).toBe(0);
+    expect(settled.mercenaries?.unpaid).toBe(false);
+
+    const expectedGoldGain = (settled.taxesCollected ?? 0) + (settled.dailyProduction?.gold ?? 0) * 2;
+    expect(settled.resources.gold).toBeCloseTo(goldAfterHire + expectedGoldGain, 2);
+  });
 });
 
 describe("Parlamento y batalla (Bloques E y F)", () => {
