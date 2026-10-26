@@ -24,7 +24,7 @@ function resolveConvexUrl(urlOrDeployment: string | undefined): string | null {
   return null;
 }
 
-const DEFAULT_CONVEX_URL = 'https://fortunate-donkey-837.eu-west-1.convex.cloud';
+const DEFAULT_CONVEX_URL = 'https://festive-dodo-429.eu-west-1.convex.cloud';
 const rawConvexUrl = import.meta.env.VITE_CONVEX_URL || DEFAULT_CONVEX_URL;
 const convexUrl = resolveConvexUrl(rawConvexUrl) || DEFAULT_CONVEX_URL;
 const rootElement = document.getElementById('root')!;
@@ -39,7 +39,7 @@ if (!convexUrl) {
           </div>
           <h1 className="text-xl font-bold text-red-400 mb-2">Error de Configuración Convex</h1>
           <p className="text-sm text-neutral-300 mb-4 leading-relaxed">
-            La variable de entorno <code className="bg-neutral-800 text-red-300 px-1.5 py-0.5 rounded text-xs font-mono">VITE_CONVEX_URL</code> debe ser una URL absoluta válida (por ejemplo: <code className="bg-neutral-800 text-neutral-200 px-1 py-0.5 rounded text-xs font-mono">https://fortunate-donkey-837.eu-west-1.convex.cloud/</code>).
+            La variable de entorno <code className="bg-neutral-800 text-red-300 px-1.5 py-0.5 rounded text-xs font-mono">VITE_CONVEX_URL</code> debe ser una URL absoluta válida (por ejemplo: <code className="bg-neutral-800 text-neutral-200 px-1 py-0.5 rounded text-xs font-mono">https://festive-dodo-429.eu-west-1.convex.cloud/</code>).
           </p>
           <p className="text-xs text-neutral-400">
             Comprueba el valor en tu archivo <code className="font-mono text-neutral-300">.env.local</code>.

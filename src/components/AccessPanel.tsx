@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAction, useQuery_experimental } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -34,16 +34,54 @@ const resetPasswordAction = makeFunctionReference<'action'>('account:resetPasswo
 
 type Mode = 'crear' | 'entrar' | 'recuperar';
 
-/** Convierte los errores del servidor en mensajes genéricos en español. */
+/**
+ * Convierte los errores del servidor y de la red en mensajes comprensibles para el usuario,
+ * preservando la causa técnica sin ocultar excepciones críticas.
+ */
 export function describeAuthError(error: unknown): string {
   if (error instanceof ConvexError && typeof error.data === 'string') return error.data;
   const message = error instanceof Error ? error.message : String(error);
-  if (/already exists/i.test(message)) return ACCOUNT_MESSAGES.NAME_TAKEN;
-  if (/InvalidSecret|InvalidAccountId|Invalid credentials/i.test(message)) return ACCOUNT_MESSAGES.INVALID_CREDENTIALS;
-  if (/TooManyFailedAttempts/i.test(message)) return 'Demasiados intentos fallidos. Espera unos minutos y vuelve a intentarlo.';
-  const convexData = /ConvexError: (.+?)(?: at |$)/.exec(message);
+
+  // Funciones no desplegadas en el backend remoto de Convex
+  if (/Could not find public function for 'auth:signIn'/i.test(message)) {
+    return 'El servidor Convex remoto aún no tiene desplegado el módulo de autenticación (falta "auth:signIn"). Es necesario desplegar el backend Convex mediante "npx convex dev" o "npx convex deploy".';
+  }
+  if (/Could not find public function for '([^']+)'/i.test(message)) {
+    const match = /Could not find public function for '([^']+)'/i.exec(message);
+    return `Función "${match ? match[1] : 'requerida'}" no disponible en el servidor Convex remoto. Requiere desplegar el backend.`;
+  }
+
+  // Nombre de gobernante ya ocupado
+  if (/already exists|already in use|nombre.+ocupado/i.test(message)) {
+    return ACCOUNT_MESSAGES.NAME_TAKEN;
+  }
+
+  // Credenciales erróneas
+  if (/InvalidSecret|InvalidAccountId|Invalid credentials|credenciales incorrectas/i.test(message)) {
+    return ACCOUNT_MESSAGES.INVALID_CREDENTIALS;
+  }
+
+  // Límite de intentos
+  if (/TooManyFailedAttempts/i.test(message)) {
+    return 'Demasiados intentos fallidos. Espera unos minutos y vuelve a intentarlo.';
+  }
+
+  // Error de conexión o red con Convex
+  if (/Failed to fetch|NetworkError|Network request failed|net::ERR_|Failed to load resource/i.test(message)) {
+    return 'No se pudo conectar con el servidor Convex. Comprueba tu conexión a Internet o el estado del backend.';
+  }
+
+  // Datos encapsulados en ConvexError
+  const convexData = /ConvexError:\s*([^\n\r]+)/.exec(message);
   if (convexData) return convexData[1].trim();
-  return 'No se pudo completar la operación. Inténtalo de nuevo.';
+
+  // Si el servidor devolvió un Server Error específico de UDF
+  if (/Server Error/i.test(message)) {
+    const cleanMsg = message.replace(/\[Request ID:\s*[a-zA-Z0-9]+\]\s*/i, '').replace(/^Server Error\s*/i, '').trim();
+    if (cleanMsg) return `Error del servidor: ${cleanMsg}`;
+  }
+
+  return 'No se pudo completar la operación. Comprueba los datos o el estado de la conexión.';
 }
 
 /** Decoración ornamental en las 4 esquinas del marco medieval */
@@ -210,6 +248,16 @@ export function AccessPanel(props: { onGuest: () => void; initialMode?: Mode; is
     ? (availabilityResult.data as { available: boolean; error: string | null })
     : undefined;
 
+  // Registro de diagnóstico seguro si la consulta de disponibilidad falla
+  useEffect(() => {
+    if (availabilityResult.status === 'error') {
+      console.warn('[La Conquista - Disponibilidad]', {
+        rulerName: trimmedName,
+        error: availabilityResult.error.message,
+      });
+    }
+  }, [availabilityResult, trimmedName]);
+
   const switchMode = (next: Mode) => {
     setMode(next);
     setError(null);
@@ -239,6 +287,12 @@ export function AccessPanel(props: { onGuest: () => void; initialMode?: Mode; is
         setNewPassword('');
       }
     } catch (err) {
+      // Registro de diagnóstico técnico seguro (sin contraseñas, tokens ni códigos)
+      console.error('[La Conquista - Error Autenticación]', {
+        modo: mode,
+        nombreGobernante: trimmedName,
+        error: err instanceof Error ? err.message : String(err),
+      });
       setError(describeAuthError(err));
     } finally {
       setBusy(false);

@@ -21,7 +21,7 @@ function getLocalEnvUrl(): string | undefined {
 export default defineConfig(({ mode }) => {
   const fileUrl = getLocalEnvUrl();
   const env = loadEnv(mode, process.cwd(), '');
-  const defaultConvexUrl = 'https://fortunate-donkey-837.eu-west-1.convex.cloud';
+  const defaultConvexUrl = 'https://festive-dodo-429.eu-west-1.convex.cloud';
   const convexUrl = fileUrl || env.VITE_CONVEX_URL || defaultConvexUrl;
   const defaultGoogleClientId = '198291664207-573hkldm168ltr0h5rscs0k8iooilqul.apps.googleusercontent.com';
   const googleClientId = env.VITE_GOOGLE_CLIENT_ID || defaultGoogleClientId;
