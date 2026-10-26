@@ -508,9 +508,14 @@ function formatSecondsDuration(seconds: number): string {
 /* ==========================================================================
    PANTALLA PRINCIPAL: RESUMEN DEL REINO (JUEGO DE ESTRATEGIA MEDIEVAL)
    ========================================================================== */
-function KingdomOverviewContent() {
+function KingdomOverviewContent(props?: {
+  viewDemoKingdom?: boolean;
+  setViewDemoKingdom?: (val: boolean) => void;
+}) {
   const { isAuthenticated, isLoading } = useConvexAuth();
-  const [viewDemoKingdom, setViewDemoKingdom] = useState<boolean>(false);
+  const [internalViewDemo, setInternalViewDemo] = useState<boolean>(false);
+  const viewDemoKingdom = props?.viewDemoKingdom ?? internalViewDemo;
+  const setViewDemoKingdom = props?.setViewDemoKingdom ?? setInternalViewDemo;
   const isViewingDemo = viewDemoKingdom;
 
   // Consulta autoritativa OIDC de Convex en tiempo real
@@ -2268,7 +2273,16 @@ function KingdomOverviewContent() {
    COMPONENTE RAÍZ APP
    ========================================================================== */
 export default function App() {
+  const { isAuthenticated } = useConvexAuth();
+  const [viewDemoKingdom, setViewDemoKingdom] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // Si no está autenticado ni en la demo de Iberia, renderiza la pantalla de inicio oficial a pantalla completa
+  if (!isAuthenticated && !viewDemoKingdom) {
+    return (
+      <HomeScreen onEnterDemo={() => setViewDemoKingdom(true)} />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0b0a08] text-[#e8dfc8] flex flex-col font-sans selection:bg-[#d4af37]/30 selection:text-[#f7f2e4]">
@@ -2316,7 +2330,10 @@ export default function App() {
           ==================================================================== */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 pb-24 sm:p-6" key={refreshTrigger}>
         <QueryErrorBoundary fallbackUserId={DEMO_USER_ID}>
-          <KingdomOverviewContent />
+          <KingdomOverviewContent
+            viewDemoKingdom={viewDemoKingdom}
+            setViewDemoKingdom={setViewDemoKingdom}
+          />
         </QueryErrorBoundary>
       </main>
 

@@ -1,27 +1,8 @@
-import React, { useState } from 'react';
-import { Crown, Shield, Scroll } from 'lucide-react';
+import React from 'react';
 import { AccessPanel } from './AccessPanel';
-import { useQuery } from 'convex/react';
-import { makeFunctionReference } from 'convex/server';
-
-const listCivilizationsQuery = makeFunctionReference<'query'>('civilizations:listCivilizations');
-
-interface CivilizationProfile {
-  id: string;
-  label: string;
-  advantage: string;
-  weakness: string | null;
-  identity: {
-    weapons: Record<string, string>;
-    armors: Record<string, string>;
-    uniqueBuilding: { name: string; baseLabel: string; description: string };
-    signatureUnit: { name: string; baseLabel: string; description: string };
-  } | null;
-  pendingDesign: boolean;
-}
 
 interface HomeScreenProps {
-  /** Entrar como invitado: reino de demostración Iberia en solo lectura. */
+  /** Entrar como invitado: reino de demostración Iberia en modo exploración. */
   onEnterDemo: () => void;
 }
 
@@ -41,220 +22,84 @@ export const OFFICIAL_CIVILIZATIONS = [
   { id: 'masais', name: 'Masáis', icon: '🦁', desc: 'Velocidad, lanzas ligeras, pastoreo y aguante territorial' },
 ];
 
+/**
+ * Pantalla de inicio oficial de «La Conquista».
+ * Reproducción 1:1 de la referencia oficial inalterable:
+ * - Composición horizontal única completa:
+ *   - Lado izquierdo: Ilustración cinematográfica, rey, castillo, río, puesta de sol,
+ *     logotipo «LA CONQUISTA» y lemas oficiales.
+ *   - Lado derecho: Panel medieval gótico oscuro con controles reales e interactivos
+ *     posicionados exactamente sobre la zona del panel de la referencia.
+ * - En escritorio / tablets horizontales (>= 768px): La composición es siempre horizontal
+ *   mediante un lienzo proporcional 1536:1024 centrado que cubre la pantalla sin apilarse.
+ * - En móvil vertical (< 768px): Adaptación ergonómica vertical para facilitar el uso táctil.
+ */
 export function HomeScreen({ onEnterDemo }: HomeScreenProps) {
-  const [selectedCiv, setSelectedCiv] = useState<string | null>(null);
-  // Ficha pública de civilizaciones (consulta de solo lectura; también para invitados).
-  const civData = useQuery(listCivilizationsQuery) as { profiles?: CivilizationProfile[] } | undefined;
-  const selectedProfile = civData?.profiles?.find((p) => p.id === selectedCiv) ?? null;
-
   return (
-    <div className="space-y-8 max-w-5xl mx-auto py-4">
+    <div className="min-h-screen w-full bg-[#05080e] text-[#e8dfc8] flex items-center justify-center relative overflow-hidden select-none">
       {/* ====================================================================
-          PANTALLA DE INICIO (sección 5 de CLAUDE.md): ilustración + panel de acceso
+          1. COMPOSICIÓN HORIZONTAL OFICIAL (ESCRITORIO Y PANTALLAS ANCHAS)
+          Composición horizontal inalterable: paisaje a la izquierda, panel interactivo a la derecha.
           ==================================================================== */}
-      <section className="bg-[#14120e] border border-[#382f20] rounded-xl p-5 sm:p-8 shadow-xl relative overflow-hidden">
-        <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-6 lg:gap-10 items-center">
-          <div className="text-center lg:text-left space-y-4">
-            <div className="inline-flex items-center justify-center p-3.5 bg-[#211a12] border border-[#d4af37]/40 rounded-xl text-[#d4af37] shadow-inner">
-              <Crown className="w-10 h-10" />
-            </div>
-            <div className="space-y-2">
-              <h1 className="text-3xl sm:text-5xl font-serif font-bold text-[#f7f2e4] tracking-wide">LA CONQUISTA</h1>
-              <p className="text-sm sm:text-base text-[#d4af37] font-serif tracking-widest uppercase font-semibold">
-                Un reino. Una corona. Tu legado.
-              </p>
-              <p className="text-sm text-[#e6ded0] font-serif">Forja tu reino. Escribe tu historia.</p>
-              <p className="text-xs sm:text-sm text-[#baa890] leading-relaxed font-serif pt-1">
-                Juego de estrategia y gestión medieval de partidas persistentes. Mueve los hilos y tu población ejecutará las órdenes en el servidor en tiempo real.
-              </p>
-            </div>
-            <p className="text-[11px] text-[#8e816d] italic max-w-lg mx-auto lg:mx-0">
-              Tu cuenta y todo el progreso viven en el servidor: retoma la partida desde cualquier dispositivo con tu nombre de gobernante y tu contraseña. Sin correo ni Google.
-            </p>
-          </div>
-          <AccessPanel onGuest={onEnterDemo} />
-        </div>
-      </section>
+      <div className="hidden md:flex items-center justify-center w-full h-screen overflow-hidden relative">
+        {/* Lienzo proporcional 1536 × 1024 que mantiene exactamente la escala de la imagen oficial */}
+        <div
+          className="relative max-w-full max-h-full aspect-[1536/1024] shadow-2xl overflow-hidden"
+          style={{
+            width: 'min(100vw, calc(100vh * 1.5))',
+            height: 'min(100vh, calc(100vw / 1.5))',
+          }}
+        >
+          {/* Imagen oficial inalterable como fondo del lienzo */}
+          <img
+            src="/assets/inicio_la_conquista_oficial.png"
+            alt="La Conquista — Un reino. Una corona. Tu legado. Forja tu reino. Escribe tu historia."
+            className="absolute inset-0 w-full h-full object-cover select-none pointer-events-none"
+          />
 
-      {/* ====================================================================
-          LAS 12 CIVILIZACIONES INICIALES (PUNTO 6 DE LA ESPECIFICACIÓN)
-          ==================================================================== */}
-      <section className="bg-[#14120e] border border-[#2d251a] p-6 rounded-xl space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#2d251a] pb-3">
-          <div className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-[#d4af37]" />
-            <div>
-              <h2 className="text-sm sm:text-base font-serif font-bold text-[#f4eedb] uppercase tracking-wider">
-                Las 12 Civilizaciones Iniciales (Punto 6)
-              </h2>
-              <p className="text-[11px] text-[#8e816d]">
-                Cada civilización cuenta con bonificaciones pasivas y estilo propio. Seleccionable al fundar un nuevo reino.
-              </p>
-            </div>
+          {/* Panel interactivo real posicionado milimétricamente sobre el panel derecho de la imagen.
+              En 1536x1024:
+              - Left: 948px / 1536 = 61.72%
+              - Top: 53px / 1024 = 5.18%
+              - Width: 495px / 1536 = 32.23%
+              - Height: 939px / 1024 = 91.70%
+          */}
+          <div
+            className="absolute z-20"
+            style={{
+              left: '61.72%',
+              top: '5.18%',
+              width: '32.23%',
+              height: '91.70%',
+            }}
+          >
+            <AccessPanel onGuest={onEnterDemo} isStageOverlay />
           </div>
-          <span className="text-[10px] text-[#d4af37] bg-[#221a11] px-2 py-0.5 rounded border border-[#d4af37]/30 self-start sm:self-auto font-mono">
-            12 Facciones Oficiales
-          </span>
         </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {OFFICIAL_CIVILIZATIONS.map((civ) => {
-            const isSelected = selectedCiv === civ.id;
-            return (
-              <div
-                key={civ.id}
-                onClick={() => setSelectedCiv(isSelected ? null : civ.id)}
-                className={`p-3.5 rounded-lg border transition-all cursor-pointer text-left space-y-1.5 ${
-                  isSelected
-                    ? 'bg-[#251b11] border-[#d4af37] shadow-md shadow-[#d4af37]/10'
-                    : 'bg-[#18140f] border-[#31271b] hover:border-[#4d3d29] hover:bg-[#1f1913]'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xl" role="img" aria-label={civ.name}>
-                    {civ.icon}
-                  </span>
-                  {civ.name === 'Ingleses' && (
-                    <span className="text-[9px] text-[#d4af37] bg-[#291e13] px-1 rounded border border-[#d4af37]/30 font-mono">
-                      Ref
-                    </span>
-                  )}
-                </div>
-                <div>
-                  <h3 className="text-xs sm:text-sm font-serif font-bold text-[#f4eedb]">
-                    {civ.name}
-                  </h3>
-                  <p className="text-[11px] text-[#938673] leading-snug line-clamp-2">
-                    {civ.desc}
-                  </p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {selectedCiv && (
-          <div className="p-3 bg-[#1e1710] border border-[#4a3a24] rounded-lg text-xs text-[#c5b7a0] space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <span className="font-serif font-semibold text-[#f4eedb]">{OFFICIAL_CIVILIZATIONS.find(c => c.id === selectedCiv)?.name}</span>
-                : {OFFICIAL_CIVILIZATIONS.find(c => c.id === selectedCiv)?.desc}.
-              </div>
-              <span className="text-[10px] text-[#d4af37] whitespace-nowrap font-serif">Se elige al fundar el reino</span>
-            </div>
-            {selectedProfile ? (
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-                <div><dt className="text-[#8e816d] inline">Ventaja: </dt><dd className="inline text-emerald-200">{selectedProfile.advantage}</dd></div>
-                <div><dt className="text-[#8e816d] inline">Debilidad: </dt><dd className="inline text-rose-200">{selectedProfile.weakness ?? 'pendiente de diseño'}</dd></div>
-                {selectedProfile.identity ? (
-                  <>
-                    <div><dt className="text-[#8e816d] inline">Tropa característica: </dt><dd className="inline text-[#f0e8d4]">{selectedProfile.identity.signatureUnit.name} ({selectedProfile.identity.signatureUnit.baseLabel})</dd></div>
-                    <div><dt className="text-[#8e816d] inline">Edificio único: </dt><dd className="inline text-[#f0e8d4]">{selectedProfile.identity.uniqueBuilding.name} ({selectedProfile.identity.uniqueBuilding.baseLabel})</dd></div>
-                    <div className="sm:col-span-2"><dt className="text-[#8e816d] inline">Armas: </dt><dd className="inline">{Object.values(selectedProfile.identity.weapons).join(' → ')}</dd></div>
-                    <div className="sm:col-span-2"><dt className="text-[#8e816d] inline">Armaduras: </dt><dd className="inline">{Object.values(selectedProfile.identity.armors).join(' → ')}</dd></div>
-                  </>
-                ) : (
-                  <div className="sm:col-span-2 text-[#8e816d] italic">Equipo, edificio y tropa característicos pendientes de documentar según el dossier histórico.</div>
-                )}
-              </dl>
-            ) : (
-              <p className="text-[11px] text-[#8e816d] italic">Consultando la ficha en el servidor…</p>
-            )}
-          </div>
-        )}
-      </section>
+      </div>
 
       {/* ====================================================================
-          LEYES FUNDAMENTALES DEL MUNDO (PUNTOS 2, 3, 10, 38)
+          2. ADAPTACIÓN RESPONSIVE ERGONÓMICA EN MÓVIL (< 768px)
+          Permite que en teléfonos los controles sean cómodamente táctiles.
           ==================================================================== */}
-      <section className="space-y-4">
-        <div className="flex items-center gap-2 px-1">
-          <Scroll className="w-4 h-4 text-[#d4af37]" />
-          <h2 className="text-sm font-serif font-semibold text-[#d4af37] uppercase tracking-wider">
-            Leyes Fundamentales del Mundo (Puntos 1–73)
-          </h2>
+      <div className="flex md:hidden flex-col w-full min-h-screen bg-[#070b12] overflow-y-auto">
+        {/* Cabecera con la ilustración oficial y la marca */}
+        <div className="relative w-full h-52 sm:h-64 overflow-hidden bg-[#070b12] flex-shrink-0">
+          <img
+            src="/assets/inicio_la_conquista_oficial.png"
+            alt="La Conquista"
+            className="w-full h-full object-cover object-left select-none pointer-events-none"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#070b12] via-transparent to-black/30 pointer-events-none" />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-[#14120e] border border-[#2d251a] p-4 rounded-xl space-y-2">
-            <div className="text-xl">⏳</div>
-            <h3 className="text-sm font-serif font-bold text-[#f4eedb]">Escala Temporal (P2)</h3>
-            <p className="text-xs text-[#9d8f7b] leading-relaxed">
-              1 día real = 1 año de reino. Las estaciones y cosechas transcurren en el servidor sin botones artificiales de avance.
-            </p>
-          </div>
-
-          <div className="bg-[#14120e] border border-[#2d251a] p-4 rounded-xl space-y-2">
-            <div className="text-xl">👑</div>
-            <h3 className="text-sm font-serif font-bold text-[#f4eedb]">Comienzo (P10)</h3>
-            <p className="text-xs text-[#9d8f7b] leading-relaxed">
-              El jugador comienza con 2.000 habitantes. La población civil se asigna a profesiones y crece un 30% anual si hay viviendas.
-            </p>
-          </div>
-
-          <div className="bg-[#14120e] border border-[#2d251a] p-4 rounded-xl space-y-2">
-            <div className="text-xl">🌾</div>
-            <h3 className="text-sm font-serif font-bold text-[#f4eedb]">Economía Real (P26)</h3>
-            <p className="text-xs text-[#9d8f7b] leading-relaxed">
-              Oro, madera, piedra, hierro y alimentos. Los soldados consumen un 5% más de comida que los civiles (factor P18).
-            </p>
-          </div>
-
-          <div className="bg-[#14120e] border border-[#2d251a] p-4 rounded-xl space-y-2">
-            <div className="text-xl">⚔️</div>
-            <h3 className="text-sm font-serif font-bold text-[#f4eedb]">Parlamento (P38)</h3>
-            <p className="text-xs text-[#9d8f7b] leading-relaxed">
-              No existen ataques sorpresa en PvP. Todo desafío pasa por el Parlamento con 3 ventanas de fecha programada.
-            </p>
+        {/* Panel interactivo adaptado en móvil */}
+        <div className="w-full flex-1 flex items-start justify-center p-4 pb-12">
+          <div className="w-full max-w-md">
+            <AccessPanel onGuest={onEnterDemo} />
           </div>
         </div>
-      </section>
-
-      {/* ====================================================================
-          PILARES FUNCIONALES Y ACCESO A IBERIA
-          ==================================================================== */}
-      <section className="bg-[#14120e] border border-[#2d251a] p-6 rounded-xl space-y-5">
-        <h2 className="text-sm font-serif font-semibold text-[#f4eedb] uppercase tracking-wider flex items-center gap-2">
-          <span>🏛️ Navegación Principal del Reino (Punto 64)</span>
-        </h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-          <div className="p-3 bg-[#1a1611] border border-[#332a1e] rounded-lg space-y-1.5">
-            <div className="text-sm font-serif font-bold text-[#d4af37]">🌾 Aldea</div>
-            <p className="text-[#a09480] text-[11px] leading-relaxed">
-              Economía, oficios, alimentos, impuestos y balance demográfico.
-            </p>
-          </div>
-
-          <div className="p-3 bg-[#1a1611] border border-[#332a1e] rounded-lg space-y-1.5">
-            <div className="text-sm font-serif font-bold text-[#d4af37]">⚔️ Ejército</div>
-            <p className="text-[#a09480] text-[11px] leading-relaxed">
-              Tropas, entrenamiento, armas, armaduras, heridos y hospital.
-            </p>
-          </div>
-
-          <div className="p-3 bg-[#1a1611] border border-[#332a1e] rounded-lg space-y-1.5">
-            <div className="text-sm font-serif font-bold text-[#d4af37]">📜 Universidad</div>
-            <p className="text-[#a09480] text-[11px] leading-relaxed">
-              Árboles de tecnologías, supervisores e investigación activa.
-            </p>
-          </div>
-
-          <div className="p-3 bg-[#1a1611] border border-[#332a1e] rounded-lg space-y-1.5">
-            <div className="text-sm font-serif font-bold text-[#d4af37]">🏛️ Parlamento</div>
-            <p className="text-[#a09480] text-[11px] leading-relaxed">
-              Desafíos de combate, diplomacia y notificaciones oficiales.
-            </p>
-          </div>
-
-          <div className="p-3 bg-[#1a1611] border border-[#332a1e] rounded-lg space-y-1.5">
-            <div className="text-sm font-serif font-bold text-[#d4af37]">🗺️ Mapa</div>
-            <p className="text-[#a09480] text-[11px] leading-relaxed">
-              Territorios del reino, provincias libres, distancias y conquista.
-            </p>
-          </div>
-        </div>
-      </section>
+      </div>
     </div>
   );
 }
