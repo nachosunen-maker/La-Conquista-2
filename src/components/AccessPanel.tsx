@@ -175,54 +175,7 @@ export function RecoveryCodeCard(props: {
   );
 }
 
-function GuestWarningModal(props: { onContinue: () => void; onCreateAccount: () => void; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="max-w-md w-full bg-[#0a0e17] border-2 border-[#b8862d]/70 rounded-xl p-6 space-y-4 shadow-2xl relative">
-        <CornerAccent position="top-left" />
-        <CornerAccent position="top-right" />
-        <CornerAccent position="bottom-left" />
-        <CornerAccent position="bottom-right" />
-
-        <div className="flex items-center gap-2 border-b border-[#222c3d] pb-3">
-          <ShieldAlert className="w-5 h-5 text-amber-400" />
-          <h3 className="text-base font-serif font-bold text-[#f4eedb]">Entrar como invitado</h3>
-        </div>
-        <p className="text-xs text-[#c5b7a0] leading-relaxed">
-          Como invitado puedes ver cómo es una civilización y el juego, pero <strong className="text-amber-300">no se guardará tu progreso</strong>. Si cierras o recargas, lo perderás. Crea una cuenta para conservarlo.
-        </p>
-        <p className="text-[11px] text-[#8e816d] leading-relaxed">
-          Verás el reino de demostración Iberia en modo exploración: sin fundar reino, sin aparecer en el mapa ni desafiar a nadie.
-        </p>
-        <div className="flex flex-col sm:flex-row gap-2 pt-2">
-          <button
-            type="button"
-            onClick={props.onContinue}
-            className="flex-1 py-2.5 rounded-lg border border-[#3b4960] hover:border-[#d4af37]/60 text-[#d4af37] text-xs font-serif font-semibold hover:bg-[#121927] transition-colors cursor-pointer"
-          >
-            Continuar como invitado
-          </button>
-          <button
-            type="button"
-            onClick={props.onCreateAccount}
-            className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-[#ba8332] via-[#cf993f] to-[#ba8332] text-[#140e04] text-xs font-serif font-bold hover:from-[#c99138] hover:to-[#c99138] transition-all cursor-pointer shadow-md"
-          >
-            Crear cuenta
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={props.onClose}
-          className="w-full text-center text-[11px] text-[#7d889b] hover:text-[#c5b7a0] transition-colors cursor-pointer pt-1"
-        >
-          Volver
-        </button>
-      </div>
-    </div>
-  );
-}
-
-export function AccessPanel(props: { onGuest: () => void; initialMode?: Mode; isStageOverlay?: boolean }) {
+export function AccessPanel(props: { initialMode?: Mode; isStageOverlay?: boolean }) {
   const { signIn } = useAuthActions();
   const resetPassword = useAction(resetPasswordAction);
 
@@ -235,7 +188,6 @@ export function AccessPanel(props: { onGuest: () => void; initialMode?: Mode; is
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showGuestWarning, setShowGuestWarning] = useState(false);
   const [issuedCode, setIssuedCode] = useState<string | null>(null);
 
   const trimmedName = rulerName.trim();
@@ -313,21 +265,6 @@ export function AccessPanel(props: { onGuest: () => void; initialMode?: Mode; is
 
   return (
     <div className={containerClasses}>
-      {/* Modal de advertencia para modo invitado */}
-      {showGuestWarning && (
-        <GuestWarningModal
-          onContinue={() => {
-            setShowGuestWarning(false);
-            props.onGuest();
-          }}
-          onCreateAccount={() => {
-            setShowGuestWarning(false);
-            switchMode('crear');
-          }}
-          onClose={() => setShowGuestWarning(false)}
-        />
-      )}
-
       {/* Marco ornamental medieval exterior con doble filete dorado */}
       <div className={`relative ${props.isStageOverlay ? 'w-full h-full' : ''} rounded-2xl p-[2.5px] bg-gradient-to-b from-[#b8862d]/70 via-[#42341d]/40 to-[#b8862d]/70 shadow-[0_12px_45px_rgba(0,0,0,0.85)]`}>
         <div className={`relative ${props.isStageOverlay ? 'w-full h-full' : ''} rounded-[13px] bg-[#090e17] border border-[#c59b3c]/40 p-3.5 sm:p-5 lg:p-6 shadow-2xl flex flex-col justify-between overflow-y-auto`}>
@@ -558,28 +495,7 @@ export function AccessPanel(props: { onGuest: () => void; initialMode?: Mode; is
                         )}
                       </div>
 
-                      {/* Botón y tarjeta de Entrar como invitado (exacto al diseño aprobado) */}
-                      <div className="pt-1">
-                        <button
-                          type="button"
-                          onClick={() => setShowGuestWarning(true)}
-                          className="w-full bg-[#0c121d] hover:bg-[#111927] border border-[#263143] hover:border-[#384860] rounded-lg p-2.5 sm:p-3 flex items-center justify-between transition-colors cursor-pointer text-left"
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-7 h-7 rounded-full bg-[#162030] flex items-center justify-center text-[#c59b3c]">
-                              <User className="w-3.5 h-3.5" />
-                            </div>
-                            <span className="font-serif text-xs sm:text-sm font-semibold text-[#e8dfc8]">
-                              Entrar como invitado
-                            </span>
-                          </div>
-                          <ChevronRight className="w-4 h-4 text-[#6e7888]" />
-                        </button>
-                        <p className="text-[10px] sm:text-[11px] text-[#727d8e] flex items-center gap-1.5 mt-1.5 leading-snug">
-                          <Info className="w-3.5 h-3.5 text-[#6e7888] flex-shrink-0" />
-                          <span>Invitado: el progreso podría perderse y no se garantiza su recuperación.</span>
-                        </p>
-                      </div>
+
                     </form>
                   </div>
                 </div>

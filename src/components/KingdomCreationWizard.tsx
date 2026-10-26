@@ -52,10 +52,6 @@ export function KingdomCreationWizard({
       setErrorMessage('El nombre del reino debe contener entre 3 y 40 caracteres.');
       return;
     }
-    if (cleanK.toLowerCase() === 'iberia' || cleanK.toLowerCase() === 'reino de iberia') {
-      setErrorMessage("El nombre 'Iberia' está reservado exclusivamente para el reino de demostración.");
-      return;
-    }
     if (cleanC.length < 3 || cleanC.length > 40) {
       setErrorMessage('El nombre del castillo debe contener entre 3 y 40 caracteres.');
       return;
@@ -131,48 +127,63 @@ export function KingdomCreationWizard({
       )}
 
       {/* ====================================================================
-          PASO 1: SELECCIÓN DE CIVILIZACIÓN (PUNTO 6)
+          PASO 1: SELECCIÓN VISUAL DE CIVILIZACIÓN (PUNTO 6)
           ==================================================================== */}
       {step === 1 && (
         <div className="space-y-4">
           <div className="space-y-1">
             <h3 className="text-sm font-serif font-bold text-[#e6ded0] uppercase tracking-wider flex items-center gap-2">
               <Shield className="w-4 h-4 text-[#d4af37]" />
-              <span>Elige el origen de tu reino (P6)</span>
+              <span>Elige el origen histórico de tu reino (P6)</span>
             </h3>
             <p className="text-xs text-[#8e816d]">
-              Selecciona una de las 12 civilizaciones oficiales. Esta elección quedará vinculada permanentemente a tu partida.
+              Selecciona una de las 12 civilizaciones oficiales. Cada una ofrece un perfil estratégico único y ventajas permanentes.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[380px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[420px] overflow-y-auto pr-1">
             {CIVILIZATIONS.map((civ: any) => {
               const isSelected = selectedCiv === civ.id;
               return (
                 <div
                   key={civ.id}
                   onClick={() => setSelectedCiv(civ.id)}
-                  className={`p-3 rounded-lg border transition-all cursor-pointer text-left space-y-1 ${
+                  className={`p-3.5 rounded-lg border transition-all cursor-pointer text-left space-y-2 relative ${
                     isSelected
-                      ? 'bg-[#291d11] border-[#d4af37] shadow-md shadow-[#d4af37]/15 ring-1 ring-[#d4af37]'
+                      ? 'bg-[#291d11] border-[#d4af37] shadow-lg shadow-[#d4af37]/20 ring-2 ring-[#d4af37]'
                       : 'bg-[#18140f] border-[#2f2519] hover:border-[#4d3d29] hover:bg-[#1f1913]'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xl" role="img" aria-label={civ.label}>
-                      🛡️
-                    </span>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-2xl p-1.5 bg-[#100d09] rounded border border-[#332717]" role="img" aria-label={civ.label}>
+                        {civ.emblem || '🛡️'}
+                      </span>
+                      <div>
+                        <h4 className="text-sm font-serif font-bold text-[#f4eedb]">
+                          {civ.label}
+                        </h4>
+                        <p className="text-[10px] text-[#b5a68d] italic">
+                          {civ.style || 'Civilización oficial canónica'}
+                        </p>
+                      </div>
+                    </div>
                     {isSelected && (
-                      <span className="text-[10px] text-[#d4af37] font-bold">✓ Seleccionada</span>
+                      <span className="px-2 py-0.5 bg-[#d4af37] text-[#140e04] text-[10px] font-bold rounded shadow">
+                        ✓ Seleccionada
+                      </span>
                     )}
                   </div>
-                  <div>
-                    <h4 className="text-xs sm:text-sm font-serif font-bold text-[#f4eedb]">
-                      {civ.label}
-                    </h4>
-                    <p className="text-[10px] text-[#938673] line-clamp-2 leading-tight pt-0.5">
-                      Civilización oficial (P6 / D-43)
+
+                  <div className="space-y-1 pt-1 border-t border-[#261e14] text-xs">
+                    <p className="text-[11px] text-[#e8dfc8] leading-tight">
+                      <strong className="text-[#d4af37]">Ventaja:</strong> {civ.passive?.description || 'Especialización equilibrada'}
                     </p>
+                    {civ.passive?.weakness && (
+                      <p className="text-[10px] text-rose-300/80 leading-tight">
+                        <strong className="text-rose-400">Debilidad:</strong> {civ.passive.weakness}
+                      </p>
+                    )}
                   </div>
                 </div>
               );

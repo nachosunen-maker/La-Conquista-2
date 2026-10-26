@@ -34,7 +34,7 @@ export const OFFICIAL_CIVILIZATIONS = [
  *   mediante un lienzo proporcional 1536:1024 centrado que cubre la pantalla sin apilarse.
  * - En móvil vertical (< 768px): Adaptación ergonómica vertical para facilitar el uso táctil.
  */
-export function HomeScreen({ onEnterDemo }: HomeScreenProps) {
+export function HomeScreen() {
   return (
     <div className="min-h-screen w-full bg-[#05080e] text-[#e8dfc8] flex items-center justify-center relative overflow-hidden select-none">
       {/* ====================================================================
@@ -73,7 +73,7 @@ export function HomeScreen({ onEnterDemo }: HomeScreenProps) {
               height: '91.70%',
             }}
           >
-            <AccessPanel onGuest={onEnterDemo} isStageOverlay />
+            <AccessPanel isStageOverlay />
           </div>
         </div>
       </div>
@@ -96,7 +96,7 @@ export function HomeScreen({ onEnterDemo }: HomeScreenProps) {
         {/* Panel interactivo adaptado en móvil */}
         <div className="w-full flex-1 flex items-start justify-center p-4 pb-12">
           <div className="w-full max-w-md">
-            <AccessPanel onGuest={onEnterDemo} />
+            <AccessPanel />
           </div>
         </div>
       </div>

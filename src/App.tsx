@@ -508,21 +508,12 @@ function formatSecondsDuration(seconds: number): string {
 /* ==========================================================================
    PANTALLA PRINCIPAL: RESUMEN DEL REINO (JUEGO DE ESTRATEGIA MEDIEVAL)
    ========================================================================== */
-function KingdomOverviewContent(props?: {
-  viewDemoKingdom?: boolean;
-  setViewDemoKingdom?: (val: boolean) => void;
-}) {
+function KingdomOverviewContent() {
   const { isAuthenticated, isLoading } = useConvexAuth();
-  const [internalViewDemo, setInternalViewDemo] = useState<boolean>(false);
-  const viewDemoKingdom = props?.viewDemoKingdom ?? internalViewDemo;
-  const setViewDemoKingdom = props?.setViewDemoKingdom ?? setInternalViewDemo;
-  const isViewingDemo = viewDemoKingdom;
 
   // Consulta autoritativa OIDC de Convex en tiempo real
   const viewer = useQuery(getViewerQuery);
-  const activeUserId = isViewingDemo
-    ? DEMO_USER_ID
-    : (isAuthenticated ? viewer?.subject ?? '' : 'GUEST');
+  const activeUserId = isAuthenticated ? viewer?.subject ?? '' : 'GUEST';
 
   const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -550,6 +541,7 @@ function KingdomOverviewContent(props?: {
   ) as KingdomFullResponse | undefined;
 
   const kingdom = kingdomData?.kingdom;
+  if (!kingdom) return <div className="p-8 text-center text-[#8e816d]">Cargando o reino no encontrado...</div>;
   const resources = kingdomData?.resources;
   const population = kingdomData?.population;
   const populationJobs = kingdomData?.populationJobs;
@@ -575,7 +567,6 @@ function KingdomOverviewContent(props?: {
 
   // Verificación estricta de titularidad en el servidor (P1)
   const isOwner = Boolean(
-    !isViewingDemo &&
     isAuthenticated &&
     viewer &&
     kingdom &&
@@ -925,10 +916,10 @@ function KingdomOverviewContent(props?: {
     }, 600);
   };
 
-  // 1. Si el usuario no está autenticado y no ha elegido la demo, mostrar pantalla de inicio / bienvenida (P4)
-  if (!isAuthenticated && !viewDemoKingdom) {
+  // 1. Si el usuario no está autenticado, mostrar pantalla de inicio / bienvenida (P4)
+  if (!isAuthenticated) {
     return (
-      <HomeScreen onEnterDemo={() => setViewDemoKingdom(true)} />
+      <HomeScreen />
     );
   }
 
@@ -948,7 +939,7 @@ function KingdomOverviewContent(props?: {
   }
 
   // 3. Si el usuario autenticado aún no tiene un reino propio: código de recuperación (una vez) y asistente de fundación (P4-P9, paso 2)
-  if (!kingdom && isAuthenticated && !viewDemoKingdom) {
+  if (!kingdom && isAuthenticated) {
     return (
       <RecoveryCodeGate>
         <div className="space-y-4">
@@ -971,54 +962,8 @@ function KingdomOverviewContent(props?: {
             )}
           </div>
           <FoundingWizard defaultMonarchName={viewer?.rulerName ?? ''} onFounded={() => setActiveTab('aldea')} />
-          <div className="flex justify-center">
-            <button
-              onClick={() => setViewDemoKingdom(true)}
-              className="px-4 py-2 bg-[#1b1711] hover:bg-[#262017] border border-[#3b3121] rounded text-[#c5a059] text-xs font-serif transition-colors cursor-pointer"
-            >
-              Explorar el Reino de Iberia (demostración) sin fundar
-            </button>
-          </div>
         </div>
       </RecoveryCodeGate>
-    );
-  }
-
-  // 4. Si el reino de demostración no existe o no está disponible en la base de datos de Convex
-  if (!kingdom && viewDemoKingdom) {
-    return (
-      <div className="bg-[#14120e] border-2 border-rose-900/60 rounded-xl p-8 text-center max-w-lg mx-auto my-12 space-y-4">
-        <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
-        <h2 className="text-lg font-serif font-bold text-rose-300">Reino de demostración no disponible</h2>
-        <p className="text-xs text-[#a09480] leading-relaxed">
-          El reino de demostración Iberia (<code className="text-[#d4af37] font-mono">{DEMO_USER_ID}</code>) no está disponible en el servidor Convex. Comprueba que el backend esté conectado y contenga los datos del reino de prueba.
-        </p>
-        <button
-          onClick={() => setViewDemoKingdom(false)}
-          className="px-4 py-2 bg-[#251e14] hover:bg-[#34281b] border border-amber-600/40 rounded text-amber-300 text-xs font-serif transition-colors cursor-pointer"
-        >
-          ← Volver a la pantalla de inicio
-        </button>
-      </div>
-    );
-  }
-
-  // 5. Si el reino de un usuario específico no se encuentra
-  if (!kingdom) {
-    return (
-      <div className="bg-[#14120e] border border-amber-900/40 rounded-xl p-8 text-center max-w-lg mx-auto my-12 space-y-4">
-        <Castle className="w-12 h-12 text-amber-500/80 mx-auto" />
-        <h2 className="text-lg font-serif font-bold text-[#f4eedb]">Reino no encontrado</h2>
-        <p className="text-xs text-[#a09480] leading-relaxed">
-          No se encontró ningún registro para el identificador <code className="text-[#d4af37] font-mono">{activeUserId}</code>.
-        </p>
-        <button
-          onClick={() => setViewDemoKingdom(false)}
-          className="px-4 py-2 bg-[#251e14] hover:bg-[#34281b] border border-amber-600/40 rounded text-amber-300 text-xs font-serif transition-colors cursor-pointer"
-        >
-          ← Volver a la pantalla de inicio
-        </button>
-      </div>
     );
   }
 
@@ -1076,29 +1021,6 @@ function KingdomOverviewContent(props?: {
   return (
     <div className="space-y-6">
       {/* Indicador de estado de sesión / Demo */}
-      {isViewingDemo && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-amber-950/30 border border-amber-600/40 rounded-xl text-xs text-[#d6c7af] shadow-inner mb-2">
-          <div className="flex items-center gap-2.5">
-            <ShieldAlert className="w-5 h-5 text-amber-400 flex-shrink-0" />
-            <div>
-              <span className="font-semibold text-amber-300 block font-serif">
-                {isAuthenticated ? 'Modo Demostración: Reino de Iberia (Solo Lectura)' : 'Modo invitado · no se guarda tu progreso'}
-              </span>
-              <p className="text-[11px] text-[#a09480] mt-0.5">
-                {isAuthenticated
-                  ? `Has iniciado sesión. Este reino de prueba se conserva intacto en modo solo lectura.`
-                  : 'Estás viendo el Reino de Iberia (demostración) en solo lectura: obras, tropas, investigación y combate están bloqueados y nada se guarda. Crea una cuenta para fundar y gobernar tu propio reino.'}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setViewDemoKingdom(false)}
-            className="px-3.5 py-1.5 bg-[#251d13] hover:bg-[#342718] border border-[#d4af37]/40 rounded text-[#d4af37] text-xs font-serif transition-colors whitespace-nowrap self-start sm:self-center cursor-pointer"
-          >
-            {isAuthenticated ? '← Volver a mi reino' : 'Crear cuenta o iniciar sesión'}
-          </button>
-        </div>
-      )}
 
       {/* ====================================================================
           1. CABECERA HERÁLDICA DEL REINO (ESTRATEGIA MEDIEVAL)
@@ -2274,13 +2196,12 @@ function KingdomOverviewContent(props?: {
    ========================================================================== */
 export default function App() {
   const { isAuthenticated } = useConvexAuth();
-  const [viewDemoKingdom, setViewDemoKingdom] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Si no está autenticado ni en la demo de Iberia, renderiza la pantalla de inicio oficial a pantalla completa
-  if (!isAuthenticated && !viewDemoKingdom) {
+  // Si no está autenticado, renderiza la pantalla de inicio oficial a pantalla completa
+  if (!isAuthenticated) {
     return (
-      <HomeScreen onEnterDemo={() => setViewDemoKingdom(true)} />
+      <HomeScreen />
     );
   }
 
@@ -2330,10 +2251,7 @@ export default function App() {
           ==================================================================== */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 pb-24 sm:p-6" key={refreshTrigger}>
         <QueryErrorBoundary fallbackUserId={DEMO_USER_ID}>
-          <KingdomOverviewContent
-            viewDemoKingdom={viewDemoKingdom}
-            setViewDemoKingdom={setViewDemoKingdom}
-          />
+          <KingdomOverviewContent />
         </QueryErrorBoundary>
       </main>
 
