@@ -267,7 +267,7 @@ export function AccessPanel(props: { initialMode?: Mode; isStageOverlay?: boolea
     <div className={containerClasses}>
       {/* Marco ornamental medieval exterior con doble filete dorado */}
       <div className={`relative ${props.isStageOverlay ? 'w-full h-full' : ''} rounded-2xl p-[2.5px] bg-gradient-to-b from-[#b8862d]/70 via-[#42341d]/40 to-[#b8862d]/70 shadow-[0_12px_45px_rgba(0,0,0,0.85)]`}>
-        <div className={`relative ${props.isStageOverlay ? 'w-full h-full' : ''} rounded-[13px] bg-[#090e17] border border-[#c59b3c]/40 p-3.5 sm:p-5 lg:p-6 shadow-2xl flex flex-col justify-between overflow-y-auto`}>
+        <div className={`relative ${props.isStageOverlay ? 'w-full h-full' : ''} rounded-[13px] bg-[#090e17]/95 backdrop-blur-sm border border-[#c59b3c]/40 p-3.5 sm:p-5 lg:p-6 shadow-2xl flex flex-col justify-between overflow-y-auto`}>
           {/* Adornos en las 4 esquinas */}
           <CornerAccent position="top-left" />
           <CornerAccent position="top-right" />

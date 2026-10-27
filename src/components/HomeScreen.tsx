@@ -42,35 +42,29 @@ export function HomeScreen() {
           Composición horizontal inalterable: paisaje a la izquierda, panel interactivo a la derecha.
           ==================================================================== */}
       <div className="hidden md:flex items-center justify-center w-full h-screen overflow-hidden relative">
-        {/* Lienzo proporcional 1536 × 1024 que mantiene exactamente la escala de la imagen oficial */}
+        {/* Lienzo proporcional 1264 × 843 (~3:2) que mantiene exactamente la escala del arte oficial */}
         <div
-          className="relative max-w-full max-h-full aspect-[1536/1024] shadow-2xl overflow-hidden"
+          className="relative max-w-full max-h-full aspect-[1264/843] shadow-2xl overflow-hidden"
           style={{
-            width: 'min(100vw, calc(100vh * 1.5))',
-            height: 'min(100vh, calc(100vw / 1.5))',
+            width: 'min(100vw, calc(100vh * (1264 / 843)))',
+            height: 'min(100vh, calc(100vw / (1264 / 843)))',
           }}
         >
-          {/* Imagen oficial inalterable como fondo del lienzo */}
+          {/* Ilustración artística oficial como fondo del lienzo */}
           <img
-            src="/assets/inicio_la_conquista_oficial.png"
+            src="/assets/aistudio/1793086836321_852e3733.jpg"
             alt="La Conquista — Un reino. Una corona. Tu legado. Forja tu reino. Escribe tu historia."
             className="absolute inset-0 w-full h-full object-cover select-none pointer-events-none"
           />
 
-          {/* Panel interactivo real posicionado milimétricamente sobre el panel derecho de la imagen.
-              En 1536x1024:
-              - Left: 948px / 1536 = 61.72%
-              - Top: 53px / 1024 = 5.18%
-              - Width: 495px / 1536 = 32.23%
-              - Height: 939px / 1024 = 91.70%
-          */}
+          {/* Panel interactivo real posicionado sobre la zona derecha del lienzo */}
           <div
             className="absolute z-20"
             style={{
-              left: '61.72%',
-              top: '5.18%',
-              width: '32.23%',
-              height: '91.70%',
+              left: '59%',
+              top: '4.5%',
+              width: '37.5%',
+              height: '91%',
             }}
           >
             <AccessPanel isStageOverlay />
@@ -84,9 +78,9 @@ export function HomeScreen() {
           ==================================================================== */}
       <div className="flex md:hidden flex-col w-full min-h-screen bg-[#070b12] overflow-y-auto">
         {/* Cabecera con la ilustración oficial y la marca */}
-        <div className="relative w-full h-52 sm:h-64 overflow-hidden bg-[#070b12] flex-shrink-0">
+        <div className="relative w-full h-56 sm:h-72 overflow-hidden bg-[#070b12] flex-shrink-0">
           <img
-            src="/assets/inicio_la_conquista_oficial.png"
+            src="/assets/aistudio/1793086836321_852e3733.jpg"
             alt="La Conquista"
             className="w-full h-full object-cover object-left select-none pointer-events-none"
           />
