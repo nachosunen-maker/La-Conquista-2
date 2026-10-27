@@ -263,11 +263,12 @@ export function runCivilizationTests(): CivilizationTestResult[] {
   const pendingNoWeakness = pending.every((id) => (getCivilization(id)?.passive.weakness ?? null) === null);
   const aztecNoSteel = !Object.values(getCivilizationIdentity("aztecas")!.weapons).some((n) => /acero/i.test(n)) && !Object.values(getCivilizationIdentity("aztecas")!.armors).some((n) => /acero|hierro|malla/i.test(n));
   const vikingNoHorns = !Object.values(getCivilizationIdentity("vikingos")!.armors).some((n) => /cuerno/i.test(n));
+  const testPassed = identified.length === 12 && pending.length === 0 && complete && weaknessOk && pendingNoWeakness && aztecNoSteel && vikingNoHorns;
   record(
     "SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026)",
-    "11. Diez civilizaciones con equipo por nivel, edificio único, tropa característica y debilidad; Navajos y Masáis pendientes (no se inventan); sin acero ni caballos aztecas ni cuernos vikingos",
-    identified.length === 10 && pending.join(",") === "navajos,masais" && complete && weaknessOk && pendingNoWeakness && aztecNoSteel && vikingNoHorns,
-    `Con identidad: ${identified.length}; pendientes: ${pending.join(", ")}; completas: ${complete}; con debilidad: ${weaknessOk}; aztecas sin acero: ${aztecNoSteel}`
+    "11. Las 12 civilizaciones cuentan con equipo por nivel, edificio único, tropa característica y debilidad; sin acero ni caballos aztecas ni cuernos vikingos",
+    testPassed,
+    `Con identidad: ${identified.length}; pendientes: ${pending.length}; completas: ${complete}; con debilidad: ${weaknessOk}; aztecas sin acero: ${aztecNoSteel}; vikingos sin cuernos: ${vikingNoHorns}`
   );
 
   const roman = { weapon: civilizationWeaponLabel("romanos", "espadaHierro"), armor: civilizationArmorLabel("romanos", "hierro"), building: civilizationBuildingLabel("romanos", "cuartel"), other: civilizationBuildingLabel("romanos", "granja"), unit: civilizationUnitLabel("romanos", "infanteria") };
@@ -276,7 +277,7 @@ export function runCivilizationTests(): CivilizationTestResult[] {
     "SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026)",
     "12. Los nombres propios acompañan al nombre base (multiplicadores intactos) y las civilizaciones pendientes usan los nombres genéricos",
     roman.weapon === "Gladius hispaniensis (Espada de hierro)" && roman.armor === "Lorica segmentata (Hierro)" && roman.building === `Castra (${BUILDINGS.cuartel.label})` && roman.other === BUILDINGS.granja.label && roman.unit === "Legionario (Infantería)" &&
-      navajo.weapon === "Espada de hierro" && navajo.building === BUILDINGS.cuartel.label && navajo.unit === "Infantería",
+      navajo.weapon === "Hacha de hierro (Espada de hierro)" && navajo.building === `Hogar de rastreadores (${BUILDINGS.taberna.label})` && navajo.unit === "Rastreador (Infantería)",
     `Romanos: ${roman.weapon} · ${roman.armor} · ${roman.building} · ${roman.unit}; Navajos: ${navajo.weapon} · ${navajo.building} · ${navajo.unit}`
   );
 
@@ -293,7 +294,7 @@ export function runCivilizationTests(): CivilizationTestResult[] {
     "13. Debilidades aplicadas: caballería inglesa +15 % de coste (plan de instrucción), mongoles −5 % de defensa; toda civilización conserva su ventaja; la ficha pública marca las pendientes",
     Math.abs(englishCavalryCost - 1.15) < 1e-9 && englishInfantryCost === 1 && plan.success && planPlain.success &&
       plan.plan.costs.gold === Math.ceil(planPlain.plan.costs.gold! * 1.15) && plan.plan.durationMs === planPlain.plan.durationMs &&
-      Math.abs(mongolDefense - 0.95) < 1e-9 && allHaveAdvantage && !profileRomanos.pendingDesign && profileNavajos.pendingDesign && profileRomanos.identity?.uniqueBuilding.name === "Castra",
+      Math.abs(mongolDefense - 0.95) < 1e-9 && allHaveAdvantage && !profileRomanos.pendingDesign && !profileNavajos.pendingDesign && profileRomanos.identity?.uniqueBuilding.name === "Castra",
     `Oro caballería inglesa: ${plan.success ? plan.plan.costs.gold : "-"} frente a ${planPlain.success ? planPlain.plan.costs.gold : "-"}; defensa mongola ×${mongolDefense}; Romanos pendiente: ${profileRomanos.pendingDesign}; Navajos pendiente: ${profileNavajos.pendingDesign}`
   );
 
