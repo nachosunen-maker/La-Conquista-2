@@ -52,11 +52,9 @@ if (!convexUrl) {
   const convex = new ConvexReactClient(convexUrl);
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
-      <ConvexProvider client={convex}>
-        <AuthProvider convex={convex}>
-          <App />
-        </AuthProvider>
-      </ConvexProvider>
+      <AuthProvider convex={convex}>
+        <App />
+      </AuthProvider>
     </React.StrictMode>
   );
 }

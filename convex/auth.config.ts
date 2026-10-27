@@ -7,7 +7,7 @@
 export default {
   providers: [
     {
-      domain: process.env.CONVEX_SITE_URL || process.env.SITE_URL,
+      domain: process.env.CONVEX_SITE_URL || "https://festive-dodo-429.eu-west-1.convex.site",
       applicationID: "convex",
     },
   ],

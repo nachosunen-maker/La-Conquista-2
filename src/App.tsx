@@ -949,14 +949,30 @@ function KingdomOverviewContent() {
                 <span>Gobernante: {viewer.rulerName ?? viewer.name ?? 'sesión iniciada'}</span>
               </span>
             ) : (
-              <div className="max-w-md mx-auto p-3 bg-amber-950/40 border border-amber-600/40 rounded-lg text-amber-200 text-xs text-left">
-                <div className="flex items-center gap-1.5 font-semibold text-amber-300">
-                  <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                  <span>Sesión en espera de validación por el servidor</span>
+              <div className="max-w-md mx-auto space-y-2">
+                <div className="p-3 bg-amber-950/40 border border-amber-600/40 rounded-lg text-amber-200 text-xs text-left">
+                  <div className="flex items-center gap-1.5 font-semibold text-amber-300">
+                    <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                    <span>Sesión en espera de validación por el servidor</span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-amber-300/80 leading-relaxed">
+                    El servidor aún no ha confirmado tu sesión. Si persiste, cierra sesión y vuelve a entrar.
+                  </p>
                 </div>
-                <p className="mt-1 text-[11px] text-amber-300/80 leading-relaxed">
-                  El servidor aún no ha confirmado tu sesión. Si persiste, cierra sesión y vuelve a entrar.
-                </p>
+                {/* Diagnóstico temporal solicitado */}
+                <div className="p-3 bg-neutral-950/90 border border-neutral-700/60 rounded-lg text-left text-[11px] font-mono text-neutral-300 space-y-1 shadow-xl">
+                  <div className="font-bold text-amber-400 border-b border-neutral-800 pb-1 flex items-center justify-between">
+                    <span>[Diagnóstico temporal de autenticación]</span>
+                    <span className="text-[10px] text-neutral-400">festive-dodo-429</span>
+                  </div>
+                  <div>• auth provider loading (isLoading): <span className={isLoading ? "text-amber-400" : "text-emerald-400"}>{String(isLoading)}</span></div>
+                  <div>• token local presente (isAuthenticated): <span className={isAuthenticated ? "text-emerald-400" : "text-rose-400"}>{String(isAuthenticated)}</span></div>
+                  <div>• servidor getViewer(): <span className={viewer === undefined ? "text-amber-400" : viewer === null ? "text-rose-400" : "text-emerald-400"}>{viewer === undefined ? "cargando (undefined)" : viewer === null ? "null (servidor rechaza token)" : "reconocido"}</span></div>
+                  <div>• URL cliente Convex: <span className="text-neutral-200">https://festive-dodo-429.eu-west-1.convex.cloud</span></div>
+                  <div className="text-[10px] text-neutral-400 pt-1 border-t border-neutral-900 leading-tight">
+                    * Distinción: isAuthenticated=true indica token guardado en cliente; getViewer=null indica que el backend rechazó la identidad.
+                  </div>
+                </div>
               </div>
             )}
           </div>
