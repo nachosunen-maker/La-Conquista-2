@@ -537,6 +537,8 @@ export const UNIT_COUNTERS: Readonly<Record<Exclude<UnitType, "asedio">, Exclude
 export const BATTLE_REWARDS = {
   victory: { honor: 20, glory: 10 },
   crushingVictory: { honor: 50, glory: 30 },
+  decisiveVictory: { honor: 30, glory: 18 },
+  narrowVictory: { honor: 12, glory: 6 },
   draw: { honor: 5, glory: 0 },
   defeat: { honor: 0, glory: -5 },
   /** La gloria decae 1 punto por día real y nunca baja de 0. */
@@ -544,6 +546,12 @@ export const BATTLE_REWARDS = {
   /** +1 punto de moral por cada 10 de gloria, máximo +10. */
   GLORY_MORALE_PER_POINTS: 10,
   GLORY_MORALE_MAX: 10,
+  /** Factor de escalado por tamaño relativo de ejércitos (anti-exploit y batallas desiguales). */
+  SIZE_SCALING: {
+    MIN_SCALE: 0.10,
+    MAX_SCALE: 1.50,
+    MIN_ARMY_SIZE: 10,
+  },
 } as const;
 
 /** [MAESTRA P45] Recuperación anual de heridos por nivel de Hospital militar. */
@@ -556,6 +564,14 @@ export const HOSPITAL_RECOVERY_PER_YEAR: readonly { minLevel: number; ratio: num
 ];
 /** [COMPLEMENTO §4] Tope acumulado de recuperación con tecnologías médicas. */
 export const HOSPITAL_RECOVERY_CAP = 0.6;
+
+/** Capacidad hospitalaria y gestión de heridos en exceso (triaje de campaña). */
+export const HOSPITAL = {
+  /** Capacidad de camas hospitalarias por nivel de Hospital militar. */
+  CAPACITY_PER_LEVEL: 100,
+  /** Tasa anual base de recuperación natural/triaje en campaña para heridos fuera de capacidad (5 %). */
+  FIELD_RECOVERY_RATE: 0.05,
+} as const;
 
 /** [MAESTRA P59] Bonus diario: +5 honor una vez cada 24 h reales, validado en servidor. */
 export const DAILY_BONUS = { HONOR: 5, COOLDOWN_MS: 24 * 60 * 60 * 1000 } as const;
@@ -865,6 +881,16 @@ export const MAP = {
   MARCH_SECONDS_PER_HEX: 1_800,
   /** [DERIVADO] Semilla de mundo reproducible para asignar terrenos (D-25). */
   WORLD_SEED: 20261017,
+} as const;
+
+export const MARCH = {
+  /** Límites de duración de marcha entre reinos en segundos reales (1 día real = 1 año de juego). */
+  MIN_DURATION_SECONDS: 900, // 15 minutos reales (~3,8 días de juego)
+  MAX_DURATION_SECONDS: 43_200, // 12 horas reales (0,5 años = 6 meses de juego)
+  /** Ventana de preparación previa al combate (20 % de la duración de marcha, acotada entre 15 min y 1 h). */
+  PREP_WINDOW_RATIO: 0.20,
+  MIN_PREP_SECONDS: 900,
+  MAX_PREP_SECONDS: 3_600,
 } as const;
 
 export const EXPLORATION = {
@@ -1199,7 +1225,7 @@ export const CIVILIZATIONS = [
       marchSpeedMultiplier: 1.0,
       fatigueAccrualMultiplier: 1.0,
       residentialCapacityMultiplier: 1.0,
-      trainingDurationByUnit: {},
+      trainingDurationByUnit: { asedio: 1.1 },
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
@@ -1250,7 +1276,7 @@ export const CIVILIZATIONS = [
       residentialCapacityMultiplier: 1.0,
       trainingDurationByUnit: {},
       combatAttackMultiplier: 1.0,
-      combatDefenseMultiplier: 1.0,
+      combatDefenseMultiplier: 0.95,
       happinessBonus: 0,
       weakness: "Defensa fija limitada: −5 % de fuerza defensiva en combate [DERIVADO].",
     },

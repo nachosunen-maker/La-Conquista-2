@@ -10,6 +10,9 @@ import {
   BATTLE_REWARDS,
   COMBAT,
   FOOD,
+  HOSPITAL,
+  HOSPITAL_RECOVERY_CAP,
+  HOSPITAL_RECOVERY_PER_YEAR,
   STRATEGIES,
   STRATEGY_COUNTER_BONUS,
   STRATEGY_FACTOR_RANGE,
@@ -268,12 +271,155 @@ function splitWounded(casualties: Composition): Composition {
   return wounded;
 }
 
-/** [M-01 opción A] Recompensas de honor y gloria según resultado. */
+export interface BattleRewardResult {
+  honor: number;
+  glory: number;
+  baseHonor: number;
+  baseGlory: number;
+  sizeScale: number;
+  victoryTier: "crushing" | "decisive" | "standard" | "narrow" | "draw" | "defeat";
+}
+
+/**
+ * [DECISIÓN 17-10-2026, M-01 opción A y Ronda 3] Recompensas de honor y gloria con escalado por
+ * tamaño relativo de ejércitos (anti-exploit) y niveles de victoria (aplastante, decisiva, estándar, mínima).
+ */
+export function calculateBattleRewards(
+  outcome: BattleOutcome,
+  crushing: boolean,
+  attackerInitial: number,
+  defenderInitial: number,
+  loserLossRatio: number
+): {
+  attacker: BattleRewardResult;
+  defender: BattleRewardResult;
+} {
+  const nA = Math.max(0, attackerInitial);
+  const nD = Math.max(0, defenderInitial);
+
+  // Escala por tamaño relativo para el atacante frente al defensor
+  const ratioA = nA > 0 ? nD / nA : 1;
+  const ratioD = nD > 0 ? nA / nD : 1;
+
+  // Límite mínimo de efectivos para evitar batallas artificiales (farming de duelos 1 vs 1)
+  const minArmyLimit = BATTLE_REWARDS.SIZE_SCALING.MIN_ARMY_SIZE;
+  const minUnitsPresent = Math.min(nA, nD);
+  const sizeFactor = minUnitsPresent < minArmyLimit && minUnitsPresent > 0 ? minUnitsPresent / minArmyLimit : 1;
+
+  const rawScaleA = Math.max(BATTLE_REWARDS.SIZE_SCALING.MIN_SCALE, Math.min(BATTLE_REWARDS.SIZE_SCALING.MAX_SCALE, Math.sqrt(ratioA)));
+  const rawScaleD = Math.max(BATTLE_REWARDS.SIZE_SCALING.MIN_SCALE, Math.min(BATTLE_REWARDS.SIZE_SCALING.MAX_SCALE, Math.sqrt(ratioD)));
+
+  const scaleA = Math.round(rawScaleA * sizeFactor * 100) / 100;
+  const scaleD = Math.round(rawScaleD * sizeFactor * 100) / 100;
+
+  // Determinar nivel de victoria
+  let winTier: "crushing" | "decisive" | "standard" | "narrow" = "standard";
+  let winBase: { honor: number; glory: number } = BATTLE_REWARDS.victory;
+
+  if (crushing) {
+    winTier = "crushing";
+    winBase = BATTLE_REWARDS.crushingVictory;
+  } else if (loserLossRatio >= 0.50) {
+    winTier = "decisive";
+    winBase = BATTLE_REWARDS.decisiveVictory;
+  } else if (loserLossRatio >= 0.25) {
+    winTier = "standard";
+    winBase = BATTLE_REWARDS.victory;
+  } else {
+    winTier = "narrow";
+    winBase = BATTLE_REWARDS.narrowVictory;
+  }
+
+  if (outcome === "victoria") {
+    const effScaleA = (nA === 0 && nD === 0) ? 1 : scaleA;
+    const honorA = Math.max(1, Math.round(winBase.honor * effScaleA));
+    const gloryA = Math.max(1, Math.round(winBase.glory * effScaleA));
+    return {
+      attacker: { honor: honorA, glory: gloryA, baseHonor: winBase.honor, baseGlory: winBase.glory, sizeScale: effScaleA, victoryTier: winTier },
+      defender: { honor: BATTLE_REWARDS.defeat.honor, glory: BATTLE_REWARDS.defeat.glory, baseHonor: BATTLE_REWARDS.defeat.honor, baseGlory: BATTLE_REWARDS.defeat.glory, sizeScale: scaleD, victoryTier: "defeat" },
+    };
+  }
+
+  if (outcome === "derrota") {
+    const effScaleD = (nA === 0 && nD === 0) ? 1 : scaleD;
+    const honorD = Math.max(1, Math.round(winBase.honor * effScaleD));
+    const gloryD = Math.max(1, Math.round(winBase.glory * effScaleD));
+    return {
+      attacker: { honor: BATTLE_REWARDS.defeat.honor, glory: BATTLE_REWARDS.defeat.glory, baseHonor: BATTLE_REWARDS.defeat.honor, baseGlory: BATTLE_REWARDS.defeat.glory, sizeScale: scaleA, victoryTier: "defeat" },
+      defender: { honor: honorD, glory: gloryD, baseHonor: winBase.honor, baseGlory: winBase.glory, sizeScale: effScaleD, victoryTier: winTier },
+    };
+  }
+
+  // Empate
+  return {
+    attacker: { honor: BATTLE_REWARDS.draw.honor, glory: BATTLE_REWARDS.draw.glory, baseHonor: BATTLE_REWARDS.draw.honor, baseGlory: BATTLE_REWARDS.draw.glory, sizeScale: scaleA, victoryTier: "draw" },
+    defender: { honor: BATTLE_REWARDS.draw.honor, glory: BATTLE_REWARDS.draw.glory, baseHonor: BATTLE_REWARDS.draw.honor, baseGlory: BATTLE_REWARDS.draw.glory, sizeScale: scaleD, victoryTier: "draw" },
+  };
+}
+
+/** [M-01 opción A] Recompensas de honor y gloria según resultado (interfaz base). */
 export function battleRewards(outcome: BattleOutcome, crushing: boolean): { attacker: { honor: number; glory: number }; defender: { honor: number; glory: number } } {
   const win = crushing ? BATTLE_REWARDS.crushingVictory : BATTLE_REWARDS.victory;
   if (outcome === "victoria") return { attacker: { ...win }, defender: { ...BATTLE_REWARDS.defeat } };
   if (outcome === "derrota") return { attacker: { ...BATTLE_REWARDS.defeat }, defender: { ...win } };
   return { attacker: { ...BATTLE_REWARDS.draw }, defender: { ...BATTLE_REWARDS.draw } };
+}
+
+/** Decaimiento diario de la gloria (1 punto por día real/año de juego, mínimo 0). */
+export function calculateGloryDecay(currentGlory: number, elapsedDays: number): { nextGlory: number; decayed: number } {
+  const current = Number.isFinite(currentGlory) ? Math.max(0, currentGlory) : 0;
+  const days = Number.isFinite(elapsedDays) ? Math.max(0, elapsedDays) : 0;
+  const decayed = Math.min(current, Math.floor(days * BATTLE_REWARDS.GLORY_DECAY_PER_DAY));
+  return { nextGlory: current - decayed, decayed };
+}
+
+/** Efecto concreto de la gloria: +1 punto de moral militar por cada 10 de gloria (máximo +10). */
+export function calculateGloryMoraleBonus(glory: number): number {
+  const value = Number.isFinite(glory) ? Math.max(0, glory) : 0;
+  return Math.min(BATTLE_REWARDS.GLORY_MORALE_MAX, Math.floor(value / BATTLE_REWARDS.GLORY_MORALE_PER_POINTS));
+}
+
+/**
+ * Evaluación determinista del resultado de la batalla (P47, P52):
+ * - Victoria aplastante: exige que el enemigo pierda MÁS del 75 % (> 0,75; exactamente 0,75 no basta).
+ * - Empate: diferencia de bajas relativas <= 5 puntos porcentuales (0,05) sin retirada por pánico.
+ */
+export function evaluateBattleOutcome(
+  lossA: number,
+  lossD: number,
+  attackerRetreated: boolean,
+  defenderRetreated: boolean
+): {
+  outcome: BattleOutcome;
+  crushingVictory: boolean;
+  loserLoss: number;
+  reason: string;
+} {
+  let outcome: BattleOutcome;
+  let reason: string;
+
+  if (attackerRetreated && !defenderRetreated) {
+    outcome = "derrota";
+    reason = "El atacante se retiró del combate por pérdidas excesivas o moral insuficiente.";
+  } else if (defenderRetreated && !attackerRetreated) {
+    outcome = "victoria";
+    reason = "El defensor se retiró del combate por pérdidas excesivas o moral insuficiente.";
+  } else if (Math.abs(lossA - lossD) <= COMBAT.DRAW_TOLERANCE) {
+    outcome = "empate";
+    reason = "Diferencia de bajas relativas inferior al 5 % sin retirada de ninguno de los bandos: combate equilibrado (empate).";
+  } else if (lossD > lossA) {
+    outcome = "victoria";
+    reason = `Victoria táctica del atacante: el defensor sufrió mayores pérdidas relativas (${(lossD * 100).toFixed(1)} % frente a ${(lossA * 100).toFixed(1)} %).`;
+  } else {
+    outcome = "derrota";
+    reason = `Victoria táctica del defensor: el atacante sufrió mayores pérdidas relativas (${(lossA * 100).toFixed(1)} % frente a ${(lossD * 100).toFixed(1)} %).`;
+  }
+
+  const loserLoss = outcome === "victoria" ? lossD : outcome === "derrota" ? lossA : 0;
+  // [MAESTRA P47] Victoria aplastante exige que el perdedor pierda MÁS del 75 %.
+  const crushingVictory = outcome !== "empate" && loserLoss > COMBAT.CRUSHING_VICTORY_LOSS_RATIO;
+
+  return { outcome, crushingVictory, loserLoss, reason };
 }
 
 export function simulateBattle(attacker: BattleSide, defender: BattleSide): BattleReport {
@@ -328,16 +474,12 @@ export function simulateBattle(attacker: BattleSide, defender: BattleSide): Batt
   const lossA = nA0 > 0 ? totalUnits(casualtiesA) / nA0 : 0;
   const lossD = nD0 > 0 ? totalUnits(casualtiesD) / nD0 : 0;
 
-  let outcome: BattleOutcome;
-  if (attackerRetreated && !defenderRetreated) outcome = "derrota";
-  else if (defenderRetreated && !attackerRetreated) outcome = "victoria";
-  else if (Math.abs(lossA - lossD) <= COMBAT.DRAW_TOLERANCE) outcome = "empate";
-  else outcome = lossD > lossA ? "victoria" : "derrota";
-
+  const evalResult = evaluateBattleOutcome(lossA, lossD, attackerRetreated, defenderRetreated);
+  const outcome = evalResult.outcome;
+  const crushingVictory = evalResult.crushingVictory;
+  const loserLoss = evalResult.loserLoss;
   const winnerKingdomId = outcome === "victoria" ? attacker.kingdomId : outcome === "derrota" ? defender.kingdomId : null;
   const loserKingdomId = outcome === "victoria" ? defender.kingdomId : outcome === "derrota" ? attacker.kingdomId : null;
-  const loserLoss = outcome === "victoria" ? lossD : outcome === "derrota" ? lossA : 0;
-  const crushingVictory = winnerKingdomId !== null && loserLoss > COMBAT.CRUSHING_VICTORY_LOSS_RATIO;
   const rewards = battleRewards(outcome, crushingVictory);
 
   const woundedA = splitWounded(casualtiesA);
@@ -403,6 +545,81 @@ export function woundedRecoveryRatio(hospitalLevel: number, technologyBonus: num
   for (const row of table) if (hospitalLevel >= row.minLevel) base = row.ratio;
   if (base === 0) return 0;
   return Math.min(cap, base + Math.max(0, technologyBonus));
+}
+
+/** Desgaste de equipamiento según intensidad del combate y porcentaje de bajas (0 a 100 %). */
+export function calculateEquipmentWear(lossRatio: number): number {
+  const ratio = Number.isFinite(lossRatio) ? Math.max(0, Math.min(1, lossRatio)) : 0;
+  return Math.round(ratio * 10_000) / 100;
+}
+
+/**
+ * [MAESTRA P45 y Sección B] Gestión y recuperación de heridos en hospital militar:
+ * - Capacidad hospitalaria = nivelHospital × 100 camas.
+ * - Los heridos dentro de capacidad se tratan con la tasa completa del hospital (15 %-50 % según nivel + medicina + tecnología, tope 60 %).
+ * - Los heridos fuera de capacidad (exceso) reciben triaje/atención de campaña a tasa reducida (5 % anual), sin pérdidas arbitrarias ni recuperación duplicada.
+ */
+export function calculateHospitalRecovery(input: {
+  hospitalLevel: number;
+  totalWounded: number;
+  technologyBonus?: number;
+  medicsBonus?: number;
+  elapsedDays: number;
+  civilizationBonus?: number;
+}): {
+  hospitalCapacity: number;
+  hospitalizedWounded: number;
+  overflowWounded: number;
+  baseRecoveryRatio: number;
+  effectiveRecoveryRatio: number;
+  recoveredCount: number;
+  remainingWounded: number;
+} {
+  const hospitalLevel = Number.isInteger(input.hospitalLevel) && input.hospitalLevel > 0 ? input.hospitalLevel : 0;
+  const totalWounded = Number.isInteger(input.totalWounded) && input.totalWounded > 0 ? input.totalWounded : 0;
+  const elapsedDays = Number.isFinite(input.elapsedDays) && input.elapsedDays > 0 ? input.elapsedDays : 0;
+
+  const hospitalCapacity = hospitalLevel * HOSPITAL.CAPACITY_PER_LEVEL;
+  const hospitalizedWounded = Math.min(totalWounded, hospitalCapacity);
+  const overflowWounded = Math.max(0, totalWounded - hospitalCapacity);
+
+  const techBonus = input.technologyBonus ?? 0;
+  const medicsBonus = input.medicsBonus ?? 0;
+  const civBonus = input.civilizationBonus ?? 0;
+  const totalBonus = Math.max(0, techBonus + medicsBonus + civBonus);
+
+  const baseRecoveryRatio = woundedRecoveryRatio(
+    hospitalLevel,
+    totalBonus,
+    HOSPITAL_RECOVERY_PER_YEAR,
+    HOSPITAL_RECOVERY_CAP
+  );
+
+  let effectiveRecoveryRatio = 0;
+  if (totalWounded > 0) {
+    if (hospitalLevel === 0) {
+      effectiveRecoveryRatio = HOSPITAL.FIELD_RECOVERY_RATE;
+    } else if (totalWounded <= hospitalCapacity) {
+      effectiveRecoveryRatio = baseRecoveryRatio;
+    } else {
+      effectiveRecoveryRatio =
+        (hospitalizedWounded * baseRecoveryRatio + overflowWounded * HOSPITAL.FIELD_RECOVERY_RATE) / totalWounded;
+    }
+  }
+
+  const progress = totalWounded * effectiveRecoveryRatio * elapsedDays;
+  const recoveredCount = Math.min(totalWounded, Math.floor(progress));
+  const remainingWounded = totalWounded - recoveredCount;
+
+  return {
+    hospitalCapacity,
+    hospitalizedWounded,
+    overflowWounded,
+    baseRecoveryRatio,
+    effectiveRecoveryRatio,
+    recoveredCount,
+    remainingWounded,
+  };
 }
 
 /** Aplica la fracción de formación elegida (P37) a un inventario activo. */

@@ -54,6 +54,7 @@ Este documento recopila las fórmulas, constantes y parámetros de balance del p
 ---
 
 ## Estatus de Implementación
-- **Implementado**: Economía base, población, edificios, entrenamiento, combate.
+- **Implementado y validado (200/200 pruebas)**: Economía base, población, edificios, investigación, colas de entrenamiento, combate completo (potencia, bajas, heridos, contramedidas), singularidades y debilidades de las 12 civilizaciones oficiales (incluyendo Navajos con +10 % duración de asedio y Masáis con −5 % fuerza defensiva).
 - **Configurado (no activo)**: Estaciones (`SEASONS.ENABLED_EFFECTS = false`).
-- **Pendiente**: Singularidades de civilizaciones, detalles finales de formaciones tácticas.
+- **Próximo bloque**: Formaciones tácticas avanzadas y sus modificadores.
+

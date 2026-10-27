@@ -272,12 +272,12 @@ export function runCivilizationTests(): CivilizationTestResult[] {
   );
 
   const roman = { weapon: civilizationWeaponLabel("romanos", "espadaHierro"), armor: civilizationArmorLabel("romanos", "hierro"), building: civilizationBuildingLabel("romanos", "cuartel"), other: civilizationBuildingLabel("romanos", "granja"), unit: civilizationUnitLabel("romanos", "infanteria") };
-  const navajo = { weapon: civilizationWeaponLabel("navajos", "espadaHierro"), building: civilizationBuildingLabel("navajos", "cuartel"), unit: civilizationUnitLabel("navajos", "infanteria") };
+  const navajo = { weapon: civilizationWeaponLabel("navajos", "espadaHierro"), building: civilizationBuildingLabel("navajos", "taberna"), other: civilizationBuildingLabel("navajos", "cuartel"), unit: civilizationUnitLabel("navajos", "infanteria") };
   record(
     "SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026)",
     "12. Los nombres propios acompañan al nombre base (multiplicadores intactos) y las civilizaciones pendientes usan los nombres genéricos",
     roman.weapon === "Gladius hispaniensis (Espada de hierro)" && roman.armor === "Lorica segmentata (Hierro)" && roman.building === `Castra (${BUILDINGS.cuartel.label})` && roman.other === BUILDINGS.granja.label && roman.unit === "Legionario (Infantería)" &&
-      navajo.weapon === "Hacha de hierro (Espada de hierro)" && navajo.building === `Hogar de rastreadores (${BUILDINGS.taberna.label})` && navajo.unit === "Rastreador (Infantería)",
+      navajo.weapon === "Hacha de hierro (Espada de hierro)" && navajo.building === `Hogar de rastreadores (${BUILDINGS.taberna.label})` && navajo.other === BUILDINGS.cuartel.label && navajo.unit === "Rastreador (Infantería)",
     `Romanos: ${roman.weapon} · ${roman.armor} · ${roman.building} · ${roman.unit}; Navajos: ${navajo.weapon} · ${navajo.building} · ${navajo.unit}`
   );
 
@@ -286,16 +286,27 @@ export function runCivilizationTests(): CivilizationTestResult[] {
   const plan = createTrainingPlan({ unitType: "caballeria", count: 10, level: 1, resources: { gold: 10_000, wood: 10_000, stone: 10_000, iron: 10_000, food: 10_000 }, availableCivil: 100, buildingLevels: { castillo: 3, cuartel: 2, herreria: 1 }, activeTraining: [], now: 1_000, costModifier: englishCavalryCost });
   const planPlain = createTrainingPlan({ unitType: "caballeria", count: 10, level: 1, resources: { gold: 10_000, wood: 10_000, stone: 10_000, iron: 10_000, food: 10_000 }, availableCivil: 100, buildingLevels: { castillo: 3, cuartel: 2, herreria: 1 }, activeTraining: [], now: 1_000 });
   const mongolDefense = getCivilizationPassive("mongoles").combatDefenseMultiplier;
+  const navajoSiegeDuration = applyCivilizationTrainingDuration("asedio", 10_000, "navajos");
+  const navajoInfantryDuration = applyCivilizationTrainingDuration("infanteria", 10_000, "navajos");
+  const masaiCombat = applyCivilizationCombat(100, 100, "masais");
+  const masaiDefense = getCivilizationPassive("masais").combatDefenseMultiplier;
   const allHaveAdvantage = CIVILIZATIONS.every((c) => c.passive.description.length > 10);
   const profileRomanos = describeCivilizationIdentity(getCivilization("romanos")!);
   const profileNavajos = describeCivilizationIdentity(getCivilization("navajos")!);
+  const profileMasais = describeCivilizationIdentity(getCivilization("masais")!);
+  const weaknessChecks =
+    Math.abs(englishCavalryCost - 1.15) < 1e-9 && englishInfantryCost === 1 && plan.success && planPlain.success &&
+    plan.plan.costs.gold === Math.ceil(planPlain.plan.costs.gold! * 1.15) && plan.plan.durationMs === planPlain.plan.durationMs &&
+    Math.abs(mongolDefense - 0.95) < 1e-9 &&
+    navajoSiegeDuration === 11_000 && navajoInfantryDuration === 10_000 &&
+    Math.abs(masaiDefense - 0.95) < 1e-9 && masaiCombat.attack === 100 && Math.abs(masaiCombat.defense - 95) < 1e-9 &&
+    allHaveAdvantage && !profileRomanos.pendingDesign && !profileNavajos.pendingDesign && !profileMasais.pendingDesign &&
+    profileRomanos.identity?.uniqueBuilding.name === "Castra" && profileMasais.identity?.uniqueBuilding.name === "Boma";
   record(
     "SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026)",
-    "13. Debilidades aplicadas: caballería inglesa +15 % de coste (plan de instrucción), mongoles −5 % de defensa; toda civilización conserva su ventaja; la ficha pública marca las pendientes",
-    Math.abs(englishCavalryCost - 1.15) < 1e-9 && englishInfantryCost === 1 && plan.success && planPlain.success &&
-      plan.plan.costs.gold === Math.ceil(planPlain.plan.costs.gold! * 1.15) && plan.plan.durationMs === planPlain.plan.durationMs &&
-      Math.abs(mongolDefense - 0.95) < 1e-9 && allHaveAdvantage && !profileRomanos.pendingDesign && !profileNavajos.pendingDesign && profileRomanos.identity?.uniqueBuilding.name === "Castra",
-    `Oro caballería inglesa: ${plan.success ? plan.plan.costs.gold : "-"} frente a ${planPlain.success ? planPlain.plan.costs.gold : "-"}; defensa mongola ×${mongolDefense}; Romanos pendiente: ${profileRomanos.pendingDesign}; Navajos pendiente: ${profileNavajos.pendingDesign}`
+    "13. Debilidades aplicadas: caballería inglesa +15 % de coste, mongoles y masáis −5 % de defensa, navajos +10 % asedio; ventajas y fichas completas",
+    weaknessChecks,
+    `Oro caballería inglesa: ${plan.success ? plan.plan.costs.gold : "-"} frente a ${planPlain.success ? planPlain.plan.costs.gold : "-"}; defensa mongola ×${mongolDefense}; navajos asedio: ${navajoSiegeDuration} ms (base 10.000 ms); masáis defensa ×${masaiDefense} (${masaiCombat.defense}/100); fichas completas: ${!profileRomanos.pendingDesign && !profileNavajos.pendingDesign && !profileMasais.pendingDesign}`
   );
 
   return results;

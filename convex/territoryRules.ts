@@ -8,7 +8,9 @@ import {
   FATIGUE_TABLE,
   FOOD,
   MAP,
+  MARCH,
   TERRAINS,
+  TIME,
   UNITS,
   type TerrainType,
   type UnitType,
@@ -246,4 +248,108 @@ export function recoverFatigue(currentFatigue: number, elapsedDays: number, food
   const minimum = FOOD.TIER_FACTORS[FATIGUE.MIN_TIER_FOR_RECOVERY];
   if (tierFactor < minimum || !(elapsedDays > 0)) return current;
   return Math.max(0, current - FATIGUE.RECOVERY_PER_DAY * elapsedDays);
+}
+
+// ----------------------------------------------------------------------------
+// Planificación completa de marcha y desplazamiento militar (Sección A)
+// ----------------------------------------------------------------------------
+export interface ArmyMarchPlan {
+  distance: number;
+  durationSeconds: number;
+  durationMs: number;
+  departureTimeMs: number;
+  arrivalTimeMs: number;
+  fatigueAccrued: number;
+  finalFatigue: number;
+  battlePrepWindowSeconds: number;
+  gameTimeDays: number;
+  gameTimeYears: number;
+  slowestUnitType: UnitType | null;
+  unitSpeedMultiplier: number;
+  civilizationSpeedMultiplier: number;
+  civilizationFatigueMultiplier: number;
+  minBoundApplied: boolean;
+  maxBoundApplied: boolean;
+}
+
+export function calculateArmyMarchPlan(input: {
+  from: HexCoord;
+  to: HexCoord;
+  composition: Partial<Record<UnitType, number>>;
+  currentFatigue: number;
+  departureTimeMs: number;
+  terrainMultiplier?: number;
+  civilizationPassive?: { marchSpeedMultiplier?: number; fatigueAccrualMultiplier?: number } | null;
+}): ArmyMarchPlan {
+  const distance = hexDistance(input.from, input.to);
+  const terrainMultiplier = typeof input.terrainMultiplier === "number" && input.terrainMultiplier > 0 ? input.terrainMultiplier : 1;
+
+  let slowestUnitType: UnitType | null = null;
+  let unitSpeedMultiplier = 1;
+  for (const [type, count] of Object.entries(input.composition) as [UnitType, number][]) {
+    if (count > 0 && UNITS[type]) {
+      if (UNITS[type].marchMultiplier > unitSpeedMultiplier) {
+        unitSpeedMultiplier = UNITS[type].marchMultiplier;
+        slowestUnitType = type;
+      } else if (!slowestUnitType) {
+        slowestUnitType = type;
+      }
+    }
+  }
+
+  const civSpeed = input.civilizationPassive?.marchSpeedMultiplier ?? 1.0;
+  const civFatigue = input.civilizationPassive?.fatigueAccrualMultiplier ?? 1.0;
+
+  let durationSeconds = 0;
+  let minBoundApplied = false;
+  let maxBoundApplied = false;
+
+  if (distance > 0) {
+    const rawSeconds = (MAP.MARCH_SECONDS_PER_HEX * distance * terrainMultiplier * unitSpeedMultiplier) / Math.max(0.1, civSpeed);
+    if (rawSeconds < MARCH.MIN_DURATION_SECONDS) {
+      durationSeconds = MARCH.MIN_DURATION_SECONDS;
+      minBoundApplied = true;
+    } else if (rawSeconds > MARCH.MAX_DURATION_SECONDS) {
+      durationSeconds = MARCH.MAX_DURATION_SECONDS;
+      maxBoundApplied = true;
+    } else {
+      durationSeconds = Math.ceil(rawSeconds);
+    }
+  }
+
+  const durationMs = durationSeconds * 1000;
+  const departureTimeMs = Number.isFinite(input.departureTimeMs) ? input.departureTimeMs : 0;
+  const arrivalTimeMs = departureTimeMs + durationMs;
+
+  const rawFatigue = FATIGUE.PER_HEX * distance * terrainMultiplier * civFatigue;
+  const fatigueAccrued = Math.max(0, Math.ceil(rawFatigue));
+  const currentFatigue = Number.isFinite(input.currentFatigue) ? Math.max(0, Math.min(100, input.currentFatigue)) : 0;
+  const finalFatigue = Math.min(100, currentFatigue + fatigueAccrued);
+
+  const battlePrepWindowSeconds = distance > 0
+    ? Math.max(MARCH.MIN_PREP_SECONDS, Math.min(MARCH.MAX_PREP_SECONDS, Math.round(MARCH.PREP_WINDOW_RATIO * durationSeconds)))
+    : 0;
+
+  // Escala temporal: 1 día real (86.400 s) = 1 año de juego = 365 días de juego
+  const gameTimeYears = Math.round((durationSeconds / TIME.SECONDS_PER_GAME_YEAR) * 10_000) / 10_000;
+  const gameTimeDays = Math.round((durationSeconds * (365 / TIME.SECONDS_PER_GAME_YEAR)) * 100) / 100;
+
+  return {
+    distance,
+    durationSeconds,
+    durationMs,
+    departureTimeMs,
+    arrivalTimeMs,
+    fatigueAccrued,
+    finalFatigue,
+    battlePrepWindowSeconds,
+    gameTimeDays,
+    gameTimeYears,
+    slowestUnitType,
+    unitSpeedMultiplier,
+    civilizationSpeedMultiplier: civSpeed,
+    civilizationFatigueMultiplier: civFatigue,
+    minBoundApplied,
+    maxBoundApplied,
+  };
 }
