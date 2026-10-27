@@ -513,7 +513,7 @@ function KingdomOverviewContent() {
 
   // Consulta autoritativa OIDC de Convex en tiempo real
   const viewer = useQuery(getViewerQuery);
-  const activeUserId = isAuthenticated ? viewer?.subject ?? '' : 'GUEST';
+  const activeUserId = isAuthenticated && viewer ? (viewer.userId ?? viewer.subject.split('|')[0]) : null;
 
   const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -537,11 +537,10 @@ function KingdomOverviewContent() {
   // Consulta reactiva en tiempo real al backend remoto
   const kingdomData = useQuery(
     getKingdomFullQuery,
-    activeUserId !== 'GUEST' ? { userId: activeUserId } : "skip"
-  ) as KingdomFullResponse | undefined;
+    activeUserId ? { userId: activeUserId } : "skip"
+  ) as KingdomFullResponse | undefined | null;
 
   const kingdom = kingdomData?.kingdom;
-  if (!kingdom) return <div className="p-8 text-center text-[#8e816d]">Cargando o reino no encontrado...</div>;
   const resources = kingdomData?.resources;
   const population = kingdomData?.population;
   const populationJobs = kingdomData?.populationJobs;
@@ -549,11 +548,11 @@ function KingdomOverviewContent() {
   const buildings = kingdomData?.buildings ?? [];
   const constructionState = useQuery(
     getConstructionStateQuery,
-    kingdom ? { kingdomId: kingdom._id } : "skip"
+    kingdom ? { kingdomId: kingdom._id as any } : "skip"
   ) as ConstructionState | undefined;
   const parliamentBadge = useQuery(
     getParliamentBadgeQuery,
-    kingdom ? { kingdomId: kingdom._id } : "skip"
+    kingdom ? { kingdomId: kingdom._id as any } : "skip"
   ) as { badgeCount: number } | undefined;
 
   // Mutaciones autoritativas del Bloque B.8
@@ -570,7 +569,7 @@ function KingdomOverviewContent() {
     isAuthenticated &&
     viewer &&
     kingdom &&
-    viewer.subject === kingdom.userId
+    ((viewer.userId ?? viewer.subject.split('|')[0]) === kingdom.userId.split('|')[0])
   );
   const activeOwnerKey = isOwner && viewer && kingdom
     ? `${viewer.subject}:${kingdom._id}`
@@ -923,8 +922,8 @@ function KingdomOverviewContent() {
     );
   }
 
-  // 2. Estado de carga inicial (consultando reino en Convex)
-  if (kingdomData === undefined) {
+  // 2. Estado de carga inicial (consultando sesión o reino en Convex)
+  if (isLoading || viewer === undefined || (activeUserId && kingdomData === undefined)) {
     return (
       <div className="min-h-[500px] flex flex-col items-center justify-center p-8 text-center space-y-4">
         <div className="w-12 h-12 rounded-full border-2 border-[#d4af37]/20 border-t-[#d4af37] animate-spin flex items-center justify-center">
@@ -939,7 +938,7 @@ function KingdomOverviewContent() {
   }
 
   // 3. Si el usuario autenticado aún no tiene un reino propio: código de recuperación (una vez) y asistente de fundación (P4-P9, paso 2)
-  if (!kingdom && isAuthenticated) {
+  if (!kingdom) {
     return (
       <RecoveryCodeGate>
         <div className="space-y-4">

@@ -25,10 +25,16 @@ export const getKingdomFull = query({
     const resolvedUserId = resolveKingdomQueryUserId(args.userId, userId ?? undefined);
     if (!resolvedUserId) return null;
 
-    const kingdom = await ctx.db
+    let kingdom = await ctx.db
       .query("kingdoms")
       .withIndex("by_user_id", (q) => q.eq("userId", resolvedUserId))
       .first();
+
+    // Compatibilidad: si el reino fue guardado con sufijo de sesión previo, encontrarlo por id base
+    if (!kingdom && resolvedUserId !== "guest_g9ai8cz") {
+      const allKingdoms = await ctx.db.query("kingdoms").collect();
+      kingdom = allKingdoms.find((k) => k.userId.split("|")[0] === resolvedUserId) ?? null;
+    }
 
     if (!kingdom) {
       return null;

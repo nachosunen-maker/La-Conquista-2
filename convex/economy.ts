@@ -92,7 +92,7 @@ async function requireAuthenticatedUser(ctx: {
       "o identidades no verificadas enviadas por el cliente."
     );
   }
-  return identity.subject;
+  return identity.subject.split("|")[0];
 }
 
 function isWorkersDistribution(value: unknown): value is WorkersDistribution {
@@ -490,12 +490,29 @@ export const getOrInitializeKingdom = mutation({
     const callerUserId = await requireAuthenticatedUser(ctx);
     const name = args.name.trim();
     if (!name) throw new Error("El nombre del reino es obligatorio (P7).");
-    const existing = await ctx.db
+    let existing = await ctx.db
       .query("kingdoms")
       .withIndex("by_user_id_and_name", (q) =>
         q.eq("userId", callerUserId).eq("name", name)
       )
       .first();
+
+    if (!existing) {
+      existing = await ctx.db
+        .query("kingdoms")
+        .withIndex("by_user_id", (q) => q.eq("userId", callerUserId))
+        .first();
+    }
+
+    if (!existing) {
+      const candidates = await ctx.db.query("kingdoms").collect();
+      existing = candidates.find(
+        (k) => k.userId.split("|")[0] === callerUserId && (!k.name || k.name === name)
+      ) ?? null;
+      if (existing && existing.userId !== callerUserId) {
+        await ctx.db.patch(existing._id, { userId: callerUserId, updatedAt: Date.now() });
+      }
+    }
 
     if (existing) {
       if (args.civilization !== undefined && existing.civilization && args.civilization !== existing.civilization) {
