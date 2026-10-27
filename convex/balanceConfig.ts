@@ -1203,7 +1203,7 @@ export const CIVILIZATIONS = [
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
-      weakness: null,
+      weakness: "Dependencia de movilidad ligera: +10 % de duración de instrucción de asedio [DERIVADO].",
     },
     uniqueTechnologyId: "tech_civ_navajos",
   },
@@ -1252,7 +1252,7 @@ export const CIVILIZATIONS = [
       combatAttackMultiplier: 1.0,
       combatDefenseMultiplier: 1.0,
       happinessBonus: 0,
-      weakness: null,
+      weakness: "Defensa fija limitada: −5 % de fuerza defensiva en combate [DERIVADO].",
     },
     uniqueTechnologyId: "tech_civ_masais",
   },
@@ -1341,7 +1341,13 @@ export const CIVILIZATION_IDENTITIES: Readonly<Record<string, CivilizationIdenti
     signatureUnit: { unitType: "infanteria", name: "Samurái", description: "Guerrero de élite; la lanza y el arco cuentan tanto como la katana." },
     unitNames: { infanteria: "Samurái", arqueria: "Ashigaru arquero", caballeria: "Samurái a caballo", asedio: "Ōzutsu" },
   },
-  navajos: null,
+  navajos: {
+    weapons: { palo: "Vara de madera", lanzaBasica: "Lanza de obsidiana", espadaHierro: "Hacha de hierro", acero: "Maza de acero", aceroAvanzado: "Maza de acero reforzado" },
+    armors: { ninguna: "Sin armadura", piel: "Túnica de piel", cueroReforzado: "Cuero de bisonte", hierro: "Cota de malla ligera", acero: "Brigantina de acero" },
+    uniqueBuilding: { buildingType: "taberna", name: "Hogar de rastreadores", description: "Taberna navaja: lugar de descanso para exploradores." },
+    signatureUnit: { unitType: "infanteria", name: "Rastreador", description: "Infantería ligera especialista en terreno boscoso." },
+    unitNames: { infanteria: "Rastreador", arqueria: "Arquero Navajo", caballeria: "Jinete explorador", asedio: "Catapulta ligera" },
+  },
   aztecas: {
     weapons: { palo: "Bastón de guerra", lanzaBasica: "Tepoztopilli", espadaHierro: "Macuahuitl de obsidiana", acero: "Macuahuitl y átlatl", aceroAvanzado: "Macuahuitl de obsidiana reforzado" },
     armors: { ninguna: "Sin armadura", piel: "Ichcahuipilli ligero", cueroReforzado: "Ichcahuipilli reforzado", hierro: "Tlahuiztli y chimalli", acero: "Tlahuiztli de águila" },
@@ -1349,7 +1355,13 @@ export const CIVILIZATION_IDENTITIES: Readonly<Record<string, CivilizationIdenti
     signatureUnit: { unitType: "infanteria", name: "Guerrero Águila", description: "Infantería de élite; sin caballos ni acero europeo." },
     unitNames: { infanteria: "Guerrero Águila", arqueria: "Hondero y atlatl", caballeria: "Guerrero Jaguar (élite a pie)", asedio: "Cuadrilla de asalto" },
   },
-  masais: null,
+  masais: {
+    weapons: { palo: "Bastón masái", lanzaBasica: "Lanza masái", espadaHierro: "Seme (espada corta)", acero: "Seme de acero", aceroAvanzado: "Seme de acero forjado" },
+    armors: { ninguna: "Sin armadura", piel: "Pieles tradicionales", cueroReforzado: "Cuero endurecido", hierro: "Cota de malla ligera", acero: "Protección de acero masái" },
+    uniqueBuilding: { buildingType: "viviendas", name: "Boma", description: "Viviendas masáis: recinto fortificado para el ganado y la familia." },
+    signatureUnit: { unitType: "infanteria", name: "Guerrero de la sabana", description: "Infantería con gran resistencia a la fatiga." },
+    unitNames: { infanteria: "Guerrero de la sabana", arqueria: "Arquero masái", caballeria: "Jinete de la sabana", asedio: "Ariete ligero" },
+  },
 };
 export type CivilizationId = (typeof CIVILIZATIONS)[number]["id"];
 /** [DECISIÓN 21-10-2026] Identificadores antiguos aún presentes en reinos y progreso guardados. */

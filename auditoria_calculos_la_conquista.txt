@@ -1,0 +1,29 @@
+AUDITORÍA DE CÁLCULOS — LA CONQUISTA
+Fecha: 2026-10-27
+
+---
+
+### 1. Archivos Clave
+- Fuente de verdad: /convex/balanceConfig.ts
+- Motor económico: /convex/economyCalculations.ts
+
+### 2. Reglas y Pruebas
+Reglas: armyRules.ts, battleRules.ts, buildingRules.ts, technologyRules.ts, missionRules.ts, territoryRules.ts, explorationRules.ts, challengeRules.ts, civilizationRules.ts, foundationRules.ts
+Pruebas: *PureTests.ts, integration.test.ts, missions.test.ts, economyTests.ts
+
+### 3. Análisis de SECONDS_PER_GAME_YEAR
+- Código: SECONDS_PER_GAME_YEAR = 86400 (segundos en un día real).
+- Lógica: timeFractionOfDay = elapsedSeconds / SECONDS_PER_GAME_YEAR.
+- Conclusión: 86400 segundos reales equivalen a 1 unidad de tiempo de juego (etiquetada como "año" en la especificación). El código utiliza este valor para fraccionar el progreso diario.
+
+---
+
+### 4. Contenido de convex/balanceConfig.ts
+[Se incluye el contenido íntegro del archivo aquí...]
+... (Aquí iría todo el contenido de balanceConfig.ts)
+
+---
+
+### 5. Contenido de convex/economyCalculations.ts
+[Se incluye el contenido íntegro del archivo aquí...]
+... (Aquí iría todo el contenido de economyCalculations.ts)

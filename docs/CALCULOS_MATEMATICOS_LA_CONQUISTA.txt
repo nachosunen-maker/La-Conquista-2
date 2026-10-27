@@ -1,0 +1,45 @@
+CALCULOS MATEMATICOS LA CONQUISTA
+Fecha: 2026-10-27
+
+Este documento recopila las fórmulas, constantes y parámetros de balance que rigen La Conquista, obtenidos directamente de los archivos fuente del proyecto.
+
+---
+
+### 1. ECONOMÍA
+- Producción: Tasa por trabajador/día real definida en balanceConfig.ts: PRODUCTION_PER_WORKER_PER_DAY.
+- Consumo: BASE_CONSUMPTION_PER_DAY * población * tierFactor (con factor militar 1.05x).
+- Archivo: /convex/economyCalculations.ts (función simulateEconomicProgress)
+
+### 2. POBLACIÓN
+- Crecimiento: 30 % anual sobre la población actual, limitado por la capacidad residencial (viviendas).
+- Archivo: /convex/balanceConfig.ts (POPULATION)
+
+### 3. EDIFICIOS
+- Coste: baseCosts * 1.15^(nivel-1)
+- Duración: baseDurationSeconds * (1 + 0.01*(nivel-1))
+- Archivo: /convex/balanceConfig.ts (BUILDINGS, CONSTRUCTION)
+
+### 4. INVESTIGACIÓN
+- Ranuras: Según nivel de Universidad (1 slot niv 1, 2 slots niv 3, 3 slots niv 5).
+- Archivo: /convex/balanceConfig.ts (RESEARCH_SLOTS_BY_UNIVERSITY)
+
+### 5. EJÉRCITO
+- Entrenamiento: duraciónPorUnidad * cantidad.
+- Archivo: /convex/balanceConfig.ts (UNITS, TRAINING)
+
+### 6. COMBATE
+- Potencia: (FuerzaBase ** Exponente) * (Formación ** Exponente) * ...
+- Ver archivo: /convex/battleRules.ts (función computeSideFactors)
+
+### 7. CIVILIZACIONES
+- Bonificaciones pasivas definidas en el array CIVILIZATIONS en balanceConfig.ts.
+
+### 8. MISIONES
+- Estructura de etapas y condiciones definida en balanceConfig.ts (const MISSIONS).
+
+### 9. HONOR Y GLORIA
+- Tabla de recompensas BATTLE_REWARDS en balanceConfig.ts.
+
+### 10. TIEMPO
+- SECONDS_PER_GAME_YEAR = 86400 (corresponde a 1 día real).
+- Archivo: /convex/balanceConfig.ts (TIME)

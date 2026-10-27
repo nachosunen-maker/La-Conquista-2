@@ -84,6 +84,10 @@ async function requireAuthenticatedUser(ctx: {
   auth: { getUserIdentity: () => Promise<any> };
 }): Promise<string> {
   const identity = await ctx.auth.getUserIdentity();
+  console.log("requireAuthenticatedUser: identity object check:", {
+    hasIdentity: !!identity,
+    hasSubject: !!identity?.subject,
+  });
   if (!identity || !identity.subject) {
     throw new Error(
       "Autenticación requerida: No se detectó una sesión autenticada en el servidor Convex. " +
