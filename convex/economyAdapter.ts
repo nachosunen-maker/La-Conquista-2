@@ -22,7 +22,7 @@ import {
   simulateEconomicProgress,
 } from "./economyCalculations";
 import { calculateBuildingWorkerCapacity } from "./buildingRules";
-import { UNITS } from "./balanceConfig";
+import { UNITS, type UnitType } from "./balanceConfig";
 
 /** Representaciones canónicas de los documentos del backend remoto */
 export interface RemoteKingdomDoc {
@@ -241,6 +241,7 @@ export function classifyArmyUnits(
 
   let livingActive = 0;
   let siegeUnits = 0;
+  let siegeOperators = 0;
   let wounded = 0;
 
   for (const unit of armyUnits) {
@@ -254,17 +255,21 @@ export function classifyArmyUnits(
       throw new Error(`Heridos inválidos en unidad militar '${unit.unitType}': debe ser un entero no negativo.`);
     }
 
-    const typeNormalized = (unit.unitType || "").toLowerCase().trim();
-    if (typeNormalized === "asedio") {
+    const typeNormalized = (unit.unitType || "").toLowerCase().trim() as UnitType;
+    const unitBalance = UNITS[typeNormalized];
+    const isSiege = unitBalance && !unitBalance.isLivingTroop;
+    if (isSiege) {
       siegeUnits += unit.count;
-      wounded += (unitWounded ?? 0) * UNITS.asedio.populationPerUnit;
+      const popPerUnit = unitBalance.populationPerUnit ?? 5;
+      const unitOperators = unit.count * popPerUnit;
+      siegeOperators += unitOperators;
+      wounded += (unitWounded ?? 0) * popPerUnit;
     } else {
       livingActive += unit.count;
       wounded += unitWounded ?? 0;
     }
   }
 
-  const siegeOperators = siegeUnits * UNITS.asedio.populationPerUnit;
   return {
     regularSoldiers: livingActive + siegeOperators + wounded,
     siegeUnits,

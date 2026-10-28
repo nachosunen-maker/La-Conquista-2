@@ -1,4 +1,4 @@
-import { applyFormation, calculateEquipmentWear, calculateHospitalRecovery, computeSideFactors, simulateBattle, strategyFactor, tacticalCounterMultiplier, tacticalFormationFactor, wallsDefenseBonus, woundedRecoveryRatio, type BattleSide } from "./battleRules";
+import { applyFormation, calculateEquipmentWear, calculateHospitalRecovery, computeSideFactors, emptyComposition, simulateBattle, strategyFactor, tacticalCounterMultiplier, tacticalFormationFactor, wallsDefenseBonus, woundedRecoveryRatio, type BattleSide } from "./battleRules";
 import { BATTLE_REWARDS, COMBAT, HOSPITAL, HOSPITAL_RECOVERY_CAP, HOSPITAL_RECOVERY_PER_YEAR, TACTICAL_FORMATIONS, TACTICAL_FORMATION_COUNTER_BONUS, type TacticalFormation } from "./balanceConfig";
 
 export interface BattleTestResult {
@@ -10,7 +10,7 @@ export interface BattleTestResult {
 function side(overrides: Partial<BattleSide> & { kingdomId: string }): BattleSide {
   return {
     name: overrides.kingdomId,
-    composition: { infanteria: 1000, arqueria: 0, caballeria: 0, asedio: 0 },
+    composition: { ...emptyComposition(), infanteria: 1000 },
     trainingMultiplier: 1,
     weaponTier: "espadaHierro",
     armorTier: "cueroReforzado",

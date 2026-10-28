@@ -9,9 +9,10 @@ import { v } from "convex/values";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { MISSIONS, TIME, UNIT_TYPES, type MissionCounterKey, type MissionReward } from "./balanceConfig";
+import { MISSIONS, TIME, UNITS, UNIT_TYPES, type MissionCounterKey, type MissionReward } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
 import { storageCapacity } from "./economyExtended";
+import { normalizeUnitType } from "./armyRules";
 import {
   allSecretMissions,
   conditionProgress,
@@ -89,7 +90,10 @@ async function buildSnapshot(ctx: Ctx, kingdomId: Id<"kingdoms">, now: number): 
     buildingLevels,
     population: typeof (population as any)?.total === "number" ? (population as any).total : kingdomAny.population ?? 0,
     completedTechnologyIds: (technologies as any[]).filter((t) => t.status === "completed").map((t) => t.technologyId as string),
-    armySize: (units as any[]).reduce((sum, u) => sum + (UNIT_TYPES.includes(u.unitType) && u.unitType !== "asedio" ? Math.max(0, u.count ?? 0) : 0), 0),
+    armySize: (units as any[]).reduce((sum, u) => {
+      const norm = normalizeUnitType(u.unitType);
+      return sum + (norm && UNITS[norm]?.isLivingTroop ? Math.max(0, u.count ?? 0) : 0);
+    }, 0),
     happiness: typeof kingdomAny.happiness === "number" ? kingdomAny.happiness : 0,
     honor: typeof kingdomAny.honor === "number" ? kingdomAny.honor : 0,
     resources: resourceMap,

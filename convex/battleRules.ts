@@ -125,7 +125,11 @@ export interface BattleReport {
 }
 
 export function emptyComposition(): Composition {
-  return { infanteria: 0, arqueria: 0, caballeria: 0, asedio: 0 };
+  const comp = {} as Record<UnitType, number>;
+  for (const t of UNIT_TYPES) {
+    comp[t] = 0;
+  }
+  return comp as Composition;
 }
 
 export function totalUnits(composition: Composition): number {
@@ -140,18 +144,20 @@ export function wallsDefenseBonus(wallsLevel: number): number {
 
 /** [P37 + M-11] Fuerza ofensiva y defensiva ponderadas por tipo, con la matriz de contrapartidas. */
 function strengths(composition: Composition, enemyComposition: Composition, enemyWalls: number): { offensive: number; defensive: number } {
-  const enemyLiving = (["infanteria", "arqueria", "caballeria"] as const).reduce((sum, type) => sum + Math.max(0, enemyComposition[type] ?? 0), 0);
+  const enemyLiving = UNIT_TYPES.reduce((sum, type) => sum + (UNITS[type]?.isLivingTroop ? Math.max(0, enemyComposition[type] ?? 0) : 0), 0);
   let offensive = 0;
   let defensive = 0;
   for (const type of UNIT_TYPES) {
     const count = Math.max(0, composition[type] ?? 0);
     if (count === 0) continue;
     const unit = UNITS[type];
-    let attack = type === "asedio" && enemyWalls <= 0 ? COMBAT.SIEGE_ATTACK_WITHOUT_WALLS : unit.attack;
-    if (type !== "asedio" && enemyLiving > 0) {
-      const countered = UNIT_COUNTERS[type];
-      const share = Math.max(0, enemyComposition[countered] ?? 0) / enemyLiving;
-      attack *= 1 + COMBAT.FORMATION_COUNTER_BONUS * share;
+    let attack = !unit.isLivingTroop && enemyWalls <= 0 ? COMBAT.SIEGE_ATTACK_WITHOUT_WALLS : unit.attack;
+    if (unit.isLivingTroop && enemyLiving > 0) {
+      const countered = (UNIT_COUNTERS as Record<string, string>)[type];
+      if (countered && enemyComposition[countered as UnitType] !== undefined) {
+        const share = Math.max(0, enemyComposition[countered as UnitType] ?? 0) / enemyLiving;
+        attack *= 1 + COMBAT.FORMATION_COUNTER_BONUS * share;
+      }
     }
     offensive += count * attack;
     defensive += count * unit.defense;

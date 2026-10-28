@@ -22,19 +22,14 @@
 
 import type { ResourceType } from "./economyCalculations";
 import { getCivilizationPassive } from "./civilizationRules";
-import type { UnitType } from "./balanceConfig";
+import { UNITS, UNIT_TYPES, type UnitType } from "./balanceConfig";
 
-export const VALID_MILITARY_UNIT_TYPES = [
-  "infanteria",
-  "arqueria",
-  "caballeria",
-  "asedio",
-] as const;
+export const VALID_MILITARY_UNIT_TYPES = UNIT_TYPES;
 
-export type MilitaryUnitType = (typeof VALID_MILITARY_UNIT_TYPES)[number];
+export type MilitaryUnitType = UnitType;
 
 export function isValidMilitaryUnitType(type: string): type is MilitaryUnitType {
-  return VALID_MILITARY_UNIT_TYPES.includes(type as MilitaryUnitType);
+  return (UNIT_TYPES as readonly string[]).includes(type);
 }
 
 export const MILITARY_TIER_EFFICIENCY: Readonly<Record<number, number>> = {
@@ -314,8 +309,9 @@ export function resolveArmyUnitsIncorporation(
  * El asedio (catapultas, arietes) son ingenios mecánicos y no incrementan regularSoldiers.
  */
 export function isLivingRegularTroop(unitType: string): boolean {
-  const norm = (unitType || "").trim().toLowerCase();
-  return norm !== "asedio";
+  const norm = (unitType || "").trim().toLowerCase() as UnitType;
+  const unit = UNITS[norm];
+  return unit ? unit.isLivingTroop : true;
 }
 
 /**

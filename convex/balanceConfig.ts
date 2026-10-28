@@ -210,8 +210,38 @@ export const INITIAL_BUILDINGS: Readonly<Record<string, number>> = {
 // ============================================================================
 // 4. EJÉRCITO (D-08 a D-15, P23, P28-P32)
 // ============================================================================
-export type UnitType = "infanteria" | "arqueria" | "caballeria" | "asedio";
-export const UNIT_TYPES: readonly UnitType[] = ["infanteria", "arqueria", "caballeria", "asedio"];
+export type UnitType =
+  | "infanteria"
+  | "arqueria"
+  | "caballeria"
+  | "asedio"
+  | "onagro_campana"
+  | "carrobalista"
+  | "espringarda_movil"
+  | "trabuchet_traccion"
+  | "arcuballista"
+  | "fustibalo_campo"
+  | "mangonel_tactico"
+  | "carros_artillados"
+  | "ariete_movil"
+  | "torres_asalto";
+
+export const UNIT_TYPES: readonly UnitType[] = [
+  "infanteria",
+  "arqueria",
+  "caballeria",
+  "asedio",
+  "onagro_campana",
+  "carrobalista",
+  "espringarda_movil",
+  "trabuchet_traccion",
+  "arcuballista",
+  "fustibalo_campo",
+  "mangonel_tactico",
+  "carros_artillados",
+  "ariete_movil",
+  "torres_asalto",
+];
 
 export interface UnitBalance {
   label: string;
@@ -237,7 +267,17 @@ export const UNITS: Readonly<Record<UnitType, UnitBalance>> = {
   infanteria: { label: "Infantería", costs: { gold: 5, wood: 0, stone: 0, iron: 2, food: 2 }, trainingSecondsPerUnit: 1_800, populationPerUnit: 1, isLivingTroop: true, requirements: { cuartel: 1 }, attack: 1.0, defense: 1.2, speed: 1.0, marchMultiplier: 1.0 },
   arqueria: { label: "Arquería", costs: { gold: 6, wood: 2, stone: 0, iron: 2, food: 2 }, trainingSecondsPerUnit: 2_400, populationPerUnit: 1, isLivingTroop: true, requirements: { cuartel: 1 }, attack: 1.2, defense: 0.7, speed: 0.9, marchMultiplier: 1.0 },
   caballeria: { label: "Caballería", costs: { gold: 15, wood: 2, stone: 0, iron: 5, food: 4 }, trainingSecondsPerUnit: 3_600, populationPerUnit: 1, isLivingTroop: true, requirements: { cuartel: 2, herreria: 1 }, attack: 1.4, defense: 1.0, speed: 1.3, marchMultiplier: 1.2 },
-  asedio: { label: "Asedio", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 1.8, defense: 0.5, speed: 0.6, marchMultiplier: 1.5 },
+  asedio: { label: "Asedio genérico", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 1.8, defense: 0.5, speed: 0.6, marchMultiplier: 1.5 },
+  onagro_campana: { label: "Onagro de campaña", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 2.52, defense: 0.40, speed: 0.24, marchMultiplier: 3.75 },
+  carrobalista: { label: "Carrobalista", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 2.34, defense: 0.40, speed: 0.39, marchMultiplier: 2.31 },
+  espringarda_movil: { label: "Espringarda móvil", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 2.16, defense: 0.35, speed: 0.45, marchMultiplier: 2.00 },
+  trabuchet_traccion: { label: "Trabuchet de tracción", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 2.16, defense: 0.35, speed: 0.36, marchMultiplier: 2.50 },
+  arcuballista: { label: "Arcuballista / manuballista", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 1.98, defense: 0.30, speed: 0.48, marchMultiplier: 1.88 },
+  fustibalo_campo: { label: "Fustíbalo de campo", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 0.90, defense: 0.25, speed: 0.66, marchMultiplier: 1.36 },
+  mangonel_tactico: { label: "Mangonel de ruedas táctico", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 2.34, defense: 0.35, speed: 0.33, marchMultiplier: 2.73 },
+  carros_artillados: { label: "Carros de combate artillados", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 0.90, defense: 0.75, speed: 0.24, marchMultiplier: 3.75 },
+  ariete_movil: { label: "Ariete móvil de campo", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 1.44, defense: 0.50, speed: 0.30, marchMultiplier: 3.00 },
+  torres_asalto: { label: "Torres de asalto ligeras", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 10_800, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 1.08, defense: 0.55, speed: 0.15, marchMultiplier: 6.00 },
 };
 
 export const TRAINING = {

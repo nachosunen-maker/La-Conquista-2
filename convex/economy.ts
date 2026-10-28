@@ -373,7 +373,10 @@ async function settleMercenaries(ctx: any, armyUnits: any[], populationId: any, 
 async function applyMilitaryDesertion(ctx: any, armyUnits: any[], personnel: number): Promise<number> {
   let remaining = personnel;
   const living = armyUnits
-    .filter((doc) => normalizeUnitType(doc.unitType) && normalizeUnitType(doc.unitType) !== "asedio" && doc.count > 0)
+    .filter((doc) => {
+      const norm = normalizeUnitType(doc.unitType);
+      return norm && UNITS[norm]?.isLivingTroop && doc.count > 0;
+    })
     .sort((a, b) => b.count - a.count);
   for (const doc of living) {
     if (remaining <= 0) break;
@@ -383,12 +386,17 @@ async function applyMilitaryDesertion(ctx: any, armyUnits: any[], personnel: num
   }
   // Operadores de asedio desertan en bloques de máquina completa.
   if (remaining > 0) {
-    const siege = armyUnits.filter((doc) => normalizeUnitType(doc.unitType) === "asedio" && doc.count > 0);
+    const siege = armyUnits.filter((doc) => {
+      const norm = normalizeUnitType(doc.unitType);
+      return norm && !UNITS[norm]?.isLivingTroop && doc.count > 0;
+    });
     for (const doc of siege) {
-      if (remaining < UNITS.asedio.populationPerUnit) break;
-      const machines = Math.min(doc.count, Math.floor(remaining / UNITS.asedio.populationPerUnit));
+      const norm = normalizeUnitType(doc.unitType);
+      const popPerUnit = (norm && UNITS[norm]?.populationPerUnit) ? UNITS[norm].populationPerUnit : 5;
+      if (remaining < popPerUnit) break;
+      const machines = Math.min(doc.count, Math.floor(remaining / popPerUnit));
       await ctx.db.patch(doc._id, { count: doc.count - machines });
-      remaining -= machines * UNITS.asedio.populationPerUnit;
+      remaining -= machines * popPerUnit;
     }
   }
   return personnel - remaining;
