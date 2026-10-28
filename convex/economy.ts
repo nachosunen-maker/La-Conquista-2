@@ -87,6 +87,7 @@ async function requireAuthenticatedUser(ctx: any): Promise<string> {
   if (!userId) {
     throw new Error(
       "Autenticación requerida: No se detectó una sesión autenticada en el servidor Convex. " +
+      "El proveedor de autenticación (auth.config.ts) aún no está configurado. " +
       "Por estrictas razones de integridad y propiedad (P1), se prohíbe el uso de usuarios provisionales " +
       "o identidades no verificadas enviadas por el cliente."
     );
