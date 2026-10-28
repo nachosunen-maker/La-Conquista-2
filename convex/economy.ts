@@ -85,9 +85,16 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 async function requireAuthenticatedUser(ctx: any): Promise<string> {
   const userId = await getAuthUserId(ctx);
   if (!userId) {
+    const identity = await ctx.auth.getUserIdentity();
+    console.error("Fallo de autenticación en requireAuthenticatedUser", {
+      hasIdentity: !!identity,
+      issuer: identity?.issuer,
+      subject: identity?.subject,
+      tokenIdentifier: identity?.tokenIdentifier,
+    });
     throw new Error(
       "Autenticación requerida: No se detectó una sesión autenticada en el servidor Convex. " +
-      "El proveedor de autenticación (auth.config.ts) aún no está configurado. " +
+      "El proveedor de autenticación (auth.config.ts) aún no está configurado o el token es inválido. " +
       "Por estrictas razones de integridad y propiedad (P1), se prohíbe el uso de usuarios provisionales " +
       "o identidades no verificadas enviadas por el cliente."
     );

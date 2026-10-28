@@ -111,8 +111,10 @@ export const getViewer = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
+      console.error("[getViewer] No se detectó identidad en la petición.");
       return null;
     }
+    console.log("[getViewer] Identidad detectada. Emisor:", identity.issuer, "Subject:", identity.subject);
     // Nombre de gobernante: vive en la tabla users de Convex Auth (sección 5 de CLAUDE.md).
     const userId = await getAuthUserId(ctx);
     const normalizedUserId = userId ? ctx.db.normalizeId("users", userId) : null;

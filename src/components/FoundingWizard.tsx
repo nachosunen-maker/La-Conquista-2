@@ -15,7 +15,7 @@ const STEPS: Step[] = ['origen', 'reino', 'castillo', 'monarca', 'confirmar'];
  * Asistente de creación del reino (P4-P9): origen, nombre del reino, nombre del
  * castillo, nombre del monarca y confirmación con "FUNDAR MI REINO".
  */
-export function FoundingWizard(props: { defaultMonarchName: string; onFounded: () => void }) {
+export function FoundingWizard(props: { defaultMonarchName: string; onFounded: () => void; disabled?: boolean }) {
   const civilizationsData = useQuery(listCivilizationsQuery) as
     | { civilizations: ReadonlyArray<{ id: string; label: string }>; profiles?: ReadonlyArray<{ id: string; advantage: string; weakness: string | null; identity: { signatureUnit: { name: string }; uniqueBuilding: { name: string } } | null }>; bonusesEnabled: boolean; immutable: boolean }
     | undefined;
@@ -210,11 +210,11 @@ export function FoundingWizard(props: { defaultMonarchName: string; onFounded: (
           <button
             type="button"
             onClick={handleFound}
-            disabled={submitting}
-            className="px-5 py-2.5 rounded-lg bg-[#d4af37] hover:bg-[#e0bd4a] text-neutral-950 text-xs font-serif font-bold uppercase tracking-wider flex items-center gap-2 disabled:opacity-60"
+            disabled={submitting || props.disabled}
+            className="px-5 py-2.5 rounded-lg bg-[#d4af37] hover:bg-[#e0bd4a] text-neutral-950 text-xs font-serif font-bold uppercase tracking-wider flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Crown className="w-4 h-4" />}
-            Fundar mi reino
+            {props.disabled ? 'Inicia sesión para fundar' : 'Fundar mi reino'}
           </button>
         )}
       </div>

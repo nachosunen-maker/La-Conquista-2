@@ -24,6 +24,13 @@ import {
 import { calculateBuildingWorkerCapacity } from "./buildingRules";
 import { UNITS, type UnitType } from "./balanceConfig";
 
+export function isMatchingUserId(kingdomUserId: string, callerUserId: string): boolean {
+  if (!kingdomUserId || !callerUserId) return false;
+  const baseKingdom = kingdomUserId.split("|")[0];
+  const baseCaller = callerUserId.split("|")[0];
+  return baseKingdom === baseCaller;
+}
+
 /** Representaciones canónicas de los documentos del backend remoto */
 export interface RemoteKingdomDoc {
   _id: string;
@@ -584,7 +591,7 @@ export function calculateSimulatedKingdomResources(
         error: "Autenticación requerida: No se proporcionó una identidad de usuario válida para consultar el reino.",
       };
     }
-    if (!input.kingdom || input.kingdom.userId !== cleanCaller) {
+    if (!input.kingdom || !isMatchingUserId(input.kingdom.userId, cleanCaller)) {
       return {
         success: false,
         error: "No autorizado: el reino no pertenece al usuario autenticado.",
@@ -719,7 +726,7 @@ export function calculateSettlementProgress(input: SettlementInput): SettlementR
   // 2. Control de autorización si se especifica callerUserId (P1)
   if (input.options?.callerUserId) {
     const cleanCaller = input.options.callerUserId.trim();
-    if (input.kingdom.userId !== cleanCaller) {
+    if (!isMatchingUserId(input.kingdom.userId, cleanCaller)) {
       return {
         success: false,
         error: "No autorizado: el reino no pertenece al usuario autenticado.",

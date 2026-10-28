@@ -510,6 +510,7 @@ function formatSecondsDuration(seconds: number): string {
    ========================================================================== */
 function KingdomOverviewContent() {
   const { isAuthenticated, isLoading } = useConvexAuth();
+  const { signOut } = useAuthActions();
 
   // Consulta autoritativa OIDC de Convex en tiempo real
   const viewer = useQuery(getViewerQuery);
@@ -949,20 +950,31 @@ function KingdomOverviewContent() {
                 <span>Gobernante: {viewer.rulerName ?? viewer.name ?? 'sesión iniciada'}</span>
               </span>
             ) : (
-              <div className="max-w-md mx-auto space-y-2">
-                <div className="p-3 bg-amber-950/40 border border-amber-600/40 rounded-lg text-amber-200 text-xs text-left">
-                  <div className="flex items-center gap-1.5 font-semibold text-amber-300">
-                    <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                    <span>Sesión en espera de validación por el servidor</span>
+              <div className="max-w-md mx-auto space-y-3">
+                <div className="p-4 bg-amber-950/40 border-2 border-amber-600/40 rounded-xl text-amber-200 text-xs text-left shadow-lg">
+                  <div className="flex items-center gap-2 font-bold text-amber-300 text-sm mb-2">
+                    <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                    <span>Sesión no validada por el servidor</span>
                   </div>
-                  <p className="mt-1 text-[11px] text-amber-300/80 leading-relaxed">
-                    El servidor aún no ha confirmado tu sesión. Si persiste, cierra sesión y vuelve a entrar.
+                  <p className="text-[11px] text-amber-300/90 leading-relaxed mb-4">
+                    Tu navegador tiene un token de sesión antiguo que el servidor ya no reconoce. Para fundar tu reino, <strong>debes cerrar sesión y volver a entrar</strong> con tu nombre de gobernante y contraseña.
                   </p>
+                  <button
+                    onClick={() => signOut()}
+                    className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-amber-950 font-bold rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Cerrar sesión ahora
+                  </button>
                 </div>
               </div>
             )}
           </div>
-          <FoundingWizard defaultMonarchName={viewer?.rulerName ?? ''} onFounded={() => setActiveTab('aldea')} />
+          <FoundingWizard 
+            defaultMonarchName={viewer?.rulerName ?? ''} 
+            onFounded={() => setActiveTab('aldea')} 
+            disabled={!viewer}
+          />
         </div>
       </RecoveryCodeGate>
     );
