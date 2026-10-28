@@ -97,26 +97,35 @@ Este documento recopila las fórmulas matemáticas, constantes numéricas y par�
 - **Mapa axial hexagonal (`MAP`)**:
   - Radio del mapa: 10 hexágonos (`MAP.RADIUS = 10`), 331 celdas totales (`generateWorldCells`).
   - Semilla fija reproducible: `MAP.WORLD_SEED = 20261017`.
-  - Terrenos: llanura (30 %), bosque (25 %), colina (20 %), montaña (15 %), río (10 %), costa en borde.
-- **Desplazamiento y duración de marcha militar (`calculateArmyMarchPlan`)**:
+  - Terrenos y pesos de distribución: Llanura (30 %), Bosque (25 %), Colina (20 %), Montaña (15 %), Río (10 %), Costa en el borde exterior (`hexDistance = 10`).
+  - Multiplicadores de marcha por terreno (`TERRAINS.marchMultiplier`, etiquetados `[DERIVADO]`):
+    - Llanura: 1,00
+    - Río: 1,10
+    - Costa: 1,10
+    - Bosque: 1,20
+    - Colina: 1,25
+    - Montaña: 1,50
+- **Desplazamiento y duración de marcha militar (`calculateArmyMarchPlan`, `marchTimeSeconds`)**:
   $$T_{\text{marcha}} = \text{clamp}\left(T_{\text{min}},\, T_{\text{max}},\, \left\lceil \frac{T_{\text{base}} \times d \times M_{\text{terreno}} \times M_{\text{unidad}}}{\max(0.1, M_{\text{civ\_vel}})} \right\rceil \right)$$
   - $T_{\text{base}} = 1.800\text{ s}$ por hexágono (`MAP.MARCH_SECONDS_PER_HEX = 1800`).
-  - $d$: distancia hexagonal (`hexDistance(from, to)`).
-  - $M_{\text{terreno}}$: promedio de las celdas atravesadas (`pathTerrainMultiplier`, R-14).
-  - $M_{\text{unidad}}$: velocidad de la unidad más lenta del ejército (`armyMarchMultiplier`):
+  - $d$: distancia hexagonal axial (`hexDistance(from, to)`). Para $d = 0$, $T_{\text{marcha}} = 0\text{ s}$.
+  - $M_{\text{terreno}}$: promedio de las celdas del camino (`pathTerrainMultiplier`, R-14):
+    $$M_{\text{terreno}} = \text{round}\left( \frac{\sum_{i=1}^d M_{\text{terreno}}(c_i)}{d},\, 3 \right)$$
+    donde el camino se calcula mediante interpolación lineal hexagonal (`hexLine(from, to)`), con origen excluido y destino incluido. Si una celda es desconocida, computa como 1,00.
+  - $M_{\text{unidad}}$: velocidad de la tropa más lenta del ejército (`armyMarchMultiplier`):
     - Infantería: 1,0
     - Arquería: 1,0
     - Caballería: 1,2
     - Asedio: 1,5
-  - $M_{\text{civ\_vel}}$: Mongoles = 1,15 (+15 % velocidad); neutral = 1,0.
+  - $M_{\text{civ\_vel}}$: Mongoles = 1,15 (+15 % velocidad); neutral / demás civilizaciones = 1,0.
   - Límites de salvaguarda: $T_{\text{min}} = 900\text{ s}$ (15 min reales), $T_{\text{max}} = 43.200\text{ s}$ (12 h reales).
   - Ventana de preparación pre-batalla:
     $$\text{Ventana} = \max(900\text{ s},\, \min(3.600\text{ s},\, \text{round}(0.20 \times T_{\text{marcha}})))$$
 - **Fatiga de marcha y recuperación (`marchFatigue`, `recoverFatigue`)**:
   - Acumulación por marcha:
     $$F_{\text{devengada}} = \left\lceil 2 \times d \times M_{\text{terreno}} \times M_{\text{civ\_fatiga}} \right\rceil$$
-    (Masáis: $M_{\text{civ\_fatiga}} = 0.75$ [−25 % acumulación]).
-  - Límite: $F \in [0, 100]$.
+    (Masáis: $M_{\text{civ\_fatiga}} = 0.75$ [−25 % acumulación]; demás civilizaciones = 1,0).
+  - Límite y tope: $F \in [0, 100]$.
   - Multiplicadores de poder de combate por fatiga (`FATIGUE_TABLE`):
     - 0–10: 1,00
     - 11–25: 0,97
@@ -127,8 +136,8 @@ Este documento recopila las fórmulas matemáticas, constantes numéricas y par�
     - 91–100: 0,45
   - Recuperación en descanso:
     $$F_{\text{nuevo}} = \max(0,\, F_{\text{actual}} - 10 \times \text{días\_reales}) \quad (\text{solo con ración } \ge \text{normal})$$
-- **Archivos**: `convex/territoryRules.ts`, `convex/balanceConfig.ts`.
-- **Prueba**: `convex/territoryPureTests.ts` (Test: *Marcha P41: 1.800 s por hexágono...* y Test: *Fatiga P32: +2 por hexágono...*).
+- **Archivos**: `convex/territoryRules.ts`, `convex/balanceConfig.ts`, `convex/territories.ts`, `convex/army.ts`, `convex/parliament.ts`.
+- **Pruebas**: `convex/territoryPureTests.ts` (Tests 1, 6, 7, 8) y `convex/integration.test.ts` (Campañas militares y marchas sobre el mapa).
 
 ---
 
@@ -147,7 +156,28 @@ Este documento recopila las fórmulas matemáticas, constantes numéricas y par�
   - Murallas: $+5\%$ defensa por nivel hasta $+50\%$ máximo (`WALLS_DEFENSE_PER_LEVEL = 0.05`, `WALLS_DEFENSE_MAX = 0.50`). Asedio rinde $\times 1,8$ contra murallas y $\times 1,0$ a campo abierto.
   - Contramedidas de unidades: Caballería $\to$ Arqueros $\to$ Infantería $\to$ Caballería ($+25\%$ efectividad, `FORMATION_COUNTER_BONUS = 0.25`).
   - Estrategias (ofensiva, defensiva, flanqueo, guerrilla): modificador 0,80–1,25 (`STRATEGY_MATRIX`).
-  - Formaciones tácticas: ciclo ofensiva $\to$ flanqueo $\to$ defensiva $\to$ ofensiva ($\times 1,12$ efectividad), equilibrada neutral ($\times 1,00$).
+  - **Formaciones tácticas [DERIVADO] (`TACTICAL_FORMATIONS`)**:
+    - **Ofensiva**: ataque $\times 1,12$, defensa $\times 0,90$, contrarresta Flanqueo (`beats = "flanqueo"`).
+    - **Defensiva**: ataque $\times 0,90$, defensa $\times 1,12$, contrarresta Ofensiva (`beats = "ofensiva"`).
+    - **Flanqueo**: ataque $\times 1,06$, defensa $\times 0,96$, contrarresta Defensiva (`beats = "defensiva"`).
+    - **Equilibrada**: ataque $\times 1,00$, defensa $\times 1,00$, no contrarresta ninguna (`beats = null`).
+    - **Ciclo de contramedidas**: Ofensiva $\to$ Flanqueo $\to$ Defensiva $\to$ Ofensiva; Equilibrada neutral.
+    - **Factor de contramedida**: $\times 1,15$ directo sobre la potencia del bando cuando su formación contrarresta la del rival (`TACTICAL_FORMATION_COUNTER_BONUS = 1.15`).
+    - **Rango acotado**: $[0,85, 1,25]$ (`TACTICAL_FORMATION_FACTOR_RANGE`).
+    - **Integración autoritativa en potencia**:
+      $$\text{formationAttack} = \text{strategyFactor}(\dots) \times \text{tacticalFormationFactor}(\text{own}, \text{enemy}, \text{"attack"})$$
+      $$\text{formationDefense} = \text{strategyFactor}(\dots) \times \text{tacticalFormationFactor}(\text{own}, \text{enemy}, \text{"defense"})$$
+      $$P_{\text{ofensiva}} = \text{offensive}^{0.85} \times \text{formationAttack}^{0.30} \times \text{common} \times \text{Contr}$$
+      $$P_{\text{defensiva}} = (\text{defensive} \times \text{terreno})^{0.85} \times \text{formationDefense}^{0.30} \times \text{common} \times \text{Contr}$$
+    - **Selección, validación y persistencia**:
+      - Persistida en reino (`tacticalFormation`), configurable mediante `setTacticalFormation` y `setArmyEquipment`.
+      - Fallback por defecto: `equilibrada` (`DEFAULT_TACTICAL_FORMATION`).
+      - Validación en servidor: rechazo inmediato de cualquier identificador no admitido.
+    - **Comportamiento en la matriz de 16 simulaciones (fuerzas iguales 1.000 vs 1.000)**:
+      - 3 victorias claras por contramedida (~6,7 a 7,5 pp de ventaja en bajas, nunca aplastantes).
+      - 3 derrotas simétricas al ser contrarrestado.
+      - 10 empates (las 4 formaciones idénticas y las 6 combinaciones con equilibrada o no contrarrestadas).
+      - Ejércitos desiguales: la superioridad 2:1 (2.000 vs 1.000) se impone sobre la contramedida (35 % frente a 56 % de bajas).
 - **Resolución de Bajas (Modelo Lanchester Acotado, `applyLanchesterRound`)**:
   $$\text{Daño} = 0.40 \times \left(\frac{P_{\text{atacante}}}{P_{\text{defensor}}}\right)^{0.50} \times N_{\text{atacante}}$$
   - Bajas máximas por ronda: 40 % de los efectivos vivos (`MAX_CASUALTIES_RATIO_PER_ROUND = 0.40`).
@@ -160,8 +190,8 @@ Este documento recopila las fórmulas matemáticas, constantes numéricas y par�
   Sin creación ni pérdida de efectivos por redondeo.
 - **Desgaste de Equipamiento (`calculateEquipmentWear`)**:
   $$\text{Desgaste}(\%) = \text{lossRatio} \times 100\% \quad (0 \text{ a } 100\%)$$
-- **Archivos**: `convex/battleRules.ts`, `convex/balanceConfig.ts`.
-- **Prueba**: `convex/battlePureTests.ts` (B-01, B-02, murallas, moral, Lanchester y contabilidad cerrada).
+- **Archivos**: `convex/battleRules.ts`, `convex/balanceConfig.ts`, `convex/army.ts`, `convex/armyRules.ts`.
+- **Pruebas**: `convex/battlePureTests.ts` (Pruebas 8 y 10), `convex/armyPureTests.ts` (Prueba 10), `scripts/simulateBattles.ts`.
 
 ---
 

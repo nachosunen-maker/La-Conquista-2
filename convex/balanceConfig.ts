@@ -863,14 +863,14 @@ export interface TerrainBalance {
   commerce: number;
   marchMultiplier: number;
 }
-/** [COMPLEMENTO D-24] Terrenos y modificadores iniciales. */
+/** [DERIVADO de P41/D-24/R-14] Terrenos y modificadores de marcha y economía. */
 export const TERRAINS: Readonly<Record<TerrainType, TerrainBalance>> = {
   llanura: { label: "Llanura", production: { agriculture: 0.1 }, defense: 0, commerce: 0, marchMultiplier: 1.0 },
-  bosque: { label: "Bosque", production: { wood: 0.15 }, defense: 0, commerce: 0, marchMultiplier: 1.0 },
-  colina: { label: "Colina", production: { stone: 0.1 }, defense: 0, commerce: 0, marchMultiplier: 1.0 },
-  montana: { label: "Montaña", production: { iron: 0.15 }, defense: 0.1, commerce: 0, marchMultiplier: 1.0 },
-  rio: { label: "Río", production: { agriculture: 0.1 }, defense: 0, commerce: 0, marchMultiplier: 1.0 },
-  costa: { label: "Costa", production: {}, defense: 0, commerce: 0.1, marchMultiplier: 1.0 },
+  rio: { label: "Río", production: { agriculture: 0.1 }, defense: 0, commerce: 0, marchMultiplier: 1.10 },
+  costa: { label: "Costa", production: {}, defense: 0, commerce: 0.1, marchMultiplier: 1.10 },
+  bosque: { label: "Bosque", production: { wood: 0.15 }, defense: 0, commerce: 0, marchMultiplier: 1.20 },
+  colina: { label: "Colina", production: { stone: 0.1 }, defense: 0, commerce: 0, marchMultiplier: 1.25 },
+  montana: { label: "Montaña", production: { iron: 0.15 }, defense: 0.1, commerce: 0, marchMultiplier: 1.50 },
 };
 
 export const MAP = {

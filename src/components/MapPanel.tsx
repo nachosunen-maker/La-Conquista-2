@@ -456,6 +456,11 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                           {world.terrains[selectedCell.terrain].defense > 0 && (
                             <span className="mr-2">+{Math.round(world.terrains[selectedCell.terrain].defense * 100)} % defensa</span>
                           )}
+                          {world.terrains[selectedCell.terrain].marchMultiplier !== 1.0 && (
+                            <span className="mr-2 text-amber-300">
+                              ×{world.terrains[selectedCell.terrain].marchMultiplier.toFixed(2)} marcha ({world.terrains[selectedCell.terrain].marchMultiplier > 1 ? `+${Math.round((world.terrains[selectedCell.terrain].marchMultiplier - 1) * 100)} % tiempo y fatiga` : ''})
+                            </span>
+                          )}
                         </div>
                       )}
 

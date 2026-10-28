@@ -107,6 +107,46 @@ export function runBattleValidationTests(): BattleTestResult[] {
     report.defender.survivors + report.defender.casualties === report.defender.initial
   );
 
+  // 10. Batería de 16 combinaciones y simulaciones obligatorias de formaciones tácticas
+  const matrix16Results: { pair: string; outcome: string; crushing: boolean; lossA: number; lossD: number }[] = [];
+  let matrix16Deterministic = true;
+  for (const a of tacticalIds) {
+    for (const d of tacticalIds) {
+      const rep1 = simulateBattle(side({ kingdomId: "A", tacticalFormation: a }), side({ kingdomId: "B", tacticalFormation: d }));
+      const rep2 = simulateBattle(side({ kingdomId: "A", tacticalFormation: a }), side({ kingdomId: "B", tacticalFormation: d }));
+      if (JSON.stringify(rep1) !== JSON.stringify(rep2)) {
+        matrix16Deterministic = false;
+      }
+      matrix16Results.push({
+        pair: `${a} vs ${d}`,
+        outcome: rep1.outcome,
+        crushing: rep1.crushingVictory,
+        lossA: rep1.attacker.lossRatio,
+        lossD: rep1.defender.lossRatio,
+      });
+    }
+  }
+
+  const totalCombos = matrix16Results.length;
+  const crushingCount = matrix16Results.filter((r) => r.crushing).length;
+  const winCount = matrix16Results.filter((r) => r.outcome === "victoria").length;
+  const lossCount = matrix16Results.filter((r) => r.outcome === "derrota").length;
+  const drawCount = matrix16Results.filter((r) => r.outcome === "empate").length;
+
+  // Ejército desigual: 2.000 (defensiva) vs 1.000 (flanqueo). Flanqueo contrarresta defensiva, pero 2.000 gana por masa
+  const bigVsCounter = simulateBattle(
+    side({ kingdomId: "A", composition: { infanteria: 2000, arqueria: 0, caballeria: 0, asedio: 0 }, tacticalFormation: "defensiva" }),
+    side({ kingdomId: "B", composition: { infanteria: 1000, arqueria: 0, caballeria: 0, asedio: 0 }, tacticalFormation: "flanqueo" })
+  );
+  const bigArmyWins = bigVsCounter.outcome === "victoria" && !bigVsCounter.crushingVictory && bigVsCounter.attacker.lossRatio < bigVsCounter.defender.lossRatio;
+
+  // Interacción con fatiga y moral: atacante con contramedida pero fatiga 70 y moral 50 vs defensor descansado (fatiga 0, moral 80)
+  const fatigueInteraction = simulateBattle(
+    side({ kingdomId: "A", tacticalFormation: "ofensiva", fatigue: 70, morale: 50 }),
+    side({ kingdomId: "B", tacticalFormation: "flanqueo", fatigue: 0, morale: 80 })
+  );
+  const fatigueRestrained = fatigueInteraction.outcome === "empate" || fatigueInteraction.outcome === "derrota";
+
   return [
     {
       test: "Determinismo: fuerzas idénticas producen el mismo informe y terminan en empate con 3 rondas (P52, D-29/D-30)",
@@ -163,6 +203,12 @@ export function runBattleValidationTests(): BattleTestResult[] {
       passed: woundedConsistent && recovery1 === 0.15 && recovery5 === 0.5 && Math.abs(recoveryTech - 0.6) < 1e-9 && recoveryNone === 0 &&
         equal.lootTransferred === false && wearSample === 25 && hospOk,
       details: `Contabilidad coherente: ${woundedConsistent}; recuperación nivel 1/5+/5+tec/sin hospital: ${recovery1}/${recovery5}/${recoveryTech}/${recoveryNone}; hospital cap/heridos/recuperados: ${hospCalc.hospitalCapacity}/${hospCalc.hospitalizedWounded}/${hospCalc.recoveredCount}; desgaste: ${wearSample} %`,
+    },
+    {
+      test: "Simulaciones obligatorias de formaciones tácticas: matriz 16 combinaciones (3 victorias, 3 derrotas, 10 empates sin aplastantes), superioridad 2:1 preservada frente a contramedida, modulación por fatiga/moral y determinismo",
+      passed: totalCombos === 16 && crushingCount === 0 && winCount === 3 && lossCount === 3 && drawCount === 10 &&
+        matrix16Deterministic && bigArmyWins && fatigueRestrained,
+      details: `Matriz 16: ${totalCombos} pares (victorias: ${winCount}, derrotas: ${lossCount}, empates: ${drawCount}, aplastantes: ${crushingCount}); determinismo 100%: ${matrix16Deterministic}; 2.000 vs 1.000 con contramedida gana grande: ${bigArmyWins}; fatiga/moral modulan ventaja: ${fatigueRestrained}`,
     },
   ];
 }

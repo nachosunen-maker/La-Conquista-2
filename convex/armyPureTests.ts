@@ -67,7 +67,8 @@ export function runArmyValidationTests(): ArmyTestResult[] {
   const levels = availableMilitaryLevels({ castillo: 4, cuartel: 3, universidad: 2 }).map((l) => l.level);
 
   const equipmentLocked = validateEquipmentSelection({ weaponTier: "acero", armorTier: "ninguna", strategy: "agresiva", buildingLevels: { herreria: 4 }, unlockedWeapons: [], unlockedArmors: [] });
-  const equipmentOpen = validateEquipmentSelection({ weaponTier: "acero", armorTier: "piel", strategy: "agresiva", buildingLevels: { herreria: 4 }, unlockedWeapons: ["acero"], unlockedArmors: [] });
+  const equipmentOpen = validateEquipmentSelection({ weaponTier: "acero", armorTier: "piel", strategy: "agresiva", buildingLevels: { herreria: 4 }, unlockedWeapons: ["acero"], unlockedArmors: [], tacticalFormation: "ofensiva" });
+  const equipmentInvalidFormation = validateEquipmentSelection({ weaponTier: "acero", armorTier: "piel", strategy: "agresiva", buildingLevels: { herreria: 4 }, unlockedWeapons: ["acero"], unlockedArmors: [], tacticalFormation: "invalida" });
 
   // Mercenarios por tipo (decisión 21-10-2026)
   const priceTableMatchesFormula = MERCENARIES.TYPES.every((type) => derivedMercenaryPrice(type.unitType, type.level) === type.goldPerUnit);
@@ -139,9 +140,10 @@ export function runArmyValidationTests(): ArmyTestResult[] {
       details: `Activos ${summary.totalActive}, heridos ${summary.totalWounded}, máquinas ${summary.siegeMachines}, operadores ${summary.siegeOperators}, vivos ${summary.livingSoldiers}, multiplicador ${summary.trainingMultiplier.toFixed(4)}`,
     },
     {
-      test: "Equipamiento (P30/P31): el acero exige tecnología además de Herrería 4",
-      passed: !equipmentLocked.success && equipmentOpen.success && equipmentOpen.weaponTier === "acero" && equipmentOpen.armorTier === "piel",
-      details: `Acero sin tecnología rechazado: ${!equipmentLocked.success}; con tecnología aceptado: ${equipmentOpen.success}`,
+      test: "Equipamiento y formaciones tácticas (P30/P31, decisión 21-10-2026): el acero exige tecnología, y la formación táctica se valida en servidor (rechazando cadenas arbitrarias)",
+      passed: !equipmentLocked.success && equipmentOpen.success && equipmentOpen.weaponTier === "acero" && equipmentOpen.armorTier === "piel" &&
+        equipmentOpen.tacticalFormation === "ofensiva" && !equipmentInvalidFormation.success && equipmentInvalidFormation.error.includes("Formación táctica desconocida"),
+      details: `Acero bloqueado: ${!equipmentLocked.success}; con tecnología y formación ofensiva: ${equipmentOpen.success}; formación arbitraria rechazada: ${!equipmentInvalidFormation.success}`,
     },
   ];
 }

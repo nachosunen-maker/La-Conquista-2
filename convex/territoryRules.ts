@@ -175,16 +175,31 @@ export function armyMarchMultiplier(composition: Partial<Record<UnitType, number
   return multiplier;
 }
 
-/** [COMPLEMENTO §5] T_marcha = T_base × d × M_terreno × M_unidad (segundos reales). */
-export function marchTimeSeconds(distance: number, terrainMultiplier: number = 1, unitMultiplier: number = 1): number {
-  if (!Number.isFinite(distance) || distance < 0) return 0;
-  return MAP.MARCH_SECONDS_PER_HEX * distance * terrainMultiplier * unitMultiplier;
+/** [COMPLEMENTO §5] T_marcha = T_base × d × M_terreno × M_unidad / M_civ (segundos reales, acotado entre 900 y 43.200 s). */
+export function marchTimeSeconds(
+  distance: number,
+  terrainMultiplier: number = 1,
+  unitMultiplier: number = 1,
+  civSpeedMultiplier: number = 1
+): number {
+  if (!Number.isFinite(distance) || distance <= 0) return 0;
+  const civSpeed = civSpeedMultiplier > 0 ? civSpeedMultiplier : 1;
+  const rawSeconds = (MAP.MARCH_SECONDS_PER_HEX * distance * terrainMultiplier * unitMultiplier) / civSpeed;
+  return Math.max(MARCH.MIN_DURATION_SECONDS, Math.min(MARCH.MAX_DURATION_SECONDS, Math.ceil(rawSeconds)));
 }
 
-/** [COMPLEMENTO §5] F_nueva = min(100, F_actual + 2·d·M_terreno). */
-export function marchFatigue(currentFatigue: number, distance: number, terrainMultiplier: number = 1): number {
+/** [COMPLEMENTO §5] F_nueva = min(100, F_actual + ceil(2·d·M_terreno·M_civFatiga)). */
+export function marchFatigue(
+  currentFatigue: number,
+  distance: number,
+  terrainMultiplier: number = 1,
+  civFatigueMultiplier: number = 1
+): number {
   const current = Number.isFinite(currentFatigue) ? Math.max(0, currentFatigue) : 0;
-  return Math.min(100, current + FATIGUE.PER_HEX * Math.max(0, distance) * terrainMultiplier);
+  if (!Number.isFinite(distance) || distance <= 0) return Math.min(100, current);
+  const civFatigue = civFatigueMultiplier > 0 ? civFatigueMultiplier : 1;
+  const rawFatigue = FATIGUE.PER_HEX * distance * terrainMultiplier * civFatigue;
+  return Math.min(100, current + Math.max(0, Math.ceil(rawFatigue)));
 }
 
 /**
@@ -219,14 +234,18 @@ export function hexLine(from: HexCoord, to: HexCoord): HexCoord[] {
 /**
  * [DECISIÓN 23-10-2026, R-14] Multiplicador de terreno de una marcha: media de los multiplicadores de
  * las celdas del camino (origen excluido, destino incluido). Celdas desconocidas cuentan como 1.
- * Con los valores vigentes de TERRAINS (todos 1,0) el resultado es 1 hasta que se aprueben valores.
  */
-export function pathTerrainMultiplier(from: HexCoord, to: HexCoord, terrainByCell: ReadonlyMap<string, TerrainType | string>): number {
+export function pathTerrainMultiplier(
+  from: HexCoord,
+  to: HexCoord,
+  terrainByCell: ReadonlyMap<string, TerrainType | string> | Record<string, TerrainType | string>
+): number {
   const cells = hexLine(from, to);
   if (cells.length === 0) return 1;
   let total = 0;
   for (const cell of cells) {
-    const terrain = terrainByCell.get(cellId(cell.q, cell.r));
+    const id = cellId(cell.q, cell.r);
+    const terrain = terrainByCell instanceof Map ? terrainByCell.get(id) : (terrainByCell as Record<string, string>)[id];
     total += terrain ? terrainMarchMultiplier(terrain as TerrainType) : 1;
   }
   return Math.round((total / cells.length) * 1000) / 1000;
@@ -266,10 +285,12 @@ export interface ArmyMarchPlan {
   gameTimeYears: number;
   slowestUnitType: UnitType | null;
   unitSpeedMultiplier: number;
+  terrainMultiplier: number;
   civilizationSpeedMultiplier: number;
   civilizationFatigueMultiplier: number;
   minBoundApplied: boolean;
   maxBoundApplied: boolean;
+  pathCells: HexCoord[];
 }
 
 export function calculateArmyMarchPlan(input: {
@@ -279,10 +300,18 @@ export function calculateArmyMarchPlan(input: {
   currentFatigue: number;
   departureTimeMs: number;
   terrainMultiplier?: number;
+  terrainByCell?: ReadonlyMap<string, TerrainType | string> | Record<string, TerrainType | string>;
   civilizationPassive?: { marchSpeedMultiplier?: number; fatigueAccrualMultiplier?: number } | null;
 }): ArmyMarchPlan {
   const distance = hexDistance(input.from, input.to);
-  const terrainMultiplier = typeof input.terrainMultiplier === "number" && input.terrainMultiplier > 0 ? input.terrainMultiplier : 1;
+  const pathCells = hexLine(input.from, input.to);
+
+  let terrainMultiplier = 1;
+  if (typeof input.terrainMultiplier === "number" && input.terrainMultiplier > 0) {
+    terrainMultiplier = input.terrainMultiplier;
+  } else if (input.terrainByCell && distance > 0) {
+    terrainMultiplier = pathTerrainMultiplier(input.from, input.to, input.terrainByCell);
+  }
 
   let slowestUnitType: UnitType | null = null;
   let unitSpeedMultiplier = 1;
@@ -321,7 +350,7 @@ export function calculateArmyMarchPlan(input: {
   const departureTimeMs = Number.isFinite(input.departureTimeMs) ? input.departureTimeMs : 0;
   const arrivalTimeMs = departureTimeMs + durationMs;
 
-  const rawFatigue = FATIGUE.PER_HEX * distance * terrainMultiplier * civFatigue;
+  const rawFatigue = distance > 0 ? FATIGUE.PER_HEX * distance * terrainMultiplier * civFatigue : 0;
   const fatigueAccrued = Math.max(0, Math.ceil(rawFatigue));
   const currentFatigue = Number.isFinite(input.currentFatigue) ? Math.max(0, Math.min(100, input.currentFatigue)) : 0;
   const finalFatigue = Math.min(100, currentFatigue + fatigueAccrued);
@@ -347,9 +376,11 @@ export function calculateArmyMarchPlan(input: {
     gameTimeYears,
     slowestUnitType,
     unitSpeedMultiplier,
+    terrainMultiplier,
     civilizationSpeedMultiplier: civSpeed,
     civilizationFatigueMultiplier: civFatigue,
     minBoundApplied,
     maxBoundApplied,
+    pathCells,
   };
 }

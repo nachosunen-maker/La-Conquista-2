@@ -69,15 +69,122 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
   const line = hexLine({ q: 0, r: 0 }, { q: 3, r: -1 });
   const lineOk = line.length === 3 && line.every((c, i) => hexDistance({ q: 0, r: 0 }, c) === i + 1) && line[2].q === 3 && line[2].r === -1;
   const terrainMap = new Map<string, string>([["1,0", "llanura"], ["2,-1", "montana"], ["3,-1", "bosque"]]);
-  const allOnes = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 3, r: -1 }, terrainMap);
+  const expectedAverage = Math.round(((1.0 + 1.5 + 1.2) / 3) * 1000) / 1000; // 1.233
+  const mixedAverage = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 3, r: -1 }, terrainMap);
   const weighted = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 2, r: 0 }, new Map([["1,0", "x"], ["2,0", "y"]]));
   const zero = pathTerrainMultiplier({ q: 2, r: 2 }, { q: 2, r: 2 }, terrainMap);
 
+  // Pruebas específicas de los 6 terrenos y caminos mixtos (requisitos 5 y 6)
+  const singleLlanura = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 1, r: 0 }, { "1,0": "llanura" });
+  const singleRio = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 1, r: 0 }, { "1,0": "rio" });
+  const singleCosta = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 1, r: 0 }, { "1,0": "costa" });
+  const singleBosque = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 1, r: 0 }, { "1,0": "bosque" });
+  const singleColina = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 1, r: 0 }, { "1,0": "colina" });
+  const singleMontana = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 1, r: 0 }, { "1,0": "montana" });
+  const all6TerrainsExact =
+    singleLlanura === 1.0 &&
+    singleRio === 1.10 &&
+    singleCosta === 1.10 &&
+    singleBosque === 1.20 &&
+    singleColina === 1.25 &&
+    singleMontana === 1.50;
+
+  // Caminos mixtos de 4 hexágonos (línea recta (0,0) -> (4,0): celdas "1,0", "2,0", "3,0", "4,0")
+  const pathLlanura = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 4, r: 0 }, { "1,0": "llanura", "2,0": "llanura", "3,0": "llanura", "4,0": "llanura" }); // 1.000
+  const pathColinas = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 4, r: 0 }, { "1,0": "llanura", "2,0": "llanura", "3,0": "colina", "4,0": "colina" });   // (1+1+1.25+1.25)/4 = 1.125
+  const pathVariado = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 4, r: 0 }, { "1,0": "llanura", "2,0": "rio", "3,0": "bosque", "4,0": "montana" });      // (1+1.1+1.2+1.5)/4 = 1.200
+  const pathMontanas = pathTerrainMultiplier({ q: 0, r: 0 }, { q: 4, r: 0 }, { "1,0": "montana", "2,0": "montana", "3,0": "montana", "4,0": "montana" }); // 1.500
+
+  // Determinismo: múltiples evaluaciones producen resultados estrictamente idénticos
+  const determinismOk =
+    pathVariado === 1.200 &&
+    pathTerrainMultiplier({ q: 0, r: 0 }, { q: 4, r: 0 }, { "1,0": "llanura", "2,0": "rio", "3,0": "bosque", "4,0": "montana" }) === 1.200 &&
+    pathLlanura < pathColinas && pathColinas < pathVariado && pathVariado < pathMontanas;
+
+  // Comportamiento con civilizaciones, asedio, fatiga y límites
+  // Caso base: 4 hexágonos en bosque (1.20), infantería, fatiga inicial 10
+  const terrainBosque4 = { "1,0": "bosque", "2,0": "bosque", "3,0": "bosque", "4,0": "bosque" };
+  const standardMarch = calculateArmyMarchPlan({
+    from: { q: 0, r: 0 },
+    to: { q: 4, r: 0 },
+    composition: { infanteria: 50 },
+    currentFatigue: 10,
+    departureTimeMs: 0,
+    terrainByCell: terrainBosque4,
+  });
+  // rawSeconds = 1800 * 4 * 1.20 * 1.0 / 1.0 = 8640 s
+  // rawFatigue = 2 * 4 * 1.20 * 1.0 = 9.6 -> ceil(9.6) = 10 fatiga
+  const standardOk = standardMarch.durationSeconds === 8640 && standardMarch.fatigueAccrued === 10 && standardMarch.finalFatigue === 20;
+
+  // Mongoles: +15 % velocidad de marcha (civSpeed = 1.15), fatiga normal (1.0)
+  const mongolesMarch = calculateArmyMarchPlan({
+    from: { q: 0, r: 0 },
+    to: { q: 4, r: 0 },
+    composition: { infanteria: 50 },
+    currentFatigue: 10,
+    departureTimeMs: 0,
+    terrainByCell: terrainBosque4,
+    civilizationPassive: { marchSpeedMultiplier: 1.15, fatigueAccrualMultiplier: 1.0 },
+  });
+  // ceil(8640 / 1.15) = 7514 s; fatiga = 10
+  const mongolesOk = mongolesMarch.durationSeconds === 7514 && mongolesMarch.fatigueAccrued === 10 && mongolesMarch.durationSeconds < standardMarch.durationSeconds;
+
+  // Masáis: velocidad normal (1.0), -25 % acumulación de fatiga (civFatigue = 0.75)
+  const masaisMarch = calculateArmyMarchPlan({
+    from: { q: 0, r: 0 },
+    to: { q: 4, r: 0 },
+    composition: { infanteria: 50 },
+    currentFatigue: 10,
+    departureTimeMs: 0,
+    terrainByCell: terrainBosque4,
+    civilizationPassive: { marchSpeedMultiplier: 1.0, fatigueAccrualMultiplier: 0.75 },
+  });
+  // durationSeconds = 8640 s; rawFatigue = 2 * 4 * 1.20 * 0.75 = 7.2 -> ceil(7.2) = 8
+  const masaisOk = masaisMarch.durationSeconds === 8640 && masaisMarch.fatigueAccrued === 8 && masaisMarch.fatigueAccrued < standardMarch.fatigueAccrued;
+
+  // Asedio: marcha a la velocidad del más lento (marchMultiplier = 1.50)
+  const siegeMarch = calculateArmyMarchPlan({
+    from: { q: 0, r: 0 },
+    to: { q: 2, r: 0 },
+    composition: { infanteria: 100, asedio: 2 },
+    currentFatigue: 0,
+    departureTimeMs: 0,
+    terrainMultiplier: 1.50, // montaña
+  });
+  // rawSeconds = 1800 * 2 * 1.50 * 1.50 = 8100 s; infantería sola sería 1800 * 2 * 1.50 * 1.0 = 5400 s
+  const siegeOk = siegeMarch.unitSpeedMultiplier === 1.50 && siegeMarch.slowestUnitType === "asedio" && siegeMarch.durationSeconds === 8100;
+
+  // Límite máximo: 20 hexágonos en montaña (1.50) con asedio (1.50) -> raw = 81.000 s -> acotado a 43.200 s (12 h reales)
+  const maxBoundMarch = calculateArmyMarchPlan({
+    from: { q: -10, r: 0 },
+    to: { q: 10, r: 0 },
+    composition: { asedio: 5 },
+    currentFatigue: 0,
+    departureTimeMs: 0,
+    terrainMultiplier: 1.50,
+  });
+  const maxBoundOk = maxBoundMarch.durationSeconds === 43_200 && maxBoundMarch.maxBoundApplied === true;
+
+  // Límite mínimo: marcha de prueba corta con tiempo raw menor a 900 s acotada a 900 s
+  const minBoundTime = marchTimeSeconds(1, 0.4, 1.0); // raw = 720 s -> 900 s
+  const minBoundOk = minBoundTime === 900;
+
+  // Fatiga acumulada con tope en 100
+  const cappedFatigueMarch = calculateArmyMarchPlan({
+    from: { q: 0, r: 0 },
+    to: { q: 6, r: 0 },
+    composition: { infanteria: 50 },
+    currentFatigue: 95,
+    departureTimeMs: 0,
+    terrainMultiplier: 1.50, // raw fatiga = 2 * 6 * 1.50 = 18
+  });
+  const cappedFatigueOk = cappedFatigueMarch.fatigueAccrued === 18 && cappedFatigueMarch.finalFatigue === 100;
+
   return [
     {
-      test: "R-14 (decisión 23-10-2026): la marcha usa la media del terreno de las celdas del camino (origen excluido, destino incluido); con los valores vigentes (1,0) no cambia nada",
-      passed: lineOk && allOnes === 1 && weighted === 1 && zero === 1 && hexLine({ q: 1, r: 1 }, { q: 1, r: 1 }).length === 0,
-      details: `Línea (0,0)→(3,-1): ${line.map((c) => `${c.q},${c.r}`).join(" ")}; media con TERRAINS vigentes: ${allOnes}; distancia 0: ${zero}`,
+      test: "R-14 (decisión 23-10-2026): la marcha usa la media del terreno de las celdas del camino (origen excluido, destino incluido)",
+      passed: lineOk && mixedAverage === expectedAverage && weighted === 1 && zero === 1 && hexLine({ q: 1, r: 1 }, { q: 1, r: 1 }).length === 0,
+      details: `Línea (0,0)→(3,-1): ${line.map((c) => `${c.q},${c.r}`).join(" ")}; media ponderada mixta: ${mixedAverage} (esperado ${expectedAverage}); distancia 0: ${zero}`,
     },
     {
       test: "Mundo hexagonal de radio 10 con 331 celdas únicas y terreno reproducible por semilla (D-23, D-25)",
@@ -112,6 +219,16 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
         multipliers.join(",") === "1,1,0.97,0.97,0.92,0.92,0.85,0.85,0.75,0.75,0.6,0.6,0.45,0.45" &&
         recoveredNormal === 30 && recoveredMinima === 50,
       details: `Fatiga tras 4 hex: ${fatigueAfter}; tope: ${fatigueCapped}; multiplicadores: ${multipliers.join(",")}; recuperación normal/mínima: ${recoveredNormal}/${recoveredMinima}`,
+    },
+    {
+      test: "Modificadores de los 6 terrenos canónicos (P41, D-24) y caminos mixtos deterministas",
+      passed: all6TerrainsExact && determinismOk && pathLlanura === 1.0 && pathColinas === 1.125 && pathVariado === 1.200 && pathMontanas === 1.500,
+      details: `Terrenos: llanura=${singleLlanura}, rio=${singleRio}, costa=${singleCosta}, bosque=${singleBosque}, colina=${singleColina}, montana=${singleMontana}; caminos: llanura=${pathLlanura}, colinas=${pathColinas}, mixto=${pathVariado}, montaña=${pathMontanas}`,
+    },
+    {
+      test: "Interacción completa de marcha con civilizaciones (Mongoles, Masáis), asedio, fatiga y límites",
+      passed: standardOk && mongolesOk && masaisOk && siegeOk && maxBoundOk && minBoundOk && cappedFatigueOk,
+      details: `Estándar: ${standardMarch.durationSeconds}s / ${standardMarch.fatigueAccrued}f; Mongoles: ${mongolesMarch.durationSeconds}s; Masáis fatiga: ${masaisMarch.fatigueAccrued}f; Asedio 2 hex montaña: ${siegeMarch.durationSeconds}s; Límite máx: ${maxBoundMarch.durationSeconds}s; Límite mín: ${minBoundTime}s; Tope fatiga: ${cappedFatigueMarch.finalFatigue}`,
     },
   ];
 }

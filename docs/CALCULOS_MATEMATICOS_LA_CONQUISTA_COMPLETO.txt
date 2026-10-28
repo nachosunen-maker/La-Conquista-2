@@ -104,13 +104,22 @@ y validados mediante la batería completa de pruebas automatizadas (200/200 supe
 - Mapa axial hexagonal:
     * Radio del mapa: 10 hexágonos (MAP.RADIUS = 10), 331 celdas totales.
     * Semilla fija: MAP.WORLD_SEED = 20261017.
-    * Distribución de terreno: Llanura 30 %, Bosque 25 %, Colina 20 %, Montaña 15 %, Río 10 %.
-- Desplazamiento y duración de marcha militar (calculateArmyMarchPlan):
+    * Distribución de terreno: Llanura 30 %, Bosque 25 %, Colina 20 %, Montaña 15 %, Río 10 %, Costa en el borde.
+    * Multiplicadores de marcha por terreno [DERIVADO]:
+        Llanura: 1.00
+        Río:     1.10
+        Costa:   1.10
+        Bosque:  1.20
+        Colina:  1.25
+        Montaña: 1.50
+- Desplazamiento y duración de marcha militar (calculateArmyMarchPlan, marchTimeSeconds):
     T_marcha = clamp(T_min, T_max, ceil((T_base * distancia * M_terreno * M_unidad) / max(0.1, M_civ_vel)))
     donde:
       T_base = 1.800 s por hexágono (MAP.MARCH_SECONDS_PER_HEX = 1800)
-      distancia = hexDistance(origen, destino)
-      M_terreno = promedio de las celdas atravesadas
+      distancia = hexDistance(origen, destino)  [para distancia 0, T_marcha = 0]
+      M_terreno = promedio de las celdas del camino (pathTerrainMultiplier, R-14):
+                  round((sum(M_terreno(c_i)) / distancia), 3)
+                  calculado sobre la línea recta hexagonal (hexLine), origen excluido y destino incluido.
       M_unidad = multiplicador de la unidad más lenta (Infantería 1.0, Arquería 1.0, Caballería 1.2, Asedio 1.5)
       M_civ_vel = 1.15 para Mongoles (+15 % velocidad); 1.0 para el resto
       T_min = 900 s (15 min reales); T_max = 43.200 s (12 horas reales)
@@ -120,7 +129,7 @@ y validados mediante la batería completa de pruebas automatizadas (200/200 supe
     F_devengada = ceil(2 * distancia * M_terreno * M_civ_fatiga)
     donde:
       M_civ_fatiga = 0.75 para Masáis (-25 % fatiga); 1.0 para el resto
-      Fango acumulado: [0, 100]
+      Rango acumulado: [0, 100]
     Multiplicadores de poder según fatiga (FATIGUE_TABLE):
       0 a 10:   1,00
       11 a 25:  0,97
@@ -131,8 +140,8 @@ y validados mediante la batería completa de pruebas automatizadas (200/200 supe
       91 a 100: 0,45
     Recuperación en descanso:
       F_nuevo = max(0, F_actual - (10 * dias_reales))  [con ración >= normal]
-- Archivos fuente: convex/territoryRules.ts, convex/balanceConfig.ts.
-- Pruebas: convex/territoryPureTests.ts (Marcha P41, Fatiga P32).
+- Archivos fuente: convex/territoryRules.ts, convex/balanceConfig.ts, convex/territories.ts, convex/army.ts, convex/parliament.ts.
+- Pruebas: convex/territoryPureTests.ts (Tests 1, 6, 7, 8) y convex/integration.test.ts (Campañas militares y marchas sobre el mapa).
 
 --------------------------------------------------------------------------------
 7. MOTOR DE COMBATE
@@ -144,14 +153,32 @@ y validados mediante la batería completa de pruebas automatizadas (200/200 supe
       E = Nivel de entrenamiento militar
       W = Nivel de armamento
       A = Nivel de armaduras
-      Form = Factor de formación táctica (ofensiva > flanqueo > defensiva > ofensiva x1.12, equilibrada 1.0)
+      Form = Factor de formación táctica combinada con estrategia
       M = Factor de moral = 0.50 + (Moral / 200), rango [0.50, 1.00]
       Alim = Factor de abastecimiento, rango [0.80, 1.05]
       Fat = Factor de fatiga según FATIGUE_TABLE, rango [0.45, 1.00]
-      Contr = Ventaja de contramedida (+25 % efectividad en ciclo Caballería > Arqueros > Infantería > Caballería)
+      Contr = Ventaja de contramedida táctica (x1.15 si formación propia contrarresta rival)
       Estrat = Matriz estratégica (0.80 a 1.25 según emparejamiento)
       M_civ = Modificadores de civilización (Japoneses ataque x1.05; Masáis y Mongoles defensa x0.95)
       Murallas = 1.0 + min(0.50, nivelMuralla * 0.05) para el defensor; asedio x1.8 contra murallas
+- Formaciones tácticas [DERIVADO] (TACTICAL_FORMATIONS):
+    * Ofensiva:   ataque x1,12; defensa x0,90; contrarresta Flanqueo
+    * Defensiva:  ataque x0,90; defensa x1,12; contrarresta Ofensiva
+    * Flanqueo:   ataque x1,06; defensa x0,96; contrarresta Defensiva
+    * Equilibrada: ataque x1,00; defensa x1,00; no contrarresta ninguna
+    Ciclo de contramedidas:
+      Ofensiva > Flanqueo > Defensiva > Ofensiva; Equilibrada neutral
+    Bonificación de contramedida: x1,15 directo sobre la potencia (TACTICAL_FORMATION_COUNTER_BONUS)
+    Rango acotado: [0,85, 1,25] (TACTICAL_FORMATION_FACTOR_RANGE)
+    Selección y persistencia:
+      Configurable en reino mediante setTacticalFormation y setArmyEquipment.
+      Opción por defecto: Equilibrada (DEFAULT_TACTICAL_FORMATION).
+      Validación estricta en servidor con rechazo de entradas arbitrarias.
+    Resultados en matriz 16 (fuerzas iguales 1.000 vs 1.000):
+      3 victorias (~6,7 a 7,5 pp de ventaja en bajas, nunca aplastantes).
+      3 derrotas simétricas.
+      10 empates (las 4 idénticas y las 6 no contrarrestadas / equilibradas).
+      Ejércitos desiguales: superioridad 2:1 (2.000 vs 1.000) vence a pesar de contramedida rival.
 - Resolución de bajas (Modelo Lanchester acotado, applyLanchesterRound):
     Daño = 0.40 * (P_atacante / P_defensor)^0.50 * N_atacante
     * Bajas máximas por ronda: 40 % de los efectivos vivos (MAX_CASUALTIES_RATIO_PER_ROUND = 0.40)
@@ -164,8 +191,8 @@ y validados mediante la batería completa de pruebas automatizadas (200/200 supe
     Sin generación ni pérdida espuria de tropas por redondeo.
 - Desgaste de equipamiento (calculateEquipmentWear):
     Desgaste(%) = lossRatio * 100 %  (en rango 0 % a 100 %)
-- Archivos fuente: convex/battleRules.ts, convex/balanceConfig.ts.
-- Pruebas: convex/battlePureTests.ts.
+- Archivos fuente: convex/battleRules.ts, convex/balanceConfig.ts, convex/army.ts, convex/armyRules.ts.
+- Pruebas: convex/battlePureTests.ts (Pruebas 8 y 10), convex/armyPureTests.ts (Prueba 10), scripts/simulateBattles.ts.
 
 --------------------------------------------------------------------------------
 8. RESULTADOS, HONOR, GLORIA Y EMPATE

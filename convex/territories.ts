@@ -33,7 +33,10 @@ import {
   type WorldCell,
   hexLine,
   pathTerrainMultiplier,
+  calculateArmyMarchPlan,
 } from "./territoryRules";
+import type { UnitType } from "./balanceConfig";
+import { getCivilizationPassive } from "./civilizationRules";
 import {
   canStartExploration,
   calculateExplorationRefund,
@@ -727,3 +730,59 @@ export async function releaseTerritories(ctx: MutationCtx, kingdomId: Id<"kingdo
     await ctx.db.patch(cell._id, { ownerKingdomId: undefined, isHome: false, claimedAt: undefined });
   }
 }
+
+/**
+ * [R-14/P41] Previsualización autoritativa del plan de marcha militar entre el territorio principal
+ * y una celda objetivo, utilizando los mismos datos de terreno que el servidor almacena.
+ */
+export const previewArmyMarchPlan = query({
+  args: {
+    kingdomId: v.id("kingdoms"),
+    targetCellId: v.string(),
+    composition: v.optional(v.record(v.string(), v.number())),
+  },
+  handler: async (ctx, args) => {
+    const kingdom = await ctx.db.get(args.kingdomId);
+    if (!kingdom) throw new Error("Reino no encontrado.");
+    const homeCoord = await readHomeCoord(ctx, args.kingdomId);
+    if (!homeCoord) throw new Error("El reino no tiene territorio principal asignado.");
+
+    const target = await ctx.db
+      .query("territories")
+      .withIndex("by_cell", (q) => q.eq("cellId", args.targetCellId))
+      .first();
+    if (!target) throw new Error("El territorio objetivo no existe.");
+
+    const targetCoord = { q: target.q, r: target.r };
+    const terrainMultiplier = await readPathTerrainMultiplier(ctx, homeCoord, targetCoord);
+    const civPassive = getCivilizationPassive(kingdom.civilization);
+
+    const comp: Partial<Record<UnitType, number>> = {};
+    if (args.composition) {
+      for (const [k, v] of Object.entries(args.composition)) {
+        if (v > 0) comp[k as UnitType] = v;
+      }
+    } else {
+      comp.infanteria = 1;
+    }
+
+    const currentFatigue = typeof kingdom.armyFatigue === "number" ? kingdom.armyFatigue : 0;
+    const plan = calculateArmyMarchPlan({
+      from: homeCoord,
+      to: targetCoord,
+      composition: comp,
+      currentFatigue,
+      departureTimeMs: Date.now(),
+      terrainMultiplier,
+      civilizationPassive: civPassive,
+    });
+
+    return {
+      success: true,
+      homeCoord,
+      targetCoord,
+      terrainMultiplier,
+      plan,
+    };
+  },
+});

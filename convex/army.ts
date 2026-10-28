@@ -352,6 +352,7 @@ export const setArmyEquipment = mutation({
     weaponTier: v.string(),
     armorTier: v.string(),
     strategy: v.string(),
+    tacticalFormation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireOwner(ctx, args.kingdomId);
@@ -366,15 +367,26 @@ export const setArmyEquipment = mutation({
       buildingLevels: collection.levels,
       unlockedWeapons: modifiers.unlockedWeapons,
       unlockedArmors: modifiers.unlockedArmors,
+      tacticalFormation: args.tacticalFormation,
     });
     if (!selection.success) throw new Error(selection.error);
-    await ctx.db.patch(args.kingdomId, {
+    const patch: any = {
       weaponTier: selection.weaponTier,
       armorTier: selection.armorTier,
       strategy: selection.strategy,
       updatedAt: Date.now(),
-    });
-    return { success: true, weaponTier: selection.weaponTier, armorTier: selection.armorTier, strategy: selection.strategy };
+    };
+    if (selection.tacticalFormation !== undefined) {
+      patch.tacticalFormation = selection.tacticalFormation;
+    }
+    await ctx.db.patch(args.kingdomId, patch);
+    return {
+      success: true,
+      weaponTier: selection.weaponTier,
+      armorTier: selection.armorTier,
+      strategy: selection.strategy,
+      tacticalFormation: patch.tacticalFormation,
+    };
   },
 });
 
@@ -575,7 +587,8 @@ export const launchAttack = mutation({
     // [R-14, decisión 23-10-2026] Media del terreno del camino (origen excluido, destino incluido).
     const terrainMul = await readPathTerrainMultiplier(ctx, homeCoord, { q: target.q, r: target.r });
     const unitMul = armyMarchMultiplier(requestedComposition);
-    const durationSeconds = marchTimeSeconds(distance, terrainMul, unitMul);
+    const civPassive = getCivilizationPassive(kingdom.civilization);
+    const durationSeconds = marchTimeSeconds(distance, terrainMul, unitMul, civPassive?.marchSpeedMultiplier ?? 1.0);
     const durationMs = Math.round(durationSeconds * 1000);
     const completesAt = now + durationMs;
 
@@ -622,7 +635,13 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     .first();
 
   const currentFatigue = typeof attackerKingdom.armyFatigue === "number" ? attackerKingdom.armyFatigue : 0;
-  const newFatigue = marchFatigue(currentFatigue, march.distance, typeof march.terrainMultiplier === "number" ? march.terrainMultiplier : 1);
+  const attackerCiv = getCivilizationPassive(attackerKingdom.civilization);
+  const newFatigue = marchFatigue(
+    currentFatigue,
+    march.distance,
+    typeof march.terrainMultiplier === "number" ? march.terrainMultiplier : 1,
+    attackerCiv?.fatigueAccrualMultiplier ?? 1.0
+  );
   await ctx.db.patch(march.kingdomId, { armyFatigue: newFatigue });
 
   if (!targetCell || !targetCell.ownerKingdomId || targetCell.ownerKingdomId === march.kingdomId) {

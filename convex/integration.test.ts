@@ -198,6 +198,39 @@ describe("Entrenamiento (Bloque B)", () => {
     expect(armyAfter.summary.byType.caballeria.active).toBe(2);
     expect(armyAfter.mercenaries.types.filter((type: any) => type.available).map((type: any) => type.id)).toEqual(["mesnada", "lanceros", "arqueros", "jinetes"]);
   });
+
+  test("configurar formación táctica: valida en servidor, persiste en el reino y por defecto es equilibrada", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "user-tactics", "Reino Táctico");
+    const state0 = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state0.equipment.tacticalFormation).toBe("equilibrada");
+
+    // Guardar formación táctica válida
+    const res = await asUser.mutation(api.army.setTacticalFormation, { kingdomId, tacticalFormation: "ofensiva" });
+    expect(res.tacticalFormation).toBe("ofensiva");
+    expect(res.attack).toBe(1.12);
+    expect(res.defense).toBe(0.9);
+
+    const state1 = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state1.equipment.tacticalFormation).toBe("ofensiva");
+
+    // Rechazar formación arbitraria o inválida
+    await expect(asUser.mutation(api.army.setTacticalFormation, { kingdomId, tacticalFormation: "invencible" })).rejects.toThrow(/Formación desconocida/);
+
+    // Permite actualizarla mediante setArmyEquipment
+    await setBuildingLevel(t, kingdomId, "herreria", 2);
+    await setBuildingLevel(t, kingdomId, "minaHierro", 1);
+    const equip = await asUser.mutation(api.army.setArmyEquipment, {
+      kingdomId,
+      weaponTier: "espadaHierro",
+      armorTier: "cueroReforzado",
+      strategy: "defensiva",
+      tacticalFormation: "flanqueo",
+    });
+    expect(equip.tacticalFormation).toBe("flanqueo");
+    const state2 = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state2.equipment.tacticalFormation).toBe("flanqueo");
+  });
 });
 
 describe("Singularidades por civilización (decisión 21-10-2026)", () => {
@@ -228,7 +261,8 @@ describe("Singularidades por civilización (decisión 21-10-2026)", () => {
     expect(construction.catalog.cuartel.label).toBe(`Castra (${BUILDINGS.cuartel.label})`);
     expect(construction.catalog.granja.label).toBe(BUILDINGS.granja.label);
     const civs = await t.query(api.civilizations.listCivilizations, {});
-    expect(civs.profiles.find((p: any) => p.id === "navajos")?.pendingDesign).toBe(true);
+    expect(civs.profiles.find((p: any) => p.id === "navajos")?.pendingDesign).toBe(false);
+    expect(civs.profiles.find((p: any) => p.id === "navajos")?.identity?.signatureUnit.name).toBe("Rastreador");
     expect(civs.profiles.find((p: any) => p.id === "romanos")?.identity?.signatureUnit.name).toBe("Legionario");
   });
 });
@@ -829,6 +863,51 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     const level2Unit = armyState.units.find((u: any) => u.unitType === "infanteria" && u.level === 2);
     expect(level2Unit).toBeDefined();
     expect(level2Unit.count).toBeGreaterThan(0);
+  });
+
+  test("marcha calcula el multiplicador de terreno medio con datos reales de la base de datos y coincide con previewArmyMarchPlan", async () => {
+    const t = createTestBackend();
+    const attacker = await foundKingdom(t, "user-atk-terr", "Reino Atacante Terreno");
+    const defender = await foundKingdom(t, "user-def-terr", "Reino Defensor Terreno");
+
+    await attacker.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: attacker.kingdomId });
+    await defender.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: defender.kingdomId });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 1, count: 200 });
+    });
+
+    const defTerritories = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
+    const targetCellId = defTerritories.homeTerritoryId!;
+
+    // 1. Obtener previsualización autoritativa
+    const preview = await attacker.asUser.query(api.territories.previewArmyMarchPlan, {
+      kingdomId: attacker.kingdomId,
+      targetCellId,
+      composition: { infanteria: 100 },
+    });
+    expect(preview.success).toBe(true);
+    expect(preview.terrainMultiplier).toBeGreaterThanOrEqual(1.0);
+    expect(preview.plan.distance).toBeGreaterThan(0);
+    expect(preview.plan.durationSeconds).toBeGreaterThanOrEqual(900);
+    expect(preview.plan.durationSeconds).toBeLessThanOrEqual(43200);
+
+    // 2. Lanzar ataque y verificar coincidencia exacta con el plan
+    const marchRes = await attacker.asUser.mutation(api.army.launchAttack, {
+      kingdomId: attacker.kingdomId,
+      cellId: targetCellId,
+      units: [{ unitType: "infanteria", level: 1, count: 100 }],
+    });
+    expect(marchRes.success).toBe(true);
+    expect(marchRes.distance).toBe(preview.plan.distance);
+    expect(marchRes.durationSeconds).toBe(preview.plan.durationSeconds);
+
+    // 3. Verificar datos guardados en la tabla armyMarches
+    const savedMarch = await t.run(async (ctx) => {
+      return await ctx.db.get(marchRes.marchId);
+    });
+    expect(savedMarch).toBeDefined();
+    expect(savedMarch?.terrainMultiplier).toBe(preview.terrainMultiplier);
   });
 
   test("seguridad getWorldMap: prohíbe espiar la niebla de guerra de otro reino", async () => {

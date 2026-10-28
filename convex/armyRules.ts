@@ -366,17 +366,27 @@ export function validateEquipmentSelection(input: {
   buildingLevels: Readonly<Record<string, number>>;
   unlockedWeapons: ReadonlyArray<string>;
   unlockedArmors: ReadonlyArray<string>;
-}): { success: true; weaponTier: WeaponTier; armorTier: ArmorTier; strategy: Strategy } | { success: false; error: string } {
+  tacticalFormation?: string;
+}): { success: true; weaponTier: WeaponTier; armorTier: ArmorTier; strategy: Strategy; tacticalFormation?: TacticalFormation } | { success: false; error: string } {
   if (!isWeaponTier(input.weaponTier)) return { success: false, error: `Arma desconocida: '${input.weaponTier}'.` };
   if (!isArmorTier(input.armorTier)) return { success: false, error: `Armadura desconocida: '${input.armorTier}'.` };
   if (!isStrategy(input.strategy)) return { success: false, error: `Estrategia desconocida: '${input.strategy}'.` };
+  if (input.tacticalFormation !== undefined && !isTacticalFormation(input.tacticalFormation)) {
+    return { success: false, error: `Formación táctica desconocida: '${input.tacticalFormation}'. Válidas: ${Object.keys(TACTICAL_FORMATIONS).join(", ")}.` };
+  }
   if (!availableWeaponTiers(input.buildingLevels, input.unlockedWeapons).includes(input.weaponTier)) {
     return { success: false, error: `El arma '${input.weaponTier}' no está desbloqueada (requiere Herrería o tecnología).` };
   }
   if (!availableArmorTiers(input.buildingLevels, input.unlockedArmors).includes(input.armorTier)) {
     return { success: false, error: `La armadura '${input.armorTier}' no está desbloqueada (requiere Herrería o tecnología).` };
   }
-  return { success: true, weaponTier: input.weaponTier, armorTier: input.armorTier, strategy: input.strategy };
+  return {
+    success: true,
+    weaponTier: input.weaponTier,
+    armorTier: input.armorTier,
+    strategy: input.strategy,
+    tacticalFormation: input.tacticalFormation ? (input.tacticalFormation as TacticalFormation) : undefined,
+  };
 }
 
 export function validateBuildingLevelMap(levels: Readonly<Record<string, number>>): boolean {

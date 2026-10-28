@@ -19,6 +19,7 @@ import { distanceBetweenKingdoms, pathTerrainBetweenKingdoms, readHomeCoord } fr
 import { marchFatigue, marchTimeSeconds, armyMarchMultiplier } from "./territoryRules";
 import { applyFormation, emptyComposition, simulateBattle, type BattleSide, type Composition } from "./battleRules";
 import { isTacticalFormation } from "./armyRules";
+import { getCivilizationPassive } from "./civilizationRules";
 import { evaluateKingdomMissions, recordMissionEvent } from "./missions";
 import {
   approximateEstimate,
@@ -251,9 +252,16 @@ export const acceptChallenge = mutation({
     if (now >= challenge.expiresAt) throw new Error("El desafío ha caducado.");
     const { scheduledAt, freezeAt } = scheduleFor(now, args.window);
     const attackerUnits = await readArmyUnitDocs(ctx, challenge.challengerKingdomId);
+    const attackerKingdom = await ctx.db.get(challenge.challengerKingdomId);
+    const civPassive = getCivilizationPassive(attackerKingdom?.civilization);
     // [R-14, decisión 23-10-2026] Terreno medio del camino entre los territorios principales.
     const terrainMultiplier = await pathTerrainBetweenKingdoms(ctx, challenge.challengerKingdomId, challenge.targetKingdomId);
-    const marchSeconds = marchTimeSeconds(challenge.distance ?? 0, terrainMultiplier, armyMarchMultiplier(activeComposition(attackerUnits)));
+    const marchSeconds = marchTimeSeconds(
+      challenge.distance ?? 0,
+      terrainMultiplier,
+      armyMarchMultiplier(activeComposition(attackerUnits)),
+      civPassive?.marchSpeedMultiplier ?? 1.0
+    );
     await ctx.db.patch(args.challengeId, { status: "ACCEPTED", respondedAt: now, window: args.window, scheduledAt, freezeAt, marchSeconds, terrainMultiplier });
     await ctx.scheduler.runAt(freezeAt, internal.parliament.freezeChallenge, { challengeId: args.challengeId });
     await ctx.scheduler.runAt(scheduledAt, internal.parliament.resolveChallenge, { challengeId: args.challengeId });
@@ -358,6 +366,7 @@ async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, role: "
     const cell = await ctx.db.query("territories").withIndex("by_cell", (q) => q.eq("cellId", `${home.q},${home.r}`)).first();
     terrainDefenseBonus = cell ? (TERRAINS as any)[cell.terrain]?.defense ?? 0 : 0;
   }
+  const civPassive = getCivilizationPassive(refreshed.civilization);
   const currentFatigue = typeof refreshed.armyFatigue === "number" ? refreshed.armyFatigue : 0;
   return {
     kingdomId,
@@ -371,7 +380,7 @@ async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, role: "
     tacticalFormation: isTacticalFormation(refreshed.tacticalFormation ?? "") ? (refreshed.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
     morale: typeof refreshed.militaryMorale === "number" ? refreshed.militaryMorale : WELLBEING.INITIAL_MORALE,
     foodTier: refreshed.foodTier ?? "normal",
-    fatigue: role === "attacker" ? marchFatigue(currentFatigue, distance, terrainMultiplier) : currentFatigue,
+    fatigue: role === "attacker" ? marchFatigue(currentFatigue, distance, terrainMultiplier, civPassive.fatigueAccrualMultiplier) : currentFatigue,
     wallsLevel: role === "defender" ? levels.murallas ?? 0 : 0,
     terrainDefenseBonus: role === "defender" ? terrainDefenseBonus : 0,
   };
