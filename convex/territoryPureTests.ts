@@ -1,5 +1,6 @@
 import {
   armyMarchMultiplier,
+  calculateArmyMarchPlan,
   canClaimTerritory,
   chooseHomeCell,
   fatigueMultiplier,
@@ -49,6 +50,15 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
 
   const marchInfantry = marchTimeSeconds(4, 1, armyMarchMultiplier({ infanteria: 100 }));
   const marchSiege = marchTimeSeconds(4, 1, armyMarchMultiplier({ infanteria: 100, asedio: 2 }));
+  const marchPlan = calculateArmyMarchPlan({
+    from: { q: 0, r: 0 },
+    to: { q: 4, r: 0 },
+    composition: { infanteria: 100 },
+    currentFatigue: 10,
+    departureTimeMs: 1000,
+  });
+  const planOk = marchPlan.distance === 4 && marchPlan.durationSeconds === 7_200 && marchPlan.fatigueAccrued === 8 &&
+    marchPlan.finalFatigue === 18 && marchPlan.arrivalTimeMs === 7_201_000 && marchPlan.battlePrepWindowSeconds === 1440;
   const fatigueAfter = marchFatigue(10, 4, 1);
   const fatigueCapped = marchFatigue(99, 4, 1);
   const multipliers = [0, 10, 11, 25, 26, 40, 41, 60, 61, 75, 76, 90, 91, 100].map(fatigueMultiplier);
@@ -92,9 +102,9 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
       details: `Sin reclamación: ${!claimNoPending.success}; cercana: ${claimNear.success}; lejana: ${!claimFar.success}; ocupada: ${!claimOwned.success}`,
     },
     {
-      test: "Marcha (P41): 1.800 s por hexágono a la velocidad del más lento; asedio ×1,5",
-      passed: marchInfantry === 7_200 && marchSiege === 10_800,
-      details: `Infantería 4 hex: ${marchInfantry}s; con asedio: ${marchSiege}s`,
+      test: "Marcha (P41): 1.800 s por hexágono a la velocidad del más lento; asedio ×1,5 y plan de marcha completo",
+      passed: marchInfantry === 7_200 && marchSiege === 10_800 && planOk,
+      details: `Infantería 4 hex: ${marchInfantry}s; con asedio: ${marchSiege}s; plan completo: dur=${marchPlan.durationSeconds}s, fatiga=${marchPlan.finalFatigue}, prep=${marchPlan.battlePrepWindowSeconds}s`,
     },
     {
       test: "Fatiga (P32): +2 por hexágono con tope 100, tabla de penalización y recuperación de 10/día solo con ración normal o mejor",

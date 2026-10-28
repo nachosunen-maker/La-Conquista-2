@@ -1,5 +1,5 @@
-import { applyFormation, computeSideFactors, simulateBattle, strategyFactor, tacticalCounterMultiplier, tacticalFormationFactor, wallsDefenseBonus, woundedRecoveryRatio, type BattleSide } from "./battleRules";
-import { BATTLE_REWARDS, COMBAT, HOSPITAL_RECOVERY_CAP, HOSPITAL_RECOVERY_PER_YEAR, TACTICAL_FORMATIONS, TACTICAL_FORMATION_COUNTER_BONUS, type TacticalFormation } from "./balanceConfig";
+import { applyFormation, calculateEquipmentWear, calculateHospitalRecovery, computeSideFactors, simulateBattle, strategyFactor, tacticalCounterMultiplier, tacticalFormationFactor, wallsDefenseBonus, woundedRecoveryRatio, type BattleSide } from "./battleRules";
+import { BATTLE_REWARDS, COMBAT, HOSPITAL, HOSPITAL_RECOVERY_CAP, HOSPITAL_RECOVERY_PER_YEAR, TACTICAL_FORMATIONS, TACTICAL_FORMATION_COUNTER_BONUS, type TacticalFormation } from "./balanceConfig";
 
 export interface BattleTestResult {
   test: string;
@@ -92,6 +92,14 @@ export function runBattleValidationTests(): BattleTestResult[] {
   const recoveryTech = woundedRecoveryRatio(5, 0.15, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP);
   const recoveryNone = woundedRecoveryRatio(0, 0.15, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP);
 
+  const wearSample = calculateEquipmentWear(0.25);
+  const hospCalc = calculateHospitalRecovery({
+    hospitalLevel: 2,
+    totalWounded: 250,
+    elapsedDays: 1,
+  });
+  const hospOk = hospCalc.hospitalCapacity === 200 && hospCalc.hospitalizedWounded === 200 && hospCalc.overflowWounded === 50 && hospCalc.recoveredCount === 46;
+
   const woundedConsistent = [equal, eliteWins, crushing].every((report) =>
     report.attacker.wounded === Math.round(report.attacker.casualtiesComposition.infanteria * 0.65) &&
     report.attacker.dead === report.attacker.casualties - report.attacker.wounded &&
@@ -151,10 +159,10 @@ export function runBattleValidationTests(): BattleTestResult[] {
       details: `Ciclo cerrado: ${cycleClosed}; contramedida ofensiva vs flanqueo ×${tacticalCounter}, vs defensiva ×${tacticalNoCounter}; factor ofensiva ${tacticalPlain}; equilibrada ${tacticalBalanced}; contrarrestar vence sin aplastar: ${tacticalWins}; sin contramedida empata: ${noCounterDraws}; equilibrada nunca aplastada: ${balancedNeverCrushed}; por defecto equilibrada: ${defaultIsBalanced}`,
     },
     {
-      test: "Heridos ≈65 % de las bajas (P44) y contabilidad cerrada de supervivientes; recuperación hospitalaria P45 con tope 60 %",
+      test: "Heridos ≈65 % de las bajas (P44) y contabilidad cerrada de supervivientes; recuperación hospitalaria P45 con tope 60 % y desgaste de equipamiento",
       passed: woundedConsistent && recovery1 === 0.15 && recovery5 === 0.5 && Math.abs(recoveryTech - 0.6) < 1e-9 && recoveryNone === 0 &&
-        equal.lootTransferred === false,
-      details: `Contabilidad coherente: ${woundedConsistent}; recuperación nivel 1/5+/5+tec/sin hospital: ${recovery1}/${recovery5}/${recoveryTech}/${recoveryNone}`,
+        equal.lootTransferred === false && wearSample === 25 && hospOk,
+      details: `Contabilidad coherente: ${woundedConsistent}; recuperación nivel 1/5+/5+tec/sin hospital: ${recovery1}/${recovery5}/${recoveryTech}/${recoveryNone}; hospital cap/heridos/recuperados: ${hospCalc.hospitalCapacity}/${hospCalc.hospitalizedWounded}/${hospCalc.recoveredCount}; desgaste: ${wearSample} %`,
     },
   ];
 }
