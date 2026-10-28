@@ -9,5 +9,9 @@ export default {
       domain: "https://festive-dodo-429.eu-west-1.convex.site",
       applicationID: "convex",
     },
+    {
+      domain: "https://festive-dodo-429.convex.site",
+      applicationID: "convex",
+    },
   ],
 };

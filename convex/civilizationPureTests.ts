@@ -206,7 +206,7 @@ export function runCivilizationTests(): CivilizationTestResult[] {
   const mockSideJap: BattleSide = {
     kingdomId: "k-jap",
     name: "Japón",
-    composition: { infanteria: 100, arqueria: 0, caballeria: 0, asedio: 0 },
+    composition: { ...emptyComposition(), infanteria: 100 },
     trainingMultiplier: 1.0,
     weaponTier: "palo",
     armorTier: "ninguna",

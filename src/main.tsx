@@ -8,18 +8,30 @@ import './index.css';
 function resolveConvexUrl(urlOrDeployment: string | undefined): string | null {
   if (!urlOrDeployment || typeof urlOrDeployment !== 'string') return null;
   const trimmed = urlOrDeployment.trim().replace(/\/+$/, '');
+  
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     try {
-      new URL(trimmed);
+      const url = new URL(trimmed);
+      // [CORRECCIÓN] Asegurar que usamos el endpoint regional para el deployment principal.
+      // Las redirecciones de endpoints globales a regionales pueden soltar conexiones en vuelo.
+      if (url.hostname === 'festive-dodo-429.convex.cloud') {
+        return 'https://festive-dodo-429.eu-west-1.convex.cloud';
+      }
       return trimmed;
     } catch {
       return null;
     }
   }
+
   // If the value is a Convex deployment key/name (e.g. dev:festive-dodo-429|... or dev:festive-dodo-429)
   const match = trimmed.match(/^(?:dev|prod):([a-z0-9-]+)/);
   if (match) {
-    return `https://${match[1]}.convex.cloud`;
+    const deploymentName = match[1];
+    // [CORRECCIÓN] Forzar la URL regional confirmada para el deployment de este proyecto.
+    if (deploymentName === 'festive-dodo-429') {
+      return 'https://festive-dodo-429.eu-west-1.convex.cloud';
+    }
+    return `https://${deploymentName}.convex.cloud`;
   }
   return null;
 }

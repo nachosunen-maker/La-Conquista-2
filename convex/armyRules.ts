@@ -244,6 +244,16 @@ export function summarizeArmy(units: ReadonlyArray<ArmyUnitRecord>): ArmySummary
     arqueria: { active: 0, wounded: 0 },
     caballeria: { active: 0, wounded: 0 },
     asedio: { active: 0, wounded: 0 },
+    onagro_campana: { active: 0, wounded: 0 },
+    carrobalista: { active: 0, wounded: 0 },
+    espringarda_movil: { active: 0, wounded: 0 },
+    trabuchet_traccion: { active: 0, wounded: 0 },
+    arcuballista: { active: 0, wounded: 0 },
+    fustibalo_campo: { active: 0, wounded: 0 },
+    mangonel_tactico: { active: 0, wounded: 0 },
+    carros_artillados: { active: 0, wounded: 0 },
+    ariete_movil: { active: 0, wounded: 0 },
+    torres_asalto: { active: 0, wounded: 0 },
   };
   let weighted = 0;
   let totalActive = 0;

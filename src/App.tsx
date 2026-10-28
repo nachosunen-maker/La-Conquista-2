@@ -959,20 +959,6 @@ function KingdomOverviewContent() {
                     El servidor aún no ha confirmado tu sesión. Si persiste, cierra sesión y vuelve a entrar.
                   </p>
                 </div>
-                {/* Diagnóstico temporal solicitado */}
-                <div className="p-3 bg-neutral-950/90 border border-neutral-700/60 rounded-lg text-left text-[11px] font-mono text-neutral-300 space-y-1 shadow-xl">
-                  <div className="font-bold text-amber-400 border-b border-neutral-800 pb-1 flex items-center justify-between">
-                    <span>[Diagnóstico temporal de autenticación]</span>
-                    <span className="text-[10px] text-neutral-400">festive-dodo-429</span>
-                  </div>
-                  <div>• auth provider loading (isLoading): <span className={isLoading ? "text-amber-400" : "text-emerald-400"}>{String(isLoading)}</span></div>
-                  <div>• token local presente (isAuthenticated): <span className={isAuthenticated ? "text-emerald-400" : "text-rose-400"}>{String(isAuthenticated)}</span></div>
-                  <div>• servidor getViewer(): <span className={viewer === undefined ? "text-amber-400" : viewer === null ? "text-rose-400" : "text-emerald-400"}>{viewer === undefined ? "cargando (undefined)" : viewer === null ? "null (servidor rechaza token)" : "reconocido"}</span></div>
-                  <div>• URL cliente Convex: <span className="text-neutral-200">https://festive-dodo-429.eu-west-1.convex.cloud</span></div>
-                  <div className="text-[10px] text-neutral-400 pt-1 border-t border-neutral-900 leading-tight">
-                    * Distinción: isAuthenticated=true indica token guardado en cliente; getViewer=null indica que el backend rechazó la identidad.
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -2210,8 +2196,20 @@ function KingdomOverviewContent() {
    COMPONENTE RAÍZ APP
    ========================================================================== */
 export default function App() {
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated, isLoading } = useConvexAuth();
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // Si está cargando el estado inicial de sesión, mostrar cargador minimalista para estabilizar la transición (P4, T-01)
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#0b0a08] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 text-[#d4af37] animate-spin" />
+          <span className="text-xs text-[#8e816d] font-serif uppercase tracking-widest">Validando Sesión...</span>
+        </div>
+      </div>
+    );
+  }
 
   // Si no está autenticado, renderiza la pantalla de inicio oficial a pantalla completa
   if (!isAuthenticated) {

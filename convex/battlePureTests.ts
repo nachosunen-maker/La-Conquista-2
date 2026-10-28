@@ -1,4 +1,4 @@
-import { applyFormation, calculateEquipmentWear, calculateHospitalRecovery, computeSideFactors, emptyComposition, simulateBattle, strategyFactor, tacticalCounterMultiplier, tacticalFormationFactor, wallsDefenseBonus, woundedRecoveryRatio, type BattleSide } from "./battleRules";
+import { applyFormation, calculateEquipmentWear, calculateHospitalRecovery, computeSideFactors, emptyComposition, simulateBattle, strategyFactor, tacticalCounterMultiplier, tacticalFormationFactor, wallsDefenseBonus, woundedRecoveryRatio, type BattleSide, type Composition } from "./battleRules";
 import { BATTLE_REWARDS, COMBAT, HOSPITAL, HOSPITAL_RECOVERY_CAP, HOSPITAL_RECOVERY_PER_YEAR, TACTICAL_FORMATIONS, TACTICAL_FORMATION_COUNTER_BONUS, type TacticalFormation } from "./balanceConfig";
 
 export interface BattleTestResult {
@@ -8,9 +8,8 @@ export interface BattleTestResult {
 }
 
 function side(overrides: Partial<BattleSide> & { kingdomId: string }): BattleSide {
+  const { composition, ...rest } = overrides;
   return {
-    name: overrides.kingdomId,
-    composition: { ...emptyComposition(), infanteria: 1000 },
     trainingMultiplier: 1,
     weaponTier: "espadaHierro",
     armorTier: "cueroReforzado",
@@ -20,7 +19,9 @@ function side(overrides: Partial<BattleSide> & { kingdomId: string }): BattleSid
     fatigue: 0,
     wallsLevel: 0,
     terrainDefenseBonus: 0,
-    ...overrides,
+    ...rest,
+    name: overrides.kingdomId,
+    composition: { ...emptyComposition(), ...(composition ?? { infanteria: 1000 }) },
   };
 }
 
@@ -29,35 +30,35 @@ export function runBattleValidationTests(): BattleTestResult[] {
   const equalAgain = simulateBattle(side({ kingdomId: "A" }), side({ kingdomId: "B" }));
 
   // Fuerza pequeña bien preparada contra fuerza grande mal preparada (P34, P69)
-  const elite = side({ kingdomId: "elite", composition: { infanteria: 600, arqueria: 0, caballeria: 0, asedio: 0 }, trainingMultiplier: 1.9, weaponTier: "aceroAvanzado", armorTier: "acero", morale: 95, foodTier: "excelente", strategy: "agresiva" });
-  const mob = side({ kingdomId: "mob", composition: { infanteria: 1000, arqueria: 0, caballeria: 0, asedio: 0 }, trainingMultiplier: 1, weaponTier: "palo", armorTier: "ninguna", morale: 30, foodTier: "minima", fatigue: 80, strategy: "concentracion" });
+  const elite = side({ kingdomId: "elite", composition: { ...emptyComposition(), infanteria: 600 }, trainingMultiplier: 1.9, weaponTier: "aceroAvanzado", armorTier: "acero", morale: 95, foodTier: "excelente", strategy: "agresiva" });
+  const mob = side({ kingdomId: "mob", composition: { ...emptyComposition(), infanteria: 1000 }, trainingMultiplier: 1, weaponTier: "palo", armorTier: "ninguna", morale: 30, foodTier: "minima", fatigue: 80, strategy: "concentracion" });
   const eliteWins = simulateBattle(elite, mob);
 
   // Superioridad numérica abrumadora
-  const horde = side({ kingdomId: "horde", composition: { infanteria: 5000, arqueria: 0, caballeria: 0, asedio: 0 } });
-  const small = side({ kingdomId: "small", composition: { infanteria: 300, arqueria: 0, caballeria: 0, asedio: 0 } });
+  const horde = side({ kingdomId: "horde", composition: { ...emptyComposition(), infanteria: 5000 } });
+  const small = side({ kingdomId: "small", composition: { ...emptyComposition(), infanteria: 300 } });
   const crushing = simulateBattle(horde, small);
 
   // Moral baja fuerza la retirada
   const demoralized = simulateBattle(side({ kingdomId: "low", morale: 10 }), side({ kingdomId: "ok" }));
 
   // Asedio contra murallas y sin murallas
-  const siegeArmy = side({ kingdomId: "siege", composition: { infanteria: 800, arqueria: 0, caballeria: 0, asedio: 50 } });
+  const siegeArmy = side({ kingdomId: "siege", composition: { ...emptyComposition(), infanteria: 800, asedio: 50 } });
   const walled = side({ kingdomId: "walled", wallsLevel: 3 });
   const open = side({ kingdomId: "open", wallsLevel: 0 });
   const strengthVsWalls = computeSideFactors(siegeArmy, siegeArmy.composition, walled).offensiveStrength;
   const strengthVsOpen = computeSideFactors(siegeArmy, siegeArmy.composition, open).offensiveStrength;
-  const wallsFactors = computeSideFactors(side({ kingdomId: "w", wallsLevel: 10 }), { infanteria: 1000, arqueria: 0, caballeria: 0, asedio: 0 }, open);
-  const noWallsFactors = computeSideFactors(side({ kingdomId: "w", wallsLevel: 0 }), { infanteria: 1000, arqueria: 0, caballeria: 0, asedio: 0 }, open);
+  const wallsFactors = computeSideFactors(side({ kingdomId: "w", wallsLevel: 10 }), { ...emptyComposition(), infanteria: 1000 }, open);
+  const noWallsFactors = computeSideFactors(side({ kingdomId: "w", wallsLevel: 0 }), { ...emptyComposition(), infanteria: 1000 }, open);
   const maxLossCeiling = 1 - (1 - COMBAT.CASUALTY_RATE_K) ** COMBAT.MAX_ROUNDS;
 
   // Matriz de contrapartidas P37 (M-11)
-  const cavalry = side({ kingdomId: "cav", composition: { infanteria: 0, arqueria: 0, caballeria: 1000, asedio: 0 } });
-  const archers = side({ kingdomId: "arc", composition: { infanteria: 0, arqueria: 1000, caballeria: 0, asedio: 0 } });
+  const cavalry = side({ kingdomId: "cav", composition: { ...emptyComposition(), caballeria: 1000 } });
+  const archers = side({ kingdomId: "arc", composition: { ...emptyComposition(), arqueria: 1000 } });
   const infantry = side({ kingdomId: "inf" });
   const cavVsArchers = computeSideFactors(cavalry, cavalry.composition, archers).offensiveStrength;
   const cavVsInfantry = computeSideFactors(cavalry, cavalry.composition, infantry).offensiveStrength;
-  const formed = applyFormation({ infanteria: 1000, arqueria: 400, caballeria: 200, asedio: 10 }, { arqueria: 0.5, caballeria: 0 });
+  const formed = applyFormation({ ...emptyComposition(), infanteria: 1000, arqueria: 400, caballeria: 200, asedio: 10 }, { arqueria: 0.5, caballeria: 0 });
 
   const factorCounter = strategyFactor("defensiva", "agresiva", "defense");
   const factorPlain = strategyFactor("defensiva", "defensiva", "defense");
@@ -85,7 +86,7 @@ export function runBattleValidationTests(): BattleTestResult[] {
     const report = simulateBattle(side({ kingdomId: "A", tacticalFormation: id }), side({ kingdomId: "B", tacticalFormation: "equilibrada" }));
     return !report.crushingVictory && report.defender.lossRatio < 0.6;
   });
-  const defaultIsBalanced = computeSideFactors(side({ kingdomId: "x" }), { infanteria: 1000, arqueria: 0, caballeria: 0, asedio: 0 }, side({ kingdomId: "y" })).tacticalFormation === "equilibrada";
+  const defaultIsBalanced = computeSideFactors(side({ kingdomId: "x" }), { ...emptyComposition(), infanteria: 1000 }, side({ kingdomId: "y" })).tacticalFormation === "equilibrada";
 
   const recovery1 = woundedRecoveryRatio(1, 0, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP);
   const recovery5 = woundedRecoveryRatio(7, 0, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP);
@@ -135,8 +136,8 @@ export function runBattleValidationTests(): BattleTestResult[] {
 
   // Ejército desigual: 2.000 (defensiva) vs 1.000 (flanqueo). Flanqueo contrarresta defensiva, pero 2.000 gana por masa
   const bigVsCounter = simulateBattle(
-    side({ kingdomId: "A", composition: { infanteria: 2000, arqueria: 0, caballeria: 0, asedio: 0 }, tacticalFormation: "defensiva" }),
-    side({ kingdomId: "B", composition: { infanteria: 1000, arqueria: 0, caballeria: 0, asedio: 0 }, tacticalFormation: "flanqueo" })
+    side({ kingdomId: "A", composition: { ...emptyComposition(), infanteria: 2000 }, tacticalFormation: "defensiva" }),
+    side({ kingdomId: "B", composition: { ...emptyComposition(), infanteria: 1000 }, tacticalFormation: "flanqueo" })
   );
   const bigArmyWins = bigVsCounter.outcome === "victoria" && !bigVsCounter.crushingVictory && bigVsCounter.attacker.lossRatio < bigVsCounter.defender.lossRatio;
 

@@ -458,12 +458,7 @@ export const setTacticalFormation = mutation({
 export const setFormation = mutation({
   args: {
     kingdomId: v.id("kingdoms"),
-    formation: v.object({
-      infanteria: v.optional(v.number()),
-      arqueria: v.optional(v.number()),
-      caballeria: v.optional(v.number()),
-      asedio: v.optional(v.number()),
-    }),
+    formation: v.record(v.string(), v.number()),
   },
   handler: async (ctx, args) => {
     await requireOwner(ctx, args.kingdomId);

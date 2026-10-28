@@ -1,0 +1,836 @@
+
+> la-conquista@1.0.0 test
+> tsx scripts/runEconomicTests.ts
+
+================================================================================
+LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAMENTO + EXPLORACIÓN + CIVILIZACIONES + CUENTA + MISIONES)
+================================================================================
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Acceso: el subject autenticado autoriza el reino propio y la demo permanece solo de lectura
+  Detalle: Demo pública de lectura: true; usuario ajeno rechazado: true; demo modificable: false
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Lectura de población: fallback solo usa censo y mano libre persistidos, sin inventar capacidad ni hambruna
+  Detalle: Fallback agregado: 2000/250; sin capacidad/hambruna inventadas: true; faltantes/inválidos/sobreasignados rechazados: true
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  1. Tiempo transcurrido continuo en segundos (P2)
+  Detalle: Fracción esperada 0.5, obtenida 0.5. Comida resultante: 2600 (esperada 2600)
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  2. Balance alimentario y superávit de P19 (Régimen Normal oficial)
+  Detalle: Producción: 2200/día, Consumo: 2000/día, Margen: +10.0% (esperado +10.0%)
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  3. Factor militar 1,05 exclusivamente en tropa regular (P18)
+  Detalle: Consumo con 200 soldados: 2010 (esperado 2010: 1800 civil + 210 militar)
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  4. No negatividad y detección analítica de agotamiento (Bloque 6)
+  Detalle: Comida final: 0 (suelo 0). Agotada a los 21600s. Tiempo en inanición: 64800s.
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  5. Agotamiento exacto en el instante final del intervalo
+  Detalle: Comida final: 0; secondsToExhaustion: 10800s (esperado 10800s); starvationSeconds: 0s (esperado 0s).
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  6. Detección de recursos no válidos (negativos, infinitos o NaN)
+  Detalle: Válido aceptado: true; Negativo rechazado: true; Infinito rechazado: true; NaN rechazado: true.
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  7. Validación de nombres, montos y motivo obligatorio de gasto (P3, Bloque 5)
+  Detalle: Tipos oficiales aceptados: true; 'oro' rechazado: true; motivo vacío rechazado: true; motivo espacios rechazado: true.
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  8. Lógica de deduplicación e idempotencia contable con motivo obligatorio (Bloque 5)
+  Detalle: Duplicado idéntico detectado: true; Conflicto monto: true; Conflicto motivo: true; Rechazo motivo vacío: true; Nueva transacción: true.
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  9. Integridad censal: enteros, no negativos y suma exacta = 2.000 (P10)
+  Detalle: Válido: true; Decimal rechazado: true; Descuadre rechazado: true; Negativo rechazado: true.
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  10. Adaptador: Transformación válida de documentos relacionales y ensamblado de estado
+  Detalle: Éxito: true; Población: 2000; Soldados: 150; Agricultores: 1100
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  11. Adaptador: Preservación de censo real de 1.000 hab. en reinos existentes sin alterar datos
+  Detalle: Éxito: true; Censo preservado: 1000 (esperado 1000 sin sobreescritura P10)
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  12. Adaptador: Rechazo estricto ante ausencia de documentos raíz requeridos
+  Detalle: Sin reino rechazado: true; Sin recursos rechazado: true; Sin población rechazado: true
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  13. Adaptador: Detección y rechazo de recursos negativos o marcas temporales inválidas
+  Detalle: Comida negativa rechazada: true; Timestamp negativo rechazado: true
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  14. Adaptador: Clasificación militar (P18, D-12): máquinas de asedio no comen, operadores y heridos sí
+  Detalle: Personas militares: 250; máquinas: 10; operadores: 50; unidades activas: 210; con heridos: 265
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  15. Adaptador: Rechazo de incoherencias demográficas y regímenes no oficiales (P17)
+  Detalle: Superación de censo rechazada: true; Régimen alimentario no oficial rechazado: true
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  16. Consulta Proyectada: Proyección reproducible con hora inyectable (P2)
+  Detalle: Éxito: true; Segundos transcurridos: 43200; Comida proyectada: 2597.5 (esperada 2597.5); Superávit diario: 195
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  17. Consulta Proyectada: Intervalo temporal de cero segundos (conservación exacta)
+  Detalle: Éxito: true; Segundos: 0; Comida proyectada: 2500 (idéntica a original 2500)
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  18. Consulta Proyectada: Timestamp anterior a lastUpdated (prevención de retroceso)
+  Detalle: Éxito: true; Segundos clamp: 0; Comida protegida: 2500
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  19. Consulta Proyectada: Detección analítica de agotamiento e inanición (Bloque 6)
+  Detalle: Comida final: 0 (suelo 0); Segundos hasta agotamiento: 43200; Segundos en inanición: 43200; isStarving: true
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  20. Consulta Proyectada: Control estricto de autorización (P1: rechazo de ajenos y anónimos)
+  Detalle: Rechazo usuario ajeno: true; Rechazo anónimo: true; Aprobación usuario legítimo: true
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  21. Consulta Proyectada: Factores oficiales del régimen alimentario (P17) y operadores de asedio (P18, D-12)
+  Detalle: Consumo mínima: 763.125 (esperado 763.125); abundante: 1119.2500000000002 (esperado 1119.25); excelente: 1221 (esperado 1221.0); normal: 1017.5 (esperado 1017.5); personas militares: 350 (esperado 350)
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  21B. Saldos de un día real en los cuatro regímenes, incluyendo el 5% de tropas reales
+  Detalle: minima: 5446.25 (esperado 5446.25); normal: 5195 (esperado 5195); abundante: 5094.5 (esperado 5094.5); excelente: 4994 (esperado 4994)
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  22. Constantes oficiales de balance alimentario aprobadas (Mínima 0.75, Normal 1.00, Abundante 1.10, Excelente 1.20)
+  Detalle: Mínima: 0.75 (0.75), Normal: 1 (1.00), Abundante: 1.1 (1.10), Excelente: 1.2 (1.20)
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  23. Liquidación persistente: cálculo autoritativo con régimen alimentario normal y actualización atómica
+  Detalle: Éxito: true; Segundos: 43200; Comida inicial: 2000; Comida liquidada: 2050 (esperada 2050); Delta: 50
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  24. Liquidación persistente: procesa diez días offline completos sin tope artificial
+  Detalle: Intervalo limitado: false; Segundos: 864000 (esperados 864000); Comida final: 5000 (esperada 5000); Timestamp efectivo: 865000000
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  25. Liquidación persistente: primera inicialización (isFirstInitialization) sin adeudamiento ni regalo de recursos
+  Detalle: Éxito: true; Segundos: 0; Comida conservada intacta: 2500 (esperado 2500); Delta: 0; Timestamp actualizado: 2000000
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  26. Inalterabilidad de recursos sin fórmula aprobada (oro 800, madera 1200, piedra 1000, hierro 300)
+  Detalle: Oro: 800, Madera: 1200, Piedra: 1000, Hierro: 300 (100% inalterados)
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  27. Liquidación persistente: no negatividad (suelo en 0) y activación precisa del estado isStarving
+  Detalle: Comida final: 0 (no negativa); isStarving: true; Tiempo agotamiento: 8640s (esperado 8640s); Tiempo en inanición: 8640s (esperado 8640s)
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  28. Transición atómica de régimen: liquida con el régimen previo antes de activar el nuevo
+  Detalle: Previo: normal, Nuevo: excelente, Comida liquidada: 2100 (esperada 2100 con factor normal), Delta: 100
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  29. Periodos prolongados (30 días reales / 2.592.000s): cálculo analítico exacto en O(1) sin bucles
+  Detalle: Tiempo cálculo: 0ms (O(1)); Segundos: 2592000; Comida resultante: 8000 (esperada 8000); Capped: false
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  30. Primera liquidación: fija referencia temporal inicial sin alterar recursos anteriores
+  Detalle: Segundos: 0; Delta comida: 0; Comida conservada: 2500 (exactamente 2500); Timestamp fijado: 1792139337131
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  31. Inanición acumulada en periodos largos: cálculo exacto de tiempo en inanición y suelo en 0
+  Detalle: Comida final: 0; Agotamiento en: 86400s (1 día); Tiempo en inanición: 777600s (exactamente 9 días = 777.600s)
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  32. Concurrencia e idempotencia temporal: reejecución con timestamp idéntico resulta en delta 0 sin duplicación
+  Detalle: Liq 1: delta +8.33, comida 2008.33; Liq 2 (mismo timestamp): delta 0, comida 2008.33 (sin duplicación)
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  33. Integración UI: Usuario sin reino no puede liquidar ni cambiar régimen (rechazo defensivo)
+  Detalle: Liquidación rechazada: true (Documento de reino ('kingdom') ausente o nulo.); Cambio de régimen rechazado: true (Documento de reino ('kingdom') ausente o nulo.)
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  34. Integración UI: Modo demo bloquea mutaciones persistentes y restringe interacción a simulación local
+  Detalle: isOwner en demo: false; Mutaciones bloqueadas: true; Simulación local permitida: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  35. Integración UI: Carga inicial del régimen desde kingdom.foodTier con fallback a 'normal'
+  Detalle: Reino con tier guardado: abundante (esperado 'abundante'); Reino sin tier guardado: normal (esperado 'normal')
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  36. Integración UI: Cambio de régimen solo aparece confirmado tras respuesta exitosa del servidor
+  Detalle: Sin actualización optimista falsa: true; Confirmado tras servidor: excelente (esperado 'excelente')
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  37. Integración UI: Fallo de mutación captura el error y revierte el selector al régimen confirmado
+  Detalle: Rechazo del servidor: true; Selector revertido a: normal (esperado 'normal')
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  38. Integración UI: Las consultas y mutaciones respetan estrictamente sus firmas tipadas en Convex
+  Detalle: getKingdomFull: {userId}; getViewer: {}; settleKingdomEconomy: {kingdomId?}; setKingdomFoodTier: {kingdomId?, foodTier}
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  39. Integración UI: Segregación visual estricta entre reservas persistidas (2500) y delta estimado (+100)
+  Detalle: Persistido en almacén: 2500; Estimación en proyección: 2600 (delta +100); Original intacto: 2500
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  40. Integración UI: Salvaguarda anti-bucles en liquidación automática al cargar el reino propio
+  Detalle: Re-renders simulados: 5; Liquidaciones ejecutadas: 1 (estrictamente 1 vez); Flag persistente: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  41. Reasignación laboral valida y resultado persistible sincroniza oficio y mano disponible
+  Detalle: Persistir agriculture=400, available=400; liberar a 250 deja 550 disponibles
+
+[32m[APROBADO][0m (LÍMITES Y ROBUSTEZ)
+  Prueba:  42. Rechaza cantidades negativas/fraccionarias, oficio inválido, falta de disponibles y estado duplicado/ajeno
+  Detalle: Rechazos: negativo=true, fracción=true, sin disponibles=true, tipo=true, duplicado=true, reino ajeno=true, censo excedido=true; insert=insert, delete=delete
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  43. La reasignación sólo puede ser autorizada por el propietario autenticado; Iberia sigue siendo de solo lectura
+  Detalle: Propietario aceptado=true; ajeno rechazado=true; demo rechazada=true
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  44. Sin agricultores no hay producción gratuita; el oficio militar civil no recibe recargo de tropa
+  Detalle: Sin agricultores=0/día; con 100 agricultores=200/día; consumo=1005/día; tropas reales=100
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  45. Liquidación repetida sobre el mismo timestamp no duplica producción ni consumo
+  Detalle: Primera liquidación: 200; repetición: 0; saldo final: 1200
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  46. La capacidad edificada limita la producción por trabajador (D-47); edificio sin trabajadores no genera producción
+  Detalle: Pendiente=false; granja nivel 1 con 20 agricultores=40/día; capacidad limitada (fixture)=10/día; granja sin agricultores=0/día
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Construcción válida genera objetivo, coste inmutable y fin basado en hora de servidor
+  Detalle: Nivel 1, finaliza en 70000
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  La duración aumenta un 1 % por nivel (P22) y admite el modificador tecnológico
+  Detalle: Nivel 1 (fixture): 60000; nivel 2: 60600; nivel 100: 160683; con −5 %: 57000.
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  El coste escala con 1,15^(nivel−1) (D-02) y el plan usa el coste del nivel objetivo
+  Detalle: Nivel 1: 120 madera; nivel 3: 159 madera / 66 oro; plan nivel 3: 159
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Rechaza recursos insuficientes sin plan de gasto
+  Detalle: Recursos insuficientes: wood requiere 120 y hay 119.
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Acepta costes cero sólo cuando la regla los declara explícitamente
+  Detalle: La configuración explícita de coste cero se reconoce.
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  La cola permite dos construcciones pero rechaza la tercera y evita duplicar edificio activo
+  Detalle: Una ranura permite iniciar: true; cola llena, tipo repetido y fila incompleta rechazados: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Límite de nivel 100 y validación de nivel entero
+  Detalle: Nivel 100 rechazado: true; nivel fraccionario rechazado: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ningún edificio supera el nivel del Castillo (D-05); el Castillo queda exento
+  Detalle: Granja 5→6 con Castillo 5 bloqueada: true; sin Castillo bloqueada: true; Castillo 1→2 permitido: sí
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Progreso y finalización dependen sólo del intervalo temporal calculado
+  Detalle: Progreso 50%: true; vencimiento exacto: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Cancelar obra en curso reembolsa el 50 % fijo (D-04) sin depender del tiempo restante; una vencida no se cancela
+  Detalle: Reembolso al 50 % de progreso: oro 25, madera 60; al 98 %: 25; vencida/futura rechazadas: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Autorización de construcción requiere titular autenticado y excluye Iberia
+  Detalle: Propietario aceptado; usuario ajeno y reino demo rechazados.
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  El catálogo oficial está completo: 18 edificios con coste, duración y requisitos
+  Detalle: Edificios configurados: 18; todos completos: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Los edificios fundacionales alojan el censo inicial (P10/P19) y emplean la distribución inicial de trabajadores
+  Detalle: Capacidad residencial inicial 2000 ≥ 2000: true; capacidades laborales cubren la distribución inicial: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Finalización conserva edificios y sólo permite crear nivel 1 o subir un nivel existente
+  Detalle: Edificio nuevo: true; mejora consecutiva hasta 100: true; salto de nivel rechazado: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Requisitos configurados se validan contra niveles de edificios persistidos
+  Detalle: Requisito no satisfecho bloqueado: true; nivel requerido persistido permite continuar: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Mercenarios por tipo (decisión 21-10-2026): la tabla de precios sigue la fórmula derivada del anclaje de 25 oro, hay tipos más baratos y más caros, y el nivel de Taberna los desbloquea
+  Detalle: Precios: Mesnada a sueldo 20 · Lanceros a sueldo 25 · Arqueros de fortuna 30 · Jinetes de fortuna 75 · Compañía veterana 30 · Guardia mercenaria 90; fórmula coincide: true; Taberna 1: mesnada/lanceros; Taberna 5: 6 tipos
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Contratar mercenarios: exige el nivel de Taberna del tipo, respeta el tope común de 50 por nivel, usa lanceros por defecto y cobra el precio del tipo
+  Detalle: Jinetes con Taberna 2: Jinetes de fortuna exige Taberna nivel 3 (actual: 2).; con Taberna 3: coste 375; 60 con Taberna 1: rechazado; por defecto lanceros; sin oro: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Entrenamiento válido: coste unitario × cantidad, duración lineal (D-08) y población civil reservada
+  Detalle: Oro 50, duración 18000000 ms, población 10
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Sin Cuartel no se entrena; sin civiles libres o sin recursos se rechaza (P54, decisión posterior)
+  Detalle: Sin cuartel: true; civiles insuficientes: true; oro insuficiente: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Requisitos por unidad: caballería exige Cuartel 2 + Herrería 1; asedio reserva 5 operadores por pieza (D-12)
+  Detalle: Caballería bloqueada/abierta: true/true; asedio 2 piezas reserva 10; sin operadores rechazado: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Niveles militares P23/P29: nivel 2 exige Castillo 2 + Cuartel 2; nivel fuera de 1-5 rechazado
+  Detalle: Nivel 2 bloqueado/abierto: true/true; nivel 6 rechazado: true; niveles con Castillo 4 + Cuartel 3 + Universidad 2: 1,2,3
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Colas de entrenamiento (D-09): 1 con Cuartel 1-2, 2 con Cuartel 3, máximo 4
+  Detalle: Ranuras 0/1/2/3/9/50: 0/1/1/2/4/4; cola llena rechazada: true; segunda cola con Cuartel 3: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Modificador tecnológico de duración con suelo del 50 %
+  Detalle: Con doctrina: 17100000; con suelo: 9000000
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Cancelación (D-10): 50 % de recursos, población íntegra; lote completado no se cancela
+  Detalle: Reembolso oro 25, hierro 10; población 10; completado rechazado: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Resumen del ejército: niveles ponderados, heridos aparte, operadores de asedio y tabla heredada 'regular' como infantería
+  Detalle: Activos 224, heridos 10, máquinas 4, operadores 20, vivos 240, multiplicador 1.1563
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Ejército: Equipamiento y formaciones tácticas (P30/P31, decisión 21-10-2026): el acero exige tecnología, y la formación táctica se valida en servidor (rechazando cadenas arbitrarias)
+  Detalle: Acero bloqueado: true; con tecnología y formación ofensiva: true; formación arbitraria rechazada: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Tecnología: Investigación válida descuenta el coste del catálogo y fija fin por duración real (D-17)
+  Detalle: Oro 100, duración 86400000 ms; desconocida rechazada: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Tecnología: Requisitos: nivel de Universidad, edificios y tecnologías previas (D-19)
+  Detalle: Espionaje I con Universidad 1 bloqueada: true; con Universidad 2: true; Espionaje II sin I: true; con I: true; bloqueos de Metalurgia: Requisito incumplido: 'Herrería/Forja' debe alcanzar el nivel 4.
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Tecnología: Ranuras (D-20, M-03): 1 con Universidad 1-2, 2 con Universidad 3-4, 3 con Universidad 5+; sin duplicados ni repetir completadas
+  Detalle: Ranuras Universidad 0/2/3/5/10: 1/1/2/3/3; ranura ocupada rechazada: true; segunda ranura con Universidad 3: true; duplicada: true; completada: true; sin oro: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Tecnología: Cancelación reembolsa el 50 % antes de completar (uniforme con construcción y entrenamiento)
+  Detalle: Reembolso oro 50, madera 50, piedra 25; completada rechazada: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Tecnología: Efectos idempotentes (D-18): una tecnología repetida cuenta una vez; recuperación de heridos con tope 60 %
+  Detalle: Agricultura ×1.05; minería ×1.05; entrenamiento ×0.95; construcción ×0.95; heridos +0.15000000000000002; espionaje 1; felicidad +3
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Tecnología: El catálogo contiene las tecnologías universales y únicas (P62) con ramas, costes y duraciones positivas
+  Detalle: Total tecnologías: 25 (13 universales + 12 de civilización)
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Economía ampliada: Producción por trabajador y día (D-46): madera 1, piedra 0,75, hierro 0,40, oro 0,20; alimentos intactos
+  Detalle: Madera 250/día, piedra 187.5, hierro 40, oro 10, alimentos 2200
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Economía ampliada: La capacidad de edificios limita a los trabajadores efectivos (D-47); tecnología y terreno multiplican
+  Detalle: Madera limitada a 100; piedra sin cantera 0; con tecnología alimentos 2310 y madera 262.5; bosque 287.5
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Economía ampliada: Impuestos (P27, D-49): recaudación = producción no monetaria × tasa; tramos de penalización
+  Detalle: Recaudación diaria 267.75 oro; productividad al 60 %: 0.85; felicidad/día al 30 %: −2; moral al 100 %: −10
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Economía ampliada: Crecimiento del 30 % anual (P12) limitado por viviendas (P16, D-50) y continuo en fracciones de año
+  Detalle: Sin tope: +600; tope 2.100: +100; lleno: +0; dos medios días: +600 (fracción final: 0); simulación: 2600
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Economía ampliada: Inanición por fases (D-48): acumulación persistida, −10 % productividad en fase 2, pérdidas y deserción en fase 3, reinicio al recuperarse
+  Detalle: Día 1: 86400s acumulados; fase 2 productividad 0.9; fase 3 muertes 10 y deserción 10; recuperado: 0s
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Economía ampliada: Moral militar (P33, D-49): 70 de felicidad y ración normal dan 55; efectos de batalla caducan; peor caso 7,5
+  Detalle: Moral base 55; con victoria vigente y ración abundante 63; peor caso 7.5
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Economía ampliada: Felicidad (D-49): ración normal estable en 70; hacinamiento −2/día; iglesia y circo +2/día; variación limitada a ±5/día
+  Detalle: Normal 70; hacinado 68; con iglesia y circo 72; peor caso 10 días (delta/día -13.0) 20
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Mapa: R-14 (decisión 23-10-2026): la marcha usa la media del terreno de las celdas del camino (origen excluido, destino incluido)
+  Detalle: Línea (0,0)→(3,-1): 1,0 2,-1 3,-1; media ponderada mixta: 1.233 (esperado 1.233); distancia 0: 1
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Mapa: Mundo hexagonal de radio 10 con 331 celdas únicas y terreno reproducible por semilla (D-23, D-25)
+  Detalle: Celdas 331; terrenos: rio=30, costa=33, montana=52, bosque=59, llanura=101, colina=56
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Mapa: Distancia axial (D-26) y vecindad: 6 vecinos en el interior, menos en el borde
+  Detalle: d((0,0),(3,-1))=3; d((-2,5),(4,-3))=8; vecinos centro 6, borde 3
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Mapa: Territorio principal: el primer reino ocupa el centro y el segundo se sitúa lo más lejos posible, de forma determinista
+  Detalle: Primero 0,0; segundo -1,-9 a distancia 10
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Mapa: Reclamación de territorio libre cercano (P47-P49): exige reclamación pendiente, celda libre y distancia ≤ 2
+  Detalle: Sin reclamación: true; cercana: true; lejana: true; ocupada: true
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Mapa: Marcha (P41): 1.800 s por hexágono a la velocidad del más lento; asedio ×1,5 y plan de marcha completo
+  Detalle: Infantería 4 hex: 7200s; con asedio: 10800s; plan completo: dur=7200s, fatiga=18, prep=1440s
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Mapa: Fatiga (P32): +2 por hexágono con tope 100, tabla de penalización y recuperación de 10/día solo con ración normal o mejor
+  Detalle: Fatiga tras 4 hex: 18; tope: 100; multiplicadores: 1,1,0.97,0.97,0.92,0.92,0.85,0.85,0.75,0.75,0.6,0.6,0.45,0.45; recuperación normal/mínima: 30/50
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Mapa: Modificadores de los 6 terrenos canónicos (P41, D-24) y caminos mixtos deterministas
+  Detalle: Terrenos: llanura=1, rio=1.1, costa=1.1, bosque=1.2, colina=1.25, montana=1.5; caminos: llanura=1, colinas=1.125, mixto=1.2, montaña=1.5
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Mapa: Interacción completa de marcha con civilizaciones (Mongoles, Masáis), asedio, fatiga y límites
+  Detalle: Estándar: 8640s / 10f; Mongoles: 7514s; Masáis fatiga: 8f; Asedio 2 hex montaña: 8100s; Límite máx: 43200s; Límite mín: 900s; Tope fatiga: 100
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Batalla: Determinismo: fuerzas idénticas producen el mismo informe y terminan en empate con 3 rondas (P52, D-29/D-30)
+  Detalle: Resultado empate; rondas 3; bajas 463/463; honor por empate 5
+
+[31m[FALLIDO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Batalla: B-02: 600 soldados de élite derrotan a 1.000 reclutas mal preparados (P34, P69)
+  Detalle: Resultado empate; pérdidas élite 0.0 % frente a reclutas 0.0 %; honor 5/5
+
+[31m[FALLIDO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Batalla: B-01: con k = 0,40 la superioridad abrumadora fuerza la retirada (70 %) y es victoria aplastante (>75 %, P47) con +50 honor
+  Detalle: Pérdidas del pequeño 0.0 % (techo 78.4 %); retirada false; aplastante false; rondas 3
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Batalla: Moral inferior a 20 fuerza la retirada tras la primera ronda (D-30)
+  Detalle: Resultado derrota; rondas 1
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Batalla: Murallas (M-06): el asedio rinde ×1,8 solo contra murallas y la defensa sube +5 %/nivel hasta +50 %
+  Detalle: Fuerza de asedio sin/con murallas: 850/890; defensa con murallas 10 frente a 0: ×1.411
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Batalla: Formación (P37, M-11): la caballería gana +25 % contra arqueros y nada contra infantería; la fracción de participación se aplica por tipo
+  Detalle: Caballería vs arqueros 1750; vs infantería 1400; formación {"infanteria":1000,"arqueria":200,"caballeria":0,"asedio":10,"onagro_campana":0,"carrobalista":0,"espringarda_movil":0,"trabuchet_traccion":0,"arcuballista":0,"fustibalo_campo":0,"mangonel_tactico":0,"carros_artillados":0,"ariete_movil":0,"torres_asalto":0}
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Batalla: Estrategias (P35): contrarrestar da ventaja y el factor se mantiene en 0,80–1,25
+  Detalle: Defensiva vs agresiva: 1.25; defensiva vs defensiva: 1.2; agresiva en defensa: 0.8
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Batalla: Formaciones tácticas (decisión 21-10-2026): ciclo ofensiva > flanqueo > defensiva > ofensiva, equilibrada neutral, contramedida ×1.15; con ejércitos iguales contrarrestar gana sin aplastar y el resto empata
+  Detalle: Ciclo cerrado: true; contramedida ofensiva vs flanqueo ×1.15, vs defensiva ×1; factor ofensiva 1.12; equilibrada 1; contrarrestar vence sin aplastar: true; sin contramedida empata: true; equilibrada nunca aplastada: true; por defecto equilibrada: true
+
+[31m[FALLIDO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Batalla: Heridos ≈65 % de las bajas (P44) y contabilidad cerrada de supervivientes; recuperación hospitalaria P45 con tope 60 % y desgaste de equipamiento
+  Detalle: Contabilidad coherente: false; recuperación nivel 1/5+/5+tec/sin hospital: 0.15/0.5/0.6/0; hospital cap/heridos/recuperados: 200/200/46; desgaste: 25 %
+
+[31m[FALLIDO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Batalla: Simulaciones obligatorias de formaciones tácticas: matriz 16 combinaciones (3 victorias, 3 derrotas, 10 empates sin aplastantes), superioridad 2:1 preservada frente a contramedida, modulación por fatiga/moral y determinismo
+  Detalle: Matriz 16: 16 pares (victorias: 3, derrotas: 3, empates: 10, aplastantes: 0); determinismo 100%: true; 2.000 vs 1.000 con contramedida gana grande: false; fatiga/moral modulan ventaja: true
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Parlamento: Máquina de estados disjunta (BLOQUE 9): solo 5 transiciones válidas; rechazado y resuelto son finales
+  Detalle: Transiciones válidas: 5; prohibidas comprobadas: true
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Parlamento: Ventanas de programación (P38, D-35): 1, 3 y 7 días reales; congelación 15 minutos antes (D-36)
+  Detalle: Próxima: +24 h; semana: +168 h; congelación 15 min antes
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Parlamento: Penalización por rechazo (D-34): 2 % con mínimo 10, máximo 500 y nunca por debajo de cero
+  Detalle: Oro 100→10; madera 5→5; piedra 0→0; hierro 30.000→500; rico→500
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Parlamento: Nuevo desafío (D-40, D-42): Parlamento 1 en ambos, máximo 3 pendientes, sin duplicados y 24 h de espera por rival
+  Detalle: Válido true; a sí mismo true; sin parlamento true/true; 3 pendientes true; duplicado inverso true; enfriamiento true/true
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Parlamento: Mensajes predefinidos P60 (cinco, sin chat libre) e información aproximada del enemigo (P42, D-39)
+  Detalle: Mensajes 5; estimación sin espionaje 750-1250; con Espionaje II 930-1070
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Ronda 2: Políticas de descanso (M-04): intensiva +15 % producción, −3 felicidad y +5 fatiga/día; relajada −10 %, +2 y −5
+  Detalle: Intensiva: productividad 1.15, felicidad 67, fatiga +5; relajada: 0.9, 72, -5
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Ronda 2: Almacén (M-06): tope 10.000 + 2.000 por nivel de Mercado; el excedente del intervalo se pierde y las reservas previas no se destruyen
+  Detalle: Capacidad 0/2 mercados: 10000/14000; 9.900 madera → 10000 (perdido 150); 12.000 sin mercado → 12000; con Mercado 2 → 12250
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Ronda 2: Profesiones (M-07): medicina +1 pp/10 (tope 10), religión y circo +1/20 (tope 3), panadería −5 %/20 (tope −15 %), construcción −1 %/10 (tope −20 %); limitadas por capacidad
+  Detalle: Medicina +0.05 (60 asignados, 50 efectivos); felicidad/día +4; consumo ×0.9; obras ×0.8; panadería nivel 2 con 60 trabajadores (tope −15 %): consumo 1700; iglesia con 40 trabajadores: felicidad 73
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Ronda 2: Gloria (M-01): decae 1 punto por día real sin bajar de 0 y aporta +1 moral por cada 10 (máximo +10)
+  Detalle: Gloria 25,5 tras 2 días: 23.5 (moral +2); moral con 45 de gloria: 59; con 500: 65
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Ronda 2: Mercenarios (M-02 + decisión 21-10-2026): sin salario diario, sin natalidad propia y sin deserción por impago
+  Detalle: Salario debido 0; nacimientos sin contar mercenarios: 600 (esperado 600); sin oro no desertan: true
+
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+  Prueba:  Ronda 2: Estaciones informativas (M-05 B): cuatro estaciones de un cuarto de año de juego, cíclicas, sin efectos activos
+  Detalle: t=0: primavera; t=0,8 años: invierno; t=5,3 años: verano (progreso 0.20); efectos activos: false
+
+[32m[APROBADO][0m (VALIDACIÓN BÁSICA)
+  Prueba:  1. Rechaza tipos de unidades militares no admitidos
+  Detalle: Resultado: Tipo de unidad no admitido: 'dragones'. Tipos válidos: infanteria, arqueria, caballeria, asedio, onagro_campana, carrobalista, espringarda_movil, trabuchet_traccion, arcuballista, fustibalo_campo, mangonel_tactico, carros_artillados, ariete_movil, torres_asalto.
+
+[32m[APROBADO][0m (VALIDACIÓN BÁSICA)
+  Prueba:  2. Rechaza cantidades cero, negativas y fraccionarias
+  Detalle: Cantidades inválidas rechazadas correctamente
+
+[32m[APROBADO][0m (REGLAS CANÓNICAS P29)
+  Prueba:  3. Exige niveles militares estrictamente entre 1 (Milicia) y 5 (Élite)
+  Detalle: Niveles 0 y 6 rechazados
+
+[32m[APROBADO][0m (REGLAS DE PROTECCIÓN)
+  Prueba:  4. Bloquea el reclutamiento si faltan costes oficiales aprobados
+  Detalle: Detalle: Costes de reclutamiento de 'infanteria' nivel 1 pendientes de especificación oficial.
+
+[32m[APROBADO][0m (REQUISITOS P23)
+  Prueba:  5. Valida requisitos para tropa nivel 2 (Castillo 2 + Cuartel 2)
+  Detalle: Insuficiente bloqueado: true; Cumplido aprobado: true
+
+[32m[APROBADO][0m (REQUISITOS P23)
+  Prueba:  6. Valida requisitos para tropa nivel 5 (Castillo 8 + Cuartel 5 + Univ 4 + Herrería 5)
+  Detalle: Falta herrería rechazada: true; Todos cumplidos aceptado: true
+
+[32m[APROBADO][0m (ECONOMÍA Y RECURSOS)
+  Prueba:  7. Rechaza reclutamiento cuando las reservas de recursos son insuficientes
+  Detalle: Detalle: Recursos insuficientes: 'gold' requiere 200 y el reino dispone de 50.
+
+[32m[APROBADO][0m (DEMOGRAFÍA P54)
+  Prueba:  8. Rechaza reclutar más tropas que los ciudadanos libres disponibles
+  Detalle: Detalle: No hay suficientes ciudadanos libres disponibles para reclutar (disponibles: 20, solicitados: 50).
+
+[32m[APROBADO][0m (COLAS Y CONCURRENCIA)
+  Prueba:  9. Impide exceder la capacidad simultánea de entrenamiento en cuartel
+  Detalle: Detalle: Las 2 ranuras de entrenamiento militar ya están ocupadas en el cuartel.
+
+[32m[APROBADO][0m (CÁLCULO EXACTO)
+  Prueba:  10. Genera costes inmutables, duración lineal y fecha exacta de fin
+  Detalle: Oro: 300, Duración: 75000ms
+
+[32m[APROBADO][0m (AUTORIZACIÓN Y SEGURIDAD)
+  Prueba:  11. El reino de demostración Iberia rechaza cualquier mutación de soberano
+  Detalle: isOwner para usuario externo: false; para DEMO_USER_ID: false (ambos deben ser falsos)
+
+[32m[APROBADO][0m (AUTORIZACIÓN Y SEGURIDAD)
+  Prueba:  12. Valida estrictamente la identidad del titular contra el documento del reino
+  Detalle: Titular legítimo: true; Ajeno: false; Anónimo: false
+
+[32m[APROBADO][0m (REGLAS CANÓNICAS P29)
+  Prueba:  13. Multiplicadores marciales de eficacia reflejan exactamente P29 (100% a 190%)
+  Detalle: N1: 100%, N2: 115%, N3: 135%, N4: 160%, N5: 190%
+
+[32m[APROBADO][0m (FINALIZACIÓN AUTORITATIVA (3B))
+  Prueba:  14. Determina con precisión de milisegundo el vencimiento basado en reloj de servidor
+  Detalle: Antes: false; Exacto: true; Posterior: true; Inválido rechazado: true
+
+[32m[APROBADO][0m (FINALIZACIÓN AUTORITATIVA (3B))
+  Prueba:  15. Calcula porcentaje de avance acotado entre 0% y 100%
+  Detalle: Inicio: 0%; Mitad: 50%; Fin: 100%; Posterior: 100%
+
+[32m[APROBADO][0m (INCORPORACIÓN ATÓMICA (3B))
+  Prueba:  16. Modifica conteo existente o inserta nuevo registro según tipo sin duplicar filas
+  Detalle: Insert inicial: insert (25); Update existente: update (40); Nuevo tipo: insert
+
+[32m[APROBADO][0m (INCORPORACIÓN ATÓMICA (3B))
+  Prueba:  17. Incrementa de forma aditiva y segura el censo militar de regularSoldiers (P18)
+  Detalle: Base 100+25: 125; Base 0+50: 50; Seguro con entrada anómala: 15
+
+[32m[APROBADO][0m (IDEMPOTENCIA Y ATOMICIDAD (3B))
+  Prueba:  18. Consolidación sucesiva de levas suma exactamente las unidades sin desincronizar contadores
+  Detalle: Primera leva: 30; Segunda leva acumulada: 50
+
+[32m[APROBADO][0m (REGLA CANÓNICA P18)
+  Prueba:  19. Unidades de asedio no computan en regularSoldiers para no devengar ración alimentaria (x1,05)
+  Detalle: Infantería (+20): 70; Asedio (+10): 50; Living infantería: true; Living asedio: false
+
+[32m[APROBADO][0m (COHERENCIA DEMOGRÁFICA CENSAL)
+  Prueba:  20. El censo total permanece matemáticamente exacto (2.000) tras reclutamiento e incorporación
+  Detalle: Soldados: 50; Trabajadores: 1750; Reserva civil: 200; Total censado: 2000
+
+[32m[APROBADO][0m (AUTENTICACIÓN Y SEGURIDAD)
+  Prueba:  1. Usuario no autenticado / anónimo es rechazado para fundar reinos (P1)
+  Detalle: Acceso anónimo denegado: true
+
+[32m[APROBADO][0m (PROTECCIÓN REINO DEMO IBERIA)
+  Prueba:  2. Impide fundar con nombres reservados de Iberia o desde el usuario de demostración
+  Detalle: Demo self-owner: false; 'Reino de Iberia' bloqueado: true; 'Iberia' bloqueado: true
+
+[32m[APROBADO][0m (CIVILIZACIONES CANÓNICAS P6)
+  Prueba:  3. Rechaza civilizaciones no oficiales o inventadas
+  Detalle: Error capturado: Civilización no admitida: 'alienigenas'. Debe ser una de las 12 civilizaciones oficiales (P6).
+
+[32m[APROBADO][0m (CIVILIZACIONES CANÓNICAS P6)
+  Prueba:  4. Valida y acepta las 12 civilizaciones oficiales de la Especificación Maestra
+  Detalle: Total civilizaciones oficiales: 12; Todas aceptadas: true
+
+[32m[APROBADO][0m (NOMENCLATURA DEL REINO P7)
+  Prueba:  5. Valida rango de longitud y rechaza nombres de reino vacíos o desbordados
+  Detalle: Corto rechazado: true; Largo rechazado: true; Vacío rechazado: true
+
+[32m[APROBADO][0m (NOMENCLATURA DEL CASTILLO P8)
+  Prueba:  6. Valida y exige nombre del castillo capital centro administrativo
+  Detalle: Castillo corto rechazado: true; Castillo vacío rechazado: true
+
+[32m[APROBADO][0m (REGISTRO DEL MONARCA P5)
+  Prueba:  7. Registra el nombre del monarca o adopta la identidad verificada de la cuenta
+  Detalle: Personalizado: Justiniano I; Defecto: Emperador Basilio
+
+[32m[APROBADO][0m (CENSO INICIAL OFICIAL P10)
+  Prueba:  8. El reino se inicializa con exactamente 2.000 habitantes según P10
+  Detalle: Población agregada: 2000; Población relacional: 2000
+
+[32m[APROBADO][0m (CENSO INICIAL OFICIAL P10)
+  Prueba:  9. Desglose inicial 1.750 trabajadores + 250 libres = 2.000 habitantes cumple integridad estricta
+  Detalle: Validación censal: true; Soldados iniciales: 0; Reserva civil: 250
+
+[32m[APROBADO][0m (ECONOMÍA INICIAL P26)
+  Prueba:  10. Dotación de recursos iniciales refleja exactamente la configuración canónica
+  Detalle: Oro: 500, Madera: 1000, Piedra: 800, Hierro: 250, Alimentos: 2500
+
+[32m[APROBADO][0m (INFRAESTRUCTURA INICIAL P8)
+  Prueba:  11. El reino recién fundado incluye el Castillo de nivel 1 como centro administrativo
+  Detalle: Castillo nivel 1 presente: true
+
+[32m[APROBADO][0m (ARQUITECTURA Y SEGURIDAD)
+  Prueba:  12. Impide la creación de reinos múltiples para una misma cuenta de usuario
+  Detalle: Detección de reino existente previene duplicación concurrente: true
+
+[32m[APROBADO][0m (CIVILIZACIONES CANÓNICAS P6)
+  Prueba:  13. La civilización seleccionada se almacena permanentemente vinculada a la partida
+  Detalle: Civilización registrada: 'bizantinos'
+
+[32m[APROBADO][0m (ACCESO COMO INVITADO)
+  Prueba:  14. Un invitado sin autenticación puede consultar el reino demo (DEMO_USER_ID) en modo solo lectura
+  Detalle: ID resuelto para invitado consultando demo: 'guest_g9ai8cz'
+
+[32m[APROBADO][0m (ACCESO COMO INVITADO)
+  Prueba:  15. Un invitado sin autenticación es bloqueado al intentar consultar un reino privado ajeno
+  Detalle: Resultado de consultar reino privado sin sesión: null
+
+[32m[APROBADO][0m (SEGURIDAD Y PERMISOS DE ESCRITURA)
+  Prueba:  16. El invitado y la identidad demo tienen estrictamente bloqueados los permisos de escritura (P1)
+  Detalle: Invitado con permisos: false; DEMO_USER_ID con permisos: false
+
+[32m[APROBADO][0m (undefined)
+  Prueba:  Máquina de estados disjunta (BLOQUE 9): solo 5 transiciones válidas; rechazado y resuelto son finales
+  Detalle: Transiciones válidas: 5; prohibidas comprobadas: true
+
+[32m[APROBADO][0m (undefined)
+  Prueba:  Ventanas de programación (P38, D-35): 1, 3 y 7 días reales; congelación 15 minutos antes (D-36)
+  Detalle: Próxima: +24 h; semana: +168 h; congelación 15 min antes
+
+[32m[APROBADO][0m (undefined)
+  Prueba:  Penalización por rechazo (D-34): 2 % con mínimo 10, máximo 500 y nunca por debajo de cero
+  Detalle: Oro 100→10; madera 5→5; piedra 0→0; hierro 30.000→500; rico→500
+
+[32m[APROBADO][0m (undefined)
+  Prueba:  Nuevo desafío (D-40, D-42): Parlamento 1 en ambos, máximo 3 pendientes, sin duplicados y 24 h de espera por rival
+  Detalle: Válido true; a sí mismo true; sin parlamento true/true; 3 pendientes true; duplicado inverso true; enfriamiento true/true
+
+[32m[APROBADO][0m (undefined)
+  Prueba:  Mensajes predefinidos P60 (cinco, sin chat libre) e información aproximada del enemigo (P42, D-39)
+  Detalle: Mensajes 5; estimación sin espionaje 750-1250; con Espionaje II 930-1070
+
+[32m[APROBADO][0m (MAPA Y TERRITORIOS D-22-D-26)
+  Prueba:  R-14 (decisión 23-10-2026): la marcha usa la media del terreno de las celdas del camino (origen excluido, destino incluido)
+  Detalle: Línea (0,0)→(3,-1): 1,0 2,-1 3,-1; media ponderada mixta: 1.233 (esperado 1.233); distancia 0: 1
+
+[32m[APROBADO][0m (MAPA Y TERRITORIOS D-22-D-26)
+  Prueba:  Mundo hexagonal de radio 10 con 331 celdas únicas y terreno reproducible por semilla (D-23, D-25)
+  Detalle: Celdas 331; terrenos: rio=30, costa=33, montana=52, bosque=59, llanura=101, colina=56
+
+[32m[APROBADO][0m (MAPA Y TERRITORIOS D-22-D-26)
+  Prueba:  Distancia axial (D-26) y vecindad: 6 vecinos en el interior, menos en el borde
+  Detalle: d((0,0),(3,-1))=3; d((-2,5),(4,-3))=8; vecinos centro 6, borde 3
+
+[32m[APROBADO][0m (MAPA Y TERRITORIOS D-22-D-26)
+  Prueba:  Territorio principal: el primer reino ocupa el centro y el segundo se sitúa lo más lejos posible, de forma determinista
+  Detalle: Primero 0,0; segundo -1,-9 a distancia 10
+
+[32m[APROBADO][0m (MAPA Y TERRITORIOS D-22-D-26)
+  Prueba:  Reclamación de territorio libre cercano (P47-P49): exige reclamación pendiente, celda libre y distancia ≤ 2
+  Detalle: Sin reclamación: true; cercana: true; lejana: true; ocupada: true
+
+[32m[APROBADO][0m (MAPA Y TERRITORIOS D-22-D-26)
+  Prueba:  Marcha (P41): 1.800 s por hexágono a la velocidad del más lento; asedio ×1,5 y plan de marcha completo
+  Detalle: Infantería 4 hex: 7200s; con asedio: 10800s; plan completo: dur=7200s, fatiga=18, prep=1440s
+
+[32m[APROBADO][0m (MAPA Y TERRITORIOS D-22-D-26)
+  Prueba:  Fatiga (P32): +2 por hexágono con tope 100, tabla de penalización y recuperación de 10/día solo con ración normal o mejor
+  Detalle: Fatiga tras 4 hex: 18; tope: 100; multiplicadores: 1,1,0.97,0.97,0.92,0.92,0.85,0.85,0.75,0.75,0.6,0.6,0.45,0.45; recuperación normal/mínima: 30/50
+
+[32m[APROBADO][0m (MAPA Y TERRITORIOS D-22-D-26)
+  Prueba:  Modificadores de los 6 terrenos canónicos (P41, D-24) y caminos mixtos deterministas
+  Detalle: Terrenos: llanura=1, rio=1.1, costa=1.1, bosque=1.2, colina=1.25, montana=1.5; caminos: llanura=1, colinas=1.125, mixto=1.2, montaña=1.5
+
+[32m[APROBADO][0m (MAPA Y TERRITORIOS D-22-D-26)
+  Prueba:  Interacción completa de marcha con civilizaciones (Mongoles, Masáis), asedio, fatiga y límites
+  Detalle: Estándar: 8640s / 10f; Mongoles: 7514s; Masáis fatiga: 8f; Asedio 2 hex montaña: 8100s; Límite máx: 43200s; Límite mín: 900s; Tope fatiga: 100
+
+[32m[APROBADO][0m (VISIBILIDAD INICIAL P22)
+  Prueba:  1. Radio de visión inicial alrededor de la capital cubre exactamente 7 celdas conocidas
+  Detalle: Celdas conocidas iniciales: 7 (-1,0, -1,1, 0,-1, 0,0, 0,1, 1,-1, 1,0)
+
+[32m[APROBADO][0m (EXPANSIÓN Y ADYACENCIA P22)
+  Prueba:  2. Permite explorar celdas adyacentes a la frontera y bloquea celdas no limítrofes
+  Detalle: Adyacente aprobada: true; Lejana bloqueada: true
+
+[32m[APROBADO][0m (COSTES Y DURACIÓN CANÓNICA D-26)
+  Prueba:  3. Aplica costes base (30 oro, 40 comida) y duración canónica de marcha (1.800 s/hex)
+  Detalle: Oro: 30, Comida: 40, Distancia: 2, Segundos: 3600
+
+[32m[APROBADO][0m (PROTECCIÓN ECONÓMICA Y CENSAL)
+  Prueba:  4. Rechaza expedición si faltan recursos o ciudadanos libres para formar la partida de exploradores
+  Detalle: Pobre bloqueado: true; Sin explorador libre bloqueado: true
+
+[32m[APROBADO][0m (CONTROL DE CONCURRENCIA)
+  Prueba:  5. Respeta el límite autoritativo de 1 expedición de exploración activa por reino
+  Detalle: Segunda expedición simultánea bloqueada: true
+
+[32m[APROBADO][0m (PROGRESIÓN TEMPORAL)
+  Prueba:  6. Calcula el avance porcentual acotado entre 0 % y 100 % de forma determinista
+  Detalle: Inicio: 0%, Mitad: 50%, Fin: 100%, Posterior: 100%
+
+[32m[APROBADO][0m (REEMBOLSO DE CANCELACIÓN D-04/D-21)
+  Prueba:  7. Reembolsa exactamente el 50 % de oro y comida al cancelar una expedición en marcha
+  Detalle: Oro reembolsado: 15 (de 30), Alimentos reembolsados: 20 (de 40)
+
+[32m[APROBADO][0m (DESCUBRIMIENTOS TERRITORIALES)
+  Prueba:  8. Genera hallazgos deterministas con recompensas proporcionadas según el terreno explorado
+  Detalle: Terreno: bosque, Recompensa: 50 de wood
+
+[32m[APROBADO][0m (INTEGRACIÓN TERRITORIAL P49)
+  Prueba:  9. Exige que un territorio libre esté explorado antes de poder ser reclamado mediante victoria aplastante
+  Detalle: Inexplorado bloqueado: true; Explorado admitido: true
+
+[32m[APROBADO][0m (CIVILIZACIONES CANÓNICAS (P6))
+  Prueba:  1. Las 12 civilizaciones oficiales están presentes sin omisiones ni inventadas
+  Detalle: Total civilizaciones: 12; Coinciden exactamente con P6: true
+
+[32m[APROBADO][0m (INTEGRIDAD DE PERFILES ESTRATÉGICOS)
+  Prueba:  2. Cada civilización posee emblema, estilo temático, bonificación pasiva y tecnología única
+  Detalle: Todos los perfiles completos y vinculados a rama 'civilizacion': true
+
+[32m[APROBADO][0m (CALIBRACIÓN DE BALANCE (P6))
+  Prueba:  3. Ninguna bonificación pasiva supera el rango seguro del 15 % para evitar desequilibrios
+  Detalle: Bonificaciones contenidas en los límites simétricos aprobados: true
+
+[32m[APROBADO][0m (ECONOMÍA CULTURAL EFECTIVA)
+  Prueba:  4. Las tasas de producción reflejan con exactitud las especialidades de cada pueblo
+  Detalle: Madera inglesa: 1.10; Piedra romana: 0.825; Alimento azteca: 2.24
+
+[32m[APROBADO][0m (INGENIERÍA ROMANA)
+  Prueba:  5. Los romanos reducen la duración de construcción de edificios en exactamente un 10 %
+  Detalle: Base: 100s; Romanos: 90s; Estándar: 100s
+
+[32m[APROBADO][0m (ERUDICIÓN GRIEGA)
+  Prueba:  6. Los griegos reducen la duración de investigación un 10 % y aportan +5 de felicidad base
+  Detalle: Investigación griega: 77760s (de 86.400s); Felicidad base: +5
+
+[32m[APROBADO][0m (EXPLORACIÓN Y EXPEDICIONES (P22))
+  Prueba:  7. Vikingos reducen duración de expedición (15 %) e indios americanos reducen provisiones (20 %)
+  Detalle: Vikingos dur: 3060s; Navajos costes: 24 oro / 32 comida
+
+[32m[APROBADO][0m (MEDICINA ÁRABE (P44))
+  Prueba:  8. Los árabes aportan +8 pp a la tasa de recuperación de heridos
+  Detalle: Bonificación árabe de recuperación: +8 pp
+
+[32m[APROBADO][0m (MOVILIDAD Y RESISTENCIA (P32, P41))
+  Prueba:  9. Mongoles aumentan velocidad de marcha un 15 % y masáis reducen fatiga un 25 %
+  Detalle: Mongoles: 3131s (de 3600s); Masáis fatiga: 15 (de 20)
+
+[32m[APROBADO][0m (EXCLUSIVIDAD TECNOLÓGICA (P62))
+  Prueba:  10. Solo la civilización correspondiente puede investigar su tecnología única
+  Detalle: Propia admitida: true; Ajena bloqueada: true; Universal admitida: true
+
+[32m[APROBADO][0m (SISTEMA MILITAR Y COMBATE (P34))
+  Prueba:  11. El poder ofensivo japonés supera al neutral en exactamente el 5 % pasivo
+  Detalle: Ataque japonés: 105.0; Neutral: 100.0
+
+[32m[APROBADO][0m (RETROCOMPATIBILIDAD Y NEUTRALIDAD)
+  Prueba:  12. Los reinos sin civilización operan con multiplicadores neutros 1.0 sin penalización
+  Detalle: Factores neutros: construccion=1.0, investigacion=1.0, ataque=1.0, defensa=1.0
+
+[32m[APROBADO][0m (SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026))
+  Prueba:  11. Las 12 civilizaciones cuentan con equipo por nivel, edificio único, tropa característica y debilidad; sin acero ni caballos aztecas ni cuernos vikingos
+  Detalle: Con identidad: 12; pendientes: 0; completas: true; con debilidad: true; aztecas sin acero: true; vikingos sin cuernos: true
+
+[32m[APROBADO][0m (SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026))
+  Prueba:  12. Los nombres propios acompañan al nombre base (multiplicadores intactos) y las civilizaciones pendientes usan los nombres genéricos
+  Detalle: Romanos: Gladius hispaniensis (Espada de hierro) · Lorica segmentata (Hierro) · Castra (Cuartel/Barracones) · Legionario (Infantería); Navajos: Hacha de hierro (Espada de hierro) · Hogar de rastreadores (Taberna) · Rastreador (Infantería)
+
+[32m[APROBADO][0m (SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026))
+  Prueba:  13. Debilidades aplicadas: caballería inglesa +15 % de coste, mongoles y masáis −5 % de defensa, navajos +10 % asedio; ventajas y fichas completas
+  Detalle: Oro caballería inglesa: 173 frente a 150; defensa mongola ×0.95; navajos asedio: 11000 ms (base 10.000 ms); masáis defensa ×0.95 (95/100); fichas completas: true
+
+[32m[APROBADO][0m (CUENTA Y ACCESO (P4, P5, sección 5))
+  Prueba:  Nombre de gobernante: 2–40 caracteres; letras, números, espacio, apóstrofo, punto y guion simples
+  Detalle: válidos: true,true,true,true,true,true · inválidos (1 char, 41, espacios extra OK, vacío, --, -inicio, @, _, doble espacio OK): false,false,true,false,false,false,false,false,true
+
+[32m[APROBADO][0m (CUENTA Y ACCESO (P4, P5, sección 5))
+  Prueba:  Unicidad sin distinguir mayúsculas ni acentos: el identificador normalizado coincide y el correo sintético es interno
+  Detalle: normalizados: "alfonso de castilla" / "alfonso de castilla" / "alfonso de castilla" · correo: alfonso%20de%20castilla@la-conquista.local
+
+[32m[APROBADO][0m (CUENTA Y ACCESO (P4, P5, sección 5))
+  Prueba:  Contraseña: mínimo 8 caracteres y máximo 128
+  Detalle: 7 → false, 8 → true, 129 → false
+
+[32m[APROBADO][0m (CUENTA Y ACCESO (P4, P5, sección 5))
+  Prueba:  Código de recuperación: 16 símbolos del alfabeto sin ambigüedades, en grupos de 4; bytes fuera de rango se descartan (sin sesgo)
+  Detalle: código: NU28-EMTR-X5BH-QWU2 · pocos bytes → null · solo bytes 255 → null
+
+[32m[APROBADO][0m (CUENTA Y ACCESO (P4, P5, sección 5))
+  Prueba:  El código escrito en minúsculas, con espacios o sin guiones se normaliza al mismo valor
+  Detalle: normalizado desde minúsculas: true
+
+[32m[APROBADO][0m (CUENTA Y ACCESO (P4, P5, sección 5))
+  Prueba:  Recuperación: tras 5 fallos seguidos se bloquea 15 min y luego se libera
+  Detalle: antes del bloqueo: true · bloqueado: true · liberado al expirar: true
+
+[32m[APROBADO][0m (CUENTA Y ACCESO (P4, P5, sección 5))
+  Prueba:  Comparación de hashes en tiempo constante
+  Detalle: iguales → true; distinto último carácter → false; longitudes distintas → false
+
+[32m[APROBADO][0m (MISIONES (P50, P51, decisión 2026-10-21))
+  Prueba:  Catálogo: identificadores únicos, etapas numeradas en orden y el mismo número de misiones secretas por civilización con la misma recompensa
+  Detalle: 44 misiones (4 etapas, 6 diarias, 16 secretas; 1 por civilización)
+
+[32m[APROBADO][0m (MISIONES (P50, P51, decisión 2026-10-21))
+  Prueba:  Diarias: 3 misiones idénticas para todos, elegidas por fecha (reinicio 0:00 UTC) y distintas entre días
+  Detalle: Día 2026-10-23: d_explorar, d_batalla, d_bonus; 23:59 → 2026-10-23; 00:00 → 2026-10-24
+
+[32m[APROBADO][0m (MISIONES (P50, P51, decisión 2026-10-21))
+  Prueba:  Etapas progresivas: sin cumplir nada no hay premios; al cumplir toda la etapa 1 se conceden sus misiones y el premio final, la etapa 2 no se evalúa hasta la siguiente pasada (y con Castillo 2 aún no cumple nada) y nada se repite
+  Detalle: Primera pasada: s1_castillo2, s1_cuartel, s1_taberna, s1_tropas, s1_universidad, stage:1; segunda: 
+
+[32m[APROBADO][0m (MISIONES (P50, P51, decisión 2026-10-21))
+  Prueba:  Secretas: se conceden al cumplirse (felicidad 90, 5.000 oro) y la de civilización solo a la civilización correspondiente
+  Detalle: Secretas concedidas: x_felicidad, x_tesoro, x_civ_romanos; con otra civilización: 0
+
+[32m[APROBADO][0m (MISIONES (P50, P51, decisión 2026-10-21))
+  Prueba:  Diarias: se completan con los contadores del día, no se repiten en el mismo día y vuelven a estar disponibles al día siguiente
+  Detalle: Hoy: daily:d_explorar:2026-10-23, daily:d_batalla:2026-10-23, daily:d_bonus:2026-10-23; repetidas: 0; mañana: 3
+
+[32m[APROBADO][0m (MISIONES (P50, P51, decisión 2026-10-21))
+  Prueba:  Bonificación temporal de producción: se multiplican las vigentes y se ignoran las caducadas
+  Detalle: ×1,05 vigente y ×1,10 caducada → 1.05
+
+--------------------------------------------------------------------------------
+RESUMEN FINAL:
+  Total de pruebas:     205
+  Pruebas superadas:    201
+  Pruebas fallidas:     4
+  Tiempo de ejecución:  140 ms
+--------------------------------------------------------------------------------
+[31m  SE HAN DETECTADO FALLOS EN LA BATERÍA DE PRUEBAS.[0m

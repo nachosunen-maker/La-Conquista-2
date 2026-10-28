@@ -80,23 +80,18 @@ export {
  * 4. Sin sesión válida, ninguna mutación sobre un reino se ejecuta.
  * ============================================================================
  */
-async function requireAuthenticatedUser(ctx: {
-  auth: { getUserIdentity: () => Promise<any> };
-}): Promise<string> {
-  const identity = await ctx.auth.getUserIdentity();
-  console.log("requireAuthenticatedUser: identity object check:", {
-    hasIdentity: !!identity,
-    hasSubject: !!identity?.subject,
-  });
-  if (!identity || !identity.subject) {
+import { getAuthUserId } from "@convex-dev/auth/server";
+
+async function requireAuthenticatedUser(ctx: any): Promise<string> {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) {
     throw new Error(
       "Autenticación requerida: No se detectó una sesión autenticada en el servidor Convex. " +
-      "El proveedor de autenticación (auth.config.ts) aún no está configurado. " +
       "Por estrictas razones de integridad y propiedad (P1), se prohíbe el uso de usuarios provisionales " +
       "o identidades no verificadas enviadas por el cliente."
     );
   }
-  return identity.subject.split("|")[0];
+  return userId;
 }
 
 function isWorkersDistribution(value: unknown): value is WorkersDistribution {

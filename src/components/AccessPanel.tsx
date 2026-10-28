@@ -71,6 +71,11 @@ export function describeAuthError(error: unknown): string {
     return 'No se pudo conectar con el servidor Convex. Comprueba tu conexión a Internet o el estado del backend.';
   }
 
+  // [NUEVO] Error específico de pérdida de conexión durante una operación en vuelo
+  if (/Connection lost while action was in flight/i.test(message)) {
+    return 'Se ha perdido la conexión con el servidor durante la operación. Esto suele ser una interrupción temporal de la red; por favor, inténtalo de nuevo en unos segundos.';
+  }
+
   // Datos encapsulados en ConvexError
   const convexData = /ConvexError:\s*([^\n\r]+)/.exec(message);
   if (convexData) return convexData[1].trim();
@@ -81,7 +86,7 @@ export function describeAuthError(error: unknown): string {
     if (cleanMsg) return `Error del servidor: ${cleanMsg}`;
   }
 
-  return 'No se pudo completar la operación. Comprueba los datos o el estado de la conexión.';
+  return 'No se ha completado la operación. Comprueba los datos o el estado de la conexión.';
 }
 
 /** Decoración ornamental en las 4 esquinas del marco medieval */

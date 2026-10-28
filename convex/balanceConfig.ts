@@ -571,6 +571,16 @@ export const UNIT_COUNTERS: Readonly<Record<Exclude<UnitType, "asedio">, Exclude
   caballeria: "arqueria",
   arqueria: "infanteria",
   infanteria: "caballeria",
+  onagro_campana: "onagro_campana",
+  carrobalista: "carrobalista",
+  espringarda_movil: "espringarda_movil",
+  trabuchet_traccion: "trabuchet_traccion",
+  arcuballista: "arcuballista",
+  fustibalo_campo: "fustibalo_campo",
+  mangonel_tactico: "mangonel_tactico",
+  carros_artillados: "carros_artillados",
+  ariete_movil: "ariete_movil",
+  torres_asalto: "torres_asalto",
 };
 
 /** [DECISIÓN 17-10-2026, M-01 opción A] Recompensas de honor y gloria por batalla (P50, P51). */
