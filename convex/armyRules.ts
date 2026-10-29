@@ -19,6 +19,7 @@ import {
   TACTICAL_FORMATIONS,
   type TacticalFormation,
   MERCENARIES,
+  type MercenaryType,
 } from "./balanceConfig";
 import { MAX_BUILDING_LEVEL, checkBuildingRequirements } from "./buildingRules";
 
@@ -322,10 +323,18 @@ export function isTacticalFormation(value: string): value is TacticalFormation {
 // ----------------------------------------------------------------------------
 // Mercenarios por tipo (P53, decisión 21-10-2026)
 // ----------------------------------------------------------------------------
-export type MercenaryType = (typeof MERCENARIES.TYPES)[number];
+const LEGACY_MERCENARY_IDS: Record<string, string> = {
+  mesnada: "lanzonas_mesnada",
+  lanceros: "lanceros",
+  arqueros: "ballesteros_genoveses",
+  jinetes: "stradioti",
+  veteranos: "almogavares",
+  guardia: "condottieri",
+};
 
 export function getMercenaryType(id: string | null | undefined): MercenaryType | null {
-  const wanted = id ?? MERCENARIES.DEFAULT_TYPE_ID;
+  const raw = id ?? MERCENARIES.DEFAULT_TYPE_ID;
+  const wanted = LEGACY_MERCENARY_IDS[raw] ?? raw;
   return MERCENARIES.TYPES.find((type) => type.id === wanted) ?? null;
 }
 

@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import { createTestBackend } from "./test.setup";
-import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT } from "./balanceConfig";
+import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT, RESOURCE_PRODUCTION_MULTIPLIERS } from "./balanceConfig";
 import { costsForTargetLevel, BUILDING_RULES } from "./buildingRules";
 import { DEMO_USER_ID } from "./kingdomAccess";
 import { ensureHomeTerritory } from "./territories";
@@ -181,13 +181,13 @@ describe("Entrenamiento (Bloque B)", () => {
     await setBuildingLevel(t, kingdomId, "taberna", 1);
     const before = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     const hired = await asUser.mutation(api.army.hireMercenaries, { kingdomId, count: 5 });
-    expect(hired.cost).toBe(125);
-    expect(hired.typeId).toBe("lanceros");
+    expect(hired.cost).toBe(150);
+    expect(hired.typeId).toBe("almogavares");
     const after = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     expect(after!.population?.total).toBe(before!.population!.total + 5);
     const army = await asUser.query(api.army.getArmyState, { kingdomId });
     expect(army.mercenaries.active).toBe(5);
-    // Tipos ligados al nivel de Taberna (decisión 21-10-2026): los jinetes exigen Taberna 3.
+    // Tipos ligados al nivel de Taberna: los jinetes exigen Taberna 3.
     await expect(asUser.mutation(api.army.hireMercenaries, { kingdomId, count: 2, typeId: "jinetes" })).rejects.toThrow(/Taberna nivel 3/);
     await setBuildingLevel(t, kingdomId, "taberna", 3);
     const riders = await asUser.mutation(api.army.hireMercenaries, { kingdomId, count: 2, typeId: "jinetes" });
@@ -196,7 +196,7 @@ describe("Entrenamiento (Bloque B)", () => {
     const armyAfter = await asUser.query(api.army.getArmyState, { kingdomId });
     expect(armyAfter.mercenaries.active).toBe(7);
     expect(armyAfter.summary.byType.caballeria.active).toBe(2);
-    expect(armyAfter.mercenaries.types.filter((type: any) => type.available).map((type: any) => type.id)).toEqual(["mesnada", "lanceros", "arqueros", "jinetes"]);
+    expect(armyAfter.mercenaries.types.filter((type: any) => type.available).map((type: any) => type.id)).toEqual(["lanzonas_mesnada", "lanceros", "almogavares", "ballesteros_genoveses", "stradioti", "piqueros_suizos"]);
   });
 
   test("configurar formación táctica: valida en servidor, persiste en el reino y por defecto es equilibrada", async () => {
@@ -295,8 +295,8 @@ describe("Liquidación económica (Bloque D)", () => {
     vi.setSystemTime(T0 + DAY);
     const settled = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
     expect(settled.resources.food).toBeGreaterThan(before!.resources.food);
-    expect(settled.resources.wood).toBeCloseTo(before!.resources.wood + 250, 3);
-    expect(settled.resources.stone).toBeCloseTo(before!.resources.stone + 206.25, 3);
+    expect(settled.resources.wood).toBeCloseTo(before!.resources.wood + 250 * RESOURCE_PRODUCTION_MULTIPLIERS.wood, 3);
+    expect(settled.resources.stone).toBeCloseTo(before!.resources.stone + 206.25 * RESOURCE_PRODUCTION_MULTIPLIERS.stone, 3);
     expect(settled.taxesCollected).toBeGreaterThan(0);
     expect(settled.population?.births).toBe(0);
     expect(settled.population?.growthCappedByHousing).toBe(true);

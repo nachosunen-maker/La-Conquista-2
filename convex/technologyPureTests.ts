@@ -49,14 +49,14 @@ export function runTechnologyValidationTests(): TechnologyTestResult[] {
     technology: TECHNOLOGY_CATALOG.weapons_1,
     completedIds: new Set(),
     researchingIds: new Set(),
-    buildingLevels: { castillo: 5, universidad: 3, herreria: 3 },
+    buildingLevels: { castillo: 5, universidad: 3, herreria: 1 },
   });
 
   return [
     {
       test: "Investigación válida descuenta el coste del catálogo y fija fin por duración real (D-17)",
       passed: agri.success && agri.plan.costs.gold === 100 && agri.plan.costs.wood === 100 && agri.plan.costs.stone === 50 &&
-        agri.plan.durationMs === 86_400_000 && agri.plan.completesAt === 5_000_000 + 86_400_000 && !unknown.success,
+        agri.plan.durationMs === 60_000 && agri.plan.completesAt === 5_000_000 + 60_000 && !unknown.success,
       details: agri.success ? `Oro ${agri.plan.costs.gold}, duración ${agri.plan.durationMs} ms; desconocida rechazada: ${!unknown.success}` : agri.error,
     },
     {
@@ -86,8 +86,8 @@ export function runTechnologyValidationTests(): TechnologyTestResult[] {
     },
     {
       test: "El catálogo contiene las tecnologías universales y únicas (P62) con ramas, costes y duraciones positivas",
-      passed: TECHNOLOGIES.length === 25 && TECHNOLOGIES.every((t) => t.durationSeconds > 0 && t.universityLevel >= 1 && Object.values(t.costs).every((c) => c >= 0)),
-      details: `Total tecnologías: ${TECHNOLOGIES.length} (13 universales + 12 de civilización)`,
+      passed: TECHNOLOGIES.length === 32 && TECHNOLOGIES.every((t) => t.durationSeconds > 0 && t.universityLevel >= 1 && Object.values(t.costs).every((c) => c >= 0)),
+      details: `Total tecnologías: ${TECHNOLOGIES.length} (20 universales + 12 de civilización)`,
     },
   ];
 }
