@@ -153,24 +153,24 @@ export interface BuildingBalance {
 }
 
 export const BUILDINGS: Readonly<Record<string, BuildingBalance>> = {
-  castillo: { label: "Castillo", baseCosts: { gold: 500, wood: 800, stone: 800, iron: 100, food: 0 }, baseDurationSeconds: 86_400, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: {}, role: "Desbloqueos y administración" },
-  viviendas: { label: "Viviendas", baseCosts: { gold: 40, wood: 100, stone: 20, iron: 0, food: 0 }, baseDurationSeconds: 7_200, residentialCapacityPerLevel: 100, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 1 }, role: "Capacidad residencial" },
-  granja: { label: "Granja", baseCosts: { gold: 30, wood: 80, stone: 20, iron: 0, food: 0 }, baseDurationSeconds: 10_800, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 100, jobType: "agriculture", requirements: { castillo: 1 }, role: "Agricultura" },
-  aserradero: { label: "Aserradero", baseCosts: { gold: 40, wood: 100, stone: 30, iron: 0, food: 0 }, baseDurationSeconds: 14_400, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 80, jobType: "wood", requirements: { castillo: 1 }, role: "Madera" },
-  cantera: { label: "Cantera", baseCosts: { gold: 50, wood: 80, stone: 80, iron: 0, food: 0 }, baseDurationSeconds: 18_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 80, jobType: "stone", requirements: { castillo: 1 }, role: "Piedra" },
-  minaHierro: { label: "Mina de hierro", baseCosts: { gold: 60, wood: 100, stone: 80, iron: 20, food: 0 }, baseDurationSeconds: 21_600, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 60, jobType: "iron", requirements: { cantera: 1 }, role: "Hierro" },
-  minaOro: { label: "Mina de oro", baseCosts: { gold: 100, wood: 100, stone: 100, iron: 0, food: 0 }, baseDurationSeconds: 21_600, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 50, jobType: "gold", requirements: { castillo: 2 }, role: "Oro" },
-  cuartel: { label: "Cuartel/Barracones", baseCosts: { gold: 100, wood: 150, stone: 100, iron: 20, food: 0 }, baseDurationSeconds: 28_800, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 1 }, role: "Reclutamiento y entrenamiento" },
-  herreria: { label: "Herrería/Forja", baseCosts: { gold: 100, wood: 120, stone: 100, iron: 80, food: 0 }, baseDurationSeconds: 28_800, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 50, jobType: null, requirements: { cuartel: 1, minaHierro: 1 }, role: "Armas y armaduras" },
-  universidad: { label: "Universidad", baseCosts: { gold: 150, wood: 100, stone: 150, iron: 20, food: 0 }, baseDurationSeconds: 43_200, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 2 }, role: "Investigación y tecnologías" },
-  murallas: { label: "Murallas", baseCosts: { gold: 100, wood: 100, stone: 300, iron: 20, food: 0 }, baseDurationSeconds: 36_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 2 }, role: "Defensa del reino" },
-  mercado: { label: "Mercado", baseCosts: { gold: 100, wood: 150, stone: 100, iron: 0, food: 0 }, baseDurationSeconds: 28_800, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 30, jobType: null, requirements: { castillo: 2 }, role: "Intercambio y eficiencia económica" },
-  parlamento: { label: "Parlamento", baseCosts: { gold: 200, wood: 100, stone: 200, iron: 20, food: 0 }, baseDurationSeconds: 43_200, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 2 }, role: "Desafíos y diplomacia" },
-  hospitalMilitar: { label: "Hospital militar", baseCosts: { gold: 100, wood: 100, stone: 150, iron: 30, food: 0 }, baseDurationSeconds: 36_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 50, jobType: null, requirements: { castillo: 2 }, role: "Recuperación de heridos", professionJob: "medicine" },
-  taberna: { label: "Taberna", baseCosts: { gold: 50, wood: 100, stone: 40, iron: 0, food: 0 }, baseDurationSeconds: 14_400, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 30, jobType: null, requirements: { castillo: 1 }, role: "Contratación de mercenarios" },
-  panaderia: { label: "Panadería", baseCosts: { gold: 40, wood: 100, stone: 30, iron: 0, food: 0 }, baseDurationSeconds: 14_400, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Apoyo a la alimentación", professionJob: "bakery" },
-  iglesia: { label: "Iglesia", baseCosts: { gold: 60, wood: 100, stone: 80, iron: 0, food: 0 }, baseDurationSeconds: 18_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Religión y moral", professionJob: "religion" },
-  circo: { label: "Circo/Feria", baseCosts: { gold: 60, wood: 120, stone: 60, iron: 0, food: 0 }, baseDurationSeconds: 18_000, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Felicidad", professionJob: "entertainment" },
+  castillo: { label: "Castillo", baseCosts: { gold: 500, wood: 800, stone: 800, iron: 100, food: 0 }, baseDurationSeconds: 180, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: {}, role: "Desbloqueos y administración" },
+  viviendas: { label: "Viviendas", baseCosts: { gold: 40, wood: 100, stone: 20, iron: 0, food: 0 }, baseDurationSeconds: 5, residentialCapacityPerLevel: 100, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 1 }, role: "Capacidad residencial" },
+  granja: { label: "Granja", baseCosts: { gold: 30, wood: 80, stone: 20, iron: 0, food: 0 }, baseDurationSeconds: 10, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 100, jobType: "agriculture", requirements: { castillo: 1 }, role: "Agricultura" },
+  aserradero: { label: "Aserradero", baseCosts: { gold: 40, wood: 100, stone: 30, iron: 0, food: 0 }, baseDurationSeconds: 10, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 80, jobType: "wood", requirements: { castillo: 1 }, role: "Madera" },
+  cantera: { label: "Cantera", baseCosts: { gold: 50, wood: 80, stone: 80, iron: 0, food: 0 }, baseDurationSeconds: 15, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 80, jobType: "stone", requirements: { castillo: 1 }, role: "Piedra" },
+  minaHierro: { label: "Mina de hierro", baseCosts: { gold: 60, wood: 100, stone: 80, iron: 20, food: 0 }, baseDurationSeconds: 20, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 60, jobType: "iron", requirements: { cantera: 1 }, role: "Hierro" },
+  minaOro: { label: "Mina de oro", baseCosts: { gold: 100, wood: 100, stone: 100, iron: 0, food: 0 }, baseDurationSeconds: 20, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 50, jobType: "gold", requirements: { castillo: 2 }, role: "Oro" },
+  cuartel: { label: "Cuartel/Barracones", baseCosts: { gold: 100, wood: 150, stone: 100, iron: 20, food: 0 }, baseDurationSeconds: 30, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 1 }, role: "Reclutamiento y entrenamiento" },
+  herreria: { label: "Herrería/Forja", baseCosts: { gold: 100, wood: 120, stone: 100, iron: 80, food: 0 }, baseDurationSeconds: 45, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 50, jobType: null, requirements: { cuartel: 1, minaHierro: 1 }, role: "Armas y armaduras" },
+  universidad: { label: "Universidad", baseCosts: { gold: 150, wood: 100, stone: 150, iron: 20, food: 0 }, baseDurationSeconds: 45, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 2 }, role: "Investigación y tecnologías" },
+  murallas: { label: "Murallas", baseCosts: { gold: 100, wood: 100, stone: 300, iron: 20, food: 0 }, baseDurationSeconds: 90, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 2 }, role: "Defensa del reino" },
+  mercado: { label: "Mercado", baseCosts: { gold: 100, wood: 150, stone: 100, iron: 0, food: 0 }, baseDurationSeconds: 45, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 30, jobType: null, requirements: { castillo: 2 }, role: "Intercambio y eficiencia económica" },
+  parlamento: { label: "Parlamento", baseCosts: { gold: 200, wood: 100, stone: 200, iron: 20, food: 0 }, baseDurationSeconds: 60, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 2 }, role: "Desafíos y diplomacia" },
+  hospitalMilitar: { label: "Hospital militar", baseCosts: { gold: 100, wood: 100, stone: 150, iron: 30, food: 0 }, baseDurationSeconds: 90, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 50, jobType: null, requirements: { castillo: 2 }, role: "Recuperación de heridos", professionJob: "medicine" },
+  taberna: { label: "Taberna", baseCosts: { gold: 50, wood: 100, stone: 40, iron: 0, food: 0 }, baseDurationSeconds: 30, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 30, jobType: null, requirements: { castillo: 1 }, role: "Contratación de mercenarios" },
+  panaderia: { label: "Panadería", baseCosts: { gold: 40, wood: 100, stone: 30, iron: 0, food: 0 }, baseDurationSeconds: 30, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Apoyo a la alimentación", professionJob: "bakery" },
+  iglesia: { label: "Iglesia", baseCosts: { gold: 60, wood: 100, stone: 80, iron: 0, food: 0 }, baseDurationSeconds: 45, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Religión y moral", professionJob: "religion" },
+  circo: { label: "Circo/Feria", baseCosts: { gold: 60, wood: 120, stone: 60, iron: 0, food: 0 }, baseDurationSeconds: 90, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 40, jobType: null, requirements: { castillo: 1 }, role: "Felicidad", professionJob: "entertainment" },
 };
 
 export const CONSTRUCTION = {
@@ -186,6 +186,11 @@ export const CONSTRUCTION = {
   CANCEL_REFUND_RATIO: 0.5,
   /** [COMPLEMENTO D-05] Ningún edificio supera el nivel del Castillo. */
   CASTLE_CAPS_LEVELS: true,
+  /**
+   * [BALANCE BETA APROBADO 2026-10-29] Multiplicador global de duración de construcción.
+   * Con los nuevos tiempos base ya calibrados en segundos reales, el multiplicador es 1.00 (sin reducción temporal).
+   */
+  GLOBAL_DURATION_MULTIPLIER: 1.00,
 } as const;
 
 /**

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import { createTestBackend } from "./test.setup";
 import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT } from "./balanceConfig";
-import { costsForTargetLevel } from "./buildingRules";
+import { costsForTargetLevel, BUILDING_RULES } from "./buildingRules";
 import { DEMO_USER_ID } from "./kingdomAccess";
 import { ensureHomeTerritory } from "./territories";
 
@@ -128,8 +128,8 @@ describe("Construcción (Bloque A)", () => {
     expect(result.costs.gold).toBe(expectedCosts.gold);
     const after = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     expect(after!.resources.gold).toBeCloseTo(before!.resources.gold - expectedCosts.gold, 5);
-    // Duración con bonificación romana (−10 % duración de construcción, P6)
-    expect(result.completesAt - result.startedAt).toBe(Math.ceil(BUILDINGS.cuartel.baseDurationSeconds * 1000 * 0.90));
+    // Duración con bonificación romana (−10 % duración de construcción, P6) y multiplicador global
+    expect(result.completesAt - result.startedAt).toBe(Math.ceil(BUILDING_RULES.cuartel.baseDurationMs! * 0.90));
 
     vi.setSystemTime(result.completesAt + 1000);
     await t.finishAllScheduledFunctions(vi.runAllTimers);

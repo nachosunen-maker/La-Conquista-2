@@ -27,7 +27,7 @@ export const BUILDING_RULES: BuildingRules = Object.fromEntries(
       label: balance.label,
       role: balance.role,
       costs: { ...balance.baseCosts },
-      baseDurationMs: balance.baseDurationSeconds * 1000,
+      baseDurationMs: Math.max(1000, Math.round(balance.baseDurationSeconds * 1000 * CONSTRUCTION.GLOBAL_DURATION_MULTIPLIER)),
       residentialCapacityPerLevel: balance.residentialCapacityPerLevel,
       productiveWorkerCapacityPerLevel: balance.workerCapacityPerLevel,
       jobType: balance.jobType,
@@ -44,6 +44,7 @@ export const MAX_CONCURRENT_CONSTRUCTIONS = CONSTRUCTION.MAX_CONCURRENT;
 export const DURATION_INCREASE_PER_LEVEL = CONSTRUCTION.DURATION_INCREASE_PER_LEVEL;
 export const COST_GROWTH_PER_LEVEL = CONSTRUCTION.COST_GROWTH_PER_LEVEL;
 export const CANCEL_REFUND_RATIO = CONSTRUCTION.CANCEL_REFUND_RATIO;
+export const GLOBAL_DURATION_MULTIPLIER = CONSTRUCTION.GLOBAL_DURATION_MULTIPLIER;
 export const INITIAL_BUILDING_LEVELS = INITIAL_BUILDINGS;
 
 export interface ConstructionQueueEntry {
@@ -62,7 +63,7 @@ export interface ConstructionPlan {
   costs: Partial<Record<ResourceType, number>>;
 }
 
-/** [MAESTRA P22] Duración del nivel n = base × (1 + 0,01)^(n−1), redondeada hacia arriba. */
+/** [MAESTRA P22] Duración del nivel n = base × (1 + 0,01 × (n−1)), redondeada hacia arriba. */
 export function durationForTargetLevel(
   baseDurationMs: number,
   targetLevel: number,
@@ -79,7 +80,7 @@ export function durationForTargetLevel(
   ) {
     return null;
   }
-  return Math.ceil(baseDurationMs * (1 + DURATION_INCREASE_PER_LEVEL) ** (targetLevel - 1) * durationModifier);
+  return Math.ceil(baseDurationMs * (1 + DURATION_INCREASE_PER_LEVEL * (targetLevel - 1)) * durationModifier);
 }
 
 /** [COMPLEMENTO D-02] coste(n) = redondear(base × 1,15^(n−1)). */

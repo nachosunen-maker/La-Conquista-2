@@ -14,8 +14,10 @@ import {
   type ConstructionQueueEntry,
 } from "./buildingRules";
 import { isKingdomOwner } from "./kingdomAccess";
-import { BUILDINGS, POPULATION } from "./balanceConfig";
+import { BUILDINGS, POPULATION, CONSTRUCTION, RESEARCH } from "./balanceConfig";
 import { INITIAL_KINGDOM_CONFIG, type ResourceType } from "./economyCalculations";
+import { getConstructionDurationModifier } from "./technologyRules";
+import { getCivilizationPassive } from "./civilizationRules";
 
 export interface ConstructionTestResult {
   test: string;
@@ -84,7 +86,7 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
   }));
   const durationAtLevelTwo = durationForTargetLevel(testBaseDurationMs, 2);
   const durationAtLevelHundred = durationForTargetLevel(testBaseDurationMs, 100);
-  const expectedLevelHundredDuration = Math.ceil(testBaseDurationMs * (1.01 ** 99));
+  const expectedLevelHundredDuration = Math.ceil(testBaseDurationMs * (1 + 0.01 * 99));
   const durationWithTechnology = durationForTargetLevel(testBaseDurationMs, 1, 0.95);
   const missingPrerequisite = createConstructionPlan(validInput({
     rule: { ...rule, progressionRequirements: { universidad: 2 } },
@@ -240,6 +242,65 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
       test: "Requisitos configurados se validan contra niveles de edificios persistidos",
       passed: !missingPrerequisite.success && satisfiedPrerequisite.success,
       details: `Requisito no satisfecho bloqueado: ${!missingPrerequisite.success}; nivel requerido persistido permite continuar: ${satisfiedPrerequisite.success}`,
+    },
+    {
+      test: "Catálogo de 18 edificios oficiales y tiempos base aprobados beta (GLOBAL_DURATION_MULTIPLIER = 1.00)",
+      passed:
+        CONSTRUCTION.GLOBAL_DURATION_MULTIPLIER === 1.00 &&
+        Object.keys(BUILDINGS).length === 18 &&
+        Object.keys(BUILDING_RULES).length === 18 &&
+        BUILDING_RULES.castillo.baseDurationMs === 180_000 &&
+        BUILDING_RULES.viviendas.baseDurationMs === 5_000 &&
+        BUILDING_RULES.granja.baseDurationMs === 10_000 &&
+        BUILDING_RULES.aserradero.baseDurationMs === 10_000 &&
+        BUILDING_RULES.cantera.baseDurationMs === 15_000 &&
+        BUILDING_RULES.minaHierro.baseDurationMs === 20_000 &&
+        BUILDING_RULES.minaOro.baseDurationMs === 20_000 &&
+        BUILDING_RULES.cuartel.baseDurationMs === 30_000 &&
+        BUILDING_RULES.herreria.baseDurationMs === 45_000 &&
+        BUILDING_RULES.universidad.baseDurationMs === 45_000 &&
+        BUILDING_RULES.murallas.baseDurationMs === 90_000 &&
+        BUILDING_RULES.mercado.baseDurationMs === 45_000 &&
+        BUILDING_RULES.parlamento.baseDurationMs === 60_000 &&
+        BUILDING_RULES.hospitalMilitar.baseDurationMs === 90_000 &&
+        BUILDING_RULES.taberna.baseDurationMs === 30_000 &&
+        BUILDING_RULES.panaderia.baseDurationMs === 30_000 &&
+        BUILDING_RULES.iglesia.baseDurationMs === 45_000 &&
+        BUILDING_RULES.circo.baseDurationMs === 90_000,
+      details: `18 edificios con multiplicador 1.00; Castillo: 180s, Viviendas: 5s, Circo: 90s, Granja: 10s, Cuartel: 30s.`,
+    },
+    {
+      test: "Progresión de duraciones en niveles 1, 2, 10, 25, 50 y 100 (+1 % lineal por nivel: base × (1 + 0.01 × (n−1)))",
+      passed:
+        durationForTargetLevel(BUILDING_RULES.viviendas.baseDurationMs!, 1) === 5_000 &&
+        durationForTargetLevel(BUILDING_RULES.viviendas.baseDurationMs!, 2) === 5_050 &&
+        durationForTargetLevel(BUILDING_RULES.viviendas.baseDurationMs!, 10) === 5_450 &&
+        durationForTargetLevel(BUILDING_RULES.viviendas.baseDurationMs!, 25) === 6_200 &&
+        durationForTargetLevel(BUILDING_RULES.viviendas.baseDurationMs!, 50) === 7_450 &&
+        durationForTargetLevel(BUILDING_RULES.viviendas.baseDurationMs!, 100) === 9_950 &&
+        durationForTargetLevel(BUILDING_RULES.castillo.baseDurationMs!, 1) === 180_000 &&
+        durationForTargetLevel(BUILDING_RULES.castillo.baseDurationMs!, 2) === 181_800 &&
+        durationForTargetLevel(BUILDING_RULES.castillo.baseDurationMs!, 10) === 196_200 &&
+        durationForTargetLevel(BUILDING_RULES.castillo.baseDurationMs!, 25) === 223_200 &&
+        durationForTargetLevel(BUILDING_RULES.castillo.baseDurationMs!, 50) === 268_200 &&
+        durationForTargetLevel(BUILDING_RULES.castillo.baseDurationMs!, 100) === 358_200 &&
+        durationForTargetLevel(BUILDING_RULES.circo.baseDurationMs!, 1) === 90_000 &&
+        durationForTargetLevel(BUILDING_RULES.circo.baseDurationMs!, 2) === 90_900 &&
+        durationForTargetLevel(BUILDING_RULES.circo.baseDurationMs!, 10) === 98_100 &&
+        durationForTargetLevel(BUILDING_RULES.circo.baseDurationMs!, 25) === 111_600 &&
+        durationForTargetLevel(BUILDING_RULES.circo.baseDurationMs!, 50) === 134_100 &&
+        durationForTargetLevel(BUILDING_RULES.circo.baseDurationMs!, 100) === 179_100,
+      details: `Viviendas L1=5s / L100=9.95s; Castillo L1=180s / L100=358.2s; Circo L1=90s / L100=179.1s.`,
+    },
+    {
+      test: "Modificadores de duración de construcción: tecnologías, civilizaciones e idempotencia",
+      passed:
+        getConstructionDurationModifier(["construction_1"]) === 0.95 &&
+        getConstructionDurationModifier(["construction_1", "construction_1"]) === 0.95 &&
+        getCivilizationPassive("romanos").constructionDurationMultiplier === 0.90 &&
+        RESEARCH.CONSTRUCTION_MIN_DURATION_RATIO === 0.50 &&
+        durationForTargetLevel(BUILDING_RULES.circo.baseDurationMs!, 1, 0.95) === 85_500,
+      details: `Ingeniería civil: −5% (0.95); id duplicado idéntico: 0.95; Romanos: −10% (0.90); Tope de seguridad: 50%; Circo L1 con −5%: 85.5s.`,
     },
   ];
 }

@@ -601,6 +601,7 @@ function KingdomOverviewContent() {
   const [workerSaveError, setWorkerSaveError] = useState<string | null>(null);
   const [workerSaveMessage, setWorkerSaveMessage] = useState<string | null>(null);
   const [cancellingConstruction, setCancellingConstruction] = useState<string | null>(null);
+  const [confirmCancelConstruction, setConfirmCancelConstruction] = useState<ConstructionRecord | null>(null);
   const [startingConstruction, setStartingConstruction] = useState<string | null>(null);
   const [constructionError, setConstructionError] = useState<string | null>(null);
   const [constructionMessage, setConstructionMessage] = useState<string | null>(null);
@@ -798,21 +799,35 @@ function KingdomOverviewContent() {
     }
   };
 
-  const handleConstructionCancellation = async (construction: ConstructionRecord) => {
-    if (!isOwner || !kingdom || !window.confirm(
-      `¿Cancelar ${construction.buildingType} nivel ${construction.targetLevel}? El servidor devolverá el 50 % de los costes registrados.`
-    )) return;
+  const handleConstructionCancellation = (construction: ConstructionRecord) => {
+    if (!isOwner || !kingdom) return;
+    setConstructionError(null);
+    setConfirmCancelConstruction(construction);
+  };
 
-    setCancellingConstruction(construction._id);
+  const handleCloseCancelDialog = () => {
+    if (cancellingConstruction !== null) return;
+    setConfirmCancelConstruction(null);
+  };
+
+  const handleConfirmCancellation = async () => {
+    if (!isOwner || !kingdom || !confirmCancelConstruction) return;
+    if (cancellingConstruction !== null) return;
+
+    const constructionToCancel = confirmCancelConstruction;
+    setCancellingConstruction(constructionToCancel._id);
     setConstructionError(null);
     setConstructionMessage(null);
     try {
       const result = await cancelConstruction({
         kingdomId: kingdom._id,
-        constructionId: construction._id,
+        constructionId: constructionToCancel._id,
       });
       if (!result?.success) throw new Error("El servidor no confirmó la cancelación.");
-      setConstructionMessage("Construcción cancelada; se aplicó el reembolso confirmado por Convex.");
+      setConstructionMessage(
+        `Construcción de ${constructionToCancel.buildingType ?? "edificio"} cancelada; se aplicó el reembolso confirmado por Convex.`
+      );
+      setConfirmCancelConstruction(null);
     } catch (error) {
       setConstructionError(error instanceof Error ? error.message : "No se pudo cancelar la construcción.");
     } finally {
@@ -2135,6 +2150,62 @@ function KingdomOverviewContent() {
         </div>
         {constructionError && <p role="alert" className="text-xs text-rose-400">{constructionError}</p>}
         {constructionMessage && <p role="status" className="text-xs text-emerald-400">{constructionMessage}</p>}
+
+        {confirmCancelConstruction && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+            <div className="bg-[#14120e] border border-amber-900/60 rounded-xl p-5 max-w-md w-full space-y-4 shadow-2xl text-[#f0e8d4]">
+              <div className="flex items-center gap-3 text-amber-400">
+                <AlertTriangle className="w-6 h-6 flex-shrink-0" />
+                <h3 className="font-serif font-bold text-base text-[#f5eedf]">
+                  ¿Cancelar construcción?
+                </h3>
+              </div>
+              <div className="space-y-2 text-xs text-[#c7b99f]">
+                <p>
+                  Estás a punto de cancelar la obra de{' '}
+                  <strong className="text-[#f0e8d4]">
+                    {confirmCancelConstruction.buildingType ?? 'edificio'}
+                  </strong>{' '}
+                  (nivel {confirmCancelConstruction.targetLevel ?? '—'}).
+                </p>
+                <p className="text-[#a89b84]">
+                  El servidor devolverá el <strong className="text-amber-300">50 %</strong> de los recursos registrados
+                  y liberará inmediatamente la ranura de construcción en Convex. Las demás obras conservarán su progreso original.
+                </p>
+              </div>
+              {constructionError && (
+                <div role="alert" className="p-2.5 rounded bg-rose-950/60 border border-rose-800/70 text-xs text-rose-300">
+                  {constructionError}
+                </div>
+              )}
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-[#2c2419]">
+                <button
+                  type="button"
+                  onClick={handleCloseCancelDialog}
+                  disabled={cancellingConstruction !== null}
+                  className="px-3 py-1.5 rounded text-xs text-[#a89b84] hover:text-[#f0e8d4] border border-[#3d3323] hover:bg-[#231d15] disabled:opacity-50 transition-colors"
+                >
+                  Volver
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCancellation}
+                  disabled={cancellingConstruction !== null}
+                  className="px-3 py-1.5 rounded text-xs font-semibold text-rose-200 bg-rose-900/80 hover:bg-rose-800 border border-rose-700/80 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                >
+                  {cancellingConstruction !== null ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Cancelando en servidor…
+                    </>
+                  ) : (
+                    'Confirmar cancelación'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="bg-[#12100d] border border-[#241e15] rounded-xl p-4 text-xs text-[#8e816d] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
