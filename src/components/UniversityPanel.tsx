@@ -45,6 +45,7 @@ interface TechnologiesState {
     universityLevel: number;
     costs: Record<string, number>;
     durationSeconds: number;
+    bonifiedDurationSeconds: number;
     buildingRequirements: Record<string, number>;
     technologyRequirements: string[];
     effect: { key: string; value: number; description: string };
@@ -167,7 +168,7 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
                   </span>
                 </div>
                 <p className="text-[#c7beac]"><strong className="text-[#e6ded0]">Efecto:</strong> {technology.effect.description}</p>
-                <p className="text-[#c7beac]"><strong className="text-[#e6ded0]">Coste:</strong> {formatCosts(technology.costs)} · <strong className="text-[#e6ded0]">duración:</strong> {formatSecondsDuration(technology.durationSeconds)}</p>
+                <p className="text-[#c7beac]"><strong className="text-[#e6ded0]">Coste:</strong> {formatCosts(technology.costs)} · <strong className="text-[#e6ded0]">duración:</strong> {formatSecondsDuration(technology.bonifiedDurationSeconds)}</p>
                 <p className="text-[#8e816d]">
                   Universidad nivel {technology.universityLevel}
                   {Object.keys(technology.buildingRequirements).length ? ` · ${formatRequirements(technology.buildingRequirements, buildingLabels)}` : ''}

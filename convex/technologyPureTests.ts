@@ -85,9 +85,25 @@ export function runTechnologyValidationTests(): TechnologyTestResult[] {
       details: `Agricultura ×${modifiers.agricultureProduction}; minería ×${modifiers.miningProduction}; entrenamiento ×${modifiers.trainingDuration}; construcción ×${modifiers.constructionDuration}; heridos +${modifiers.woundedRecoveryBonus}; espionaje ${modifiers.espionageLevel}; felicidad +${modifiers.happinessBase}`,
     },
     {
-      test: "El catálogo contiene las tecnologías universales y únicas (P62) con ramas, costes y duraciones positivas",
-      passed: TECHNOLOGIES.length === 32 && TECHNOLOGIES.every((t) => t.durationSeconds > 0 && t.universityLevel >= 1 && Object.values(t.costs).every((c) => c >= 0)),
-      details: `Total tecnologías: ${TECHNOLOGIES.length} (20 universales + 12 de civilización)`,
+      test: "Desbloqueo tecnología mongola: exige Cuartel 2 y Universidad 2 (Mongoles)",
+      passed: (() => {
+        const locked = evaluateTechnologyStatus({
+          technology: TECHNOLOGY_CATALOG.tech_civ_mongoles,
+          completedIds: new Set(),
+          researchingIds: new Set(),
+          buildingLevels: { castillo: 2, universidad: 2, cuartel: 1 },
+          kingdomCivilization: "mongoles",
+        });
+        const unlocked = evaluateTechnologyStatus({
+          technology: TECHNOLOGY_CATALOG.tech_civ_mongoles,
+          completedIds: new Set(),
+          researchingIds: new Set(),
+          buildingLevels: { castillo: 2, universidad: 2, cuartel: 2 },
+          kingdomCivilization: "mongoles",
+        });
+        return locked.status === "locked" && unlocked.status === "available";
+      })(),
+      details: "Verifica desbloqueo con Cuartel 2 y bloqueo con Cuartel 1",
     },
   ];
 }

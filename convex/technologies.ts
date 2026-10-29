@@ -22,6 +22,7 @@ import {
   researchSlots,
   type ResearchQueueEntry,
 } from "./technologyRules";
+import { getCivilizationPassive } from "./civilizationRules";
 import { TECHNOLOGIES } from "./balanceConfig";
 import type { ResourceType } from "./economyCalculations";
 
@@ -77,7 +78,14 @@ export const getTechnologies = query({
           buildingLevels,
           kingdomCivilization: kingdom.civilization,
         });
-        return { ...technology, status: evaluation.status, blockers: evaluation.blockers };
+        const civPassive = getCivilizationPassive(kingdom.civilization);
+        const bonifiedDurationSeconds = Math.ceil(technology.durationSeconds * civPassive.researchDurationMultiplier);
+        return { 
+          ...technology, 
+          status: evaluation.status, 
+          blockers: evaluation.blockers, 
+          bonifiedDurationSeconds 
+        };
       }),
     };
   },
