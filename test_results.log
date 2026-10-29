@@ -208,7 +208,7 @@ LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAME
 
 [32m[APROBADO][0m (INTEGRACIÓN CONVEX)
   Prueba:  La duración aumenta un 1 % por nivel (P22) y admite el modificador tecnológico
-  Detalle: Nivel 1 (fixture): 60000; nivel 2: 60600; nivel 100: 160683; con −5 %: 57000.
+  Detalle: Nivel 1 (fixture): 60000; nivel 2: 60600; nivel 100: 119400; con −5 %: 57000.
 
 [32m[APROBADO][0m (INTEGRACIÓN CONVEX)
   Prueba:  El coste escala con 1,15^(nivel−1) (D-02) y el plan usa el coste del nivel objetivo
@@ -261,6 +261,18 @@ LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAME
 [32m[APROBADO][0m (INTEGRACIÓN CONVEX)
   Prueba:  Requisitos configurados se validan contra niveles de edificios persistidos
   Detalle: Requisito no satisfecho bloqueado: true; nivel requerido persistido permite continuar: true
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Catálogo de 18 edificios oficiales y tiempos base aprobados beta (GLOBAL_DURATION_MULTIPLIER = 1.00)
+  Detalle: 18 edificios con multiplicador 1.00; Castillo: 180s, Viviendas: 5s, Circo: 90s, Granja: 10s, Cuartel: 30s.
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Progresión de duraciones en niveles 1, 2, 10, 25, 50 y 100 (+1 % lineal por nivel: base × (1 + 0.01 × (n−1)))
+  Detalle: Viviendas L1=5s / L100=9.95s; Castillo L1=180s / L100=358.2s; Circo L1=90s / L100=179.1s.
+
+[32m[APROBADO][0m (INTEGRACIÓN CONVEX)
+  Prueba:  Modificadores de duración de construcción: tecnologías, civilizaciones e idempotencia
+  Detalle: Ingeniería civil: −5% (0.95); id duplicado idéntico: 0.95; Romanos: −10% (0.90); Tope de seguridad: 50%; Circo L1 con −5%: 85.5s.
 
 [32m[APROBADO][0m (INTEGRACIÓN CONVEX)
   Prueba:  Ejército: Mercenarios por tipo (decisión 21-10-2026): la tabla de precios sigue la fórmula derivada del anclaje de 25 oro, hay tipos más baratos y más caros, y el nivel de Taberna los desbloquea
@@ -332,15 +344,15 @@ LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAME
 
 [32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Economía ampliada: Producción por trabajador y día (D-46): madera 1, piedra 0,75, hierro 0,40, oro 0,20; alimentos intactos
-  Detalle: Madera 250/día, piedra 187.5, hierro 40, oro 10, alimentos 2200
+  Detalle: Madera 750/día, piedra 375, hierro 120.00000000000001, oro 10, alimentos 2200
 
 [32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Economía ampliada: La capacidad de edificios limita a los trabajadores efectivos (D-47); tecnología y terreno multiplican
-  Detalle: Madera limitada a 100; piedra sin cantera 0; con tecnología alimentos 2310 y madera 262.5; bosque 287.5
+  Detalle: Madera limitada a 100; piedra sin cantera 0; con tecnología alimentos 2310 y madera 787.5000000000001; bosque 862.4999999999999
 
 [32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Economía ampliada: Impuestos (P27, D-49): recaudación = producción no monetaria × tasa; tramos de penalización
-  Detalle: Recaudación diaria 267.75 oro; productividad al 60 %: 0.85; felicidad/día al 30 %: −2; moral al 100 %: −10
+  Detalle: Recaudación diaria 344.50 oro; productividad al 60 %: 0.85; felicidad/día al 30 %: −2; moral al 100 %: −10
 
 [32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Economía ampliada: Crecimiento del 30 % anual (P12) limitado por viviendas (P16, D-50) y continuo en fracciones de año
@@ -398,13 +410,13 @@ LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAME
   Prueba:  Batalla: Determinismo: fuerzas idénticas producen el mismo informe y terminan en empate con 3 rondas (P52, D-29/D-30)
   Detalle: Resultado empate; rondas 3; bajas 463/463; honor por empate 5
 
-[31m[FALLIDO][0m (MATEMÁTICA / LÓGICA PURA)
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Batalla: B-02: 600 soldados de élite derrotan a 1.000 reclutas mal preparados (P34, P69)
-  Detalle: Resultado empate; pérdidas élite 0.0 % frente a reclutas 0.0 %; honor 5/5
+  Detalle: Resultado victoria; pérdidas élite 32.7 % frente a reclutas 59.5 %; honor 20/0
 
-[31m[FALLIDO][0m (MATEMÁTICA / LÓGICA PURA)
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Batalla: B-01: con k = 0,40 la superioridad abrumadora fuerza la retirada (70 %) y es victoria aplastante (>75 %, P47) con +50 honor
-  Detalle: Pérdidas del pequeño 0.0 % (techo 78.4 %); retirada false; aplastante false; rondas 3
+  Detalle: Pérdidas del pequeño 75.3 % (techo 78.4 %); retirada true; aplastante true; rondas 3
 
 [32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Batalla: Moral inferior a 20 fuerza la retirada tras la primera ronda (D-30)
@@ -426,13 +438,13 @@ LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAME
   Prueba:  Batalla: Formaciones tácticas (decisión 21-10-2026): ciclo ofensiva > flanqueo > defensiva > ofensiva, equilibrada neutral, contramedida ×1.15; con ejércitos iguales contrarrestar gana sin aplastar y el resto empata
   Detalle: Ciclo cerrado: true; contramedida ofensiva vs flanqueo ×1.15, vs defensiva ×1; factor ofensiva 1.12; equilibrada 1; contrarrestar vence sin aplastar: true; sin contramedida empata: true; equilibrada nunca aplastada: true; por defecto equilibrada: true
 
-[31m[FALLIDO][0m (MATEMÁTICA / LÓGICA PURA)
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Batalla: Heridos ≈65 % de las bajas (P44) y contabilidad cerrada de supervivientes; recuperación hospitalaria P45 con tope 60 % y desgaste de equipamiento
-  Detalle: Contabilidad coherente: false; recuperación nivel 1/5+/5+tec/sin hospital: 0.15/0.5/0.6/0; hospital cap/heridos/recuperados: 200/200/46; desgaste: 25 %
+  Detalle: Contabilidad coherente: true; recuperación nivel 1/5+/5+tec/sin hospital: 0.15/0.5/0.6/0; hospital cap/heridos/recuperados: 200/200/46; desgaste: 25 %
 
-[31m[FALLIDO][0m (MATEMÁTICA / LÓGICA PURA)
+[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Batalla: Simulaciones obligatorias de formaciones tácticas: matriz 16 combinaciones (3 victorias, 3 derrotas, 10 empates sin aplastantes), superioridad 2:1 preservada frente a contramedida, modulación por fatiga/moral y determinismo
-  Detalle: Matriz 16: 16 pares (victorias: 3, derrotas: 3, empates: 10, aplastantes: 0); determinismo 100%: true; 2.000 vs 1.000 con contramedida gana grande: false; fatiga/moral modulan ventaja: true
+  Detalle: Matriz 16: 16 pares (victorias: 3, derrotas: 3, empates: 10, aplastantes: 0); determinismo 100%: true; 2.000 vs 1.000 con contramedida gana grande: true; fatiga/moral modulan ventaja: true
 
 [32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Parlamento: Máquina de estados disjunta (BLOQUE 9): solo 5 transiciones válidas; rechazado y resuelto son finales
@@ -458,9 +470,9 @@ LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAME
   Prueba:  Ronda 2: Políticas de descanso (M-04): intensiva +15 % producción, −3 felicidad y +5 fatiga/día; relajada −10 %, +2 y −5
   Detalle: Intensiva: productividad 1.15, felicidad 67, fatiga +5; relajada: 0.9, 72, -5
 
-[32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
+[31m[FALLIDO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Ronda 2: Almacén (M-06): tope 10.000 + 2.000 por nivel de Mercado; el excedente del intervalo se pierde y las reservas previas no se destruyen
-  Detalle: Capacidad 0/2 mercados: 10000/14000; 9.900 madera → 10000 (perdido 150); 12.000 sin mercado → 12000; con Mercado 2 → 12250
+  Detalle: Capacidad 0/2 mercados: 10000/14000; 9.900 madera → 10000 (perdido 650); 12.000 sin mercado → 12000; con Mercado 2 → 12750
 
 [32m[APROBADO][0m (MATEMÁTICA / LÓGICA PURA)
   Prueba:  Ronda 2: Profesiones (M-07): medicina +1 pp/10 (tope 10), religión y circo +1/20 (tope 3), panadería −5 %/20 (tope −15 %), construcción −1 %/10 (tope −20 %); limitadas por capacidad
@@ -828,9 +840,9 @@ LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAME
 
 --------------------------------------------------------------------------------
 RESUMEN FINAL:
-  Total de pruebas:     205
-  Pruebas superadas:    201
-  Pruebas fallidas:     4
-  Tiempo de ejecución:  140 ms
+  Total de pruebas:     208
+  Pruebas superadas:    207
+  Pruebas fallidas:     1
+  Tiempo de ejecución:  79 ms
 --------------------------------------------------------------------------------
 [31m  SE HAN DETECTADO FALLOS EN LA BATERÍA DE PRUEBAS.[0m

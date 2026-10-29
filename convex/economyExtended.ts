@@ -27,6 +27,7 @@ import {
   PRODUCTION_PER_WORKER_PER_DAY,
   PROFESSION_BUILDING_CAPACITY,
   PROFESSION_EFFECTS,
+  RESOURCE_PRODUCTION_MULTIPLIERS,
   REST_POLICIES,
   STARVATION,
   STARVATION_JOB_REDUCTION_PRIORITY,
@@ -319,12 +320,13 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   const professions = computeProfessionEffects(state.jobCounts, input.buildingLevels, PROFESSION_BUILDING_CAPACITY);
   const mercenaryCount = Number.isInteger(input.mercenaryCount) && (input.mercenaryCount as number) > 0 ? (input.mercenaryCount as number) : 0;
 
-  // 1. Alimentos: motor aprobado con multiplicador agrícola (tecnología × terreno × civilización × productividad) y consumo (panadería).
+  // 1. Alimentos: motor aprobado con multiplicador agrícola (multiplicador beta × tecnología × terreno × civilización × productividad) y consumo (panadería).
   const civAgriBonus = civPassive.production.agriculture ?? 0;
-  const agricultureMultiplier = input.technologyModifiers.agricultureProduction * (1 + (terrain.agriculture ?? 0)) * (1 + civAgriBonus) * productivity;
+  const betaAgriMultiplier = RESOURCE_PRODUCTION_MULTIPLIERS.agriculture ?? 1.0;
+  const agricultureMultiplier = betaAgriMultiplier * input.technologyModifiers.agricultureProduction * (1 + (terrain.agriculture ?? 0)) * (1 + civAgriBonus) * productivity;
   const foodSim = simulateEconomicProgress(state, input.now, agricultureMultiplier, professions.foodConsumptionMultiplier);
 
-  // 2. Resto de recursos (D-46/D-47): tasa × min(asignados, capacidad) × modificadores.
+  // 2. Resto de recursos (D-46/D-47): tasa × multiplicador beta × min(asignados, capacidad) × modificadores.
   const effectiveWorkers: Record<ProductiveJob, number> = {
     agriculture: foodSim.effectiveAgricultureWorkers,
     wood: 0,
@@ -340,7 +342,8 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
     effectiveWorkers[job] = effective;
     const technologyMultiplier = job === "gold" ? 1 : input.technologyModifiers.miningProduction;
     const civJobBonus = civPassive.production[job] ?? 0;
-    const rate = PRODUCTION_PER_WORKER_PER_DAY[job] * technologyMultiplier * (1 + (terrain[job] ?? 0)) * (1 + civJobBonus) * productivity;
+    const betaJobMultiplier = RESOURCE_PRODUCTION_MULTIPLIERS[job] ?? 1.0;
+    const rate = PRODUCTION_PER_WORKER_PER_DAY[job] * betaJobMultiplier * technologyMultiplier * (1 + (terrain[job] ?? 0)) * (1 + civJobBonus) * productivity;
     dailyProduction[JOB_TO_RESOURCE[job]] = effective * rate;
   }
 

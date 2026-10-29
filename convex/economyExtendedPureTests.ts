@@ -10,7 +10,7 @@ import {
 } from "./economyExtended";
 import { computeTechnologyModifiers } from "./technologyRules";
 import { INITIAL_KINGDOM_CONFIG, SECONDS_PER_GAME_YEAR, type KingdomState } from "./economyCalculations";
-import { PRODUCTION_PER_WORKER_PER_DAY } from "./balanceConfig";
+import { PRODUCTION_PER_WORKER_PER_DAY, RESOURCE_PRODUCTION_MULTIPLIERS } from "./balanceConfig";
 
 export interface ExtendedEconomyTestResult {
   test: string;
@@ -49,10 +49,10 @@ function baseInput(overrides: Partial<ExtendedEconomyInput> = {}): ExtendedEcono
 
 export function runExtendedEconomyTests(): ExtendedEconomyTestResult[] {
   const oneDay = simulateExtendedEconomy(baseInput());
-  const expectedWood = 250 * PRODUCTION_PER_WORKER_PER_DAY.wood;
-  const expectedStone = 250 * PRODUCTION_PER_WORKER_PER_DAY.stone;
-  const expectedIron = 100 * PRODUCTION_PER_WORKER_PER_DAY.iron;
-  const expectedGoldMining = 50 * PRODUCTION_PER_WORKER_PER_DAY.gold;
+  const expectedWood = 250 * PRODUCTION_PER_WORKER_PER_DAY.wood * RESOURCE_PRODUCTION_MULTIPLIERS.wood;
+  const expectedStone = 250 * PRODUCTION_PER_WORKER_PER_DAY.stone * RESOURCE_PRODUCTION_MULTIPLIERS.stone;
+  const expectedIron = 100 * PRODUCTION_PER_WORKER_PER_DAY.iron * RESOURCE_PRODUCTION_MULTIPLIERS.iron;
+  const expectedGoldMining = 50 * PRODUCTION_PER_WORKER_PER_DAY.gold * RESOURCE_PRODUCTION_MULTIPLIERS.gold;
   const expectedTaxBase = 2200 + expectedWood + expectedStone + expectedIron;
 
   const capped = simulateExtendedEconomy(baseInput({ jobCapacities: { agriculture: 1100, wood: 100, stone: 0, iron: 120, gold: 50 } }));

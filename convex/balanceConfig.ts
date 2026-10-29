@@ -55,6 +55,22 @@ export const PRODUCTION_PER_WORKER_PER_DAY = {
 } as const;
 export type ProductiveJob = keyof typeof PRODUCTION_PER_WORKER_PER_DAY;
 
+/**
+ * [BALANCE BETA APROBADO 2026-10-29] Multiplicadores de producción por recurso.
+ * - Alimentos: 1.00 (sin incremento)
+ * - Madera: 3.00
+ * - Piedra: 2.00
+ * - Hierro: 3.00
+ * - Oro procedente de minería: 1.00 (sin incremento)
+ */
+export const RESOURCE_PRODUCTION_MULTIPLIERS: Record<ProductiveJob, number> = {
+  agriculture: 1.00,
+  wood: 3.00,
+  stone: 2.00,
+  iron: 3.00,
+  gold: 1.00,
+};
+
 /** Mapa oficio → recurso producido. */
 export const JOB_TO_RESOURCE: Record<ProductiveJob, ResourceType> = {
   agriculture: "food",

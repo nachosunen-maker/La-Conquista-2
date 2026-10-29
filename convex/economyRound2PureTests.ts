@@ -10,7 +10,7 @@ import {
 } from "./economyExtended";
 import { computeTechnologyModifiers } from "./technologyRules";
 import { INITIAL_KINGDOM_CONFIG, SECONDS_PER_GAME_YEAR, type KingdomState } from "./economyCalculations";
-import { MERCENARIES, REST_POLICIES, SEASONS, STORAGE, TIME } from "./balanceConfig";
+import { MERCENARIES, RESOURCE_PRODUCTION_MULTIPLIERS, REST_POLICIES, SEASONS, STORAGE, TIME } from "./balanceConfig";
 
 export interface Round2TestResult {
   test: string;
@@ -95,8 +95,8 @@ export function runRound2EconomyTests(): Round2TestResult[] {
       passed: storageCapacity(0) === STORAGE.BASE_CAPACITY && storageCapacity(2) === STORAGE.BASE_CAPACITY + 2 * STORAGE.CAPACITY_PER_MARKET_LEVEL &&
         storageCapacity(0, 1.1) === 11_000 &&
         nearCap.updatedResources.wood === 10_000 && nearCap.wastedByStorage.wood > 0 &&
-        aboveCap.updatedResources.wood === 12_000 && aboveCap.wastedByStorage.wood === 250 &&
-        withMarket.updatedResources.wood === 12_250 && withMarket.wastedByStorage.wood === 0,
+        aboveCap.updatedResources.wood === 12_000 && aboveCap.wastedByStorage.wood === 250 * RESOURCE_PRODUCTION_MULTIPLIERS.wood &&
+        withMarket.updatedResources.wood === 12_000 + 250 * RESOURCE_PRODUCTION_MULTIPLIERS.wood && withMarket.wastedByStorage.wood === 0,
       details: `Capacidad 0/2 mercados: ${storageCapacity(0)}/${storageCapacity(2)}; 9.900 madera → ${nearCap.updatedResources.wood} (perdido ${nearCap.wastedByStorage.wood.toFixed(0)}); 12.000 sin mercado → ${aboveCap.updatedResources.wood}; con Mercado 2 → ${withMarket.updatedResources.wood}`,
     },
     {
