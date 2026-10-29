@@ -105,5 +105,15 @@ export function runTechnologyValidationTests(): TechnologyTestResult[] {
       })(),
       details: "Verifica desbloqueo con Cuartel 2 y bloqueo con Cuartel 1",
     },
+    {
+      test: "Duración de investigación es positiva (no 0)",
+      passed: (() => {
+        const technology = TECHNOLOGY_CATALOG.agri_1;
+        const passive = { researchDurationMultiplier: 1.0 };
+        const duration = Math.ceil(technology.durationSeconds * passive.researchDurationMultiplier);
+        return duration > 0;
+      })(),
+      details: "Verifica que la duración calculada es mayor que 0",
+    },
   ];
 }
