@@ -11,14 +11,16 @@ import {
   Coins, 
   TreePine, 
   Pickaxe, 
-  Anvil, 
-  Wheat, 
+  Anvil,
+  Wheat,
   X, 
   ArrowUpRight, 
   ShieldAlert, 
   Info,
   Check
 } from 'lucide-react';
+
+import { StatusMessages } from './shared';
 
 const getBuildingsAndQueueQuery = makeFunctionReference<"query">("kingdoms:getBuildingsAndQueue");
 const startConstructionMutation = makeFunctionReference<"mutation">("kingdoms:startConstruction");
@@ -120,29 +122,8 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
   return (
     <div className="space-y-6">
       {/* Mensajes de feedback */}
-      {actionError && (
-        <div className="bg-rose-950/50 border border-rose-900 rounded-lg p-3 text-xs text-rose-300 flex items-center justify-between gap-3 shadow-md">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
-            <span>{actionError}</span>
-          </div>
-          <button onClick={() => setActionError(null)} className="text-rose-400 hover:text-rose-200">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      <StatusMessages error={actionError} message={actionSuccessMessage} isConstruction={true} />
 
-      {actionSuccessMessage && (
-        <div className="bg-emerald-950/50 border border-emerald-900 rounded-lg p-3 text-xs text-emerald-300 flex items-center justify-between gap-3 shadow-md">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-            <span>{actionSuccessMessage}</span>
-          </div>
-          <button onClick={() => setActionSuccessMessage(null)} className="text-emerald-400 hover:text-emerald-200">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
 
       {/* ====================================================================
           1. LAS DOS PLAZAS DE CONSTRUCCIÓN SIMULTÁNEA (COLA PERSISTENTE)

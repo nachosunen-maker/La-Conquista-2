@@ -270,8 +270,8 @@ export const claimMissionReward = mutation({
     if (!details) throw new Error("Misión no encontrada.");
 
     if (details.reward.resources) {
-      const resources = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).first();
-      const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).collect();
+      const resources = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).first();
+      const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
       const market = Math.max(0, ...(buildings as any[]).filter((b) => b.buildingType === "mercado").map((b) => b.level ?? 0));
       const cap = storageCapacity(market);
       for (const [resource, amount] of Object.entries(details.reward.resources)) {
@@ -284,7 +284,7 @@ export const claimMissionReward = mutation({
     }
 
     await grantReward(ctx, args.kingdomId, details.reward, now);
-    await ctx.db.patch(doc._id, { rewardGranted: true, claimedAt: now });
+    await ctx.db.patch(doc._id, { rewardGranted: true });
 
     return { success: true };
   },

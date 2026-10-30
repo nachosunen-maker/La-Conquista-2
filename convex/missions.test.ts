@@ -76,7 +76,7 @@ describe("Misiones progresivas: detección y recompensa automáticas, una sola v
 
     const missions = await asUser.query(api.missions.getMissions, { kingdomId });
     const castle = missions.currentStage!.missions.find((m: any) => m.id === "s1_castillo2");
-    expect(castle?.completed).toBe(true);
+    expect(castle?.completedAt).not.toBeNull();
     const history = missions.history.map((h: any) => h.progressId);
     expect(history).toEqual(["s1_castillo2"]);
 
@@ -175,7 +175,7 @@ describe("Misiones diarias y secretas", () => {
     await a.asUser.mutation(api.kingdoms.claimDailyBonus, { kingdomId: a.kingdomId });
     const after = await a.asUser.query(api.missions.getMissions, { kingdomId: a.kingdomId });
     const bonusMission = after.daily.missions.find((m: any) => m.id === "d_bonus");
-    expect(bonusMission?.completed).toBe(true);
+    expect(bonusMission?.completedAt).not.toBeNull();
     const kingdomAfter = (await t.run(async (ctx) => await ctx.db.get(a.kingdomId))) as any;
     expect(kingdomAfter!.honor).toBe(honorBefore + DAILY_BONUS.HONOR + (MISSIONS.DAILY.CATALOG.find((m) => m.id === "d_bonus")!.reward.honor ?? 0));
 
@@ -184,7 +184,7 @@ describe("Misiones diarias y secretas", () => {
     const nextDay = await a.asUser.query(api.missions.getMissions, { kingdomId: a.kingdomId });
     expect(nextDay.daily.dayKey).not.toBe(dayKey);
     const nextBonus = nextDay.daily.missions.find((m: any) => m.id === "d_bonus");
-    if (nextBonus) expect(nextBonus.completed).toBe(false);
+    if (nextBonus) expect(nextBonus.completedAt).toBeNull();
     expect(nextDay.history.some((h: any) => h.progressId === `daily:d_bonus:${dayKey}`)).toBe(true);
   });
 

@@ -190,6 +190,7 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
               </div>
             ))}
           </div>
+          <StatusMessages error={action.error} message={action.message} />
         </PanelSection>
       ))}
       {!writable && <p className="text-[11px] text-[#8e816d]">{readOnlyNote}</p>}

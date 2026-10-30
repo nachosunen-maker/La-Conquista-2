@@ -158,20 +158,29 @@ export function PanelSection(props: { icon: React.ReactNode; title: string; asid
   );
 }
 
-export function StatusMessages(props: { error: string | null; message: string | null }) {
+export function StatusMessages(props: { error: string | null; message: string | null; isConstruction?: boolean }) {
+  if (!props.error && !props.message) return null;
+  const isInsufficient = props.error && (props.error.toLowerCase().includes('recursos insuficientes') || props.error.toLowerCase().includes('insuficientes'));
   return (
-    <>
+    <div className="space-y-1">
       {props.error && (
-        <p role="alert" className="text-xs text-rose-400 flex items-center gap-1.5">
-          <AlertCircle className="w-3.5 h-3.5" /> {props.error}
-        </p>
+        isInsufficient ? (
+          <div className="bg-rose-950/50 border border-rose-900 rounded-lg p-2.5 text-xs text-rose-300 space-y-0.5 shadow-md">
+            <p className="font-bold uppercase tracking-wide">NO HAY RECURSOS SUFICIENTES</p>
+            <p>{props.isConstruction ? 'No dispones de los recursos necesarios para realizar esta construcción.' : 'No dispones de los recursos necesarios para realizar esta acción.'}</p>
+          </div>
+        ) : (
+          <p role="alert" className="text-xs text-rose-400 flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5" /> {props.error}
+          </p>
+        )
       )}
       {props.message && (
         <p role="status" className="text-xs text-emerald-400 flex items-center gap-1.5">
           <CheckCircle2 className="w-3.5 h-3.5" /> {props.message}
         </p>
       )}
-    </>
+    </div>
   );
 }
 

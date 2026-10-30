@@ -342,6 +342,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
             <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">Sin unidades registradas.</p>
           )}
         </div>
+        <StatusMessages error={action.error} message={action.message} />
       </PanelSection>
 
       <PanelSection
@@ -510,6 +511,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
             <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">{readOnlyNote}</p>
           )}
         </div>
+        <StatusMessages error={action.error} message={action.message} />
       </PanelSection>
 
       <PanelSection icon={<Flag className="w-4 h-4 text-sky-300" />} title="Formación de combate (P37)">
@@ -571,6 +573,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
             </button>
           )}
         </div>
+        <StatusMessages error={action.error} message={action.message} />
       </PanelSection>
 
       <PanelSection icon={<Shield className="w-4 h-4 text-emerald-400" />} title="Equipamiento y estrategia (P30, P31, P35)">
@@ -624,6 +627,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
         <p className="text-[10px] text-[#615545] flex items-center gap-1.5">
           <Clock className="w-3 h-3" /> Hora del servidor: {new Date(serverNow).toLocaleTimeString('es-ES')}
         </p>
+        <StatusMessages error={action.error} message={action.message} />
       </PanelSection>
     </div>
   );
