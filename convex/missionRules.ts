@@ -234,3 +234,56 @@ export function activeProductionBonusMultiplier(bonuses: ReadonlyArray<{ multipl
   }
   return multiplier;
 }
+
+export function findMissionDetails(progressId: string, dayKey: string, civilization?: string | null): { title: string; description: string; reward: MissionReward; kind: string; stage?: number } | null {
+  if (progressId.startsWith("stage:")) {
+    const stageNum = parseInt(progressId.replace("stage:", ""), 10);
+    const stage = MISSIONS.STAGES.find((s) => s.stage === stageNum);
+    if (!stage) return null;
+    return {
+      title: `Etapa ${stage.stage} completada: ${stage.title}`,
+      description: "Premio final de la etapa.",
+      reward: stage.reward,
+      kind: "stageReward",
+      stage: stage.stage,
+    };
+  }
+  if (progressId.startsWith("daily:")) {
+    const parts = progressId.split(":");
+    const missionId = parts[1];
+    const mission = selectDailyMissions(dayKey).find((m) => m.id === missionId);
+    if (!mission) return null;
+    return {
+      title: mission.title,
+      description: mission.description,
+      reward: mission.reward,
+      kind: "daily",
+    };
+  }
+  for (const stage of MISSIONS.STAGES) {
+    for (const mission of stage.missions) {
+      if (mission.id === progressId) {
+        return {
+          title: mission.title,
+          description: mission.description,
+          reward: mission.reward,
+          kind: "stage",
+          stage: stage.stage,
+        };
+      }
+    }
+  }
+  for (const mission of allSecretMissions()) {
+    if (mission.id === progressId) {
+      if (mission.civilization && mission.civilization !== civilization) continue;
+      return {
+        title: mission.title,
+        description: mission.description,
+        reward: mission.reward,
+        kind: "secret",
+      };
+    }
+  }
+  return null;
+}
+

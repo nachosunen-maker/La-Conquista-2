@@ -13,6 +13,8 @@ const getMissionsQuery = makeFunctionReference<'query'>('missions:getMissions');
 const getCelebrationsQuery = makeFunctionReference<'query'>('missions:getMissionCelebrations');
 const markSeenMutation = makeFunctionReference<'mutation'>('missions:markMissionsSeen');
 const refreshMissionsMutation = makeFunctionReference<'mutation'>('missions:refreshMissions');
+const finishMissionMutation = makeFunctionReference<'mutation'>('missions:finishMission');
+const claimRewardMutation = makeFunctionReference<'mutation'>('missions:claimMissionReward');
 
 interface MissionView {
   id: string;
@@ -20,7 +22,7 @@ interface MissionView {
   title: string;
   description: string;
   rewardSummary: string;
-  completed: boolean;
+  status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed';
   completedAt: number | null;
   progress: { current: number; target: number };
 }
@@ -31,7 +33,7 @@ interface MissionsState {
   currentStage: { stage: number; title: string; total: number; rewardSummary: string; missions: MissionView[] } | null;
   completedStages: Array<{ stage: number; title: string; rewardSummary: string }>;
   daily: { dayKey: string; resetsAt: number; missions: MissionView[] };
-  secrets: { discovered: Array<{ id: string; title: string; description: string; rewardSummary: string; completedAt: number | null }>; remaining: number };
+  secrets: { discovered: Array<{ id: string; progressId: string; title: string; description: string; rewardSummary: string; status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed'; completedAt: number | null }>; remaining: number };
   history: Array<{ progressId: string; title: string; kind: string; rewardSummary: string; completedAt: number }>;
 }
 
@@ -84,26 +86,150 @@ export class MissionsErrorBoundary extends React.Component<MissionsErrorBoundary
   }
 }
 
-function MissionRow({ mission }: { mission: MissionView }) {
+function MissionRow({ mission, kingdomId }: { mission: MissionView; kingdomId: string }) {
+  const finish = useMutation(finishMissionMutation);
+  const claim = useMutation(claimRewardMutation);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const pct = mission.progress.target > 0 ? Math.min(100, Math.round((mission.progress.current / mission.progress.target) * 100)) : 0;
+
+  const handleFinish = async () => {
+    try {
+      setErrorMsg(null);
+      await finish({ kingdomId, progressId: mission.progressId });
+    } catch (e: any) {
+      setErrorMsg(e.message ?? 'Error al finalizar misión');
+    }
+  };
+
+  const handleClaim = async () => {
+    try {
+      setErrorMsg(null);
+      await claim({ kingdomId, progressId: mission.progressId });
+    } catch (e: any) {
+      if (e.message?.includes('NO HAY SITIO EN EL MERCADO')) {
+        setErrorMsg('NO HAY SITIO EN EL MERCADO: No tienes espacio suficiente en el almacén para recibir esta recompensa. Libera espacio e inténtalo de nuevo.');
+      } else {
+        setErrorMsg(e.message ?? 'Error al cobrar recompensa');
+      }
+    }
+  };
+
+  const isClaimed = mission.status === 'claimed';
+  const isPendingClaim = mission.status === 'pending_claim';
+  const isReadyToFinish = mission.status === 'ready_to_finish';
+
   return (
-    <div className={`${cardClass} text-[11px] space-y-1 ${mission.completed ? 'opacity-80' : ''}`}>
+    <div className={`${cardClass} text-[11px] space-y-2 ${isClaimed ? 'opacity-80' : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2">
-          {mission.completed ? <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" /> : <Circle className="w-4 h-4 text-[#6e6352] flex-shrink-0 mt-0.5" />}
+          {isClaimed ? <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" /> : <Circle className="w-4 h-4 text-[#6e6352] flex-shrink-0 mt-0.5" />}
           <div>
-            <span className={`font-semibold block ${mission.completed ? 'text-emerald-200 line-through decoration-emerald-700' : 'text-[#f0e8d4]'}`}>{mission.title}</span>
+            <span className={`font-semibold block ${isClaimed ? 'text-emerald-200 line-through decoration-emerald-700' : 'text-[#f0e8d4]'}`}>{mission.title}</span>
             <span className="text-[#c7beac]">{mission.description}</span>
           </div>
         </div>
-        <span className="font-mono text-[#e6ded0] whitespace-nowrap">{mission.completed ? 'hecha' : `${mission.progress.current.toLocaleString('es-ES')}/${mission.progress.target.toLocaleString('es-ES')}`}</span>
+        <div className="flex flex-col items-end gap-1">
+          {isClaimed && <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded font-medium border border-emerald-800">COBRADA</span>}
+          {isPendingClaim && (
+            <button
+              onClick={handleClaim}
+              className="bg-[#d4af37] hover:bg-[#c29f2e] text-[#110e0a] font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors"
+            >
+              Cobrar recompensa
+            </button>
+          )}
+          {isReadyToFinish && (
+            <button
+              onClick={handleFinish}
+              className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors"
+            >
+              Finalizar misión
+            </button>
+          )}
+          {!isClaimed && !isPendingClaim && !isReadyToFinish && (
+            <span className="font-mono text-[#e6ded0] whitespace-nowrap">{`${mission.progress.current.toLocaleString('es-ES')}/${mission.progress.target.toLocaleString('es-ES')}`}</span>
+          )}
+        </div>
       </div>
-      {!mission.completed && (
+
+      {!isClaimed && !isPendingClaim && !isReadyToFinish && (
         <div className="h-1.5 rounded bg-[#100e0b] overflow-hidden">
           <div className="h-full bg-[#d4af37]/70" style={{ width: `${pct}%` }} />
         </div>
       )}
+
       <p className="text-[#8e816d]">Premio: {mission.rewardSummary}</p>
+
+      {errorMsg && (
+        <div className="bg-[#2a1212] border border-[#7f1d1d] text-red-200 p-2 rounded text-[10px] space-y-1">
+          <p className="font-bold uppercase tracking-wide">NO HAY SITIO EN EL MERCADO</p>
+          <p>No tienes espacio suficiente en el almacén para recibir esta recompensa. Libera espacio e inténtalo de nuevo.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SecretMissionRow({ mission, kingdomId }: { mission: MissionsState['secrets']['discovered'][number]; kingdomId: string }) {
+  const finish = useMutation(finishMissionMutation);
+  const claim = useMutation(claimRewardMutation);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleFinish = async () => {
+    try {
+      setErrorMsg(null);
+      await finish({ kingdomId, progressId: mission.progressId });
+    } catch (e: any) {
+      setErrorMsg(e.message ?? 'Error al finalizar misión secreta');
+    }
+  };
+
+  const handleClaim = async () => {
+    try {
+      setErrorMsg(null);
+      await claim({ kingdomId, progressId: mission.progressId });
+    } catch (e: any) {
+      if (e.message?.includes('NO HAY SITIO EN EL MERCADO')) {
+        setErrorMsg('NO HAY SITIO EN EL MERCADO: No tienes espacio suficiente en el almacén para recibir esta recompensa. Libera espacio e inténtalo de nuevo.');
+      } else {
+        setErrorMsg(e.message ?? 'Error al cobrar recompensa');
+      }
+    }
+  };
+
+  const isClaimed = mission.status === 'claimed';
+  const isPendingClaim = mission.status === 'pending_claim';
+  const isReadyToFinish = mission.status === 'ready_to_finish';
+
+  return (
+    <div className={`${cardClass} text-[11px] space-y-1`}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <span className="font-semibold text-[#f0e8d4] block">{mission.title}</span>
+          <span className="text-[#c7beac]">{mission.description}</span>
+        </div>
+        <div>
+          {isClaimed && <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded font-medium border border-emerald-800">COBRADA</span>}
+          {isPendingClaim && (
+            <button onClick={handleClaim} className="bg-[#d4af37] text-[#110e0a] font-bold px-2.5 py-1 rounded text-[10px] uppercase">
+              Cobrar recompensa
+            </button>
+          )}
+          {isReadyToFinish && (
+            <button onClick={handleFinish} className="bg-[#2563eb] text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase">
+              Finalizar misión
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="text-[#8e816d]">Premio: {mission.rewardSummary}</p>
+      {errorMsg && (
+        <div className="bg-[#2a1212] border border-[#7f1d1d] text-red-200 p-2 rounded text-[10px] space-y-1">
+          <p className="font-bold uppercase tracking-wide">NO HAY SITIO EN EL MERCADO</p>
+          <p>No tienes espacio suficiente en el almacén para recibir esta recompensa. Libera espacio e inténtalo de nuevo.</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -117,7 +243,6 @@ function MissionsPanelInner(props: { kingdomId: string; isOwner: boolean }) {
   });
   const refresh = useMutation(refreshMissionsMutation);
 
-  // Al abrir el panel, el propietario pide una reevaluación si el módulo está disponible en el servidor.
   useEffect(() => {
     if (isOwner && result.status === 'success') {
       refresh({ kingdomId }).catch(() => undefined);
@@ -142,9 +267,6 @@ function MissionsPanelInner(props: { kingdomId: string; isOwner: boolean }) {
           <p className="text-[11px] leading-relaxed">
             El sistema de misiones por etapas, diarias y secretas está implementado en la lógica del juego. El backend remoto conectado aún no dispone del módulo desplegado en Convex.
           </p>
-          <p className="text-[10px] text-[#8e816d]">
-            Las misiones se activarán de inmediato en cuanto se despliegue el módulo en el servidor con autorización expresa.
-          </p>
         </div>
       </PanelSection>
     );
@@ -164,7 +286,7 @@ function MissionsPanelInner(props: { kingdomId: string; isOwner: boolean }) {
       aside={<span>{state.currentStage ? `Etapa ${state.currentStage.stage} de ${state.currentStage.total}` : 'Todas las etapas completadas'} · {state.secrets.discovered.length} secretas descubiertas</span>}
     >
       <p className="text-[11px] text-[#c7beac]">
-        El servidor detecta los objetivos cumplidos y entrega el premio automáticamente, sin botón de reclamar. Las etapas se revelan una a una; las diarias son iguales para todos y se renuevan cada día.
+        Cuando los objetivos se cumplan, pulsa «FINALIZAR MISIÓN» y posteriormente «COBRAR RECOMPENSA» para ingresar los premios en tu almacén. Las diarias se renuevan cada día.
       </p>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
         <div className="space-y-2">
@@ -173,7 +295,7 @@ function MissionsPanelInner(props: { kingdomId: string; isOwner: boolean }) {
           </h3>
           {state.currentStage ? (
             <>
-              {state.currentStage.missions.map((m) => <MissionRow key={m.progressId} mission={m} />)}
+              {state.currentStage.missions.map((m) => <MissionRow key={m.progressId} mission={m} kingdomId={kingdomId} />)}
               <p className="text-[11px] text-[#8e816d]">Premio final de la etapa: {state.currentStage.rewardSummary}</p>
             </>
           ) : (
@@ -187,20 +309,14 @@ function MissionsPanelInner(props: { kingdomId: string; isOwner: boolean }) {
           <h3 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5" /> Misiones de hoy · se renuevan en {resetHours} h {resetMinutes} min
           </h3>
-          {state.daily.missions.map((m) => <MissionRow key={m.progressId} mission={m} />)}
+          {state.daily.missions.map((m) => <MissionRow key={m.progressId} mission={m} kingdomId={kingdomId} />)}
           <h3 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider flex items-center gap-1.5 pt-2">
             <EyeOff className="w-3.5 h-3.5" /> Misiones secretas
           </h3>
           {state.secrets.discovered.length === 0 ? (
             <p className="text-[11px] text-[#8e816d] italic">Ninguna descubierta todavía. Sus condiciones se revelan al cumplirse.</p>
           ) : (
-            state.secrets.discovered.map((m) => (
-              <div key={m.id} className={`${cardClass} text-[11px]`}>
-                <span className="font-semibold text-[#f0e8d4] block">{m.title}</span>
-                <span className="text-[#c7beac]">{m.description}</span>
-                <p className="text-[#8e816d]">Premio: {m.rewardSummary}</p>
-              </div>
-            ))
+            state.secrets.discovered.map((m) => <SecretMissionRow key={m.id} mission={m} kingdomId={kingdomId} />)
           )}
           <p className="text-[11px] text-[#8e816d]">{state.secrets.remaining} misiones secretas por descubrir.</p>
         </div>

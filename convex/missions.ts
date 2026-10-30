@@ -22,6 +22,8 @@ import {
   describeReward,
   emptyCounters,
   evaluateMissions,
+  findMissionDetails,
+  isConditionMet,
   nextDailyResetAt,
   normalizeCounters,
   selectDailyMissions,
@@ -139,16 +141,13 @@ async function grantReward(ctx: MutationCtx, kingdomId: Id<"kingdoms">, reward: 
     const host = (units as any[]).find((u) => u.unitType === reward.troops!.unitType && (u.level ?? 1) === reward.troops!.level && !u.isMercenary);
     if (host) await ctx.db.patch(host._id, { count: Math.max(0, host.count ?? 0) + reward.troops.count });
     else await ctx.db.insert("armyUnits", { kingdomId, unitType: reward.troops.unitType, level: reward.troops.level, count: reward.troops.count });
-    // Las tropas regaladas entran en el censo como efectivos militares (no retiran civiles).
     const population = await ctx.db.query("population").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).first();
     if (population) await ctx.db.patch(population._id, { total: (population as any).total + reward.troops.count });
   }
 }
 
 /**
- * Evalúa y concede las misiones cumplidas de un reino. Idempotente: cada identificador de
- * progreso se inserta una sola vez; si otra transacción lo insertó antes, Convex reintenta y la
- * segunda pasada ya lo ve completado.
+ * Evalúa y concede las misiones cumplidas de un reino (modo retrocompatible / automático si se requiere).
  */
 export async function evaluateKingdomMissions(ctx: MutationCtx, kingdomId: Id<"kingdoms">, now: number = Date.now()): Promise<string[]> {
   const built = await buildSnapshot(ctx, kingdomId, now);
@@ -158,19 +157,21 @@ export async function evaluateKingdomMissions(ctx: MutationCtx, kingdomId: Id<"k
   const completions = evaluateMissions(built.snapshot, completedIds, built.dayKey);
   const granted: string[] = [];
   for (const completion of completions) {
-    await ctx.db.insert("missionProgress", {
-      kingdomId,
-      progressId: completion.progressId,
-      missionId: completion.mission.id,
-      kind: completion.kind,
-      stage: completion.stage,
-      title: completion.mission.title,
-      rewardSummary: describeReward(completion.reward),
-      completedAt: now,
-      rewardGranted: true,
-    });
-    await grantReward(ctx, kingdomId, completion.reward, now);
-    granted.push(completion.progressId);
+    const existing = progress.find((p) => p.progressId === completion.progressId);
+    if (!existing) {
+      await ctx.db.insert("missionProgress", {
+        kingdomId,
+        progressId: completion.progressId,
+        missionId: completion.mission.id,
+        kind: completion.kind,
+        stage: completion.stage,
+        title: completion.mission.title,
+        rewardSummary: describeReward(completion.reward),
+        completedAt: now,
+        rewardGranted: false, // Ahora pasa a pendiente de cobro en lugar de automático
+      });
+      granted.push(completion.progressId);
+    }
   }
   return granted;
 }
@@ -185,7 +186,111 @@ async function assertReadable(ctx: Ctx, kingdomId: Id<"kingdoms">) {
   return { kingdom, owner };
 }
 
-/** Panel de misiones: etapa en curso (las futuras no se muestran), diarias del día, secretas descubiertas e historial. */
+/** Botón FINALIZAR MISIÓN: verifica condiciones en el servidor y pasa la misión a COMPLETADA — PENDIENTE DE COBRO. */
+export const finishMission = mutation({
+  args: { kingdomId: v.id("kingdoms"), progressId: v.string() },
+  handler: async (ctx, args) => {
+    const { owner } = await assertReadable(ctx, args.kingdomId);
+    if (!owner) throw new Error("No autorizado.");
+    const now = Date.now();
+    const built = await buildSnapshot(ctx, args.kingdomId, now);
+    if (!built) throw new Error("Reino no encontrado.");
+
+    const existing = await ctx.db
+      .query("missionProgress")
+      .withIndex("by_kingdom_and_progress", (q) => q.eq("kingdomId", args.kingdomId).eq("progressId", args.progressId))
+      .first();
+    if (existing) throw new Error("La misión ya ha sido finalizada.");
+
+    const details = findMissionDetails(args.progressId, built.dayKey, built.snapshot.civilization);
+    if (!details) throw new Error("Misión no encontrada.");
+
+    let met = false;
+    if (args.progressId.startsWith("stage:")) {
+      const stageNum = details.stage!;
+      const stage = MISSIONS.STAGES.find((s) => s.stage === stageNum);
+      const progress = await readProgress(ctx, args.kingdomId);
+      const completedIds = new Set(progress.map((doc) => doc.progressId));
+      met = stage ? stage.missions.every((m) => completedIds.has(m.id)) : false;
+    } else if (args.progressId.startsWith("daily:")) {
+      const parts = args.progressId.split(":");
+      const missionId = parts[1];
+      const mission = selectDailyMissions(built.dayKey).find((m) => m.id === missionId);
+      met = mission ? isConditionMet(mission.condition, built.snapshot) : false;
+    } else {
+      let cond = null;
+      for (const stage of MISSIONS.STAGES) {
+        for (const m of stage.missions) {
+          if (m.id === args.progressId) cond = m.condition;
+        }
+      }
+      for (const m of allSecretMissions()) {
+        if (m.id === args.progressId) cond = m.condition;
+      }
+      met = cond ? isConditionMet(cond, built.snapshot) : false;
+    }
+
+    if (!met) throw new Error("Los objetivos de la misión aún no se han cumplido.");
+
+    await ctx.db.insert("missionProgress", {
+      kingdomId: args.kingdomId,
+      progressId: args.progressId,
+      missionId: args.progressId,
+      kind: details.kind,
+      stage: details.stage,
+      title: details.title,
+      rewardSummary: describeReward(details.reward),
+      completedAt: now,
+      rewardGranted: false, // Pendiente de cobro
+    });
+
+    return { success: true };
+  },
+});
+
+/** Botón COBRAR RECOMPENSA: valida almacén atómicamente, entrega recompensa completa o rechaza con "NO HAY SITIO EN EL MERCADO". */
+export const claimMissionReward = mutation({
+  args: { kingdomId: v.id("kingdoms"), progressId: v.string() },
+  handler: async (ctx, args) => {
+    const { owner } = await assertReadable(ctx, args.kingdomId);
+    if (!owner) throw new Error("No autorizado.");
+    const now = Date.now();
+    const doc = await ctx.db
+      .query("missionProgress")
+      .withIndex("by_kingdom_and_progress", (q) => q.eq("kingdomId", args.kingdomId).eq("progressId", args.progressId))
+      .first();
+
+    if (!doc) throw new Error("La misión no ha sido finalizada todavía.");
+    if (doc.rewardGranted) throw new Error("La recompensa ya ha sido cobrada.");
+
+    const built = await buildSnapshot(ctx, args.kingdomId, now);
+    if (!built) throw new Error("Reino no encontrado.");
+
+    const details = findMissionDetails(args.progressId, built.dayKey, built.snapshot.civilization);
+    if (!details) throw new Error("Misión no encontrada.");
+
+    if (details.reward.resources) {
+      const resources = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).first();
+      const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).collect();
+      const market = Math.max(0, ...(buildings as any[]).filter((b) => b.buildingType === "mercado").map((b) => b.level ?? 0));
+      const cap = storageCapacity(market);
+      for (const [resource, amount] of Object.entries(details.reward.resources)) {
+        if (!amount) continue;
+        const current = typeof (resources as any)?.[resource] === "number" ? (resources as any)[resource] : 0;
+        if (current + amount > cap) {
+          throw new Error("NO HAY SITIO EN EL MERCADO");
+        }
+      }
+    }
+
+    await grantReward(ctx, args.kingdomId, details.reward, now);
+    await ctx.db.patch(doc._id, { rewardGranted: true, claimedAt: now });
+
+    return { success: true };
+  },
+});
+
+/** Panel de misiones: estado detallado de cada misión (in_progress, ready_to_finish, pending_claim, claimed). */
 export const getMissions = query({
   args: { kingdomId: v.id("kingdoms") },
   handler: async (ctx, args) => {
@@ -194,21 +299,35 @@ export const getMissions = query({
     const built = await buildSnapshot(ctx, args.kingdomId, now);
     if (!built) throw new Error("Reino no encontrado.");
     const progress = await readProgress(ctx, args.kingdomId);
-    const completedIds = new Set(progress.map((doc) => doc.progressId));
+    const progressMap = new Map(progress.map((doc) => [doc.progressId, doc]));
+    const completedIds = new Set(progress.filter((doc) => doc.rewardGranted).map((doc) => doc.progressId));
+    const finishedIds = new Set(progress.map((doc) => doc.progressId));
     const completedAt = new Map(progress.map((doc) => [doc.progressId, doc.completedAt]));
-    const stage = currentStage(completedIds);
-    const completedStages = MISSIONS.STAGES.filter((s) => completedIds.has(stageProgressId(s.stage))).map((s) => ({ stage: s.stage, title: s.title, rewardSummary: describeReward(s.reward) }));
+    const stage = currentStage(finishedIds);
+    const completedStages = MISSIONS.STAGES.filter((s) => finishedIds.has(stageProgressId(s.stage))).map((s) => ({ stage: s.stage, title: s.title, rewardSummary: describeReward(s.reward) }));
     const secrets = allSecretMissions().filter((m) => !m.civilization || m.civilization === built.snapshot.civilization);
-    const describe = (mission: (typeof MISSIONS.STAGES)[number]["missions"][number], progressId: string) => ({
-      id: mission.id,
-      progressId,
-      title: mission.title,
-      description: mission.description,
-      rewardSummary: describeReward(mission.reward),
-      completed: completedIds.has(progressId),
-      completedAt: completedAt.get(progressId) ?? null,
-      progress: conditionProgress(mission.condition, built.snapshot),
-    });
+
+    const describe = (mission: (typeof MISSIONS.STAGES)[number]["missions"][number], progressId: string) => {
+      const doc = progressMap.get(progressId);
+      const canFinish = isConditionMet(mission.condition, built.snapshot);
+      let status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed' = 'in_progress';
+      if (doc) {
+        status = doc.rewardGranted ? 'claimed' : 'pending_claim';
+      } else if (canFinish) {
+        status = 'ready_to_finish';
+      }
+      return {
+        id: mission.id,
+        progressId,
+        title: mission.title,
+        description: mission.description,
+        rewardSummary: describeReward(mission.reward),
+        status,
+        completedAt: doc?.completedAt ?? null,
+        progress: conditionProgress(mission.condition, built.snapshot),
+      };
+    };
+
     return {
       serverTimeMs: now,
       writable: owner,
@@ -222,10 +341,21 @@ export const getMissions = query({
         missions: selectDailyMissions(built.dayKey).map((m) => describe(m, dailyMissionProgressId(m.id, built.dayKey))),
       },
       secrets: {
-        discovered: secrets.filter((m) => completedIds.has(m.id)).map((m) => ({ id: m.id, title: m.title, description: m.description, rewardSummary: describeReward(m.reward), completedAt: completedAt.get(m.id) ?? null })),
-        remaining: secrets.filter((m) => !completedIds.has(m.id)).length,
+        discovered: secrets.filter((m) => finishedIds.has(m.id)).map((m) => {
+          const doc = progressMap.get(m.id);
+          const rewardGranted = doc?.rewardGranted ?? false;
+          let status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed' = 'in_progress';
+          if (doc) {
+            status = rewardGranted ? 'claimed' : 'pending_claim';
+          } else if (isConditionMet(m.condition, built.snapshot)) {
+            status = 'ready_to_finish';
+          }
+          return { id: m.id, progressId: m.id, title: m.title, description: m.description, rewardSummary: describeReward(m.reward), status, completedAt: doc?.completedAt ?? null };
+        }),
+        remaining: secrets.filter((m) => !finishedIds.has(m.id)).length,
       },
       history: progress
+        .filter((doc) => doc.rewardGranted)
         .slice()
         .sort((a, b) => b.completedAt - a.completedAt)
         .slice(0, 20)
@@ -234,7 +364,7 @@ export const getMissions = query({
   },
 });
 
-/** Celebraciones pendientes de mostrar (misiones completadas que el jugador aún no ha visto). */
+/** Celebraciones pendientes de mostrar (misiones cobradas que el jugador aún no ha visto). */
 export const getMissionCelebrations = query({
   args: { kingdomId: v.id("kingdoms") },
   handler: async (ctx, args) => {
@@ -242,7 +372,7 @@ export const getMissionCelebrations = query({
     if (!owner) return [];
     const progress = await readProgress(ctx, args.kingdomId);
     return progress
-      .filter((doc) => !doc.seenAt)
+      .filter((doc) => doc.rewardGranted && !doc.seenAt)
       .sort((a, b) => a.completedAt - b.completedAt)
       .slice(0, 5)
       .map((doc) => ({ id: doc._id, progressId: doc.progressId, title: doc.title, kind: doc.kind, stage: doc.stage ?? null, rewardSummary: doc.rewardSummary, completedAt: doc.completedAt }));
@@ -273,3 +403,4 @@ export const refreshMissions = mutation({
     return { success: true, granted };
   },
 });
+
