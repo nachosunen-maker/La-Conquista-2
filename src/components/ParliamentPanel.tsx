@@ -184,12 +184,14 @@ export function ParliamentPanel(props: {
   const handleCreate = (rivalKingdomId: string, rivalName: string) =>
     action.run(`challenge-${rivalKingdomId}`, async () => {
       const result = await createChallenge({ challengerKingdomId: kingdomId, targetKingdomId: rivalKingdomId, challengeType: 'batalla' });
+      if (result && result.success === false) return result;
       return `Desafío enviado a ${rivalName}; caduca ${formatDateTime(result.expiresAt)}${typeof result.distance === 'number' ? ` · distancia ${result.distance} hexágonos` : ''}.`;
     });
 
   const handleAccept = (challengeId: string) =>
     action.run(`accept-${challengeId}`, async () => {
       const result = await acceptChallenge({ kingdomId, challengeId, window: windowChoice[challengeId] ?? 'proxima' });
+      if (result && result.success === false) return result;
       return `Batalla programada para ${formatDateTime(result.scheduledAt)}; los contingentes se congelan ${formatDateTime(result.freezeAt)}.`;
     });
 
@@ -197,6 +199,7 @@ export function ParliamentPanel(props: {
     if (!window.confirm(`¿Rechazar el desafío de ${rivalName}? Se aplica una penalización del 2 % de cada recurso (mínimo 10, máximo 500).`)) return;
     action.run(`reject-${challengeId}`, async () => {
       const result = await rejectChallenge({ kingdomId, challengeId });
+      if (result && result.success === false) return result;
       return `Desafío rechazado. Penalización aplicada: ${formatCosts(result.penalty)}.`;
     });
   };
@@ -204,24 +207,28 @@ export function ParliamentPanel(props: {
   const handleMessage = (challengeId: string) =>
     action.run(`message-${challengeId}`, async () => {
       const result = await sendMessage({ kingdomId, challengeId, messageId: messageChoice[challengeId] ?? parliament.predefinedMessages[0].id });
+      if (result && result.success === false) return result;
       return `Mensaje enviado: "${result.text}".`;
     });
 
   const handleSpy = (targetKingdomId: string, name: string) =>
     action.run(`spy-${targetKingdomId}`, async () => {
       const result = await requestReport({ kingdomId, targetKingdomId });
+      if (result && result.success === false) return result;
       return `Informe de ${name} (nivel ${result.level}) por ${result.cost} oro: ejército estimado ${result.estimate.min}-${result.estimate.max}.`;
     });
 
   const handleBonus = () =>
     action.run('bonus', async () => {
       const result = await claimDailyBonus({ kingdomId });
+      if (result && result.success === false) return result;
       return `Bonus diario reclamado: +${result.awarded} honor (total ${result.honor}).`;
     });
 
   const handleTax = () =>
     action.run('tax', async () => {
       const result = await setTaxRate({ kingdomId, taxRate: currentTax / 100 });
+      if (result && result.success === false) return result;
       setTaxInput(null);
       return `Tasa impositiva fijada en ${Math.round(result.taxRate * 100)} %.`;
     });

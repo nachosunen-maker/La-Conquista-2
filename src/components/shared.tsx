@@ -158,16 +158,53 @@ export function PanelSection(props: { icon: React.ReactNode; title: string; asid
   );
 }
 
+export function normalizeErrorMessage(err: any): string {
+  if (!err) return "Ha ocurrido un error inesperado.";
+  if (typeof err === 'string') return err;
+  
+  // Si es un objeto de error de Convex o similar
+  const message = err.message || err.data?.message || err.error?.message || err.error;
+  if (typeof message === 'string') return message;
+  
+  // Si es un objeto JSON, intentamos convertirlo
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
+export function isInsufficientError(msg: string): boolean {
+  return msg.toLowerCase().includes('recursos') || msg.toLowerCase().includes('insuficientes');
+}
+
+export function isMarketFullError(msg: string): boolean {
+  return msg.includes('NO HAY SITIO EN EL MERCADO');
+}
+
+export function getNormalizedResourceMessage(isConstruction: boolean): string {
+  return isConstruction 
+    ? 'No dispones de los recursos necesarios para realizar esta construcción.' 
+    : 'No dispones de los recursos necesarios para realizar esta acción.';
+}
+
 export function StatusMessages(props: { error: string | null; message: string | null; isConstruction?: boolean }) {
   if (!props.error && !props.message) return null;
-  const isInsufficient = props.error && (props.error.toLowerCase().includes('recursos insuficientes') || props.error.toLowerCase().includes('insuficientes'));
+  const isInsufficient = props.error && isInsufficientError(props.error);
+  const isMarketFull = props.error && isMarketFullError(props.error);
+  
   return (
     <div className="space-y-1">
       {props.error && (
         isInsufficient ? (
           <div className="bg-rose-950/50 border border-rose-900 rounded-lg p-2.5 text-xs text-rose-300 space-y-0.5 shadow-md">
             <p className="font-bold uppercase tracking-wide">NO HAY RECURSOS SUFICIENTES</p>
-            <p>{props.isConstruction ? 'No dispones de los recursos necesarios para realizar esta construcción.' : 'No dispones de los recursos necesarios para realizar esta acción.'}</p>
+            <p>{getNormalizedResourceMessage(!!props.isConstruction)}</p>
+          </div>
+        ) : isMarketFull ? (
+          <div className="bg-rose-950/50 border border-rose-900 rounded-lg p-2.5 text-xs text-rose-300 space-y-0.5 shadow-md">
+            <p className="font-bold uppercase tracking-wide">NO HAY SITIO EN EL MERCADO</p>
+            <p>No tienes espacio suficiente en el almacén para recibir esta recompensa. Libera espacio e inténtalo de nuevo.</p>
           </div>
         ) : (
           <p role="alert" className="text-xs text-rose-400 flex items-center gap-1.5">
@@ -184,6 +221,9 @@ export function StatusMessages(props: { error: string | null; message: string | 
   );
 }
 
+// ... (keep the rest of the file)
+
+
 export const primaryButton =
   'rounded border border-[#6e5520] px-2.5 py-1 text-[11px] text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50 transition-colors';
 export const dangerButton =
@@ -196,22 +236,44 @@ export const cardClass = 'bg-[#18140f] p-3 rounded-lg border border-[#2c2419]';
 export const readOnlyNote = 'Consulta de solo lectura: el Reino de Iberia no admite acciones.';
 
 /** Ejecuta una mutación mostrando estado de carga, error y mensaje. */
-export function useActionState() {
+export function useActionState(isConstruction: boolean = false) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const run = async (key: string, action: () => Promise<string | void>) => {
+
+  const run = async (key: string, action: () => Promise<string | { success: boolean, error?: string } | void>) => {
     setBusy(key);
     setError(null);
     setMessage(null);
     try {
       const result = await action();
-      if (typeof result === 'string') setMessage(result);
+      
+      if (typeof result === 'string') {
+        setMessage(result);
+      } else if (result && typeof result === 'object') {
+        // Soporte para el contrato { success: boolean, error?: string }
+        if ('success' in result) {
+          if (result.success === false) {
+            const rawMsg = result.error || "Ha ocurrido un error inesperado.";
+            const finalMsg = isInsufficientError(rawMsg) 
+              ? getNormalizedResourceMessage(isConstruction) 
+              : rawMsg;
+            setError(finalMsg);
+          } else if (typeof result === 'object' && result !== null) {
+            // Si es éxito pero no devolvió string, al menos no es error
+          }
+        }
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const rawMsg = normalizeErrorMessage(err);
+      const finalMsg = isInsufficientError(rawMsg) 
+        ? getNormalizedResourceMessage(isConstruction) 
+        : rawMsg;
+      setError(finalMsg);
     } finally {
       setBusy(null);
     }
   };
+
   return { busy, error, message, run, setError, setMessage };
 }

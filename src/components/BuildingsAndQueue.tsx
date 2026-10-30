@@ -20,7 +20,7 @@ import {
   Check
 } from 'lucide-react';
 
-import { StatusMessages } from './shared';
+import { StatusMessages, isInsufficientError, getNormalizedResourceMessage, normalizeErrorMessage, useActionState } from './shared';
 
 const getBuildingsAndQueueQuery = makeFunctionReference<"query">("kingdoms:getBuildingsAndQueue");
 const startConstructionMutation = makeFunctionReference<"mutation">("kingdoms:startConstruction");
@@ -39,9 +39,7 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
   const cancelConstruction = useMutation(cancelConstructionMutation);
   const completeConstruction = useMutation(completeConstructionMutation);
 
-  const [busyActionId, setBusyActionId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+  const action = useActionState(true);
 
   // Reloj local para actualizar progreso de obra en tiempo real
   const [now, setNow] = useState<number>(Date.now());
@@ -52,62 +50,37 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
 
   const handleStartUpgrade = async (buildingType: string, buildingName: string) => {
     if (!isOwner) {
-      setActionError("Modo Demostración / Consulta: No tienes permisos para iniciar construcciones en este reino.");
+      action.setError("Modo Demostración / Consulta: No tienes permisos para iniciar construcciones en este reino.");
       return;
     }
-    setBusyActionId(buildingType);
-    setActionError(null);
-    setActionSuccessMessage(null);
-    try {
+    
+    await action.run(buildingType, async () => {
       const res = await startConstruction({ kingdomId, buildingType });
-      if (res && res.success) {
-        setActionSuccessMessage(`¡Construcción iniciada! '${buildingName}' nivel ${res.targetLevel} en curso (${Math.round(res.durationSeconds / 60)} min).`);
-      } else if (res && !res.success) {
-        setActionError(res.error || "Error al iniciar la construcción.");
-      }
-    } catch (err: any) {
-      setActionError(err?.message || "Error al iniciar la construcción.");
-    } finally {
-      setBusyActionId(null);
-    }
+      if (res && res.success === false) return res;
+      const durationMin = Math.round((res.completesAt - res.startedAt) / 60000);
+      return `¡Construcción iniciada! '${buildingName}' nivel ${res.targetLevel} en curso (${durationMin} min).`;
+    });
   };
 
   const handleCancelWork = async (constructionId: string, buildingName: string) => {
     if (!isOwner) return;
-    setBusyActionId(constructionId);
-    setActionError(null);
-    setActionSuccessMessage(null);
-    try {
+    await action.run(constructionId, async () => {
       const res = await cancelConstruction({ constructionId });
-      if (res && res.success) {
-        if (res.wasCompletedInstead) {
-          setActionSuccessMessage(`La obra de '${buildingName}' ya había finalizado y se ha completado.`);
-        } else {
-          setActionSuccessMessage(`Construcción cancelada. Se ha reembolsado el 50% de los recursos de '${buildingName}'.`);
-        }
+      if (res && res.success === false) return res;
+      if (res.wasCompletedInstead) {
+        return `La obra de '${buildingName}' ya había finalizado y se ha completado.`;
       }
-    } catch (err: any) {
-      setActionError(err?.message || "Error al cancelar la construcción.");
-    } finally {
-      setBusyActionId(null);
-    }
+      return `Construcción cancelada. Se ha reembolsado el 50% de los recursos de '${buildingName}'.`;
+    });
   };
 
   const handleCompleteWork = async (constructionId: string, buildingName: string) => {
     if (!isOwner) return;
-    setBusyActionId(constructionId);
-    setActionError(null);
-    setActionSuccessMessage(null);
-    try {
+    await action.run(constructionId, async () => {
       const res = await completeConstruction({ constructionId });
-      if (res && res.success) {
-        setActionSuccessMessage(`¡Obra completada! '${buildingName}' ha alcanzado el nivel ${res.newLevel}.`);
-      }
-    } catch (err: any) {
-      setActionError(err?.message || "Error al completar la construcción.");
-    } finally {
-      setBusyActionId(null);
-    }
+      if (res && res.success === false) return res;
+      return `¡Obra completada! '${buildingName}' ha alcanzado el nivel ${res.newLevel}.`;
+    });
   };
 
   if (!data) {
@@ -124,7 +97,7 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
   return (
     <div className="space-y-6">
       {/* Mensajes de feedback */}
-      <StatusMessages error={actionError} message={actionSuccessMessage} isConstruction={true} />
+      <StatusMessages error={action.error} message={action.message} isConstruction={true} />
 
 
       {/* ====================================================================
@@ -241,11 +214,11 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
                     {item.isReadyToComplete ? (
                       <button
                         type="button"
-                        disabled={busyActionId === item._id}
+                        disabled={action.busy === item._id}
                         onClick={() => handleCompleteWork(item._id!, item.buildingName)}
                         className="w-full py-1.5 px-3 bg-emerald-800 hover:bg-emerald-700 text-white rounded text-xs font-serif font-semibold shadow transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                       >
-                        {busyActionId === item._id ? (
+                        {action.busy === item._id ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : (
                           <Check className="w-3.5 h-3.5" />
@@ -255,12 +228,12 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
                     ) : (
                       <button
                         type="button"
-                        disabled={busyActionId === item._id}
+                        disabled={action.busy === item._id}
                         onClick={() => handleCancelWork(item._id!, item.buildingName)}
                         className="w-full py-1.5 px-3 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-200 rounded text-xs font-serif font-semibold shadow transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                         title="Cancela la construcción y devuelve el 50% de los recursos"
                       >
-                        {busyActionId === item._id ? (
+                        {action.busy === item._id ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : (
                           <X className="w-3.5 h-3.5" />
@@ -294,7 +267,7 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
         {/* Rejilla de edificios */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {buildings.map((b: any) => {
-            const isBusy = busyActionId === b.type;
+            const isBusy = action.busy === b.type;
             const cost = b.nextCost;
             return (
               <div

@@ -100,6 +100,7 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
   const handleResearch = (technology: TechnologiesState['catalog'][number]) =>
     action.run(`research-${technology.id}`, async () => {
       const result = await research({ kingdomId, techType: technology.id });
+      if (result && result.success === false) return result;
       return `Investigación de ${technology.name} iniciada; termina ${new Date(result.completesAt).toLocaleString('es-ES')}.`;
     });
 
@@ -107,6 +108,7 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
     if (!window.confirm(`¿Cancelar la investigación de ${entry.name}? Se devuelve el 50 % del coste.`)) return;
     action.run(`cancel-${entry._id}`, async () => {
       const result = await cancel({ kingdomId, progressId: entry._id });
+      if (result && result.success === false) return result;
       return `Investigación cancelada: ${formatCosts(result.refund)} devueltos.`;
     });
   };

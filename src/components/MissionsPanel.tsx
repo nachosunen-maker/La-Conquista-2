@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery_experimental } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { Award, CheckCircle2, Circle, EyeOff, Sparkles, Trophy } from 'lucide-react';
-import { PanelSection, cardClass } from './shared';
+import { PanelSection, StatusMessages, cardClass, useActionState } from './shared';
 
 /* ==========================================================================
    MISIONES (sección 17 de CLAUDE.md, decisión 2026-10-21)
@@ -89,35 +89,29 @@ export class MissionsErrorBoundary extends React.Component<MissionsErrorBoundary
 function MissionRow({ mission, kingdomId }: { mission: MissionView; kingdomId: string }) {
   const finish = useMutation(finishMissionMutation);
   const claim = useMutation(claimRewardMutation);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const pct = mission.progress.target > 0 ? Math.min(100, Math.round((mission.progress.current / mission.progress.target) * 100)) : 0;
+  const action = useActionState();
 
   const handleFinish = async () => {
-    try {
-      setErrorMsg(null);
-      await finish({ kingdomId, progressId: mission.progressId });
-    } catch (e: any) {
-      setErrorMsg(e.message ?? 'Error al finalizar misión');
-    }
+    await action.run(`finish-${mission.progressId}`, async () => {
+      const res = await finish({ kingdomId, progressId: mission.progressId });
+      if (res && res.success === false) return res;
+      return "¡Misión finalizada! Ya puedes cobrar la recompensa.";
+    });
   };
 
   const handleClaim = async () => {
-    try {
-      setErrorMsg(null);
-      await claim({ kingdomId, progressId: mission.progressId });
-    } catch (e: any) {
-      if (e.message?.includes('NO HAY SITIO EN EL MERCADO')) {
-        setErrorMsg('NO HAY SITIO EN EL MERCADO: No tienes espacio suficiente en el almacén para recibir esta recompensa. Libera espacio e inténtalo de nuevo.');
-      } else {
-        setErrorMsg(e.message ?? 'Error al cobrar recompensa');
-      }
-    }
+    await action.run(`claim-${mission.progressId}`, async () => {
+      const res = await claim({ kingdomId, progressId: mission.progressId });
+      if (res && res.success === false) return res;
+      return "¡Recompensa cobrada con éxito!";
+    });
   };
 
   const isClaimed = mission.status === 'claimed';
   const isPendingClaim = mission.status === 'pending_claim';
   const isReadyToFinish = mission.status === 'ready_to_finish';
+
+  const pct = mission.progress.target > 0 ? Math.min(100, Math.round((mission.progress.current / mission.progress.target) * 100)) : 0;
 
   return (
     <div className={`${cardClass} text-[11px] space-y-2 ${isClaimed ? 'opacity-80' : ''}`}>
@@ -134,17 +128,19 @@ function MissionRow({ mission, kingdomId }: { mission: MissionView; kingdomId: s
           {isPendingClaim && (
             <button
               onClick={handleClaim}
-              className="bg-[#d4af37] hover:bg-[#c29f2e] text-[#110e0a] font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors"
+              disabled={action.busy !== null}
+              className="bg-[#d4af37] hover:bg-[#c29f2e] text-[#110e0a] font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
             >
-              Cobrar recompensa
+              {action.busy === `claim-${mission.progressId}` ? 'Cobrando...' : 'Cobrar recompensa'}
             </button>
           )}
           {isReadyToFinish && (
             <button
               onClick={handleFinish}
-              className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors"
+              disabled={action.busy !== null}
+              className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
             >
-              Finalizar misión
+              {action.busy === `finish-${mission.progressId}` ? 'Finalizando...' : 'Finalizar misión'}
             </button>
           )}
           {!isClaimed && !isPendingClaim && !isReadyToFinish && (
@@ -161,12 +157,7 @@ function MissionRow({ mission, kingdomId }: { mission: MissionView; kingdomId: s
 
       <p className="text-[#8e816d]">Premio: {mission.rewardSummary}</p>
 
-      {errorMsg && (
-        <div className="bg-[#2a1212] border border-[#7f1d1d] text-red-200 p-2 rounded text-[10px] space-y-1">
-          <p className="font-bold uppercase tracking-wide">NO HAY SITIO EN EL MERCADO</p>
-          <p>No tienes espacio suficiente en el almacén para recibir esta recompensa. Libera espacio e inténtalo de nuevo.</p>
-        </div>
-      )}
+      <StatusMessages error={action.error} message={action.message} />
     </div>
   );
 }
@@ -174,28 +165,22 @@ function MissionRow({ mission, kingdomId }: { mission: MissionView; kingdomId: s
 function SecretMissionRow({ mission, kingdomId }: { mission: MissionsState['secrets']['discovered'][number]; kingdomId: string }) {
   const finish = useMutation(finishMissionMutation);
   const claim = useMutation(claimRewardMutation);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const action = useActionState();
 
   const handleFinish = async () => {
-    try {
-      setErrorMsg(null);
-      await finish({ kingdomId, progressId: mission.progressId });
-    } catch (e: any) {
-      setErrorMsg(e.message ?? 'Error al finalizar misión secreta');
-    }
+    await action.run(`finish-${mission.progressId}`, async () => {
+      const res = await finish({ kingdomId, progressId: mission.progressId });
+      if (res && res.success === false) return res;
+      return "¡Misión secreta finalizada!";
+    });
   };
 
   const handleClaim = async () => {
-    try {
-      setErrorMsg(null);
-      await claim({ kingdomId, progressId: mission.progressId });
-    } catch (e: any) {
-      if (e.message?.includes('NO HAY SITIO EN EL MERCADO')) {
-        setErrorMsg('NO HAY SITIO EN EL MERCADO: No tienes espacio suficiente en el almacén para recibir esta recompensa. Libera espacio e inténtalo de nuevo.');
-      } else {
-        setErrorMsg(e.message ?? 'Error al cobrar recompensa');
-      }
-    }
+    await action.run(`claim-${mission.progressId}`, async () => {
+      const res = await claim({ kingdomId, progressId: mission.progressId });
+      if (res && res.success === false) return res;
+      return "¡Recompensa cobrada!";
+    });
   };
 
   const isClaimed = mission.status === 'claimed';
@@ -209,27 +194,30 @@ function SecretMissionRow({ mission, kingdomId }: { mission: MissionsState['secr
           <span className="font-semibold text-[#f0e8d4] block">{mission.title}</span>
           <span className="text-[#c7beac]">{mission.description}</span>
         </div>
-        <div>
+        <div className="flex flex-col items-end gap-1">
           {isClaimed && <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded font-medium border border-emerald-800">COBRADA</span>}
           {isPendingClaim && (
-            <button onClick={handleClaim} className="bg-[#d4af37] text-[#110e0a] font-bold px-2.5 py-1 rounded text-[10px] uppercase">
-              Cobrar recompensa
+            <button
+              onClick={handleClaim}
+              disabled={action.busy !== null}
+              className="bg-[#d4af37] text-[#110e0a] font-bold px-2.5 py-1 rounded text-[10px] uppercase disabled:opacity-50"
+            >
+              {action.busy === `claim-${mission.progressId}` ? 'Cobrando...' : 'Cobrar recompensa'}
             </button>
           )}
           {isReadyToFinish && (
-            <button onClick={handleFinish} className="bg-[#2563eb] text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase">
-              Finalizar misión
+            <button
+              onClick={handleFinish}
+              disabled={action.busy !== null}
+              className="bg-[#2563eb] text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase disabled:opacity-50"
+            >
+              {action.busy === `finish-${mission.progressId}` ? 'Finalizando...' : 'Finalizar misión'}
             </button>
           )}
         </div>
       </div>
       <p className="text-[#8e816d]">Premio: {mission.rewardSummary}</p>
-      {errorMsg && (
-        <div className="bg-[#2a1212] border border-[#7f1d1d] text-red-200 p-2 rounded text-[10px] space-y-1">
-          <p className="font-bold uppercase tracking-wide">NO HAY SITIO EN EL MERCADO</p>
-          <p>No tienes espacio suficiente en el almacén para recibir esta recompensa. Libera espacio e inténtalo de nuevo.</p>
-        </div>
-      )}
+      <StatusMessages error={action.error} message={action.message} />
     </div>
   );
 }

@@ -150,6 +150,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
     if (!selectedCell) return;
     action.run('claim', async () => {
       const result = await claim({ kingdomId, cellId: selectedCell.cellId });
+      if (result && result.success === false) return result;
       setSelected(null);
       return `Territorio ${result.cellId} (${world.terrains[result.terrain]?.label ?? result.terrain}) anexionado a la corona; reclamaciones restantes: ${result.remainingClaims}.`;
     });
@@ -159,6 +160,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
     if (!selectedCell) return;
     action.run('explore', async () => {
       const result = await startExploration({ kingdomId, cellId: selectedCell.cellId });
+      if (result && result.success === false) return result;
       return `Expedición enviada a ${result.cellId}. Llegada estimada en ${Math.round(result.durationSeconds / 60)} min. Coste: ${result.costs.gold} oro y ${result.costs.food} alimentos.`;
     });
   };
@@ -166,13 +168,15 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
   const handleCancelExploration = (expeditionId: string) => {
     action.run('cancel-explore', async () => {
       const result = await cancelExploration({ kingdomId, expeditionId: expeditionId as any });
-      return result.message;
+      if (result && result.success === false) return result;
+      return result.message || 'Expedición cancelada.';
     });
   };
 
   const handleResolveCompleted = () => {
     action.run('resolve-explore', async () => {
       const result = await resolveExplorations({ kingdomId });
+      if (result && result.success === false) return result;
       return result.count > 0
         ? `Se completaron ${result.count} expedición(es) de exploración con éxito.`
         : 'No hay expediciones pendientes de consolidar.';
@@ -182,7 +186,8 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
   const handleEnsureHome = () =>
     action.run('home', async () => {
       const result = await ensureHome({ kingdomId });
-      return result.success ? `Territorio principal asignado en ${result.homeTerritoryId}.` : 'No quedan celdas libres para asignar.';
+      if (result && result.success === false) return result;
+      return `Territorio principal asignado en ${result.homeTerritoryId}.`;
     });
 
   const activeExpedition = world.activeExpeditions[0];

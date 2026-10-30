@@ -139,6 +139,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
     if (!globalUpgradeInfo.nextLevel) return;
     action.run('upgrade-army-level', async () => {
       const res = await upgradeArmyLevel({ kingdomId, targetLevel: globalUpgradeInfo.nextLevel });
+      if (res && res.success === false) return res;
       return `¡Ejército ascendido al Nivel ${res.armyLevel} (${res.levelName})! Daño ×${res.multiplier}. ${res.unitsUpgraded} unidades mejoradas.`;
     });
   };
@@ -186,6 +187,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const handleTactical = () =>
     action.run('tactical', async () => {
       const result = await setTacticalFormation({ kingdomId, tacticalFormation: currentTactical });
+      if (result && result.success === false) return result;
       setTacticalDraft(null);
       return `Formación ${result.label} guardada: ataque ×${result.attack}, defensa ×${result.defense}.`;
     });
@@ -195,6 +197,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const handleTrain = () =>
     action.run('train', async () => {
       const result = await startTraining({ kingdomId, unitType, count: safeCount, level });
+      if (result && result.success === false) return result;
       return `Lote de ${result.count} ${UNIT_LABELS[result.unitType] ?? result.unitType} (nivel ${result.level}) encolado; termina ${new Date(result.completesAt).toLocaleString('es-ES')}.`;
     });
 
@@ -202,6 +205,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
     if (!window.confirm(`¿Cancelar ${label}? Se devuelve el 50 % de los recursos y toda la población reservada.`)) return;
     action.run(`cancel-${trainingId}`, async () => {
       const result = await cancelTraining({ kingdomId, trainingId });
+      if (result && result.success === false) return result;
       return `Lote cancelado: ${formatCosts(result.refund)} devueltos y ${result.populationReturned} civiles liberados.`;
     });
   };
@@ -235,12 +239,14 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const handleHire = () =>
     action.run('hire', async () => {
       const result = await hireMercenaries({ kingdomId, count: safeMercenaries, typeId: selectedMercenaryType?.id });
+      if (result && result.success === false) return result;
       return `${result.count} ${result.label ?? 'mercenarios'} contratados por ${result.cost} oro; contrato hasta ${new Date(result.contractEndsAt).toLocaleString('es-ES')} sin salario diario.`;
     });
 
   const handleEquipment = () =>
     action.run('equipment', async () => {
-      await setEquipment({ kingdomId, weaponTier: currentWeapon, armorTier: currentArmor, strategy: currentStrategy });
+      const res = await setEquipment({ kingdomId, weaponTier: currentWeapon, armorTier: currentArmor, strategy: currentStrategy });
+      if (res && res.success === false) return res;
       setWeaponTier(null);
       setArmorTier(null);
       setStrategy(null);

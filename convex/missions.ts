@@ -150,30 +150,11 @@ async function grantReward(ctx: MutationCtx, kingdomId: Id<"kingdoms">, reward: 
  * Evalúa y concede las misiones cumplidas de un reino (modo retrocompatible / automático si se requiere).
  */
 export async function evaluateKingdomMissions(ctx: MutationCtx, kingdomId: Id<"kingdoms">, now: number = Date.now()): Promise<string[]> {
-  const built = await buildSnapshot(ctx, kingdomId, now);
-  if (!built) return [];
-  const progress = await readProgress(ctx, kingdomId);
-  const completedIds = new Set(progress.map((doc) => doc.progressId));
-  const completions = evaluateMissions(built.snapshot, completedIds, built.dayKey);
-  const granted: string[] = [];
-  for (const completion of completions) {
-    const existing = progress.find((p) => p.progressId === completion.progressId);
-    if (!existing) {
-      await ctx.db.insert("missionProgress", {
-        kingdomId,
-        progressId: completion.progressId,
-        missionId: completion.mission.id,
-        kind: completion.kind,
-        stage: completion.stage,
-        title: completion.mission.title,
-        rewardSummary: describeReward(completion.reward),
-        completedAt: now,
-        rewardGranted: false, // Ahora pasa a pendiente de cobro en lugar de automático
-      });
-      granted.push(completion.progressId);
-    }
-  }
-  return granted;
+  // Las misiones ya no se completan automáticamente para permitir el flujo manual:
+  // In Progress -> Ready to Finish (Button) -> Pending Claim (Button) -> Claimed.
+  // Esta función ahora solo podría usarse para tareas de mantenimiento si fuera necesario,
+  // pero los eventos ya actualizan los contadores que lee la consulta getMissions.
+  return [];
 }
 
 async function assertReadable(ctx: Ctx, kingdomId: Id<"kingdoms">) {
