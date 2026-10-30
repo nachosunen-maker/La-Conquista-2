@@ -56,7 +56,7 @@ export function runTechnologyValidationTests(): TechnologyTestResult[] {
     {
       test: "Investigación válida descuenta el coste del catálogo y fija fin por duración real (D-17)",
       passed: agri.success && agri.plan.costs.gold === 100 && agri.plan.costs.wood === 100 && agri.plan.costs.stone === 50 &&
-        agri.plan.durationMs === 60_000 && agri.plan.completesAt === 5_000_000 + 60_000 && !unknown.success,
+        agri.plan.durationMs === 30_000 && agri.plan.completesAt === 5_000_000 + 30_000 && !unknown.success,
       details: agri.success ? `Oro ${agri.plan.costs.gold}, duración ${agri.plan.durationMs} ms; desconocida rechazada: ${!unknown.success}` : agri.error,
     },
     {

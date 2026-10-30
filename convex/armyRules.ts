@@ -37,6 +37,17 @@ export function normalizeUnitType(value: unknown): UnitType | null {
   return isUnitType(normalized) ? normalized : null;
 }
 
+export function isSiegeUnit(unitType: UnitType): boolean {
+  return unitType === "asedio" || (Boolean(UNITS[unitType]) && !UNITS[unitType].isLivingTroop);
+}
+
+export function getUnitCategory(unitType: UnitType): "infanteria" | "arqueria" | "caballeria" | "asedio" {
+  if (unitType === "infanteria") return "infanteria";
+  if (unitType === "arqueria") return "arqueria";
+  if (unitType === "caballeria") return "caballeria";
+  return "asedio";
+}
+
 export function validateMilitaryUnitInput(unitType: string, count: number): { success: boolean; error?: string } {
   if (!normalizeUnitType(unitType)) {
     return { success: false, error: `Tipo de unidad no admitido: '${unitType}'. Válidos: ${UNIT_TYPES.join(", ")}.` };

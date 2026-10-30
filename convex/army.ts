@@ -32,7 +32,7 @@ import {
   type TrainingQueueEntry,
 } from "./armyRules";
 import { ARMORS, DEFAULT_TACTICAL_FORMATION, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TACTICAL_FORMATIONS, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type ArmorTier, type UnitType, type WeaponTier } from "./balanceConfig";
-import { civilizationArmorLabel, civilizationTrainingCostMultiplier, civilizationUnitLabel, civilizationWeaponLabel, getCivilizationIdentity, getCivilizationPassive } from "./civilizationRules";
+import { civilizationArmorLabel, civilizationTrainingCostMultiplier, civilizationTrainingDurationMultiplier, civilizationUnitLabel, civilizationWeaponLabel, getCivilizationIdentity, getCivilizationPassive } from "./civilizationRules";
 import type { ResourceType } from "./economyCalculations";
 import { readHomeCoord, readPathTerrainMultiplier } from "./territories";
 import {
@@ -170,7 +170,7 @@ export const getArmyState = query({
       })),
       unitCatalog: UNIT_TYPES.map((unitType) => {
         const civCost = civilizationTrainingCostMultiplier(unitType, kingdom.civilization);
-        const civDuration = civPassive.trainingDurationByUnit[unitType] ?? 1;
+        const civDuration = civilizationTrainingDurationMultiplier(unitType, kingdom.civilization);
         const baseCosts = trainingCostsFor(unitType, 1);
         return {
           unitType,
@@ -247,7 +247,7 @@ export const startTraining = mutation({
     if (!population) throw new Error("No existe documento de población para el reino.");
     // [P6, decisión 21-10-2026] Ventaja y debilidad de la civilización en la instrucción (duración y coste por tipo).
     const civUnitType = normalizeUnitType(args.unitType);
-    const civDuration = civUnitType ? getCivilizationPassive(kingdom.civilization).trainingDurationByUnit[civUnitType] ?? 1 : 1;
+    const civDuration = civUnitType ? civilizationTrainingDurationMultiplier(civUnitType, kingdom.civilization) : 1;
     const planResult = createTrainingPlan({
       unitType: args.unitType,
       count: args.count,

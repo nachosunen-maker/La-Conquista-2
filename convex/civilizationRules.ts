@@ -173,6 +173,22 @@ export function applyCivilizationCombat(
   };
 }
 
+export function isSiegeUnit(unitType: UnitType): boolean {
+  return unitType === "asedio" || (Boolean(UNITS[unitType]) && !UNITS[unitType].isLivingTroop);
+}
+
+/** [DECISIÓN 21-10-2026] Multiplicador de duración de entrenamiento según civilización.
+ * Las unidades especializadas de asedio heredan la regla de la categoría 'asedio'. */
+export function civilizationTrainingDurationMultiplier(unitType: UnitType, civId?: string | null): number {
+  const passive = getCivilizationPassive(civId);
+  const direct = passive.trainingDurationByUnit[unitType];
+  if (typeof direct === "number" && direct > 0) return direct;
+  if (isSiegeUnit(unitType) && typeof passive.trainingDurationByUnit.asedio === "number") {
+    return passive.trainingDurationByUnit.asedio;
+  }
+  return 1;
+}
+
 /** Aplica bonificación de duración de entrenamiento según tipo de unidad. */
 export function applyCivilizationTrainingDuration(
   unitType: UnitType,
@@ -180,8 +196,7 @@ export function applyCivilizationTrainingDuration(
   civId?: string | null
 ): number {
   if (!Number.isFinite(baseDurationMs) || baseDurationMs <= 0) return 0;
-  const passive = getCivilizationPassive(civId);
-  const modifier = passive.trainingDurationByUnit[unitType] ?? 1.0;
+  const modifier = civilizationTrainingDurationMultiplier(unitType, civId);
   return Math.ceil(baseDurationMs * modifier);
 }
 
@@ -245,11 +260,15 @@ export function civilizationUnitLabel(civId: string | null | undefined, unitType
   return own ? `${own} (${generic})` : generic;
 }
 
-/** [DECISIÓN 21-10-2026] Debilidad: sobrecoste de instrucción por tipo de unidad (1 si no aplica). */
+/** [DECISIÓN 21-10-2026] Debilidad: sobrecoste de instrucción por tipo de unidad (1 si no aplica); unidades de asedio heredan sobrecoste de 'asedio'. */
 export function civilizationTrainingCostMultiplier(unitType: UnitType, civId?: string | null): number {
   const passive = getCivilizationPassive(civId);
-  const value = passive.trainingCostByUnit?.[unitType];
-  return typeof value === "number" && value > 0 ? value : 1;
+  const direct = passive.trainingCostByUnit?.[unitType];
+  if (typeof direct === "number" && direct > 0) return direct;
+  if (isSiegeUnit(unitType) && typeof passive.trainingCostByUnit?.asedio === "number") {
+    return passive.trainingCostByUnit.asedio;
+  }
+  return 1;
 }
 
 /** Ficha pública de una civilización (para invitados y asistente de fundación). */

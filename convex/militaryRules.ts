@@ -21,7 +21,7 @@
  */
 
 import type { ResourceType } from "./economyCalculations";
-import { getCivilizationPassive } from "./civilizationRules";
+import { getCivilizationPassive, civilizationTrainingDurationMultiplier } from "./civilizationRules";
 import { UNITS, UNIT_TYPES, type UnitType } from "./balanceConfig";
 
 export const VALID_MILITARY_UNIT_TYPES = UNIT_TYPES;
@@ -237,8 +237,7 @@ export function createTrainingPlan(input: {
     }
   }
 
-  const civPassive = getCivilizationPassive(input.civilization);
-  const civUnitMultiplier = civPassive.trainingDurationByUnit[normalizedType as UnitType] ?? 1.0;
+  const civUnitMultiplier = civilizationTrainingDurationMultiplier(normalizedType as UnitType, input.civilization);
   const totalDurationMs = Math.ceil(rule.durationMsPerUnit * input.count * civUnitMultiplier);
 
   return {
