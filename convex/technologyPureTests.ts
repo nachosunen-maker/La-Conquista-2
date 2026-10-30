@@ -115,5 +115,10 @@ export function runTechnologyValidationTests(): TechnologyTestResult[] {
       })(),
       details: "Verifica que la duración calculada es mayor que 0",
     },
+    {
+      test: "Debug: Imprimir todas las duraciones tecnológicas",
+      passed: true,
+      details: TECHNOLOGIES.map(t => `${t.id}: ${t.durationSeconds}`).join(' | '),
+    },
   ];
 }

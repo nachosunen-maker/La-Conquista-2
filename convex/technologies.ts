@@ -79,12 +79,10 @@ export const getTechnologies = query({
           kingdomCivilization: kingdom.civilization,
         });
         const civPassive = getCivilizationPassive(kingdom.civilization);
-        // Debugging & Fallback
-        const multiplier = civPassive.researchDurationMultiplier || 1.0;
-        if (technology.durationSeconds === undefined || civPassive.researchDurationMultiplier === undefined) {
-          console.log(`DEBUG: Missing data for tech ${technology.id}: duration=${technology.durationSeconds}, multiplier=${civPassive.researchDurationMultiplier}, passive=${JSON.stringify(civPassive)}`);
-        }
-        const bonifiedDurationSeconds = Math.ceil(technology.durationSeconds * multiplier);
+        const multiplier = typeof civPassive.researchDurationMultiplier === 'number' ? civPassive.researchDurationMultiplier : 1.0;
+        const baseDuration = typeof technology.durationSeconds === 'number' ? technology.durationSeconds : 60;
+        const bonifiedDurationSeconds = Math.max(1, Math.ceil(baseDuration * multiplier));
+        
         return { 
           ...technology, 
           status: evaluation.status, 
