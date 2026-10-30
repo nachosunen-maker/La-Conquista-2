@@ -62,6 +62,8 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
       const res = await startConstruction({ kingdomId, buildingType });
       if (res && res.success) {
         setActionSuccessMessage(`¡Construcción iniciada! '${buildingName}' nivel ${res.targetLevel} en curso (${Math.round(res.durationSeconds / 60)} min).`);
+      } else if (res && !res.success) {
+        setActionError(res.error || "Error al iniciar la construcción.");
       }
     } catch (err: any) {
       setActionError(err?.message || "Error al iniciar la construcción.");

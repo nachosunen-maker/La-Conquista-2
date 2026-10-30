@@ -154,7 +154,7 @@ export const startConstruction = mutation({
         (await constructionWorkersModifier(ctx, args.kingdomId)) *
         getCivilizationPassive(kingdom.civilization).constructionDurationMultiplier,
     });
-    if (!planResult.success) throw new Error(planResult.error);
+    if (!planResult.success) return { success: false, error: planResult.error };
 
     const nextResources = { ...resourceSnapshot };
     for (const [resource, cost] of Object.entries(planResult.plan.costs) as [ResourceType, number][]) {
