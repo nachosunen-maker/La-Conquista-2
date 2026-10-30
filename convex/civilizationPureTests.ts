@@ -277,7 +277,7 @@ export function runCivilizationTests(): CivilizationTestResult[] {
     "SINGULARIDADES POR CIVILIZACIÓN (decisión 21-10-2026)",
     "12. Los nombres propios acompañan al nombre base (multiplicadores intactos) y las civilizaciones pendientes usan los nombres genéricos",
     roman.weapon === "Gladius hispaniensis (Espada de hierro)" && roman.armor === "Lorica segmentata (Hierro)" && roman.building === `Castra (${BUILDINGS.cuartel.label})` && roman.other === BUILDINGS.granja.label && roman.unit === "Legionario (Infantería)" &&
-      navajo.weapon === "Hacha de hierro (Espada de hierro)" && navajo.building === `Hogar de rastreadores (${BUILDINGS.taberna.label})` && navajo.other === BUILDINGS.cuartel.label && navajo.unit === "Rastreador (Infantería)",
+      navajo.weapon === "Arco compuesto de madera y tendón (Espada de hierro)" && navajo.building === `Hogar de rastreadores (${BUILDINGS.taberna.label})` && navajo.other === BUILDINGS.cuartel.label && navajo.unit === "Rastreador Diné (Infantería)",
     `Romanos: ${roman.weapon} · ${roman.armor} · ${roman.building} · ${roman.unit}; Navajos: ${navajo.weapon} · ${navajo.building} · ${navajo.unit}`
   );
 

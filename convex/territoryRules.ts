@@ -162,15 +162,34 @@ export function canClaimTerritory(input: {
 // ----------------------------------------------------------------------------
 // Marcha y fatiga (P41, P32, D-26)
 // ----------------------------------------------------------------------------
+import { normalizeCivilizationId } from "./civilizationRules";
+
 export function terrainMarchMultiplier(terrain: TerrainType): number {
   return TERRAINS[terrain]?.marchMultiplier ?? 1;
 }
 
+/**
+ * Devuelve el multiplicador de velocidad de marcha individual de una unidad,
+ * considerando excepciones culturales (p. ej. Guerreros Jaguar aztecas en plaza caballería marchan a pie).
+ */
+export function unitMarchMultiplier(unitType: UnitType, civilization?: string | null): number {
+  const normCiv = normalizeCivilizationId(civilization);
+  if (unitType === "caballeria" && normCiv === "aztecas") {
+    return UNITS.infanteria.marchMultiplier; // 1.0 (velocidad a pie)
+  }
+  return UNITS[unitType]?.marchMultiplier ?? 1.0;
+}
+
 /** El ejército viaja a la velocidad de la unidad más lenta presente. */
-export function armyMarchMultiplier(composition: Partial<Record<UnitType, number>>): number {
+export function armyMarchMultiplier(
+  composition: Partial<Record<UnitType, number>>,
+  civilization?: string | null
+): number {
   let multiplier = 1;
   for (const [unitType, count] of Object.entries(composition) as [UnitType, number][]) {
-    if (count > 0 && UNITS[unitType]) multiplier = Math.max(multiplier, UNITS[unitType].marchMultiplier);
+    if (count > 0 && UNITS[unitType]) {
+      multiplier = Math.max(multiplier, unitMarchMultiplier(unitType, civilization));
+    }
   }
   return multiplier;
 }
@@ -299,6 +318,7 @@ export function calculateArmyMarchPlan(input: {
   composition: Partial<Record<UnitType, number>>;
   currentFatigue: number;
   departureTimeMs: number;
+  civilization?: string | null;
   terrainMultiplier?: number;
   terrainByCell?: ReadonlyMap<string, TerrainType | string> | Record<string, TerrainType | string>;
   civilizationPassive?: { marchSpeedMultiplier?: number; fatigueAccrualMultiplier?: number } | null;
@@ -317,8 +337,9 @@ export function calculateArmyMarchPlan(input: {
   let unitSpeedMultiplier = 1;
   for (const [type, count] of Object.entries(input.composition) as [UnitType, number][]) {
     if (count > 0 && UNITS[type]) {
-      if (UNITS[type].marchMultiplier > unitSpeedMultiplier) {
-        unitSpeedMultiplier = UNITS[type].marchMultiplier;
+      const mult = unitMarchMultiplier(type, input.civilization);
+      if (mult > unitSpeedMultiplier) {
+        unitSpeedMultiplier = mult;
         slowestUnitType = type;
       } else if (!slowestUnitType) {
         slowestUnitType = type;

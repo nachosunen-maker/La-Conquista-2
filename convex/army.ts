@@ -649,7 +649,7 @@ export const launchAttack = mutation({
 
     // [R-14, decisión 23-10-2026] Media del terreno del camino (origen excluido, destino incluido).
     const terrainMul = await readPathTerrainMultiplier(ctx, homeCoord, { q: target.q, r: target.r });
-    const unitMul = armyMarchMultiplier(requestedComposition);
+    const unitMul = armyMarchMultiplier(requestedComposition, kingdom.civilization);
     const civPassive = getCivilizationPassive(kingdom.civilization);
     const durationSeconds = marchTimeSeconds(distance, terrainMul, unitMul, civPassive?.marchSpeedMultiplier ?? 1.0);
     const durationMs = Math.round(durationSeconds * 1000);

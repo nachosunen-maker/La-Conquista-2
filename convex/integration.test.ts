@@ -262,7 +262,7 @@ describe("Singularidades por civilización (decisión 21-10-2026)", () => {
     expect(construction.catalog.granja.label).toBe(BUILDINGS.granja.label);
     const civs = await t.query(api.civilizations.listCivilizations, {});
     expect(civs.profiles.find((p: any) => p.id === "navajos")?.pendingDesign).toBe(false);
-    expect(civs.profiles.find((p: any) => p.id === "navajos")?.identity?.signatureUnit.name).toBe("Rastreador");
+    expect(civs.profiles.find((p: any) => p.id === "navajos")?.identity?.signatureUnit.name).toBe("Rastreador Diné");
     expect(civs.profiles.find((p: any) => p.id === "romanos")?.identity?.signatureUnit.name).toBe("Legionario");
   });
 });
