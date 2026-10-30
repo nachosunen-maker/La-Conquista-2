@@ -316,19 +316,22 @@ export const TRAINING = {
   MIN_DURATION_RATIO: 0.5,
 } as const;
 
-/** [MAESTRA P29 + P23] Niveles militares: multiplicador de eficacia y requisitos. */
+/** [MAESTRA P29 + P23] Niveles militares globales: multiplicador de daño, consumo de alimentos y requisitos. */
 export interface MilitaryLevelBalance {
   level: 1 | 2 | 3 | 4 | 5;
   name: string;
-  multiplier: number;
+  multiplier: number; // Multiplicador de daño
+  foodMultiplier: number; // Multiplicador de consumo de alimentos
   requirements: Readonly<Record<string, number>>;
+  costs: ResourceCosts;
+  upgradeDurationSeconds: number;
 }
 export const MILITARY_LEVELS: readonly MilitaryLevelBalance[] = [
-  { level: 1, name: "Milicia", multiplier: 1.0, requirements: { cuartel: 1 } },
-  { level: 2, name: "Entrenado", multiplier: 1.15, requirements: { castillo: 2, cuartel: 2 } },
-  { level: 3, name: "Veterano", multiplier: 1.35, requirements: { castillo: 4, cuartel: 3, universidad: 2 } },
-  { level: 4, name: "Profesional", multiplier: 1.6, requirements: { castillo: 6, cuartel: 4, universidad: 3 } },
-  { level: 5, name: "Élite", multiplier: 1.9, requirements: { castillo: 8, cuartel: 5, universidad: 4, herreria: 5 } },
+  { level: 1, name: "Milicia", multiplier: 1.00, foodMultiplier: 1.00, requirements: { cuartel: 1 }, costs: { gold: 0, wood: 0, stone: 0, iron: 0, food: 0 }, upgradeDurationSeconds: 0 },
+  { level: 2, name: "Entrenado", multiplier: 1.10, foodMultiplier: 1.10, requirements: { castillo: 2, cuartel: 2, herreria: 1 }, costs: { gold: 200, wood: 100, stone: 100, iron: 100, food: 200 }, upgradeDurationSeconds: 60 },
+  { level: 3, name: "Veterano", multiplier: 1.20, foodMultiplier: 1.20, requirements: { castillo: 3, cuartel: 3, herreria: 2, universidad: 1 }, costs: { gold: 500, wood: 250, stone: 250, iron: 250, food: 500 }, upgradeDurationSeconds: 120 },
+  { level: 4, name: "Profesional", multiplier: 1.30, foodMultiplier: 1.30, requirements: { castillo: 4, cuartel: 4, herreria: 3, universidad: 2 }, costs: { gold: 1200, wood: 600, stone: 600, iron: 600, food: 1200 }, upgradeDurationSeconds: 300 },
+  { level: 5, name: "Élite", multiplier: 1.40, foodMultiplier: 1.40, requirements: { castillo: 5, cuartel: 5, herreria: 4, universidad: 3 }, costs: { gold: 2500, wood: 1200, stone: 1200, iron: 1200, food: 2500 }, upgradeDurationSeconds: 600 },
 ];
 
 /** [MAESTRA P30] Calidad de armas. */
@@ -455,18 +458,15 @@ export const MERCENARIES = {
    * El límite de activos (50 por nivel de Taberna) es común a todos los tipos.
    */
   TYPES: [
-    { id: "lanzonas_mesnada", label: "Mesnada Libre", unitType: "infanteria" as UnitType, level: 1, goldPerUnit: 20, minTavernLevel: 1, origin: "Reinos Peninsulares (siglos XI–XIII)", description: "Peones de frontera a sueldo estacional para campañas de choque rápido.", citation: "Cantar de mio Cid (Real Academia de la Historia)." },
-    { id: "lanceros", label: "Lanceros de Milicia", unitType: "infanteria" as UnitType, level: 2, goldPerUnit: 25, minTavernLevel: 1, origin: "Ciudades-Estado Europeas (siglo XII)", description: "Infantería entrenada de formación en erizo con lanzas largas.", citation: "Annales Genoenses / Univ. de Génova." },
-    { id: "almogavares", label: "Almogávares Catalanes", unitType: "infanteria" as UnitType, level: 3, goldPerUnit: 30, minTavernLevel: 1, origin: "Corona de Aragón (siglos XIII–XIV)", description: "Infantería de escaramuza y asalto letal con chuzo y cultell.", citation: "Ramon Muntaner, Crònica (Univ. de Barcelona)." },
-    { id: "ballesteros_genoveses", label: "Ballesteros Genoveses", unitType: "arqueria" as UnitType, level: 3, goldPerUnit: 35, minTavernLevel: 2, origin: "República de Génova (siglos XII–XV)", description: "Proyectilistas profesionales equipados con balista de acero y pavés.", citation: "Jean Froissart, Chroniques (BnF)." },
-    { id: "stradioti", label: "Stradioti Balcánicos", unitType: "caballeria" as UnitType, level: 2, goldPerUnit: 75, minTavernLevel: 3, origin: "Balcanes (siglos XV–XVI)", description: "Caballería ligera móvil, experta en emboscadas y hostigamiento.", citation: "Philippe de Commynes, Mémoires (1495)." },
-    { id: "piqueros_suizos", label: "Piqueros Cantonales Suizos", unitType: "infanteria" as UnitType, level: 4, goldPerUnit: 35, minTavernLevel: 3, origin: "Cantones Suizos (siglos XIV–XVI)", description: "Formación inexpugnable de picas largas, azote de la caballería.", citation: "Machiavelli, Dell'arte della guerra (1521)." },
-    { id: "condottieri", label: "Condottieri Italianos", unitType: "caballeria" as UnitType, level: 4, goldPerUnit: 105, minTavernLevel: 4, origin: "Península Itálica (siglos XIV–XV)", description: "Caballería pesada acorazada dirigida por capitanes de condotta.", citation: "Muratori, Rerum Italicarum Scriptores." },
-    { id: "longbowmen_blanca", label: "Arqueros de la Compañía Blanca", unitType: "arqueria" as UnitType, level: 4, goldPerUnit: 40, minTavernLevel: 4, origin: "Inglaterra y Francia (siglos XIV–XV)", description: "Arquería de élite con tejo inglés y cadencia devastadora.", citation: "Sir John Hawkwood Letters (British Library)." },
-    { id: "landsknechte", label: "Landsknechte Imperiales", unitType: "infanteria" as UnitType, level: 5, goldPerUnit: 40, minTavernLevel: 5, origin: "Sacro Imperio Germánico (siglos XV–XVI)", description: "Mercenarios imperiales con mandobles Zweihänder y formación acorazada.", citation: "Frundsberg, Kriegsrat und Chronik." },
+    { id: "mesnada_sueldo", label: "Mesnada a sueldo", unitType: "infanteria" as UnitType, level: 1, goldPerUnit: 20, minTavernLevel: 1, origin: "Reinos Peninsulares", description: "Peones de frontera a sueldo estacional para choque rápido.", citation: "Cantar de mio Cid." },
+    { id: "lanceros_sueldo", label: "Lanceros a sueldo", unitType: "infanteria" as UnitType, level: 2, goldPerUnit: 25, minTavernLevel: 1, origin: "Ciudades-Estado Europeas", description: "Infantería entrenada en formación de muralla de lanzas.", citation: "Annales Genoenses." },
+    { id: "arqueros_fortuna", label: "Arqueros de fortuna", unitType: "arqueria" as UnitType, level: 2, goldPerUnit: 30, minTavernLevel: 2, origin: "Compañías de Fortuna", description: "Proyectilistas profesionales de larga distancia y cadencia fina.", citation: "Chroniques de Froissart." },
+    { id: "jinetes_fortuna", label: "Jinetes de fortuna", unitType: "caballeria" as UnitType, level: 2, goldPerUnit: 75, minTavernLevel: 3, origin: "Balcanes y Frontera", description: "Caballería ligera móvil, experta en emboscadas y escaramuzas.", citation: "Philippe de Commynes." },
+    { id: "compania_veterana", label: "Compañía veterana", unitType: "infanteria" as UnitType, level: 3, goldPerUnit: 30, minTavernLevel: 4, origin: "Compañías Blancas", description: "Infantería veterana curtida y altamente disciplinada en combate.", citation: "Machiavelli, Arte della guerra." },
+    { id: "guardia_mercenaria", label: "Guardia mercenaria", unitType: "caballeria" as UnitType, level: 3, goldPerUnit: 90, minTavernLevel: 5, origin: "Condottieri Italianos", description: "Caballería pesada acorazada de asalto arrollador.", citation: "Rerum Italicarum Scriptores." },
   ],
   /** Tipo por defecto. */
-  DEFAULT_TYPE_ID: "almogavares",
+  DEFAULT_TYPE_ID: "mesnada_sueldo",
 } as const;
 export type MercenaryTypeId = (typeof MERCENARIES.TYPES)[number]["id"];
 export type MercenaryType = (typeof MERCENARIES.TYPES)[number];

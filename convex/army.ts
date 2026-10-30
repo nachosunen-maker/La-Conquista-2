@@ -11,7 +11,7 @@ import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
 import { evaluateKingdomMissions, recordMissionEvent } from "./missions";
 import { requireOwner } from "./buildings";
-import { validateBuildingCollection } from "./buildingRules";
+import { checkBuildingRequirements, validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import {
   availableArmorTiers,
@@ -25,8 +25,10 @@ import {
   trainingDurationMs,
   trainingProgress,
   trainingQueueSlots,
+  unitBuildingRequirements,
   unitLevelOf,
   isTacticalFormation,
+  validateGlobalArmyUpgrade,
   validateEquipmentSelection,
   validateMercenaryHire,
   type TrainingQueueEntry,
@@ -147,9 +149,23 @@ export const getArmyState = query({
     const kingdomAny = kingdom as any;
     const civPassive = getCivilizationPassive(kingdom.civilization);
     const civIdentity = getCivilizationIdentity(kingdom.civilization);
+    const currentArmyLevel = kingdomAny.armyLevel ?? 1;
+    const nextArmyLevel = Math.min(5, currentArmyLevel + 1);
+    const nextArmyLevelInfo = MILITARY_LEVELS.find((l) => l.level === nextArmyLevel) ?? null;
+    const nextArmyLevelReqs = nextArmyLevelInfo ? checkBuildingRequirements(nextArmyLevelInfo.requirements, buildingLevels) : null;
+
     return {
       serverTimeMs,
       writable: isKingdomOwner(kingdom.userId, identity?.subject),
+      armyLevel: currentArmyLevel,
+      globalUpgradeInfo: {
+        currentLevel: currentArmyLevel,
+        nextLevel: nextArmyLevel,
+        isMaxLevel: currentArmyLevel >= 5,
+        nextLevelInfo: nextArmyLevelInfo,
+        requirementsSatisfied: nextArmyLevelReqs?.satisfied ?? false,
+        requirementError: nextArmyLevelReqs && !nextArmyLevelReqs.satisfied ? nextArmyLevelReqs.error : null,
+      },
       units,
       summary,
       availableCivil: typeof population?.available === "number" ? population.available : null,
@@ -172,6 +188,7 @@ export const getArmyState = query({
         const civCost = civilizationTrainingCostMultiplier(unitType, kingdom.civilization);
         const civDuration = civilizationTrainingDurationMultiplier(unitType, kingdom.civilization);
         const baseCosts = trainingCostsFor(unitType, 1);
+        const reqs = unitBuildingRequirements(unitType, kingdom.civilization);
         return {
           unitType,
           ...UNITS[unitType],
@@ -180,7 +197,7 @@ export const getArmyState = query({
           unitDurationMs: trainingDurationMs(unitType, 1, modifiers.trainingDuration * civDuration),
           civilizationCostMultiplier: civCost,
           civilizationDurationMultiplier: civDuration,
-          requirementsSatisfied: Object.entries(UNITS[unitType].requirements).every(([type, level]) => (buildingLevels[type] ?? 0) >= level),
+          requirementsSatisfied: Object.entries(reqs).every(([type, level]) => (buildingLevels[type] ?? 0) >= level),
         };
       }),
       trainingDurationModifier: modifiers.trainingDuration,
@@ -223,6 +240,56 @@ export const getArmyState = query({
   },
 });
 
+/** [FASE 2] Ascenso global del nivel militar del reino (del nivel 1 al 5). */
+export const upgradeArmyLevel = mutation({
+  args: {
+    kingdomId: v.id("kingdoms"),
+    targetLevel: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
+    const kingdomAny = kingdom as any;
+    const currentLevel = kingdomAny.armyLevel ?? 1;
+    const now = Date.now();
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
+    const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+    const collection = validateBuildingCollection(buildings);
+    if (!collection.success) throw new Error(collection.error);
+
+    const validation = validateGlobalArmyUpgrade({
+      currentLevel,
+      targetLevel: args.targetLevel,
+      buildingLevels: collection.levels,
+      resources: settled.settledResources,
+    });
+    if (!validation.success) throw new Error(validation.error);
+
+    // Deduct costs
+    const nextResources: Record<ResourceType, number> = { ...settled.settledResources };
+    for (const [res, cost] of Object.entries(validation.costs) as [ResourceType, number][]) {
+      nextResources[res] -= cost;
+    }
+    await ctx.db.patch(settled.resources._id, nextResources);
+
+    // Upgrade kingdom armyLevel
+    await ctx.db.patch(args.kingdomId, { armyLevel: args.targetLevel, updatedAt: now });
+
+    // Upgrade all existing armyUnits for this kingdom
+    const units = await readArmyUnitsWithMigration(ctx, args.kingdomId);
+    for (const doc of units) {
+      await ctx.db.patch(doc._id, { level: args.targetLevel });
+    }
+
+    return {
+      success: true,
+      armyLevel: args.targetLevel,
+      levelName: validation.levelInfo.name,
+      multiplier: validation.levelInfo.multiplier,
+      unitsUpgraded: units.length,
+    };
+  },
+});
+
 export const startTraining = mutation({
   args: {
     kingdomId: v.id("kingdoms"),
@@ -251,7 +318,7 @@ export const startTraining = mutation({
     const planResult = createTrainingPlan({
       unitType: args.unitType,
       count: args.count,
-      level: args.level ?? 1,
+      level: args.level ?? (kingdom as any).armyLevel ?? 1,
       resources: settled.settledResources,
       availableCivil: population.available,
       buildingLevels: collection.levels,
@@ -259,6 +326,7 @@ export const startTraining = mutation({
       now,
       durationModifier: modifiers.trainingDuration * civDuration,
       costModifier: civUnitType ? civilizationTrainingCostMultiplier(civUnitType, kingdom.civilization) : 1,
+      civilization: kingdom.civilization,
     });
     if (!planResult.success) throw new Error(planResult.error);
     const plan = planResult.plan;

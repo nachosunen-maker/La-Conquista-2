@@ -27,10 +27,28 @@ const setArmyEquipmentMutation = makeFunctionReference<"mutation">("army:setArmy
 const hireMercenariesMutation = makeFunctionReference<"mutation">("army:hireMercenaries");
 const setFormationMutation = makeFunctionReference<"mutation">("army:setFormation");
 const setTacticalFormationMutation = makeFunctionReference<"mutation">("army:setTacticalFormation");
+const upgradeArmyLevelMutation = makeFunctionReference<"mutation">("army:upgradeArmyLevel");
 
 interface ArmyState {
   serverTimeMs: number;
   writable: boolean;
+  armyLevel: number;
+  globalUpgradeInfo: {
+    currentLevel: number;
+    nextLevel: number;
+    isMaxLevel: boolean;
+    nextLevelInfo: {
+      level: number;
+      name: string;
+      multiplier: number;
+      foodMultiplier: number;
+      requirements: Record<string, number>;
+      costs: Record<string, number>;
+      upgradeDurationSeconds: number;
+    } | null;
+    requirementsSatisfied: boolean;
+    requirementError: string | null;
+  };
   units: Array<{ _id: string; unitType: string; level?: number; count: number; wounded?: number; legacy?: boolean; isMercenary?: boolean; contractEndsAt?: number }>;
   summary: {
     totalActive: number;
@@ -113,8 +131,17 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const hireMercenaries = useMutation(hireMercenariesMutation);
   const setFormation = useMutation(setFormationMutation);
   const setTacticalFormation = useMutation(setTacticalFormationMutation);
+  const upgradeArmyLevel = useMutation(upgradeArmyLevelMutation);
   const serverNow = useServerClock(state?.serverTimeMs);
   const action = useActionState();
+
+  const handleUpgradeArmyLevel = () => {
+    if (!state?.globalUpgradeInfo?.nextLevel) return;
+    action.run('upgrade-army-level', async () => {
+      const res = await upgradeArmyLevel({ kingdomId, targetLevel: state.globalUpgradeInfo.nextLevel });
+      return `¡Ejército ascendido al Nivel ${res.armyLevel} (${res.levelName})! Daño ×${res.multiplier}. ${res.unitsUpgraded} unidades mejoradas.`;
+    });
+  };
 
   const [unitType, setUnitType] = useState<string>('infanteria');
   const [count, setCount] = useState<number>(10);
@@ -220,6 +247,11 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
       >
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className={cardClass}>
+            <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider">Nivel Militar Global</span>
+            <span className="text-lg font-bold text-amber-300 font-serif">Nivel {state.armyLevel ?? 1}</span>
+            <span className="text-[10px] text-[#695d4c] block">{state.militaryLevels.find(l => l.level === (state.armyLevel ?? 1))?.name ?? 'Milicia'}</span>
+          </div>
+          <div className={cardClass}>
             <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider">Tropa viva</span>
             <span className="text-lg font-bold text-rose-300 font-serif">{state.summary.livingSoldiers.toLocaleString('es-ES')}</span>
             <span className="text-[10px] text-[#695d4c] block">incluye {state.summary.siegeOperators} operadores de asedio</span>
@@ -230,15 +262,45 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
             <span className="text-[10px] text-[#695d4c] block">no consumen raciones</span>
           </div>
           <div className={cardClass}>
-            <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider">Entrenamiento medio</span>
-            <span className="text-lg font-bold text-[#f5efe1] font-serif">×{state.summary.trainingMultiplier.toFixed(2)}</span>
-            <span className="text-[10px] text-[#695d4c] block">multiplicador P29</span>
-          </div>
-          <div className={cardClass}>
             <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider">Fatiga</span>
             <span className="text-lg font-bold text-amber-300 font-serif">{state.equipment.fatigue}%</span>
             <span className="text-[10px] text-[#695d4c] block">se recupera 10/día con ración normal</span>
           </div>
+        </div>
+
+        {/* Bloque de Ascenso Global de Tropas */}
+        <div className={`${cardClass} border-[#d4af37]/40 bg-[#16120e] p-3.5 space-y-2`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-serif font-bold text-[#f5efe1] uppercase tracking-wider">
+              Ascenso Global de Tropas (Nivel {state.armyLevel ?? 1} ➔ Nivel {state.globalUpgradeInfo.isMaxLevel ? 5 : state.globalUpgradeInfo.nextLevel})
+            </span>
+            <span className="text-[10px] font-mono text-[#d4af37]">
+              {state.globalUpgradeInfo.isMaxLevel ? 'Nivel Máximo (Élite)' : `Siguiente: Nivel ${state.globalUpgradeInfo.nextLevel}`}
+            </span>
+          </div>
+          <p className="text-[11px] text-[#a0937e]">
+            Eleva el nivel militar de todas las tropas existentes en el reino del nivel {state.armyLevel ?? 1} al {state.globalUpgradeInfo.isMaxLevel ? 5 : state.globalUpgradeInfo.nextLevel}. Incrementa el multiplicador de daño (+10% por nivel) y el consumo de raciones (+10% por nivel) sin alterar puntos de vida ni defensa. Las tropas futuras nacen directamente en el nivel global activo.
+          </p>
+          {!state.globalUpgradeInfo.isMaxLevel && state.globalUpgradeInfo.nextLevelInfo && (
+            <div className="text-[11px] text-[#c7beac] bg-[#100e0b] border border-[#2b2419] rounded p-2.5 space-y-1">
+              <p><strong className="text-[#e6ded0]">Beneficio:</strong> Daño ×{state.globalUpgradeInfo.nextLevelInfo.multiplier.toFixed(2)} · Consumo alimentos ×{state.globalUpgradeInfo.nextLevelInfo.foodMultiplier.toFixed(2)}.</p>
+              <p><strong className="text-[#e6ded0]">Requisitos de edificios:</strong> {formatRequirements(state.globalUpgradeInfo.nextLevelInfo.requirements, buildingLabels)}.</p>
+              <p><strong className="text-[#e6ded0]">Coste de ascenso:</strong> {formatCosts(state.globalUpgradeInfo.nextLevelInfo.costs)}.</p>
+              {state.globalUpgradeInfo.requirementError && (
+                <p className="text-amber-300 font-semibold mt-1">🔒 {state.globalUpgradeInfo.requirementError}</p>
+              )}
+            </div>
+          )}
+          {writable && !state.globalUpgradeInfo.isMaxLevel && (
+            <button
+              type="button"
+              className={primaryButton}
+              disabled={!state.globalUpgradeInfo.requirementsSatisfied || action.busy !== null}
+              onClick={handleUpgradeArmyLevel}
+            >
+              {action.busy === 'upgrade-army-level' ? 'Ascendiendo ejército…' : `Ascender Ejército a Nivel ${state.globalUpgradeInfo.nextLevel}`}
+            </button>
+          )}
         </div>
 
         <div className="space-y-2">

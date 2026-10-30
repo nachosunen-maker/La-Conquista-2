@@ -181,8 +181,8 @@ describe("Entrenamiento (Bloque B)", () => {
     await setBuildingLevel(t, kingdomId, "taberna", 1);
     const before = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     const hired = await asUser.mutation(api.army.hireMercenaries, { kingdomId, count: 5 });
-    expect(hired.cost).toBe(150);
-    expect(hired.typeId).toBe("almogavares");
+    expect(hired.cost).toBe(100);
+    expect(hired.typeId).toBe("mesnada_sueldo");
     const after = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     expect(after!.population?.total).toBe(before!.population!.total + 5);
     const army = await asUser.query(api.army.getArmyState, { kingdomId });
@@ -196,7 +196,7 @@ describe("Entrenamiento (Bloque B)", () => {
     const armyAfter = await asUser.query(api.army.getArmyState, { kingdomId });
     expect(armyAfter.mercenaries.active).toBe(7);
     expect(armyAfter.summary.byType.caballeria.active).toBe(2);
-    expect(armyAfter.mercenaries.types.filter((type: any) => type.available).map((type: any) => type.id)).toEqual(["lanzonas_mesnada", "lanceros", "almogavares", "ballesteros_genoveses", "stradioti", "piqueros_suizos"]);
+    expect(armyAfter.mercenaries.types.filter((type: any) => type.available).map((type: any) => type.id)).toEqual(["mesnada_sueldo", "lanceros_sueldo", "arqueros_fortuna", "jinetes_fortuna"]);
   });
 
   test("configurar formación táctica: valida en servidor, persiste en el reino y por defecto es equilibrada", async () => {

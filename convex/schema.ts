@@ -18,6 +18,7 @@ export default defineSchema({
       createdAt: v.optional(v.number()),
 
       // Campos escalares / unificados (opcionales para reinos preexistentes)
+      armyLevel: v.optional(v.number()), // Nivel militar global del reino (1-5)
       population: v.optional(v.number()),
       regularSoldiers: v.optional(v.number()),
       workers: v.optional(

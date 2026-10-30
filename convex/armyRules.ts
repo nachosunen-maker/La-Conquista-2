@@ -2,6 +2,7 @@
  * LA CONQUISTA — REGLAS PURAS DEL EJÉRCITO Y ENTRENAMIENTO (Bloque B, D-08 a D-15)
  * Valores en balanceConfig.ts. Sin acceso a Convex.
  */
+import type { ResourceCosts } from "./balanceConfig";
 import type { ResourceType } from "./economyCalculations";
 import {
   ARMORS,
@@ -22,6 +23,7 @@ import {
   type MercenaryType,
 } from "./balanceConfig";
 import { MAX_BUILDING_LEVEL, checkBuildingRequirements } from "./buildingRules";
+import { normalizeCivilizationId } from "./civilizationRules";
 
 export const VALID_UNIT_TYPES: readonly string[] = UNIT_TYPES;
 
@@ -115,6 +117,45 @@ export function trainingDurationMs(unitType: UnitType, count: number, durationMo
   return Math.ceil(perUnit * count * modifier);
 }
 
+export function unitBuildingRequirements(unitType: UnitType, civilization?: string | null): Readonly<Record<string, number>> {
+  const normCiv = normalizeCivilizationId(civilization);
+  if (unitType === "caballeria" && normCiv === "mongoles") {
+    // [FASE 4] Los mongoles desbloquean la caballería exclusivamente con Cuartel Nivel 2 (sin exigir Establo ni Herrería)
+    return { cuartel: 2 };
+  }
+  return UNITS[unitType].requirements;
+}
+
+export function validateGlobalArmyUpgrade(input: {
+  currentLevel: number;
+  targetLevel: number;
+  buildingLevels: Readonly<Record<string, number>>;
+  resources: Readonly<Record<ResourceType, number>>;
+}): { success: true; levelInfo: MilitaryLevelBalance; costs: ResourceCosts } | { success: false; error: string } {
+  const { currentLevel, targetLevel, buildingLevels, resources } = input;
+  if (!Number.isInteger(targetLevel) || targetLevel < 2 || targetLevel > 5) {
+    return { success: false, error: `Nivel militar objetivo inválido: ${targetLevel}. Rango permitido: 2-5.` };
+  }
+  if (targetLevel !== currentLevel + 1) {
+    return { success: false, error: `El ascenso militar debe realizarse nivel a nivel (nivel actual: ${currentLevel}, nivel solicitado: ${targetLevel}).` };
+  }
+  const levelInfo = getMilitaryLevel(targetLevel);
+  if (!levelInfo) return { success: false, error: `Definición no encontrada para nivel militar ${targetLevel}.` };
+
+  const reqCheck = checkBuildingRequirements(levelInfo.requirements, buildingLevels);
+  if (!reqCheck.satisfied) {
+    return { success: false, error: `Requisitos de edificios no cumplidos para nivel ${targetLevel} (${levelInfo.name}): ${reqCheck.error}` };
+  }
+
+  for (const [res, cost] of Object.entries(levelInfo.costs) as [ResourceType, number][]) {
+    if (cost > 0 && (resources[res] ?? 0) < cost) {
+      return { success: false, error: `Recursos insuficientes para ascender al nivel ${targetLevel}: requiere ${cost} de ${res} y hay ${Math.floor(resources[res] ?? 0)}.` };
+    }
+  }
+
+  return { success: true, levelInfo, costs: levelInfo.costs };
+}
+
 export function createTrainingPlan(input: {
   unitType: string;
   count: number;
@@ -127,6 +168,7 @@ export function createTrainingPlan(input: {
   durationModifier?: number;
   /** [DECISIÓN 21-10-2026] Sobrecoste de la civilización para este tipo de unidad (1 = ninguno). */
   costModifier?: number;
+  civilization?: string | null;
 }): { success: true; plan: TrainingPlan } | { success: false; error: string } {
   const unitType = normalizeUnitType(input.unitType);
   if (!unitType) return { success: false, error: `Tipo de unidad no admitido: '${input.unitType}'.` };
@@ -148,7 +190,9 @@ export function createTrainingPlan(input: {
   if (input.activeTraining.length >= slots) {
     return { success: false, error: `Todas las colas de entrenamiento están ocupadas (${slots} con Cuartel nivel ${cuartelLevel}).` };
   }
-  const unitRequirements = checkBuildingRequirements(unit.requirements, input.buildingLevels);
+
+  const reqs = unitBuildingRequirements(unitType, input.civilization);
+  const unitRequirements = checkBuildingRequirements(reqs, input.buildingLevels);
   if (!unitRequirements.satisfied) return { success: false, error: unitRequirements.error };
   const levelRequirements = checkBuildingRequirements(militaryLevel.requirements, input.buildingLevels);
   if (!levelRequirements.satisfied) {
@@ -335,18 +379,26 @@ export function isTacticalFormation(value: string): value is TacticalFormation {
 // Mercenarios por tipo (P53, decisión 21-10-2026)
 // ----------------------------------------------------------------------------
 const LEGACY_MERCENARY_IDS: Record<string, string> = {
-  mesnada: "lanzonas_mesnada",
-  lanceros: "lanceros",
-  arqueros: "ballesteros_genoveses",
-  jinetes: "stradioti",
-  veteranos: "almogavares",
-  guardia: "condottieri",
+  mesnada: "mesnada_sueldo",
+  lanzonas_mesnada: "mesnada_sueldo",
+  lanceros: "lanceros_sueldo",
+  arqueros: "arqueros_fortuna",
+  ballesteros_genoveses: "arqueros_fortuna",
+  stradioti: "jinetes_fortuna",
+  jinetes: "jinetes_fortuna",
+  veteranos: "compania_veterana",
+  almogavares: "compania_veterana",
+  piqueros_suizos: "compania_veterana",
+  guardia: "guardia_mercenaria",
+  condottieri: "guardia_mercenaria",
+  longbowmen_blanca: "arqueros_fortuna",
+  landsknechte: "compania_veterana",
 };
 
 export function getMercenaryType(id: string | null | undefined): MercenaryType | null {
   const raw = id ?? MERCENARIES.DEFAULT_TYPE_ID;
   const wanted = LEGACY_MERCENARY_IDS[raw] ?? raw;
-  return MERCENARIES.TYPES.find((type) => type.id === wanted) ?? null;
+  return MERCENARIES.TYPES.find((type) => type.id === wanted) ?? MERCENARIES.TYPES[0] ?? null;
 }
 
 /** Tipos contratables con el nivel de Taberna indicado (sin Taberna, ninguno). */

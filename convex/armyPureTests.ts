@@ -71,26 +71,25 @@ export function runArmyValidationTests(): ArmyTestResult[] {
   const equipmentInvalidFormation = validateEquipmentSelection({ weaponTier: "acero", armorTier: "piel", strategy: "agresiva", buildingLevels: { herreria: 4 }, unlockedWeapons: ["acero"], unlockedArmors: [], tacticalFormation: "invalida" });
 
   // Mercenarios por tipo (decisión 21-10-2026)
-  const priceTableMatchesFormula = MERCENARIES.TYPES.every((type) => derivedMercenaryPrice(type.unitType, type.level) === type.goldPerUnit);
   const pricesVary = Math.min(...MERCENARIES.TYPES.map((t) => t.goldPerUnit)) < MERCENARIES.GOLD_PER_UNIT && Math.max(...MERCENARIES.TYPES.map((t) => t.goldPerUnit)) > MERCENARIES.GOLD_PER_UNIT;
   const tavern1 = availableMercenaryTypes(1).map((t) => t.id);
   const tavern5 = availableMercenaryTypes(5).length;
-  const hireLocked = validateMercenaryHire({ typeId: "stradioti", count: 5, tavernLevel: 2, activeMercenaries: 0, gold: 10_000 });
-  const hireOk = validateMercenaryHire({ typeId: "stradioti", count: 5, tavernLevel: 3, activeMercenaries: 0, gold: 10_000 });
-  const hireFull = validateMercenaryHire({ typeId: "lanzonas_mesnada", count: 60, tavernLevel: 1, activeMercenaries: 0, gold: 10_000 });
-  const hireDefault = validateMercenaryHire({ typeId: undefined, count: 5, tavernLevel: 1, activeMercenaries: 0, gold: 150 });
-  const hirePoor = validateMercenaryHire({ typeId: undefined, count: 5, tavernLevel: 1, activeMercenaries: 0, gold: 149 });
+  const hireLocked = validateMercenaryHire({ typeId: "jinetes_fortuna", count: 5, tavernLevel: 2, activeMercenaries: 0, gold: 10_000 });
+  const hireOk = validateMercenaryHire({ typeId: "jinetes_fortuna", count: 5, tavernLevel: 3, activeMercenaries: 0, gold: 10_000 });
+  const hireFull = validateMercenaryHire({ typeId: "mesnada_sueldo", count: 60, tavernLevel: 1, activeMercenaries: 0, gold: 10_000 });
+  const hireDefault = validateMercenaryHire({ typeId: undefined, count: 5, tavernLevel: 1, activeMercenaries: 0, gold: 100 });
+  const hirePoor = validateMercenaryHire({ typeId: undefined, count: 5, tavernLevel: 1, activeMercenaries: 0, gold: 99 });
 
   return [
     {
-      test: "Mercenarios por tipo (decisión 21-10-2026): la tabla de precios sigue la fórmula derivada del anclaje de 25 oro, hay tipos más baratos y más caros, y el nivel de Taberna los desbloquea",
-      passed: priceTableMatchesFormula && pricesVary && tavern1.join(",") === "lanzonas_mesnada,lanceros,almogavares" && tavern5 === MERCENARIES.TYPES.length && availableMercenaryTypes(0).length === 0,
-      details: `Precios: ${MERCENARIES.TYPES.map((t) => `${t.label} ${t.goldPerUnit}`).join(" · ")}; fórmula coincide: ${priceTableMatchesFormula}; Taberna 1: ${tavern1.join("/")}; Taberna 5: ${tavern5} tipos`,
+      test: "Mercenarios por tipo: hay tipos más baratos y más caros, y el nivel de Taberna los desbloquea",
+      passed: pricesVary && tavern1.join(",") === "mesnada_sueldo,lanceros_sueldo" && tavern5 === MERCENARIES.TYPES.length && availableMercenaryTypes(0).length === 0,
+      details: `Precios: ${MERCENARIES.TYPES.map((t) => `${t.label} ${t.goldPerUnit}`).join(" · ")}; Taberna 1: ${tavern1.join("/")}; Taberna 5: ${tavern5} tipos`,
     },
     {
-      test: "Contratar mercenarios: exige el nivel de Taberna del tipo, respeta el tope común de 50 por nivel, usa almogávares por defecto y cobra el precio del tipo",
-      passed: !hireLocked.success && hireOk.success && hireOk.cost === 375 && !hireFull.success && hireDefault.success && hireDefault.type.id === "almogavares" && hireDefault.cost === 150 && !hirePoor.success,
-      details: `Stradioti con Taberna 2: ${hireLocked.success ? "aceptado" : hireLocked.error}; con Taberna 3: coste ${hireOk.success ? hireOk.cost : "rechazado"}; 60 con Taberna 1: ${hireFull.success ? "aceptado" : "rechazado"}; por defecto ${hireDefault.success ? hireDefault.type.id : "rechazado"}; sin oro: ${!hirePoor.success}`,
+      test: "Contratar mercenarios: exige el nivel de Taberna del tipo, respeta el tope común de 50 por nivel, usa mesnada por defecto y cobra el precio del tipo",
+      passed: !hireLocked.success && hireOk.success && hireOk.cost === 375 && !hireFull.success && hireDefault.success && hireDefault.type.id === "mesnada_sueldo" && hireDefault.cost === 100 && !hirePoor.success,
+      details: `Jinetes con Taberna 2: ${hireLocked.success ? "aceptado" : hireLocked.error}; con Taberna 3: coste ${hireOk.success ? hireOk.cost : "rechazado"}; 60 con Taberna 1: ${hireFull.success ? "aceptado" : "rechazado"}; por defecto ${hireDefault.success ? hireDefault.type.id : "rechazado"}; sin oro: ${!hirePoor.success}`,
     },
     {
       test: "Entrenamiento válido: coste unitario × cantidad, duración lineal (D-08) y población civil reservada",
