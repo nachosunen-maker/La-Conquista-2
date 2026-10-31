@@ -127,7 +127,7 @@ export const startConstruction = mutation({
       const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
       const rule = BUILDING_RULES[args.buildingType];
       if (!rule) {
-        return { success: false, error: `El edificio '${args.buildingType}' no pertenece al catálogo configurado.` };
+        return { success: false as const, error: `El edificio '${args.buildingType}' no pertenece al catálogo configurado.` };
       }
 
       const now = Date.now();
@@ -137,7 +137,7 @@ export const startConstruction = mutation({
         ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
       ]);
       const collection = validateBuildingCollection(storedBuildings);
-      if (!collection.success) return { success: false, error: collection.error };
+      if (!collection.success) return { success: false as const, error: collection.error };
       const buildingLevels = collection.levels;
       const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
       const resourceSnapshot: Record<ResourceType, number> = settled.settledResources;
@@ -154,7 +154,7 @@ export const startConstruction = mutation({
           (await constructionWorkersModifier(ctx, args.kingdomId)) *
           getCivilizationPassive(kingdom.civilization).constructionDurationMultiplier,
       });
-      if (!planResult.success) return { success: false, error: planResult.error };
+      if (!planResult.success) return { success: false as const, error: planResult.error };
 
       const nextResources = { ...resourceSnapshot };
       for (const [resource, cost] of Object.entries(planResult.plan.costs) as [ResourceType, number][]) {
@@ -177,7 +177,7 @@ export const startConstruction = mutation({
       );
 
       return {
-        success: true,
+        success: true as const,
         constructionId,
         buildingType: args.buildingType,
         targetLevel: planResult.plan.targetLevel,
@@ -186,7 +186,7 @@ export const startConstruction = mutation({
         costs: planResult.plan.costs,
       };
     } catch (err: any) {
-      return { success: false, error: err.message || "Error al iniciar la construcción." };
+      return { success: false as const, error: err.message || "Error al iniciar la construcción." };
     }
   },
 });

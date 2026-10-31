@@ -305,6 +305,8 @@ export const getMissions = query({
         rewardSummary: describeReward(mission.reward),
         status,
         completedAt: doc?.completedAt ?? null,
+        rewardGranted: doc?.rewardGranted ?? false,
+        completed: !!doc,
         progress: conditionProgress(mission.condition, built.snapshot),
       };
     };
@@ -313,7 +315,39 @@ export const getMissions = query({
       serverTimeMs: now,
       writable: owner,
       currentStage: stage
-        ? { stage: stage.stage, title: stage.title, total: MISSIONS.STAGES.length, rewardSummary: describeReward(stage.reward), missions: stage.missions.map((m) => describe(m, m.id)) }
+        ? {
+            stage: stage.stage,
+            title: stage.title,
+            total: MISSIONS.STAGES.length,
+            rewardSummary: describeReward(stage.reward),
+            missions: stage.missions.map((m) => describe(m, m.id)),
+            stageReward: (() => {
+              const stageId = stageProgressId(stage.stage);
+              const doc = progressMap.get(stageId);
+              const allMissionsFinished = stage.missions.every((m) => finishedIds.has(m.id));
+              let status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed' = 'in_progress';
+              if (doc) {
+                status = doc.rewardGranted ? 'claimed' : 'pending_claim';
+              } else if (allMissionsFinished) {
+                status = 'ready_to_finish';
+              }
+              return {
+                id: stageId,
+                progressId: stageId,
+                title: `Premio final de la Etapa ${stage.stage}: ${stage.title}`,
+                description: `Completa todas las misiones de la Etapa ${stage.stage} para reclamar este premio.`,
+                rewardSummary: describeReward(stage.reward),
+                status,
+                completedAt: doc?.completedAt ?? null,
+                rewardGranted: doc?.rewardGranted ?? false,
+                completed: !!doc,
+                progress: {
+                  current: stage.missions.filter((m) => finishedIds.has(m.id)).length,
+                  target: stage.missions.length,
+                },
+              };
+            })(),
+          }
         : null,
       completedStages,
       daily: {
@@ -322,7 +356,7 @@ export const getMissions = query({
         missions: selectDailyMissions(built.dayKey).map((m) => describe(m, dailyMissionProgressId(m.id, built.dayKey))),
       },
       secrets: {
-        discovered: secrets.filter((m) => finishedIds.has(m.id)).map((m) => {
+        discovered: secrets.filter((m) => finishedIds.has(m.id) || isConditionMet(m.condition, built.snapshot)).map((m) => {
           const doc = progressMap.get(m.id);
           const rewardGranted = doc?.rewardGranted ?? false;
           let status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed' = 'in_progress';
@@ -331,9 +365,19 @@ export const getMissions = query({
           } else if (isConditionMet(m.condition, built.snapshot)) {
             status = 'ready_to_finish';
           }
-          return { id: m.id, progressId: m.id, title: m.title, description: m.description, rewardSummary: describeReward(m.reward), status, completedAt: doc?.completedAt ?? null };
+          return {
+            id: m.id,
+            progressId: m.id,
+            title: m.title,
+            description: m.description,
+            rewardSummary: describeReward(m.reward),
+            status,
+            rewardGranted,
+            completed: !!doc,
+            completedAt: doc?.completedAt ?? null,
+          };
         }),
-        remaining: secrets.filter((m) => !finishedIds.has(m.id)).length,
+        remaining: secrets.filter((m) => !finishedIds.has(m.id) && !isConditionMet(m.condition, built.snapshot)).length,
       },
       history: progress
         .filter((doc) => doc.rewardGranted)

@@ -124,6 +124,7 @@ describe("Construcción (Bloque A)", () => {
     // Cuartel 0 → 1 cabe en el tope y cuesta el nivel 1
     const before = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     const result = await asUser.mutation(api.kingdoms.startConstruction, { kingdomId, buildingType: "cuartel" });
+    if (!result.success) throw new Error("startConstruction failed");
     const expectedCosts = costsForTargetLevel(BUILDINGS.cuartel.baseCosts, 1)!;
     expect(result.costs.gold).toBe(expectedCosts.gold);
     const after = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
@@ -142,6 +143,7 @@ describe("Construcción (Bloque A)", () => {
     const t = createTestBackend();
     const { asUser, kingdomId } = await foundKingdom(t, "user-a", "Reino A");
     const started = await asUser.mutation(api.kingdoms.startConstruction, { kingdomId, buildingType: "cuartel" });
+    if (!started.success) throw new Error("startConstruction failed");
     const mid = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     const cancelled = await asUser.mutation(api.kingdoms.cancelConstruction, { kingdomId, constructionId: started.constructionId });
     expect(cancelled.refund.gold).toBe(Math.floor(started.costs.gold! * 0.5));

@@ -24,16 +24,37 @@ interface MissionView {
   rewardSummary: string;
   status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed';
   completedAt: number | null;
+  rewardGranted?: boolean;
+  completed?: boolean;
   progress: { current: number; target: number };
 }
 
 interface MissionsState {
   serverTimeMs: number;
   writable: boolean;
-  currentStage: { stage: number; title: string; total: number; rewardSummary: string; missions: MissionView[] } | null;
+  currentStage: {
+    stage: number;
+    title: string;
+    total: number;
+    rewardSummary: string;
+    missions: MissionView[];
+    stageReward?: MissionView;
+  } | null;
   completedStages: Array<{ stage: number; title: string; rewardSummary: string }>;
   daily: { dayKey: string; resetsAt: number; missions: MissionView[] };
-  secrets: { discovered: Array<{ id: string; progressId: string; title: string; description: string; rewardSummary: string; status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed'; completedAt: number | null }>; remaining: number };
+  secrets: {
+    discovered: Array<{
+      id: string;
+      progressId: string;
+      title: string;
+      description: string;
+      rewardSummary: string;
+      status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed';
+      completedAt: number | null;
+      rewardGranted?: boolean;
+    }>;
+    remaining: number;
+  };
   history: Array<{ progressId: string; title: string; kind: string; rewardSummary: string; completedAt: number }>;
 }
 
@@ -86,7 +107,7 @@ export class MissionsErrorBoundary extends React.Component<MissionsErrorBoundary
   }
 }
 
-function MissionRow({ mission, kingdomId }: { mission: MissionView; kingdomId: string }) {
+function MissionRow({ mission, kingdomId, isOwner }: { mission: MissionView; kingdomId: string; isOwner: boolean }) {
   const finish = useMutation(finishMissionMutation);
   const claim = useMutation(claimRewardMutation);
   const action = useActionState();
@@ -94,7 +115,7 @@ function MissionRow({ mission, kingdomId }: { mission: MissionView; kingdomId: s
   const handleFinish = async () => {
     await action.run(`finish-${mission.progressId}`, async () => {
       const res = await finish({ kingdomId, progressId: mission.progressId });
-      if (res && res.success === false) return res;
+      if (res && (res as any).success === false) return res;
       return "¡Misión finalizada! Ya puedes cobrar la recompensa.";
     });
   };
@@ -102,54 +123,104 @@ function MissionRow({ mission, kingdomId }: { mission: MissionView; kingdomId: s
   const handleClaim = async () => {
     await action.run(`claim-${mission.progressId}`, async () => {
       const res = await claim({ kingdomId, progressId: mission.progressId });
-      if (res && res.success === false) return res;
+      if (res && (res as any).success === false) return res;
       return "¡Recompensa cobrada con éxito!";
     });
   };
 
-  const isClaimed = mission.status === 'claimed';
-  const isPendingClaim = mission.status === 'pending_claim';
-  const isReadyToFinish = mission.status === 'ready_to_finish';
+  // Determinación robusta de los 4 estados canónicos:
+  // 1. Recompensa cobrada
+  const isClaimed =
+    mission.status === 'claimed' ||
+    mission.rewardGranted === true;
 
-  const pct = mission.progress.target > 0 ? Math.min(100, Math.round((mission.progress.current / mission.progress.target) * 100)) : 0;
+  // 2. Misión finalizada, pendiente de cobrar
+  const isPendingClaim =
+    !isClaimed && (
+      mission.status === 'pending_claim' ||
+      (mission.rewardGranted === false && (mission.completedAt != null || mission.completed === true))
+    );
+
+  // 3. Objetivos cumplidos, lista para finalizar
+  const isReadyToFinish =
+    !isClaimed &&
+    !isPendingClaim && (
+      mission.status === 'ready_to_finish' ||
+      (mission.progress != null && mission.progress.target > 0 && mission.progress.current >= mission.progress.target)
+    );
+
+  // 4. Objetivos pendientes
+  const isInProgress = !isClaimed && !isPendingClaim && !isReadyToFinish;
+
+  const pct = mission.progress?.target > 0
+    ? Math.min(100, Math.round((mission.progress.current / mission.progress.target) * 100))
+    : 0;
 
   return (
     <div className={`${cardClass} text-[11px] space-y-2 ${isClaimed ? 'opacity-80' : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2">
-          {isClaimed ? <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" /> : <Circle className="w-4 h-4 text-[#6e6352] flex-shrink-0 mt-0.5" />}
+          {isClaimed ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+          ) : isPendingClaim ? (
+            <CheckCircle2 className="w-4 h-4 text-[#d4af37] flex-shrink-0 mt-0.5" />
+          ) : isReadyToFinish ? (
+            <Sparkles className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+          ) : (
+            <Circle className="w-4 h-4 text-[#6e6352] flex-shrink-0 mt-0.5" />
+          )}
           <div>
-            <span className={`font-semibold block ${isClaimed ? 'text-emerald-200 line-through decoration-emerald-700' : 'text-[#f0e8d4]'}`}>{mission.title}</span>
+            <span className={`font-semibold block ${isClaimed ? 'text-emerald-200 line-through decoration-emerald-700' : 'text-[#f0e8d4]'}`}>
+              {mission.title}
+            </span>
             <span className="text-[#c7beac]">{mission.description}</span>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          {isClaimed && <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded font-medium border border-emerald-800">COBRADA</span>}
+
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          {isClaimed && (
+            <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded font-bold border border-emerald-800 tracking-wider">
+              COBRADA
+            </span>
+          )}
+
           {isPendingClaim && (
-            <button
-              onClick={handleClaim}
-              disabled={action.busy !== null}
-              className="bg-[#d4af37] hover:bg-[#c29f2e] text-[#110e0a] font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
-            >
-              {action.busy === `claim-${mission.progressId}` ? 'Cobrando...' : 'Cobrar recompensa'}
-            </button>
+            isOwner ? (
+              <button
+                onClick={handleClaim}
+                disabled={action.busy !== null}
+                className="bg-[#d4af37] hover:bg-[#c29f2e] text-[#110e0a] font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
+              >
+                {action.busy === `claim-${mission.progressId}` ? 'Cobrando...' : 'COBRAR RECOMPENSA'}
+              </button>
+            ) : (
+              <span className="text-[10px] text-[#d4af37] font-semibold uppercase">Pendiente de cobro</span>
+            )
           )}
+
           {isReadyToFinish && (
-            <button
-              onClick={handleFinish}
-              disabled={action.busy !== null}
-              className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
-            >
-              {action.busy === `finish-${mission.progressId}` ? 'Finalizando...' : 'Finalizar misión'}
-            </button>
+            isOwner ? (
+              <button
+                onClick={handleFinish}
+                disabled={action.busy !== null}
+                className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
+              >
+                {action.busy === `finish-${mission.progressId}` ? 'Finalizando...' : 'FINALIZAR MISIÓN'}
+              </button>
+            ) : (
+              <span className="text-[10px] text-blue-400 font-semibold uppercase">Objetivos cumplidos</span>
+            )
           )}
-          {!isClaimed && !isPendingClaim && !isReadyToFinish && (
-            <span className="font-mono text-[#e6ded0] whitespace-nowrap">{`${mission.progress.current.toLocaleString('es-ES')}/${mission.progress.target.toLocaleString('es-ES')}`}</span>
+
+          {isInProgress && mission.progress && (
+            <span className="font-mono text-[#e6ded0] whitespace-nowrap">
+              {`${mission.progress.current.toLocaleString('es-ES')}/${mission.progress.target.toLocaleString('es-ES')}`}
+            </span>
           )}
         </div>
       </div>
 
-      {!isClaimed && !isPendingClaim && !isReadyToFinish && (
+      {isInProgress && (
         <div className="h-1.5 rounded bg-[#100e0b] overflow-hidden">
           <div className="h-full bg-[#d4af37]/70" style={{ width: `${pct}%` }} />
         </div>
@@ -162,7 +233,7 @@ function MissionRow({ mission, kingdomId }: { mission: MissionView; kingdomId: s
   );
 }
 
-function SecretMissionRow({ mission, kingdomId }: { mission: MissionsState['secrets']['discovered'][number]; kingdomId: string }) {
+function SecretMissionRow({ mission, kingdomId, isOwner }: { mission: MissionsState['secrets']['discovered'][number]; kingdomId: string; isOwner: boolean }) {
   const finish = useMutation(finishMissionMutation);
   const claim = useMutation(claimRewardMutation);
   const action = useActionState();
@@ -170,49 +241,75 @@ function SecretMissionRow({ mission, kingdomId }: { mission: MissionsState['secr
   const handleFinish = async () => {
     await action.run(`finish-${mission.progressId}`, async () => {
       const res = await finish({ kingdomId, progressId: mission.progressId });
-      if (res && res.success === false) return res;
-      return "¡Misión secreta finalizada!";
+      if (res && (res as any).success === false) return res;
+      return "¡Misión secreta finalizada! Ya puedes cobrar la recompensa.";
     });
   };
 
   const handleClaim = async () => {
     await action.run(`claim-${mission.progressId}`, async () => {
       const res = await claim({ kingdomId, progressId: mission.progressId });
-      if (res && res.success === false) return res;
-      return "¡Recompensa cobrada!";
+      if (res && (res as any).success === false) return res;
+      return "¡Recompensa cobrada con éxito!";
     });
   };
 
-  const isClaimed = mission.status === 'claimed';
-  const isPendingClaim = mission.status === 'pending_claim';
-  const isReadyToFinish = mission.status === 'ready_to_finish';
+  const isClaimed =
+    mission.status === 'claimed' ||
+    mission.rewardGranted === true;
+
+  const isPendingClaim =
+    !isClaimed && (
+      mission.status === 'pending_claim' ||
+      (mission.rewardGranted === false && (mission.completedAt != null || (mission as any).completed === true))
+    );
+
+  const isReadyToFinish =
+    !isClaimed &&
+    !isPendingClaim && (
+      mission.status === 'ready_to_finish'
+    );
 
   return (
-    <div className={`${cardClass} text-[11px] space-y-1`}>
+    <div className={`${cardClass} text-[11px] space-y-1 ${isClaimed ? 'opacity-80' : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <div>
-          <span className="font-semibold text-[#f0e8d4] block">{mission.title}</span>
+          <span className={`font-semibold block ${isClaimed ? 'text-emerald-200 line-through decoration-emerald-700' : 'text-[#f0e8d4]'}`}>
+            {mission.title}
+          </span>
           <span className="text-[#c7beac]">{mission.description}</span>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          {isClaimed && <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded font-medium border border-emerald-800">COBRADA</span>}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          {isClaimed && (
+            <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded font-bold border border-emerald-800 tracking-wider">
+              COBRADA
+            </span>
+          )}
           {isPendingClaim && (
-            <button
-              onClick={handleClaim}
-              disabled={action.busy !== null}
-              className="bg-[#d4af37] text-[#110e0a] font-bold px-2.5 py-1 rounded text-[10px] uppercase disabled:opacity-50"
-            >
-              {action.busy === `claim-${mission.progressId}` ? 'Cobrando...' : 'Cobrar recompensa'}
-            </button>
+            isOwner ? (
+              <button
+                onClick={handleClaim}
+                disabled={action.busy !== null}
+                className="bg-[#d4af37] hover:bg-[#c29f2e] text-[#110e0a] font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
+              >
+                {action.busy === `claim-${mission.progressId}` ? 'Cobrando...' : 'COBRAR RECOMPENSA'}
+              </button>
+            ) : (
+              <span className="text-[10px] text-[#d4af37] font-semibold uppercase">Pendiente de cobro</span>
+            )
           )}
           {isReadyToFinish && (
-            <button
-              onClick={handleFinish}
-              disabled={action.busy !== null}
-              className="bg-[#2563eb] text-white font-bold px-2.5 py-1 rounded text-[10px] uppercase disabled:opacity-50"
-            >
-              {action.busy === `finish-${mission.progressId}` ? 'Finalizando...' : 'Finalizar misión'}
-            </button>
+            isOwner ? (
+              <button
+                onClick={handleFinish}
+                disabled={action.busy !== null}
+                className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
+              >
+                {action.busy === `finish-${mission.progressId}` ? 'Finalizando...' : 'FINALIZAR MISIÓN'}
+              </button>
+            ) : (
+              <span className="text-[10px] text-blue-400 font-semibold uppercase">Objetivos cumplidos</span>
+            )
           )}
         </div>
       </div>
@@ -283,8 +380,20 @@ function MissionsPanelInner(props: { kingdomId: string; isOwner: boolean }) {
           </h3>
           {state.currentStage ? (
             <>
-              {state.currentStage.missions.map((m) => <MissionRow key={m.progressId} mission={m} kingdomId={kingdomId} />)}
-              <p className="text-[11px] text-[#8e816d]">Premio final de la etapa: {state.currentStage.rewardSummary}</p>
+              {state.currentStage.missions.map((m) => (
+                <MissionRow key={m.progressId} mission={m} kingdomId={kingdomId} isOwner={isOwner} />
+              ))}
+              {state.currentStage.stageReward && (
+                <div className="pt-2 border-t border-[#241e15] space-y-1">
+                  <h4 className="text-[10px] font-semibold text-[#d4af37] uppercase tracking-wider flex items-center gap-1">
+                    <Trophy className="w-3.5 h-3.5" /> Premio final de la etapa
+                  </h4>
+                  <MissionRow mission={state.currentStage.stageReward} kingdomId={kingdomId} isOwner={isOwner} />
+                </div>
+              )}
+              {!state.currentStage.stageReward && (
+                <p className="text-[11px] text-[#8e816d]">Premio final de la etapa: {state.currentStage.rewardSummary}</p>
+              )}
             </>
           ) : (
             <p className="text-[11px] text-[#8e816d] italic">Has completado todas las etapas disponibles.</p>
@@ -297,14 +406,18 @@ function MissionsPanelInner(props: { kingdomId: string; isOwner: boolean }) {
           <h3 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5" /> Misiones de hoy · se renuevan en {resetHours} h {resetMinutes} min
           </h3>
-          {state.daily.missions.map((m) => <MissionRow key={m.progressId} mission={m} kingdomId={kingdomId} />)}
+          {state.daily.missions.map((m) => (
+            <MissionRow key={m.progressId} mission={m} kingdomId={kingdomId} isOwner={isOwner} />
+          ))}
           <h3 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider flex items-center gap-1.5 pt-2">
             <EyeOff className="w-3.5 h-3.5" /> Misiones secretas
           </h3>
           {state.secrets.discovered.length === 0 ? (
             <p className="text-[11px] text-[#8e816d] italic">Ninguna descubierta todavía. Sus condiciones se revelan al cumplirse.</p>
           ) : (
-            state.secrets.discovered.map((m) => <SecretMissionRow key={m.id} mission={m} kingdomId={kingdomId} />)
+            state.secrets.discovered.map((m) => (
+              <SecretMissionRow key={m.id} mission={m} kingdomId={kingdomId} isOwner={isOwner} />
+            ))
           )}
           <p className="text-[11px] text-[#8e816d]">{state.secrets.remaining} misiones secretas por descubrir.</p>
         </div>
