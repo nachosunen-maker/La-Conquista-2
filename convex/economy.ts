@@ -169,9 +169,13 @@ export async function settleRelationalKingdomEconomy(
   callerUserId: string,
   now: number
 ) {
+  console.log("DEBUG: settleRelationalKingdomEconomy starting for kingdom:", kingdom._id);
   await completeDueConstructions(ctx, kingdom._id, now);
+  console.log("DEBUG: completeDueConstructions done");
   await completeDueTraining(ctx, kingdom._id, now);
+  console.log("DEBUG: completeDueTraining done");
   await completeDueResearch(ctx, kingdom._id, now);
+  console.log("DEBUG: completeDueResearch done");
 
   // [DECISIÓN 21-10-2026] Migración perezosa de identificadores de civilización antiguos (Navajos, Masáis).
   const normalizedCivilization = normalizeCivilizationId(kingdom.civilization);
@@ -179,31 +183,39 @@ export async function settleRelationalKingdomEconomy(
     await ctx.db.patch(kingdom._id, { civilization: normalizedCivilization });
     kingdom = { ...kingdom, civilization: normalizedCivilization };
   }
+  console.log("DEBUG: civilization normalized");
   const state = await readRelationalKingdomState(ctx, kingdom._id);
+  console.log("DEBUG: state read, hasResources:", !!state.resources, "hasPopulation:", !!state.population);
   if (!state.resources) throw new Error("No existen recursos para el reino.");
   if (!state.population) {
+    console.log("DEBUG: population missing, inserting default...");
     const populationId = await ctx.db.insert("population" as any, {
       kingdomId: kingdom._id,
       total: INITIAL_KINGDOM_CONFIG.population,
       available: INITIAL_KINGDOM_CONFIG.unassignedCivil,
     });
     state.population = await ctx.db.get(populationId);
+    console.log("DEBUG: population inserted");
   }
 
   const isFirstInitialization = state.resources.settlementInitialized !== true;
+  console.log("DEBUG: calling calculateSettlementProgress, isFirstInitialization:", isFirstInitialization);
   const settlement = calculateSettlementProgress({
     kingdom,
     ...state,
     currentServerTimeMs: now,
     options: { isFirstInitialization, callerUserId },
   });
+  console.log("DEBUG: calculateSettlementProgress result success:", settlement.success);
   if (!settlement.success || settlement.updatedFood === undefined) {
     throw new Error(settlement.error ?? "Fallo al liquidar la economía relacional.");
   }
 
   const collection = validateBuildingCollection(state.buildings);
+  console.log("DEBUG: validateBuildingCollection success:", collection.success);
   const buildingLevels = collection.success ? collection.levels : {};
   const completedTechnologies = await readCompletedTechnologyIds(ctx, kingdom._id);
+  console.log("DEBUG: readCompletedTechnologyIds count:", completedTechnologies.length);
 
   let extended: ExtendedEconomyResult | null = null;
   let settledResources: KingdomResources = {
@@ -215,6 +227,7 @@ export async function settleRelationalKingdomEconomy(
   };
 
   if (!isFirstInitialization) {
+    console.log("DEBUG: non-first init, calling adaptRemoteDocumentsToEconomicState");
     const adapted = adaptRemoteDocumentsToEconomicState({
       kingdom,
       resources: state.resources,
@@ -224,10 +237,12 @@ export async function settleRelationalKingdomEconomy(
       buildings: state.buildings,
       foodTier: settlement.appliedFoodTier ?? (kingdom.foodTier || "normal"),
     });
+    console.log("DEBUG: adaptRemoteDocumentsToEconomicState success:", adapted.success);
     if (!adapted.success || !adapted.kingdomState || !adapted.militaryClassification) {
       throw new Error(adapted.error ?? "No se pudo adaptar el estado relacional del reino.");
     }
     const terrainBonuses = await readTerrainBonuses(ctx, kingdom._id);
+    console.log("DEBUG: calling simulateExtendedEconomy");
     extended = simulateExtendedEconomy({
       kingdomState: adapted.kingdomState,
       now,
@@ -252,6 +267,7 @@ export async function settleRelationalKingdomEconomy(
       civilization: kingdom.civilization,
       bonusProductionMultiplier: activeProductionBonusMultiplier(kingdom.temporaryBonuses, now),
     });
+    console.log("DEBUG: simulateExtendedEconomy done");
     settledResources = extended.updatedResources;
   }
 

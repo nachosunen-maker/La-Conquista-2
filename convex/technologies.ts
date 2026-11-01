@@ -99,7 +99,20 @@ export const researchTechnology = mutation({
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
     const now = Date.now();
-    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
+    let settled;
+    try {
+      console.log("DEBUG: Calling settleRelationalKingdomEconomy for kingdom:", args.kingdomId);
+      settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
+      console.log("DEBUG: settleRelationalKingdomEconomy completed successfully for kingdom:", args.kingdomId);
+    } catch (error: any) {
+      console.error("DEBUG: FATAL ERROR in settleRelationalKingdomEconomy during researchTechnology:", {
+        kingdomId: args.kingdomId,
+        techType: args.techType,
+        error: error.message,
+        stack: error.stack,
+      });
+      throw error;
+    }
     const [progress, buildings] = await Promise.all([
       readProgress(ctx, args.kingdomId),
       ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
