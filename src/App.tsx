@@ -1948,20 +1948,16 @@ function KingdomOverviewContent() {
             </div>
 
             {/* Medidor de guarnición */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-[#19150f] p-3 rounded-lg border border-[#2c2419]">
-                <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider mb-0.5">Efectivos Totales</span>
+            <div className="bg-[#19150f] p-3 rounded-lg border border-[#2c2419] flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider mb-0.5">Contingente Permanente</span>
                 <span className="text-xl font-bold text-rose-300 font-serif">
                   {totalTroops !== null ? totalTroops.toLocaleString('es-ES') : 'No disponible'}
                 </span>
-                <span className="text-[10px] text-[#695d4c] block mt-0.5">contingente permanente</span>
+                <span className="text-[10px] text-[#695d4c] block mt-0.5">tropas preparadas para el combate</span>
               </div>
-              <div className="bg-[#19150f] p-3 rounded-lg border border-[#2c2419]">
-                <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider mb-0.5">Moral de Combate</span>
-                <span className="text-xl font-bold text-[#f5efe1] font-serif">
-                  {typeof kingdom.militaryMorale === 'number' ? `${kingdom.militaryMorale}%` : 'No disponible'}
-                </span>
-                <span className="text-[10px] text-[#695d4c] block mt-0.5">firmeza marcial</span>
+              <div className="p-2.5 bg-rose-950/40 border border-rose-800/40 rounded-lg text-rose-400">
+                <Swords className="w-6 h-6" />
               </div>
             </div>
 
@@ -2013,169 +2009,373 @@ function KingdomOverviewContent() {
         </section>
       </div>
 
-      <section className="bg-[#14110d] border border-[#2b2419] rounded-xl p-5 shadow-sm space-y-4">
-        <div className="flex items-center justify-between border-b border-[#241e15] pb-3">
-          <div className="flex items-center gap-2">
-            <Castle className="w-4 h-4 text-[#d4af37]" />
-            <h2 className="text-sm font-serif font-bold uppercase tracking-wider text-[#e6ded0]">Edificios y Construcción</h2>
+      {/* ====================================================================
+          5. BLOQUE DE EDIFICIOS Y CONSTRUCCIÓN (CATÁLOGO UNIFICADO EN 6 SUBCATEGORÍAS)
+          ==================================================================== */}
+      <section className="bg-[#14110d] border border-[#2b2419] rounded-xl p-5 shadow-sm space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#241e15] pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-[#211a12] border border-[#d4af37]/40 rounded-lg text-[#d4af37]">
+              <Castle className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-sm font-serif font-bold uppercase tracking-wider text-[#e6ded0]">
+                Edificios y Construcción
+              </h2>
+              <p className="text-[11px] text-[#8e816d]">
+                18 edificios organizados por subcategorías. Mejora la infraestructura de tu reino.
+              </p>
+            </div>
           </div>
-          <span className="text-[11px] text-[#8e816d]">
+          <span className="text-[11px] font-mono text-[#d4af37] bg-[#221a10] border border-[#d4af37]/30 px-3 py-1 rounded">
             {constructionState ? `${constructionState.constructionQueue.length}/2 ranuras ocupadas` : 'Estado no disponible'}
           </span>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <h3 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider">Edificios persistidos</h3>
-            {constructionState?.buildings.length ? constructionState.buildings.map((building) => (
-              <div key={building._id} className="bg-[#18140f] p-3 rounded-lg border border-[#2c2419] flex justify-between text-xs">
-                <span className="text-[#f0e8d4]">{building.buildingType}</span>
-                <span className="font-mono text-[#d4af37]">Nivel {building.level}</span>
+        {/* Resumen de cola activa del servidor si hay construcciones en curso */}
+        {constructionState?.constructionQueue && constructionState.constructionQueue.length > 0 && (
+          <div className="bg-[#19140e] border border-[#3d301f] rounded-xl p-4 space-y-3 shadow-inner">
+            <div className="flex items-center justify-between border-b border-[#2d2215] pb-2">
+              <span className="text-xs font-serif font-bold text-[#d4af37] uppercase tracking-wider flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                Obras Activas en la Cuadrilla ({constructionState.constructionQueue.length}/2)
+              </span>
+              <span className="text-[10px] text-[#8e816d] font-mono">Reloj Autoritativo</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {constructionState.constructionQueue.map((construction) => {
+                const timingAvailable = hasConstructionTiming(construction);
+                const progress = timingAvailable
+                  ? constructionProgress(construction, constructionDisplayServerTime)
+                  : null;
+                const remainingSeconds = timingAvailable
+                  ? Math.max(0, (construction.startedAt + construction.durationMs - constructionDisplayServerTime) / 1000)
+                  : null;
+                const notStarted = timingAvailable && construction.startedAt > constructionDisplayServerTime;
+                const progressLabel = progress === null ? 'En curso' : `${Math.floor(progress)}%`;
+                const label = buildingLabels[construction.buildingType ?? ''] ?? construction.buildingType ?? 'Edificio';
+
+                return (
+                  <div key={construction._id} className="bg-[#120f0b] border border-[#2b2215] rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-[#f0e8d4]">{label} (Nivel {construction.targetLevel ?? '—'})</span>
+                      <span className="font-mono text-[#d4af37] font-bold">{progressLabel}</span>
+                    </div>
+                    <div className="w-full h-2 bg-[#0c0a07] rounded-full overflow-hidden border border-[#261f14]">
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-600 to-[#d4af37] transition-all duration-500 rounded-full"
+                        style={{ width: `${Math.min(100, Math.max(0, progress ?? 0))}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-[#8e816d]">
+                      <span>{notStarted ? 'Comienza en breve' : remainingSeconds !== null ? `Tiempo restante: ${formatSecondsDuration(remainingSeconds)}` : 'En proceso'}</span>
+                      {isOwner && !notStarted && progress !== null && progress < 100 && (
+                        <button
+                          type="button"
+                          onClick={() => handleConstructionCancellation(construction)}
+                          disabled={cancellingConstruction !== null}
+                          className="text-rose-300 hover:text-rose-200 underline text-[11px] cursor-pointer"
+                        >
+                          {cancellingConstruction === construction._id ? 'Cancelando…' : 'Cancelar (50% reembolso)'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Mensajes de feedback de construcción */}
+        <StatusMessages error={constructionError} message={constructionMessage} isConstruction={true} />
+
+        {/* Carga de elementos fundacionales para reinos antiguos */}
+        {isOwner && constructionState && (!constructionState.hasInitialBuildings || !kingdom.homeTerritoryId) && (
+          <div className="rounded-lg border border-amber-900/40 bg-[#1b160f] p-3 text-[11px] text-[#c7b99f] space-y-2">
+            <span className="block">Este reino es anterior a las reglas actuales y le faltan elementos fundacionales:</span>
+            <div className="flex flex-wrap gap-2">
+              {!constructionState.hasInitialBuildings && (
+                <button
+                  type="button"
+                  onClick={handleBootstrapBuildings}
+                  disabled={bootstrapBusy !== null}
+                  className="rounded border border-[#6e5520] px-2.5 py-1 text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50 font-serif text-xs"
+                >
+                  {bootstrapBusy === 'buildings' ? 'Asignando…' : 'Recibir edificios fundacionales'}
+                </button>
+              )}
+              {!kingdom.homeTerritoryId && (
+                <button
+                  type="button"
+                  onClick={handleEnsureHomeTerritory}
+                  disabled={bootstrapBusy !== null}
+                  className="rounded border border-[#6e5520] px-2.5 py-1 text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50 font-serif text-xs"
+                >
+                  {bootstrapBusy === 'territory' ? 'Asignando…' : 'Asignar territorio principal'}
+                </button>
+              )}
+            </div>
+            {bootstrapMessage && <span className="block text-emerald-300">{bootstrapMessage}</span>}
+          </div>
+        )}
+
+        {/* CATÁLOGO DE EDIFICIOS EN LAS 6 SUBCATEGORÍAS APROBADAS (DESPLEGADAS POR DEFECTO) */}
+        <div className="space-y-6 pt-2">
+          {[
+            {
+              id: 'administracion',
+              label: 'Administración',
+              icon: <Crown className="w-4 h-4 text-[#d4af37]" />,
+              description: 'Gobierno del reino, leyes y diplomacia',
+              types: ['castillo', 'parlamento'],
+            },
+            {
+              id: 'produccion',
+              label: 'Producción',
+              icon: <Pickaxe className="w-4 h-4 text-amber-500" />,
+              description: 'Extracción de recursos primarios y producción agrícola',
+              types: ['granja', 'aserradero', 'cantera', 'minaHierro', 'minaOro'],
+            },
+            {
+              id: 'infraestructura',
+              label: 'Infraestructura',
+              icon: <Castle className="w-4 h-4 text-[#c5a059]" />,
+              description: 'Viviendas para la población, almacenamiento y murallas',
+              types: ['viviendas', 'mercado', 'murallas'],
+            },
+            {
+              id: 'militar',
+              label: 'Militar',
+              icon: <Swords className="w-4 h-4 text-rose-400" />,
+              description: 'Reclutamiento, forja de armamento y atención a heridos',
+              types: ['cuartel', 'herreria', 'hospitalMilitar'],
+            },
+            {
+              id: 'conocimiento',
+              label: 'Conocimiento',
+              icon: <BookOpen className="w-4 h-4 text-sky-400" />,
+              description: 'Investigación científica y avances tecnológicos',
+              types: ['universidad'],
+            },
+            {
+              id: 'servicios',
+              label: 'Servicios y bienestar',
+              icon: <Heart className="w-4 h-4 text-pink-400" />,
+              description: 'Comercio local, fe, entretenimiento y mercenarios',
+              types: ['taberna', 'panaderia', 'iglesia', 'circo'],
+            },
+          ].map((category) => (
+            <div key={category.id} className="space-y-3">
+              {/* Encabezado de la Subcategoría */}
+              <div className="flex items-center gap-2 border-b border-[#2c2419] pb-2">
+                <div className="p-1 rounded bg-[#1e1811] border border-[#3d3221]">
+                  {category.icon}
+                </div>
+                <div>
+                  <h3 className="text-xs font-serif font-bold text-[#f5efe1] uppercase tracking-wider">
+                    {category.label}
+                  </h3>
+                  <p className="text-[10px] text-[#7d705c]">{category.description}</p>
+                </div>
               </div>
-            )) : (
-              <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">
-                No hay documentos de edificios persistidos para este reino.
-              </p>
-            )}
-            {constructionState?.catalogForLevels && (
-              <div className="mt-3 space-y-1.5">
-                <h4 className="text-[10px] font-semibold uppercase tracking-wider text-[#8e816d]">
-                  Catálogo oficial · siguiente nivel
-                  {constructionState.constructionDurationModifier && constructionState.constructionDurationModifier !== 1
-                    ? ` · duración ×${constructionState.constructionDurationModifier.toFixed(2)} por tecnología`
-                    : ''}
-                </h4>
-                {Object.entries(constructionState.catalogForLevels).map(([buildingType, entry]) => {
+
+              {/* Lista compacta de edificios de la subcategoría */}
+              <div className="space-y-2">
+                {category.types.map((type) => {
+                  const entry = constructionState?.catalogForLevels?.[type];
+                  const staticConfig = BUILDINGS[type];
+                  const label = entry?.label ?? staticConfig?.label ?? type;
+
+                  const currentLevel = entry?.currentLevel ?? constructionState?.buildingLevels?.[type] ?? 0;
+                  const nextLevel = entry?.nextLevel ?? (currentLevel < 100 ? currentLevel + 1 : null);
+
+                  const activeConstruction = constructionState?.constructionQueue.find((c) => c.buildingType === type);
+
                   const blockers: string[] = [];
-                  if (!entry.requirementsSatisfied) blockers.push(`requiere ${formatRequirements(entry.requirements, buildingLabels)}`);
-                  if (!entry.castleCapSatisfied) blockers.push(`el Castillo (nivel ${constructionState.buildingLevels?.castillo ?? 0}) limita el nivel`);
-                  if (entry.nextLevel === null) blockers.push('nivel máximo alcanzado');
-                  const inQueue = constructionState.constructionQueue.some((c) => c.buildingType === buildingType);
-                  const canStart = isOwner && blockers.length === 0 && !inQueue;
-                  const jobNames: Record<string, string> = { agriculture: 'agricultura', wood: 'madera', stone: 'piedra', iron: 'hierro', gold: 'oro' };
-                  const professionNames: Record<string, string> = { medicine: 'medicina', religion: 'religión', entertainment: 'circo y feria', bakery: 'panadería' };
-                  const professionJob = (BUILDINGS as Record<string, { professionJob?: string }>)[buildingType]?.professionJob;
-                  const effect = entry.residentialCapacityPerLevel > 0
-                    ? `+${entry.residentialCapacityPerLevel} plazas de vivienda`
-                    : entry.workerCapacityPerLevel > 0
-                      ? `+${entry.workerCapacityPerLevel} trabajadores${entry.jobType ? ` de ${jobNames[entry.jobType] ?? entry.jobType}` : professionJob ? ` de ${professionNames[professionJob] ?? professionJob}` : ''} · ${entry.role}`
-                      : entry.role;
+                  if (entry && !entry.requirementsSatisfied) {
+                    blockers.push(`requiere ${formatRequirements(entry.requirements, buildingLabels)}`);
+                  }
+                  if (entry && !entry.castleCapSatisfied) {
+                    blockers.push(`el Castillo (nivel ${constructionState?.buildingLevels?.castillo ?? 0}) limita el nivel`);
+                  }
+                  if (nextLevel === null) {
+                    blockers.push('nivel máximo alcanzado (100)');
+                  }
+
+                  const canStart = isOwner && blockers.length === 0 && !activeConstruction;
+
+                  const jobNames: Record<string, string> = {
+                    agriculture: 'agricultura',
+                    wood: 'madera',
+                    stone: 'piedra',
+                    iron: 'hierro',
+                    gold: 'oro',
+                  };
+                  const professionNames: Record<string, string> = {
+                    medicine: 'medicina',
+                    religion: 'religión',
+                    entertainment: 'circo y feria',
+                    bakery: 'panadería',
+                  };
+
+                  const professionJob = staticConfig?.professionJob;
+                  const effect = entry
+                    ? entry.residentialCapacityPerLevel > 0
+                      ? `+${entry.residentialCapacityPerLevel} plazas de vivienda por nivel`
+                      : entry.workerCapacityPerLevel > 0
+                        ? `+${entry.workerCapacityPerLevel} trabajadores por nivel${entry.jobType ? ` (${jobNames[entry.jobType] ?? entry.jobType})` : professionJob ? ` (${professionNames[professionJob] ?? professionJob})` : ''}`
+                        : entry.role
+                    : staticConfig?.role ?? 'Edificio del reino';
+
                   return (
-                    <div key={buildingType} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 rounded border border-[#2b2419] bg-[#100e0b] px-2.5 py-2 text-[11px]">
-                      <span className="text-[#c7beac]">
-                        <strong className="text-[#f0e8d4]">{entry.label}</strong> nivel {entry.currentLevel}
-                        {entry.nextLevel !== null && (
-                          <> → {entry.nextLevel} · coste: {formatCosts(entry.nextCosts)} · tarda: {entry.nextDurationMs ? formatSecondsDuration(entry.nextDurationMs / 1000) : 'sin dato'} · efecto: {effect}</>
+                    <div
+                      key={type}
+                      className={`rounded-lg border p-3.5 transition-all text-xs flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+                        activeConstruction
+                          ? 'bg-[#18130d] border-amber-600/50 shadow-md'
+                          : currentLevel > 0
+                            ? 'bg-[#120f0c] border-[#2c2419]'
+                            : 'bg-[#0f0c09] border-[#221b13] opacity-90'
+                      }`}
+                    >
+                      {/* Información principal del edificio */}
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-serif font-bold text-sm text-[#f5efe1]">{label}</span>
+                          <span className="font-mono text-xs font-semibold text-[#d4af37] bg-[#1a140e] px-2 py-0.5 rounded border border-[#3b2f1f]">
+                            Nivel {currentLevel}
+                          </span>
+
+                          {/* Distintivos de estado */}
+                          {activeConstruction ? (
+                            <span className="text-[10px] text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded font-semibold animate-pulse">
+                              En obra (➔ Nivel {activeConstruction.targetLevel})
+                            </span>
+                          ) : nextLevel === null ? (
+                            <span className="text-[10px] text-[#d4af37] bg-[#221c10] border border-[#d4af37]/40 px-2 py-0.5 rounded font-semibold">
+                              Máximo (100)
+                            </span>
+                          ) : blockers.length > 0 ? (
+                            <span className="text-[10px] text-amber-400 bg-amber-950/30 border border-amber-800/40 px-2 py-0.5 rounded">
+                              Bloqueado
+                            </span>
+                          ) : currentLevel > 0 ? (
+                            <span className="text-[10px] text-emerald-400 bg-emerald-950/30 border border-emerald-800/40 px-2 py-0.5 rounded">
+                              Construido
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-300 bg-emerald-950/20 border border-emerald-800/30 px-2 py-0.5 rounded">
+                              Disponible
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[11px] text-[#a09480] leading-snug">{effect}</p>
+
+                        {/* Bloque de construcción en progreso si este edificio está en la cola */}
+                        {activeConstruction && (
+                          <div className="pt-2 space-y-1.5 bg-[#0e0c09] p-2.5 rounded border border-[#2d2215]">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="text-[#d4af37] font-medium flex items-center gap-1">
+                                <Clock className="w-3.5 h-3.5" />
+                                <span>Progreso de mejora a Nivel {activeConstruction.targetLevel}:</span>
+                              </span>
+                              <span className="font-mono text-amber-300 font-bold">
+                                {hasConstructionTiming(activeConstruction)
+                                  ? `${Math.floor(constructionProgress(activeConstruction, constructionDisplayServerTime) ?? 0)}%`
+                                  : 'En curso'}
+                              </span>
+                            </div>
+                            {hasConstructionTiming(activeConstruction) && (
+                              <div className="w-full h-2 bg-[#1a140e] rounded-full overflow-hidden border border-[#3b2d1c]">
+                                <div
+                                  className="h-full bg-gradient-to-r from-amber-600 to-[#d4af37] transition-all duration-500 rounded-full"
+                                  style={{
+                                    width: `${Math.min(100, Math.max(0, constructionProgress(activeConstruction, constructionDisplayServerTime) ?? 0))}%`,
+                                  }}
+                                />
+                              </div>
+                            )}
+                            <div className="flex items-center justify-between text-[10px] text-[#8e816d] pt-0.5">
+                              <span>
+                                {hasConstructionTiming(activeConstruction)
+                                  ? `Tiempo restante: ${formatSecondsDuration(Math.max(0, (activeConstruction.startedAt + activeConstruction.durationMs - constructionDisplayServerTime) / 1000))}`
+                                  : 'Calculando tiempo...'}
+                              </span>
+                              {isOwner && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleConstructionCancellation(activeConstruction)}
+                                  disabled={cancellingConstruction !== null}
+                                  className="text-rose-400 hover:text-rose-300 underline font-medium cursor-pointer"
+                                >
+                                  {cancellingConstruction === activeConstruction._id ? 'Cancelando…' : 'Cancelar obra (reembolso 50%)'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         )}
-                      </span>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {blockers.length ? (
-                          <span className="text-amber-300">{blockers.join('; ')}</span>
-                        ) : inQueue ? (
-                          <span className="text-[#8e816d]">en cola</span>
-                        ) : (
-                          <span className="text-emerald-300">disponible</span>
+
+                        {/* Costes del siguiente nivel si aplica */}
+                        {!activeConstruction && entry && nextLevel !== null && (
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] pt-1">
+                            <span className="text-[#8e816d] font-medium">Siguiente (Nivel {nextLevel}):</span>
+                            {entry.nextCosts && (
+                              <span className="font-mono text-[#c7beac]">{formatCosts(entry.nextCosts)}</span>
+                            )}
+                            {entry.nextDurationMs && (
+                              <span className="text-[#8e816d] flex items-center gap-1 font-mono">
+                                <Clock className="w-3 h-3 text-[#d4af37]" />
+                                {formatSecondsDuration(entry.nextDurationMs / 1000)}
+                              </span>
+                            )}
+                          </div>
                         )}
-                        {canStart && (
-                          <button
-                            type="button"
-                            onClick={() => handleConstructionStart(buildingType)}
-                            disabled={startingConstruction !== null || constructionState.constructionQueue.length >= 2}
-                            className="rounded border border-[#6e5520] px-2 py-1 text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50"
-                          >
-                            {startingConstruction === buildingType ? 'Encolando…' : 'Construir'}
-                          </button>
+
+                        {/* Explicación si el edificio está bloqueado */}
+                        {!activeConstruction && blockers.length > 0 && (
+                          <div className="text-[11px] text-amber-300/90 pt-0.5 font-medium">
+                            🔒 {blockers.join('; ')}
+                          </div>
                         )}
                       </div>
+
+                      {/* Botón de acción */}
+                      {!activeConstruction && nextLevel !== null && (
+                        <div className="shrink-0 flex items-center md:self-center pt-2 md:pt-0">
+                          {canStart ? (
+                            <button
+                              type="button"
+                              onClick={() => handleConstructionStart(type)}
+                              disabled={startingConstruction !== null || (constructionState?.constructionQueue.length ?? 0) >= 2}
+                              className="w-full md:w-auto px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-[#ba8332] via-[#cf993f] to-[#ba8332] text-[#140e04] font-serif font-bold text-xs tracking-wide shadow hover:from-[#c99138] hover:via-[#dea74b] hover:to-[#c99138] disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              {startingConstruction === type ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>Encolando…</span>
+                                </>
+                              ) : (
+                                <span>{currentLevel > 0 ? `Mejorar a Nivel ${nextLevel}` : 'Construir'}</span>
+                              )}
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-[#6b5f4d] font-mono text-center block w-full md:w-auto">
+                              {blockers.length > 0 ? 'Requisitos pendientes' : (constructionState?.constructionQueue.length ?? 0) >= 2 ? 'Cola llena (2/2)' : 'No disponible'}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
-            )}
-            <p className="text-[11px] text-[#8e816d]">
-              Capacidad residencial: {capacityPop === null ? 'sin dato' : capacityPop.toLocaleString('es-ES')} plazas ·
-              capacidad laboral: {constructionState?.jobCapacities
-                ? Object.entries(constructionState.jobCapacities).map(([job, cap]) => `${{ agriculture: 'agricultura', wood: 'madera', stone: 'piedra', iron: 'hierro', gold: 'oro' }[job] ?? job} ${cap}`).join(', ')
-                : 'sin dato'}.
-            </p>
-            {isOwner && constructionState && (!constructionState.hasInitialBuildings || !kingdom.homeTerritoryId) && (
-              <div className="rounded border border-amber-900/40 bg-[#1b160f] p-3 text-[11px] text-[#c7b99f] space-y-2">
-                <span className="block">Este reino es anterior a las reglas actuales y le faltan elementos fundacionales:</span>
-                <div className="flex flex-wrap gap-2">
-                  {!constructionState.hasInitialBuildings && (
-                    <button type="button" onClick={handleBootstrapBuildings} disabled={bootstrapBusy !== null} className="rounded border border-[#6e5520] px-2 py-1 text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50">
-                      {bootstrapBusy === 'buildings' ? 'Asignando…' : 'Recibir edificios fundacionales'}
-                    </button>
-                  )}
-                  {!kingdom.homeTerritoryId && (
-                    <button type="button" onClick={handleEnsureHomeTerritory} disabled={bootstrapBusy !== null} className="rounded border border-[#6e5520] px-2 py-1 text-[#d4af37] hover:bg-[#2b2113] disabled:opacity-50">
-                      {bootstrapBusy === 'territory' ? 'Asignando…' : 'Asignar territorio principal'}
-                    </button>
-                  )}
-                </div>
-                {bootstrapMessage && <span className="block text-emerald-300">{bootstrapMessage}</span>}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <h3 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider">Cola del servidor</h3>
-            {constructionState?.constructionQueue.length ? constructionState.constructionQueue.map((construction) => {
-              const timingAvailable = hasConstructionTiming(construction);
-              const progress = timingAvailable
-                ? constructionProgress(construction, constructionDisplayServerTime)
-                : null;
-              const remainingSeconds = timingAvailable
-                ? Math.max(0, (construction.startedAt + construction.durationMs - constructionDisplayServerTime) / 1000)
-                : null;
-              const notStarted = timingAvailable && construction.startedAt > constructionDisplayServerTime;
-              const progressLabel = progress === null ? 'Progreso no disponible' : `${Math.floor(progress)} %`;
-              return (
-                <div key={construction._id} className="bg-[#18140f] p-3 rounded-lg border border-[#2c2419] space-y-2">
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <span className="text-[#f0e8d4]">{construction.buildingType ?? 'Construcción heredada'} · nivel {construction.targetLevel ?? 'sin dato'}</span>
-                    <span className="font-mono text-[#d4af37]">{progressLabel}</span>
-                  </div>
-                  <p className="text-[11px] text-[#8e816d]">
-                    {remainingSeconds === null
-                      ? 'Tiempo restante no disponible: faltan marcas temporales persistidas.'
-                      : `${notStarted ? 'Comienza en' : 'Tiempo restante'}: ${formatSecondsDuration(remainingSeconds)}`}
-                  </p>
-                  {progress !== null && (
-                    <div className="h-1.5 bg-[#0d0b09] rounded overflow-hidden">
-                      <div className="h-full bg-amber-600" style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
-                    </div>
-                  )}
-                  {isOwner && !notStarted && progress !== null && progress < 100 && (
-                    <button
-                      type="button"
-                      onClick={() => handleConstructionCancellation(construction)}
-                      disabled={cancellingConstruction !== null}
-                      className="rounded border border-rose-900/70 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-950/40 disabled:opacity-50"
-                    >
-                      {cancellingConstruction === construction._id ? 'Cancelando…' : 'Cancelar (reembolso 50 %)'}
-                    </button>
-                  )}
-                </div>
-              );
-            }) : (
-              <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">
-                No hay construcciones en curso.
-              </p>
-            )}
-          </div>
+            </div>
+          ))}
         </div>
 
-        <div className="rounded border border-amber-900/40 bg-[#1b160f] p-3 text-xs text-[#c7b99f]">
-          {isOwner
-            ? 'Las obras usan el reloj del servidor, dos ranuras simultáneas, +1 % de duración por nivel y coste ×1,15 por nivel. Ningún edificio supera el nivel del Castillo; cancelar devuelve el 50 % de lo pagado.'
-            : 'Consulta de solo lectura. Iberia no puede iniciar ni cancelar construcciones.'}
-          <span className="block mt-1 text-[11px] text-[#8e816d]">
-            La capacidad residencial y la laboral se calculan como capacidad por nivel × nivel de cada edificio completado.
-          </span>
-        </div>
-        <StatusMessages error={constructionError} message={constructionMessage} isConstruction={true} />
-
+        {/* Modal de confirmación de cancelación de obra */}
         {confirmCancelConstruction && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
             <div className="bg-[#14120e] border border-amber-900/60 rounded-xl p-5 max-w-md w-full space-y-4 shadow-2xl text-[#f0e8d4]">
@@ -2189,7 +2389,7 @@ function KingdomOverviewContent() {
                 <p>
                   Estás a punto de cancelar la obra de{' '}
                   <strong className="text-[#f0e8d4]">
-                    {confirmCancelConstruction.buildingType ?? 'edificio'}
+                    {buildingLabels[confirmCancelConstruction.buildingType ?? ''] ?? confirmCancelConstruction.buildingType ?? 'edificio'}
                   </strong>{' '}
                   (nivel {confirmCancelConstruction.targetLevel ?? '—'}).
                 </p>
@@ -2206,7 +2406,7 @@ function KingdomOverviewContent() {
                   type="button"
                   onClick={handleCloseCancelDialog}
                   disabled={cancellingConstruction !== null}
-                  className="px-3 py-1.5 rounded text-xs text-[#a89b84] hover:text-[#f0e8d4] border border-[#3d3323] hover:bg-[#231d15] disabled:opacity-50 transition-colors"
+                  className="px-3 py-1.5 rounded text-xs text-[#a89b84] hover:text-[#f0e8d4] border border-[#3d3323] hover:bg-[#231d15] disabled:opacity-50 transition-colors cursor-pointer"
                 >
                   Volver
                 </button>
@@ -2214,12 +2414,12 @@ function KingdomOverviewContent() {
                   type="button"
                   onClick={handleConfirmCancellation}
                   disabled={cancellingConstruction !== null}
-                  className="px-3 py-1.5 rounded text-xs font-semibold text-rose-200 bg-rose-900/80 hover:bg-rose-800 border border-rose-700/80 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded text-xs font-semibold text-rose-200 bg-rose-900/80 hover:bg-rose-800 border border-rose-700/80 disabled:opacity-50 transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
                   {cancellingConstruction !== null ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Cancelando en servidor…
+                      <span>Cancelando en servidor…</span>
                     </>
                   ) : (
                     'Confirmar cancelación'
@@ -2231,68 +2431,10 @@ function KingdomOverviewContent() {
         )}
       </section>
 
+      {/* Pie informativo de navegación */}
       <section className="bg-[#12100d] border border-[#241e15] rounded-xl p-4 text-xs text-[#8e816d] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <span><strong>Secciones:</strong> Ejército, Universidad, Parlamento y Mapa están disponibles en la navegación principal.</span>
-        <button
-          onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
-          className="inline-flex items-center gap-1.5 text-xs text-[#c5a059] hover:text-[#e8dfc8] transition-colors flex-shrink-0"
-        >
-          <span>{showTechnicalDetails ? 'Ocultar detalles técnicos' : 'Ver ficha de consulta'}</span>
-          {showTechnicalDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-        </button>
       </section>
-
-      {/* Ficha técnica desplegable con información del backend */}
-      {showTechnicalDetails && (
-        <section className="bg-[#0f0d0a] border border-[#2b2419] rounded-xl p-4 text-xs space-y-3 font-mono">
-          <div className="flex items-center justify-between border-b border-[#241e15] pb-2 text-[#d4af37]">
-            <span className="font-semibold">Ficha Técnica de Consulta Remota</span>
-            <span className="text-[10px] text-[#7d705c]">Convex @ 1.46.0</span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-[#a09480]">
-            <div>
-              <span className="text-[#6d614e] block">Función Autoritaria:</span>
-              <code className="text-[#e0d6c3]">kingdoms:getKingdomFull</code>
-            </div>
-            <div>
-              <span className="text-[#6d614e] block">Argumento de Usuario:</span>
-              <code className="text-[#e0d6c3]">{`{ userId: "${activeUserId}" }`}</code>
-            </div>
-            <div>
-              <span className="text-[#6d614e] block">Identificador de Reino:</span>
-              <code className="text-[#e0d6c3]">{kingdom._id}</code>
-            </div>
-            <div>
-              <span className="text-[#6d614e] block">Canal de Sincronización:</span>
-              <code className="text-emerald-400">WebSocket reactivo en tiempo real (useQuery)</code>
-            </div>
-            <div>
-              <span className="text-[#6d614e] block">Identidad Convex (OIDC):</span>
-              <code className={viewer ? "text-emerald-400" : "text-amber-400"}>
-                {viewer ? `${viewer.email || viewer.subject} (Validado)` : 'Sin sesión OIDC en Convex'}
-              </code>
-            </div>
-            <div>
-              <span className="text-[#6d614e] block">Titularidad y Permisos B.8:</span>
-              <code className={isOwner ? "text-emerald-400" : "text-amber-400"}>
-                {isOwner ? "Soberano Verificado (Mutaciones Activas)" : "Modo Consulta / Demo (Escrituras Bloqueadas)"}
-              </code>
-            </div>
-            <div>
-              <span className="text-[#6d614e] block">Régimen Persistido (BD):</span>
-              <code className="text-[#e0d6c3]">
-                {kingdom.foodTier ?? "normal (por defecto)"}
-              </code>
-            </div>
-            <div>
-              <span className="text-[#6d614e] block">Mutaciones B.8 Conectadas:</span>
-              <code className="text-emerald-400">
-                economy:settleKingdomEconomy | economy:setKingdomFoodTier
-              </code>
-            </div>
-          </div>
-        </section>
-      )}
       </>)}
     </div>
   );
