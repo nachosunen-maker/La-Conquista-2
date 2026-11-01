@@ -2,6 +2,7 @@ import {
   availableMilitaryLevels,
   calculateTrainingCancellation,
   createTrainingPlan,
+  getMilitaryLevel,
   summarizeArmy,
   trainingDurationMs,
   trainingQueueSlots,
@@ -46,7 +47,7 @@ export function runArmyValidationTests(): ArmyTestResult[] {
   const siege = createTrainingPlan(baseInput({ unitType: "asedio", count: 2, buildingLevels: { castillo: 3, cuartel: 3, herreria: 2 }, availableCivil: 10 }));
   const siegeNoOperators = createTrainingPlan(baseInput({ unitType: "asedio", count: 2, buildingLevels: { castillo: 3, cuartel: 3, herreria: 2 }, availableCivil: 9 }));
   const levelTwoLocked = createTrainingPlan(baseInput({ level: 2, buildingLevels: { castillo: 1, cuartel: 2 } }));
-  const levelTwoOpen = createTrainingPlan(baseInput({ level: 2, buildingLevels: { castillo: 2, cuartel: 2 } }));
+  const levelTwoOpen = createTrainingPlan(baseInput({ level: 2, buildingLevels: { castillo: 2, cuartel: 2, herreria: 1 } }));
   const invalidLevel = createTrainingPlan(baseInput({ level: 6 }));
   const activeOne: TrainingQueueEntry = { unitType: "arqueria", count: 5, level: 1, startedAt: 0, durationMs: 1000, costs: {}, populationReserved: 5 };
   const queueFull = createTrainingPlan(baseInput({ activeTraining: [activeOne] }));
@@ -64,7 +65,7 @@ export function runArmyValidationTests(): ArmyTestResult[] {
     { unitType: "asedio", count: 4 },
     { unitType: "regular", count: 20 },
   ]);
-  const levels = availableMilitaryLevels({ castillo: 4, cuartel: 3, universidad: 2 }).map((l) => l.level);
+  const levels = availableMilitaryLevels({ castillo: 4, cuartel: 3, herreria: 2, universidad: 2 }).map((l) => l.level);
 
   const equipmentLocked = validateEquipmentSelection({ weaponTier: "acero", armorTier: "ninguna", strategy: "agresiva", buildingLevels: { herreria: 4 }, unlockedWeapons: [], unlockedArmors: [] });
   const equipmentOpen = validateEquipmentSelection({ weaponTier: "acero", armorTier: "piel", strategy: "agresiva", buildingLevels: { herreria: 4 }, unlockedWeapons: ["acero"], unlockedArmors: [], tacticalFormation: "ofensiva" });
@@ -135,7 +136,7 @@ export function runArmyValidationTests(): ArmyTestResult[] {
       test: "Resumen del ejército: niveles ponderados, heridos aparte, operadores de asedio y tabla heredada 'regular' como infantería",
       passed: summary.totalActive === 224 && summary.totalWounded === 10 && summary.siegeMachines === 4 && summary.siegeOperators === 20 &&
         summary.livingSoldiers === 240 && summary.byType.infanteria.active === 220 &&
-        Math.abs(summary.trainingMultiplier - ((100 * 1 + 100 * 1.35 + 4 * 1 + 20 * 1) / 224)) < 1e-9,
+        Math.abs(summary.trainingMultiplier - ((100 * 1 + 100 * (getMilitaryLevel(3)?.multiplier ?? 1.2) + 4 * 1 + 20 * 1) / 224)) < 1e-9,
       details: `Activos ${summary.totalActive}, heridos ${summary.totalWounded}, máquinas ${summary.siegeMachines}, operadores ${summary.siegeOperators}, vivos ${summary.livingSoldiers}, multiplicador ${summary.trainingMultiplier.toFixed(4)}`,
     },
     {

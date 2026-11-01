@@ -1,8 +1,17 @@
-import React, { useState, useMemo } from 'react';
-import { useMutation, useQuery } from 'convex/react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useConvex, useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
-import { Landmark, Swords, Scroll, Eye, Coins, Award, Trophy } from 'lucide-react';
+import { Landmark, Swords, Scroll, Eye, Coins, Award, Trophy, Shield, RefreshCw } from 'lucide-react';
 import { isTestOrDemoKingdom } from '../../convex/explorationRules';
+import {
+  getAllActiveBots,
+  getRotationCycle,
+  BOT_DIFFICULTY_LABELS,
+  BOT_DIFFICULTY_LEVELS,
+  type BotDefinition,
+  type BotDifficulty,
+} from '../../convex/botConfig';
+import { estimateBotArmy } from '../../convex/botRules';
 import {
   PanelSection,
   StatusMessages,
@@ -25,6 +34,9 @@ const listRivalsQuery = makeFunctionReference<"query">("parliament:listRivals");
 const getWorldMapQuery = makeFunctionReference<"query">("territories:getWorldMap");
 const getBattlesQuery = makeFunctionReference<"query">("parliament:getBattles");
 const getLeaderboardQuery = makeFunctionReference<"query">("parliament:getLeaderboard");
+const listBotsQuery = makeFunctionReference<"query">("bots:listBots");
+const requestBotEspionageMutation = makeFunctionReference<"mutation">("bots:requestBotEspionage");
+const attackBotMutation = makeFunctionReference<"mutation">("bots:attackBot");
 const createChallengeMutation = makeFunctionReference<"mutation">("parliament:createChallenge");
 const acceptChallengeMutation = makeFunctionReference<"mutation">("parliament:acceptChallenge");
 const rejectChallengeMutation = makeFunctionReference<"mutation">("parliament:rejectChallenge");
@@ -145,6 +157,14 @@ const CIVILIZATION_LABELS: Record<string, string> = {
   mongoles: 'Mongoles', chinos: 'Chinos', japoneses: 'Japoneses', navajos: 'Navajos', aztecas: 'Aztecas', masais: 'Masáis',
 };
 
+const DIFFICULTY_STYLES: Record<string, { badge: string; border: string; text: string }> = {
+  facil: { badge: 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50', border: 'border-emerald-900/40', text: 'text-emerald-400' },
+  media: { badge: 'bg-sky-950/40 text-sky-300 border-sky-800/50', border: 'border-sky-900/40', text: 'text-sky-400' },
+  dificil: { badge: 'bg-amber-950/40 text-amber-300 border-amber-800/50', border: 'border-amber-900/40', text: 'text-amber-400' },
+  muy_dificil: { badge: 'bg-orange-950/40 text-orange-300 border-orange-800/50', border: 'border-orange-900/40', text: 'text-orange-400' },
+  extrema: { badge: 'bg-rose-950/40 text-rose-300 border-rose-800/50', border: 'border-rose-900/40', text: 'text-rose-400' },
+};
+
 export function ParliamentPanel(props: {
   kingdomId: string;
   isOwner: boolean;
@@ -155,6 +175,7 @@ export function ParliamentPanel(props: {
   dailyBonusHonor: number;
 }) {
   const { kingdomId, isOwner } = props;
+  const convex = useConvex();
   const parliament = useQuery(getParliamentQuery, kingdomId ? { kingdomId } : "skip") as ParliamentState | undefined;
   const rivals = useQuery(listRivalsQuery, kingdomId ? { kingdomId } : "skip") as RivalsState | undefined;
   const worldMap = useQuery(getWorldMapQuery, kingdomId ? { kingdomId } : "skip") as {
@@ -174,6 +195,8 @@ export function ParliamentPanel(props: {
   const requestReport = useMutation(requestEspionageReportMutation);
   const claimDailyBonus = useMutation(claimDailyBonusMutation);
   const setTaxRate = useMutation(setTaxRateMutation);
+  const requestBotEspionage = useMutation(requestBotEspionageMutation);
+  const attackBot = useMutation(attackBotMutation);
   const serverNow = useServerClock(parliament?.serverTimeMs);
   const action = useActionState();
 
@@ -181,6 +204,63 @@ export function ParliamentPanel(props: {
   const [messageChoice, setMessageChoice] = useState<Record<string, string>>({});
   const [taxInput, setTaxInput] = useState<number | null>(null);
   const [openBattle, setOpenBattle] = useState<string | null>(null);
+  const [remoteBotData, setRemoteBotData] = useState<any>(null);
+  const [botTab, setBotTab] = useState<'permanent' | 'rotating'>('permanent');
+
+  useEffect(() => {
+    if (!kingdomId) return;
+    let cancelled = false;
+    convex
+      .query(listBotsQuery, { kingdomId })
+      .then((data) => {
+        if (!cancelled) setRemoteBotData(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [kingdomId, convex]);
+
+  const localRotation = useMemo(() => getRotationCycle(serverNow), [serverNow]);
+  const localActiveBots = useMemo(() => getAllActiveBots(serverNow), [serverNow]);
+
+  const botData = useMemo(() => {
+    if (remoteBotData) return remoteBotData;
+    return {
+      serverTimeMs: serverNow,
+      parliamentLevel: parliament?.parliamentLevel ?? 0,
+      requiredParliamentLevel: parliament?.requiredParliamentLevel ?? 1,
+      canEngageBots: (parliament?.parliamentLevel ?? 0) >= (parliament?.requiredParliamentLevel ?? 1),
+      rotationCycle: localRotation.cycleIndex,
+      cycleExpiresAtMs: localRotation.cycleExpiresAtMs,
+      hasEspionage1: true,
+      hasEspionage2: false,
+      playerEspionageLevel: 1,
+      espionageCost: 100,
+      bots: localActiveBots.map((bot) => {
+        const est = estimateBotArmy(bot, 0);
+        return {
+          id: bot.id,
+          monarchName: bot.monarchName,
+          name: bot.name,
+          civilization: bot.civilization,
+          difficulty: bot.difficulty,
+          difficultyLabel: BOT_DIFFICULTY_LABELS[bot.difficulty],
+          militaryLevel: BOT_DIFFICULTY_LEVELS[bot.difficulty].level,
+          isPermanent: bot.isPermanent,
+          description: bot.description,
+          armyEstimate: est.total,
+          compositionEstimate: null,
+          espionageReport: null,
+        };
+      }),
+    };
+  }, [remoteBotData, serverNow, parliament, localRotation, localActiveBots]);
+
+  const displayBots = useMemo(() => {
+    if (!botData?.bots) return [];
+    return botData.bots.filter((b: any) => (botTab === 'permanent' ? b.isPermanent : !b.isPermanent));
+  }, [botData, botTab]);
 
   if (!parliament) {
     return <p className="text-xs text-[#8e816d] italic p-4">Convocando al Parlamento…</p>;
@@ -270,6 +350,35 @@ export function ParliamentPanel(props: {
       const result = await requestReport({ kingdomId, targetKingdomId });
       if (result && result.success === false) return result;
       return `Informe de ${name} (nivel ${result.level}) por ${result.cost} oro: ejército estimado ${result.estimate.min}-${result.estimate.max}.`;
+    });
+
+  const handleBotSpy = (botId: string, botName: string) =>
+    action.run(`spy-bot-${botId}`, async () => {
+      try {
+        const result: any = await requestBotEspionage({ kingdomId, botId });
+        if (result && result.success === false) return result;
+        convex.query(listBotsQuery, { kingdomId }).then((d) => setRemoteBotData(d)).catch(() => {});
+        return `Informe de espionaje sobre ${botName} (nivel ${result.level}) por ${result.cost} oro: ejército estimado ${result.estimate.min}–${result.estimate.max}.`;
+      } catch (err: any) {
+        return { success: false, error: err?.message ?? `Error al espiar a ${botName}.` };
+      }
+    });
+
+  const handleBotAttack = (botId: string, botName: string) =>
+    action.run(`attack-bot-${botId}`, async () => {
+      try {
+        const result: any = await attackBot({ kingdomId, botId });
+        if (result && result.success === false) return result;
+        const outcome = result.outcome === 'victoria'
+          ? `¡Victoria contra ${botName}!${result.crushingVictory ? ' (Victoria aplastante)' : ''}`
+          : result.outcome === 'empate'
+          ? `Empate técnico contra ${botName}.`
+          : `Derrota ante ${botName}.`;
+        if (result.battleId) setOpenBattle(result.battleId);
+        return `Combate finalizado: ${outcome} Revisa el informe en el Historial de Batallas.`;
+      } catch (err: any) {
+        return { success: false, error: err?.message ?? `Error al combatir con ${botName}.` };
+      }
     });
 
   const handleBonus = () =>
@@ -460,6 +569,129 @@ export function ParliamentPanel(props: {
         <p className="text-[10px] text-[#615545]">
           No existen ataques sorpresa (P38): todo combate pasa por el Parlamento. Rechazar cuesta el 2 % de cada recurso; aceptar fija la batalla a 1, 3 o 7 días reales y congela el contingente 15 minutos antes.
         </p>
+      </PanelSection>
+
+      <PanelSection
+        icon={<Swords className="w-4 h-4 text-amber-400" />}
+        title="Frente Militar — Monarcas y Adversarios (Bots)"
+        aside={
+          <span className="text-amber-300">
+            Rotación semanal en: {formatSecondsDuration(Math.max(0, (botData.cycleExpiresAtMs - serverNow) / 1000))}
+          </span>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-[#a89b84] leading-relaxed">
+            Adversarios militares canónicos preparados para combatir desde el Parlamento. Los monarcas no tienen economía ni ciudades en el mapa y luchan siempre con sus efectivos al completo. Hay 5 monarcas permanentes y 5 rotatorios semanales (uno por dificultad).
+          </p>
+
+          <div className="flex items-center gap-2 border-b border-[#2b2419] pb-2">
+            <button
+              type="button"
+              className={`px-3 py-1.5 rounded text-xs font-serif transition-colors ${
+                botTab === 'permanent'
+                  ? 'bg-[#2b2419] text-[#f0e8d4] font-semibold border border-[#443826]'
+                  : 'text-[#8e816d] hover:text-[#c7beac]'
+              }`}
+              onClick={() => setBotTab('permanent')}
+            >
+              👑 Monarcas Permanentes (5)
+            </button>
+            <button
+              type="button"
+              className={`px-3 py-1.5 rounded text-xs font-serif transition-colors ${
+                botTab === 'rotating'
+                  ? 'bg-[#2b2419] text-[#f0e8d4] font-semibold border border-[#443826]'
+                  : 'text-[#8e816d] hover:text-[#c7beac]'
+              }`}
+              onClick={() => setBotTab('rotating')}
+            >
+              🔄 Monarcas Rotatorios Semanales (5)
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            {displayBots.map((bot: any) => {
+              const diffStyle = DIFFICULTY_STYLES[bot.difficulty] ?? DIFFICULTY_STYLES.facil;
+              const hasReport = !!bot.espionageReport;
+              return (
+                <div key={bot.id} className={`${cardClass} border ${diffStyle.border} space-y-2.5 p-3`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-[#f0e8d4] text-xs">
+                          {bot.monarchName}
+                        </span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-wider ${diffStyle.badge}`}>
+                          {bot.difficultyLabel} (N{bot.militaryLevel})
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-[#a89b84] block font-serif">
+                        {bot.name} · {CIVILIZATION_LABELS[bot.civilization] ?? bot.civilization}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-[#8e816d] border border-[#2b2419] bg-[#14110d] px-1.5 py-0.5 rounded">
+                      {bot.isPermanent ? 'Permanente' : 'Rotatorio'}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-[#c7beac] leading-normal italic">
+                    «{bot.description}»
+                  </p>
+
+                  <div className="bg-[#120f0c] p-2 rounded border border-[#2b2419] text-[11px] space-y-1">
+                    <div className="flex justify-between items-center text-[#8e816d]">
+                      <span>Efectivos totales estimados:</span>
+                      <span className="font-mono text-[#f0e8d4]">
+                        {bot.armyEstimate.min.toLocaleString('es-ES')}–{bot.armyEstimate.max.toLocaleString('es-ES')}
+                        <span className="text-[10px] text-[#8e816d] ml-1">
+                          (±{Math.round(bot.armyEstimate.error * 100)} %)
+                        </span>
+                      </span>
+                    </div>
+
+                    {hasReport && bot.compositionEstimate && (
+                      <div className="pt-1 border-t border-[#2b2419]/70 space-y-0.5">
+                        <span className="text-sky-300 text-[10px] block font-semibold">
+                          Informe de espionaje N{bot.espionageReport.level} (válido hasta {formatDateTime(bot.espionageReport.expiresAt)}):
+                        </span>
+                        <div className="grid grid-cols-2 gap-1 text-[10px] text-[#c7beac]">
+                          <span>Infantería: {bot.compositionEstimate.infanteria.min}–{bot.compositionEstimate.infanteria.max}</span>
+                          <span>Arquería: {bot.compositionEstimate.arqueria.min}–{bot.compositionEstimate.arqueria.max}</span>
+                          <span>Caballería: {bot.compositionEstimate.caballeria.min}–{bot.compositionEstimate.caballeria.max}</span>
+                          <span>Asedio: {bot.compositionEstimate.asedio.min}–{bot.compositionEstimate.asedio.max}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {writable && (
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        className={primaryButton}
+                        disabled={!hasParliament || action.busy !== null}
+                        onClick={() => handleBotAttack(bot.id, bot.monarchName)}
+                        title="Iniciar combate inmediato contra este monarca"
+                      >
+                        {action.busy === `attack-bot-${bot.id}` ? 'Combatiendo…' : '⚔️ Atacar'}
+                      </button>
+                      <button
+                        type="button"
+                        className={primaryButton}
+                        disabled={!hasParliament || action.busy !== null}
+                        onClick={() => handleBotSpy(bot.id, bot.monarchName)}
+                        title={`Requiere Espionaje I investigado · Cuesta ${botData.espionageCost} oro`}
+                      >
+                        {action.busy === `spy-bot-${bot.id}` ? 'Espiando…' : `👁️ Espiar (${botData.espionageCost} oro)`}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </PanelSection>
 
       <PanelSection icon={<Eye className="w-4 h-4 text-sky-400" />} title="Reinos rivales (P42)">

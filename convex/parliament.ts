@@ -197,7 +197,14 @@ export const getBattles = query({
       ctx.db.query("Battle").withIndex("by_attacker", (q) => q.eq("attackerKingdomId", args.kingdomId)).collect(),
       ctx.db.query("Battle").withIndex("by_defender", (q) => q.eq("defenderKingdomId", args.kingdomId)).collect(),
     ]);
-    return [...asAttacker, ...asDefender]
+    const seen = new Set<string>();
+    const battles = [];
+    for (const battle of [...asAttacker, ...asDefender]) {
+      if (seen.has(battle._id)) continue;
+      seen.add(battle._id);
+      battles.push(battle);
+    }
+    return battles
       .sort((a, b) => b.resolvedAt - a.resolvedAt)
       .map((battle) => ({ ...battle, role: battle.attackerKingdomId === args.kingdomId ? "attacker" : "defender" }));
   },
@@ -363,7 +370,7 @@ export const expireChallenge = internalMutation({
   },
 });
 
-async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, role: "attacker" | "defender", distance: number, terrainMultiplier: number = 1): Promise<BattleSide> {
+export async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, role: "attacker" | "defender", distance: number, terrainMultiplier: number = 1): Promise<BattleSide> {
   const kingdom = await ctx.db.get(kingdomId);
   if (!kingdom) throw new Error("Reino participante no encontrado.");
   await settleRelationalKingdomEconomy(ctx, kingdom, kingdom.userId, Date.now());
@@ -413,7 +420,7 @@ export const freezeChallenge = internalMutation({
   },
 });
 
-async function applyCasualtiesToArmy(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
+export async function applyCasualtiesToArmy(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
   const units = await readArmyUnitsWithMigration(ctx, kingdomId);
   for (const type of UNIT_TYPES as readonly UnitType[]) {
     let remaining = casualties[type];
@@ -436,7 +443,7 @@ async function applyCasualtiesToArmy(ctx: MutationCtx, kingdomId: Id<"kingdoms">
   }
 }
 
-async function removeDeadFromPopulation(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
+export async function removeDeadFromPopulation(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
   let deadPersons = 0;
   for (const type of UNIT_TYPES as readonly UnitType[]) {
     const dead = Math.max(0, casualties[type] - wounded[type]);

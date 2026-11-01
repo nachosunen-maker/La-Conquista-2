@@ -260,13 +260,13 @@ function applyCasualties(composition: Composition, casualties: number): Composit
 
 function roundComposition(composition: Composition): Composition {
   const result = emptyComposition();
-  for (const type of UNIT_TYPES) result[type] = Math.round(composition[type]);
+  for (const type of UNIT_TYPES) result[type] = Math.round(composition[type] ?? 0);
   return result;
 }
 
 function diffComposition(initial: Composition, final: Composition): Composition {
   const result = emptyComposition();
-  for (const type of UNIT_TYPES) result[type] = Math.max(0, initial[type] - final[type]);
+  for (const type of UNIT_TYPES) result[type] = Math.max(0, (initial[type] ?? 0) - (final[type] ?? 0));
   return result;
 }
 

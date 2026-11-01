@@ -7,9 +7,10 @@ import { runExplorationValidationTests, type ExplorationTestResult } from "../co
 import { runCivilizationTests, type CivilizationTestResult } from "../convex/civilizationPureTests";
 import { runAccountTests, type AccountTestResult } from "../convex/accountPureTests";
 import { runMissionTests, type MissionTestResult } from "../convex/missionPureTests";
+import { runBotPureTests } from "../convex/botPureTests";
 
 console.log("================================================================================");
-console.log("LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAMENTO + EXPLORACIÓN + CIVILIZACIONES + CUENTA + MISIONES)");
+console.log("LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAMENTO + BOTS + EXPLORACIÓN + CIVILIZACIONES + CUENTA + MISIONES)");
 console.log("================================================================================\n");
 
 const startTime = Date.now();
@@ -22,6 +23,19 @@ const explorationResults: ExplorationTestResult[] = runExplorationValidationTest
 const civilizationResults: CivilizationTestResult[] = runCivilizationTests();
 const accountResults: AccountTestResult[] = runAccountTests();
 const missionResults: MissionTestResult[] = runMissionTests();
+
+const botTestRun = runBotPureTests();
+const botResults = [
+  {
+    category: "SISTEMA DE BOTS MILITARES",
+    test: "Catálogo de 47 monarcas, dificultades fijas, rotación semanal de 7 días, espionaje y combate",
+    passed: botTestRun.failed === 0,
+    details: botTestRun.failed === 0
+      ? `Superadas las ${botTestRun.passed} comprobaciones de bots (catálogo, rotación, espionaje e inmutabilidad).`
+      : `Fallaron ${botTestRun.failed} comprobaciones: ${botTestRun.errors.join("; ")}`,
+  },
+];
+
 const results = [
   ...economicResults,
   ...militaryResults,
@@ -32,6 +46,7 @@ const results = [
   ...civilizationResults,
   ...accountResults,
   ...missionResults,
+  ...botResults,
 ];
 const durationMs = Date.now() - startTime;
 
