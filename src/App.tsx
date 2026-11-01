@@ -1118,8 +1118,6 @@ function KingdomOverviewContent() {
                     </span>
                   </>
                 )}
-                <span aria-hidden="true" className="text-[#453d30]">•</span>
-                <span className="font-mono text-[11px] text-[#695d4b]">ID: {kingdom.userId}</span>
               </div>
             </div>
           </div>
