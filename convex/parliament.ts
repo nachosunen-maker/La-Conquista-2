@@ -15,12 +15,13 @@ import { readArmyUnitDocs, readArmyUnitsWithMigration } from "./army";
 import { normalizeUnitType, summarizeArmy, unitLevelOf } from "./armyRules";
 import { validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
-import { distanceBetweenKingdoms, pathTerrainBetweenKingdoms, readHomeCoord } from "./territories";
+import { distanceBetweenKingdoms, pathTerrainBetweenKingdoms, readHomeCoord, readDiscoveredKingdomIds } from "./territories";
 import { marchFatigue, marchTimeSeconds, armyMarchMultiplier } from "./territoryRules";
 import { applyFormation, emptyComposition, simulateBattle, type BattleSide, type Composition } from "./battleRules";
 import { isTacticalFormation } from "./armyRules";
 import { getCivilizationPassive } from "./civilizationRules";
 import { evaluateKingdomMissions, recordMissionEvent } from "./missions";
+import { isTestOrDemoKingdom } from "./explorationRules";
 import {
   approximateEstimate,
   approximatePopulation,
@@ -138,13 +139,23 @@ export const listRivals = query({
     if (!isDemoRead && !isKingdomOwner(kingdom.userId, identity?.subject)) {
       throw new Error("No autorizado: solo puede consultar su propio reino.");
     }
+    const discoveredKingdomIds = await readDiscoveredKingdomIds(ctx, args.kingdomId);
     const all = await ctx.db.query("kingdoms").collect();
     const reports = await ctx.db.query("espionageReports").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
     const now = Date.now();
     const myHome = await readHomeCoord(ctx, args.kingdomId);
     const rivals = [];
+    const seenNames = new Set<string>();
     for (const other of all) {
       if (other._id === args.kingdomId) continue;
+      // [BETA PARLAMENTO]: Excluir reinos de demostración, pruebas o verificación
+      if (isTestOrDemoKingdom({ userId: other.userId, name: other.name, monarchName: other.monarchName })) continue;
+      // [BETA PARLAMENTO]: Solo reinos de jugadores reales descubiertos previamente en el mapa
+      if (!discoveredKingdomIds.has(other._id)) continue;
+      // [BETA PARLAMENTO]: Deduplicar por nombre normalizado
+      const normName = (other.name ?? "").toLowerCase().trim();
+      if (normName && seenNames.has(normName)) continue;
+      if (normName) seenNames.add(normName);
       const [levels, population, units, home] = await Promise.all([
         readBuildingLevels(ctx, other._id),
         readPopulationTotal(ctx, other._id),

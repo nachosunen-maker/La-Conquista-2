@@ -243,3 +243,78 @@ export function generateExplorationDiscovery(
     resourceReward: reward,
   };
 }
+
+/**
+ * [BETA PARLAMENTO]: Identifica si un reino es de demostración, pruebas o verificación.
+ * Estos reinos no deben figurar como rivales legítimos en el Parlamento.
+ */
+export function isTestOrDemoKingdom(kingdom: {
+  userId?: string | null;
+  name?: string | null;
+  monarchName?: string | null;
+}): boolean {
+  if (kingdom.userId === "guest_g9ai8cz") return true;
+  const name = (kingdom.name ?? "").toLowerCase().trim();
+  const monarch = (kingdom.monarchName ?? "").toLowerCase().trim();
+
+  // El reino de demostración Iberia oficial no es un rival de combate real
+  if (name === "reino de iberia" || name === "iberia") return true;
+  if (name.includes("prueba") || name.includes("pruebas")) return true;
+  if (name.includes("verificaci") || name.includes("verificacion") || name.includes("verificación")) return true;
+  if (name.includes("test")) return true;
+
+  if (monarch.includes("test") || monarch.includes("prueba") || monarch.includes("verificaci")) return true;
+  if (monarch === "rey arturo") return true;
+
+  return false;
+}
+
+/**
+ * [BETA PARLAMENTO]: Determina si un reino objetivo ha sido descubierto en el mapa por un reino observador.
+ * Un reino se considera descubierto si el observador conoce al menos una de las celdas
+ * territoriales que dicho reino posee (su territorio principal o territorios anexionados).
+ */
+export function isKingdomDiscoveredOnMap(
+  targetKingdomId: string,
+  knownCellIds: ReadonlySet<string>,
+  targetOwnedCellIds: ReadonlyArray<string>,
+  targetHomeTerritoryId?: string | null
+): boolean {
+  if (targetHomeTerritoryId && knownCellIds.has(targetHomeTerritoryId)) {
+    return true;
+  }
+  return targetOwnedCellIds.some((cellId) => knownCellIds.has(cellId));
+}
+
+/**
+ * [BETA PARLAMENTO]: Filtra la lista de reinos candidatos para el Parlamento, devolviendo
+ * únicamente aquellos de jugadores reales descubiertos en el mapa por el reino observador,
+ * excluyendo reinos de demostración, pruebas o verificación y deduplicando por nombre.
+ */
+export function filterDiscoveredKingdoms<T extends { kingdomId: string; name?: string; monarchName?: string; userId?: string }>(
+  viewerKingdomId: string,
+  candidates: ReadonlyArray<T>,
+  discoveredKingdomIds: ReadonlySet<string>
+): T[] {
+  const seenIds = new Set<string>();
+  const seenNames = new Set<string>();
+  const result: T[] = [];
+
+  for (const k of candidates) {
+    if (k.kingdomId === viewerKingdomId) continue;
+    if (seenIds.has(k.kingdomId)) continue;
+    if (!discoveredKingdomIds.has(k.kingdomId)) continue;
+    if (isTestOrDemoKingdom(k)) continue;
+
+    const normName = (k.name ?? "").toLowerCase().trim();
+    if (normName && seenNames.has(normName)) continue;
+    if (normName) seenNames.add(normName);
+
+    seenIds.add(k.kingdomId);
+    result.push(k);
+  }
+
+  return result;
+}
+
+

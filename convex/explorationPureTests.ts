@@ -8,8 +8,10 @@ import {
   calculateExplorationRefund,
   canStartExploration,
   explorationProgress,
+  filterDiscoveredKingdoms,
   generateExplorationDiscovery,
   getInitialSightCellIds,
+  isKingdomDiscoveredOnMap,
 } from "./explorationRules";
 import { canClaimTerritory, generateWorldCells, hexDistance } from "./territoryRules";
 
@@ -183,6 +185,89 @@ export function runExplorationValidationTests(): ExplorationTestResult[] {
       test: "9. Exige que un territorio libre esté explorado antes de poder ser reclamado mediante victoria aplastante",
       passed: !claimUnexplored.success && claimExplored.success,
       details: `Inexplorado bloqueado: ${!claimUnexplored.success}; Explorado admitido: ${claimExplored.success}`,
+    },
+    // =========================================================================
+    // FILTRADO DE REINOS EN EL PARLAMENTO POR DESCUBRIMIENTO EN EL MAPA (BETA)
+    // =========================================================================
+    {
+      category: "PARLAMENTO POR DESCUBRIMIENTO (CASO A)",
+      test: "10. Caso A: Reino real no descubierto en el mapa -> NO aparece en el Parlamento",
+      passed: (() => {
+        const p1Sight = new Set(getInitialSightCellIds({ q: 0, r: 0 }));
+        const p2Home = "5,5";
+        const isP2Discovered = isKingdomDiscoveredOnMap("kingdom_2", p1Sight, [p2Home], p2Home);
+        const candidates = [{ kingdomId: "kingdom_2", name: "Reino 2" }, { kingdomId: "kingdom_3", name: "Reino 3" }];
+        const discoveredIds = new Set<string>();
+        const filtered = filterDiscoveredKingdoms("kingdom_1", candidates, discoveredIds);
+        return !isP2Discovered && filtered.length === 0;
+      })(),
+      details: "Reino 2 y Reino 3 bajo niebla de guerra: ninguno aparece en el Parlamento del Jugador 1.",
+    },
+    {
+      category: "PARLAMENTO POR DESCUBRIMIENTO (CASO B)",
+      test: "11. Caso B: Reino real descubierto en el mapa -> DEBE aparecer en el Parlamento",
+      passed: (() => {
+        const p1Known = new Set([...getInitialSightCellIds({ q: 0, r: 0 }), "5,5"]);
+        const p2Home = "5,5";
+        const isP2Discovered = isKingdomDiscoveredOnMap("kingdom_2", p1Known, [p2Home], p2Home);
+        const isP3Discovered = isKingdomDiscoveredOnMap("kingdom_3", p1Known, ["-5,-5"], "-5,-5");
+        const candidates = [{ kingdomId: "kingdom_2", name: "Reino 2" }, { kingdomId: "kingdom_3", name: "Reino 3" }];
+        const discoveredIds = new Set<string>(["kingdom_2"]);
+        const filtered = filterDiscoveredKingdoms("kingdom_1", candidates, discoveredIds);
+        return isP2Discovered && !isP3Discovered && filtered.length === 1 && filtered[0].kingdomId === "kingdom_2";
+      })(),
+      details: "Celda 5,5 explorada: Reino 2 aparece como rival disponible; Reino 3 permanece inexplorado y oculto.",
+    },
+    {
+      category: "PARLAMENTO POR DESCUBRIMIENTO (CASO C)",
+      test: "12. Caso C: Exploración asimétrica: Jugador 1 descubre a Jugador 2, pero Jugador 2 NO a Jugador 1",
+      passed: (() => {
+        const p1Known = new Set([...getInitialSightCellIds({ q: 0, r: 0 }), "5,5"]);
+        const p2Known = new Set(getInitialSightCellIds({ q: 5, r: 5 }));
+        const p1DiscoversP2 = isKingdomDiscoveredOnMap("kingdom_2", p1Known, ["5,5"], "5,5");
+        const p2DiscoversP1 = isKingdomDiscoveredOnMap("kingdom_1", p2Known, ["0,0"], "0,0");
+        const p1Rivals = filterDiscoveredKingdoms("kingdom_1", [{ kingdomId: "kingdom_2" }], new Set(["kingdom_2"]));
+        const p2Rivals = filterDiscoveredKingdoms("kingdom_2", [{ kingdomId: "kingdom_1" }], new Set<string>());
+        return p1DiscoversP2 && !p2DiscoversP1 && p1Rivals.length === 1 && p2Rivals.length === 0;
+      })(),
+      details: "Jugador 1 ve a Jugador 2 en su Parlamento (1 rival); Jugador 2 no ve a Jugador 1 (0 rivales).",
+    },
+    {
+      category: "PARLAMENTO POR DESCUBRIMIENTO (CASO D)",
+      test: "13. Caso D: Persistencia tras recargas: el descubrimiento guardado en backend persiste entre sesiones",
+      passed: (() => {
+        // Simulación de reconstrucción de estado tras recarga a partir de exploredTerritories persistido
+        const persistentExploredRecords = [{ kingdomId: "kingdom_1", cellId: "5,5", discoveredAt: 1700000000000 }];
+        const sessionReloadedKnown = new Set([
+          ...getInitialSightCellIds({ q: 0, r: 0 }),
+          ...persistentExploredRecords.map((r) => r.cellId),
+        ]);
+        const reloadedDiscovered = isKingdomDiscoveredOnMap("kingdom_2", sessionReloadedKnown, ["5,5"], "5,5");
+        const sessionRivals = filterDiscoveredKingdoms("kingdom_1", [{ kingdomId: "kingdom_2", name: "Reino 2" }], new Set(reloadedDiscovered ? ["kingdom_2"] : []));
+        return reloadedDiscovered && sessionRivals.length === 1 && sessionRivals[0].kingdomId === "kingdom_2";
+      })(),
+      details: "Tras recargar sesión y leer exploredTerritories persistido, Reino 2 sigue disponible en el Parlamento.",
+    },
+    {
+      category: "PARLAMENTO POR DESCUBRIMIENTO (EXCLUSIÓN PRUEBAS Y DEMO)",
+      test: "14. Exclusión de reinos de prueba, verificación, demo Iberia y deduplicación",
+      passed: (() => {
+        const discovered = new Set(["k_iberia_demo", "k_verif", "k_pruebas", "k_real_1", "k_real_dup"]);
+        const candidates = [
+          { kingdomId: "k_iberia_demo", name: "Reino de Iberia", userId: "guest_g9ai8cz" },
+          { kingdomId: "k_verif", name: "Reino de Verificación Remoto", monarchName: "Monarca" },
+          { kingdomId: "k_pruebas", name: "Reino de Pruebas", monarchName: "GobernanteTestFundacion" },
+          { kingdomId: "k_real_1", name: "Reino de Navarra", monarchName: "Sancho" },
+          { kingdomId: "k_real_dup", name: "Reino de Navarra", monarchName: "Sancho II" },
+        ];
+        const filtered = filterDiscoveredKingdoms("my_kingdom", candidates, discovered);
+        return (
+          filtered.length === 1 &&
+          filtered[0].kingdomId === "k_real_1" &&
+          filtered[0].name === "Reino de Navarra"
+        );
+      })(),
+      details: "Excluye demo Iberia, verificación y pruebas; deduplica Navarra. Solo 1 reino real legítimo visible.",
     },
   ];
 }

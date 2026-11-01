@@ -125,6 +125,78 @@ export async function distanceBetweenKingdoms(ctx: QueryCtx | MutationCtx, a: Id
 }
 
 /**
+ * [BETA PARLAMENTO]: Celdas conocidas ("q,r") para un reino:
+ * 1. Celdas poseídas por el reino (territorio principal + anexionados).
+ * 2. Celdas dentro del radio de visión inicial alrededor del territorio principal.
+ * 3. Celdas exploradas registradas en 'exploredTerritories'.
+ * 4. Celdas con expediciones vencidas o completadas en 'explorationQueue'.
+ */
+export async function readKnownCellIds(
+  ctx: QueryCtx | MutationCtx,
+  kingdomId: Id<"kingdoms">
+): Promise<Set<string>> {
+  const kingdom = await ctx.db.get(kingdomId);
+  if (!kingdom) return new Set();
+
+  const [ownedCells, exploredRecords, activeQueue] = await Promise.all([
+    ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdomId))
+      .collect(),
+    ctx.db
+      .query("exploredTerritories")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+      .collect(),
+    ctx.db
+      .query("explorationQueue")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+      .collect(),
+  ]);
+
+  const homeCoord = await readHomeCoord(ctx, kingdomId);
+  const initialSight = getInitialSightCellIds(homeCoord, EXPLORATION.INITIAL_SIGHT_RADIUS, MAP.RADIUS);
+
+  const knownIds = new Set<string>([
+    ...ownedCells.map((c) => c.cellId),
+    ...initialSight,
+    ...exploredRecords.map((r) => r.cellId),
+  ]);
+
+  const now = Date.now();
+  for (const exp of activeQueue) {
+    if (now >= exp.completesAt) {
+      knownIds.add(exp.cellId);
+    }
+  }
+
+  return knownIds;
+}
+
+/**
+ * [BETA PARLAMENTO]: Obtiene los identificadores de reinos rivales descubiertos en el mapa por un reino.
+ * Un reino se considera descubierto si el jugador conoce la celda de su territorio
+ * principal o cualquiera de sus celdas territoriales.
+ */
+export async function readDiscoveredKingdomIds(
+  ctx: QueryCtx | MutationCtx,
+  kingdomId: Id<"kingdoms">
+): Promise<Set<Id<"kingdoms">>> {
+  const knownCellIds = await readKnownCellIds(ctx, kingdomId);
+  if (knownCellIds.size === 0) return new Set();
+
+  const world = await readWorld(ctx);
+  const discovered = new Set<Id<"kingdoms">>();
+
+  for (const cell of world) {
+    if (cell.ownerKingdomId && cell.ownerKingdomId !== kingdomId && knownCellIds.has(cell.cellId)) {
+      discovered.add(cell.ownerKingdomId);
+    }
+  }
+
+  return discovered;
+}
+
+/**
  * Resuelve y completa una expedición de exploración vencida (idempotente).
  */
 export async function completeExpedition(ctx: MutationCtx, expeditionId: Id<"explorationQueue">) {

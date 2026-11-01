@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { Landmark, Swords, Scroll, Eye, Coins, Award, Trophy } from 'lucide-react';
+import { isTestOrDemoKingdom } from '../../convex/explorationRules';
 import {
   PanelSection,
   StatusMessages,
@@ -21,6 +22,7 @@ import {
 
 const getParliamentQuery = makeFunctionReference<"query">("parliament:getParliament");
 const listRivalsQuery = makeFunctionReference<"query">("parliament:listRivals");
+const getWorldMapQuery = makeFunctionReference<"query">("territories:getWorldMap");
 const getBattlesQuery = makeFunctionReference<"query">("parliament:getBattles");
 const getLeaderboardQuery = makeFunctionReference<"query">("parliament:getLeaderboard");
 const createChallengeMutation = makeFunctionReference<"mutation">("parliament:createChallenge");
@@ -155,6 +157,14 @@ export function ParliamentPanel(props: {
   const { kingdomId, isOwner } = props;
   const parliament = useQuery(getParliamentQuery, kingdomId ? { kingdomId } : "skip") as ParliamentState | undefined;
   const rivals = useQuery(listRivalsQuery, kingdomId ? { kingdomId } : "skip") as RivalsState | undefined;
+  const worldMap = useQuery(getWorldMapQuery, kingdomId ? { kingdomId } : "skip") as {
+    cells?: Array<{
+      cellId: string;
+      state: string;
+      ownerKingdomId: string | null;
+      ownerName: string | null;
+    }>;
+  } | undefined;
   const battles = useQuery(getBattlesQuery, kingdomId ? { kingdomId } : "skip") as BattleRecord[] | undefined;
   const leaderboard = useQuery(getLeaderboardQuery, kingdomId ? { kingdomId } : "skip") as LeaderboardState | undefined;
   const createChallenge = useMutation(createChallengeMutation);
@@ -180,6 +190,50 @@ export function ParliamentPanel(props: {
   const currentTax = taxInput ?? Math.round((props.taxRate ?? 0.1) * 100);
   const nextBonusAt = (props.lastDailyBonusAt ?? 0) + props.dailyBonusCooldownMs;
   const bonusAvailable = serverNow >= nextBonusAt;
+
+  const visibleRivals = useMemo(() => {
+    if (!rivals?.rivals) return [];
+
+    // Celdas conocidas y exploradas sobre el mapa autoritativo
+    const discoveredOnMap = new Set<string>();
+    if (worldMap?.cells) {
+      for (const cell of worldMap.cells) {
+        if (cell.state !== 'fog' && cell.ownerKingdomId && cell.ownerKingdomId !== kingdomId) {
+          discoveredOnMap.add(cell.ownerKingdomId);
+        }
+      }
+    }
+
+    const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
+    const filtered: typeof rivals.rivals = [];
+
+    for (const rival of rivals.rivals) {
+      // 1. Excluir el propio reino
+      if (rival.kingdomId === kingdomId) continue;
+
+      // 2. Excluir duplicados de identificador
+      if (seenIds.has(rival.kingdomId)) continue;
+
+      // 3. Excluir reinos de demostración, pruebas o verificación
+      if (isTestOrDemoKingdom({ name: rival.name })) continue;
+
+      // 4. Si el mapa ya ha cargado sus celdas, verificar estrictamente descubrimiento en mapa
+      if (worldMap?.cells && worldMap.cells.length > 0) {
+        if (!discoveredOnMap.has(rival.kingdomId)) continue;
+      }
+
+      // 5. Excluir duplicados por nombre normalizado (evitar que el mismo nombre aparezca 2 veces)
+      const normName = (rival.name || '').toLowerCase().trim();
+      if (normName && seenNames.has(normName)) continue;
+      if (normName) seenNames.add(normName);
+
+      seenIds.add(rival.kingdomId);
+      filtered.push(rival);
+    }
+
+    return filtered;
+  }, [rivals?.rivals, worldMap?.cells, kingdomId]);
 
   const handleCreate = (rivalKingdomId: string, rivalName: string) =>
     action.run(`challenge-${rivalKingdomId}`, async () => {
@@ -411,11 +465,13 @@ export function ParliamentPanel(props: {
       <PanelSection icon={<Eye className="w-4 h-4 text-sky-400" />} title="Reinos rivales (P42)">
         {!rivals ? (
           <p className="text-xs text-[#8e816d] italic">Consultando reinos…</p>
-        ) : rivals.rivals.length === 0 ? (
-          <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">No hay otros reinos en este mundo todavía.</p>
+        ) : visibleRivals.length === 0 ? (
+          <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">
+            Aún no has descubierto otros reinos en el mapa. Envía expediciones de exploración para entablar contacto diplomático.
+          </p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {rivals.rivals.map((rival) => (
+            {visibleRivals.map((rival) => (
               <div key={rival.kingdomId} className={`${cardClass} text-[11px] space-y-1.5`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold text-[#f0e8d4] text-xs">{rival.name}</span>
