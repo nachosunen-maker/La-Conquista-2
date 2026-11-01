@@ -159,7 +159,7 @@ export function PanelSection(props: { icon: React.ReactNode; title: string; asid
 }
 
 export function normalizeErrorMessage(err: any): string {
-  if (!err) return "Ha ocurrido un error inesperado.";
+  if (!err) return "No se han podido guardar los cambios. Inténtalo de nuevo.";
   let message = "";
   if (typeof err === "string") {
     message = err;
@@ -176,7 +176,17 @@ export function normalizeErrorMessage(err: any): string {
     }
   }
 
-  // Limpiar prefijos técnicos y trazas de Convex para no exponer Request IDs ni llamadas internas al usuario
+  console.error('[La Conquista - Error Técnico]:', message);
+
+  const lower = message.toLowerCase();
+  if (lower.includes("failed to fetch") || lower.includes("network") || lower.includes("could not find public function")) {
+    return "No ha sido posible conectar con el servidor del reino. Inténtalo de nuevo.";
+  }
+  if (lower.includes("server error") || lower.includes("convexerror")) {
+    return "Este servicio del reino no está disponible en este momento.";
+  }
+
+  // If there's already a clean user-facing message, keep it
   let clean = message
     .replace(/^\[CONVEX[^\]]*\]\s*/gi, "")
     .replace(/^\[Request ID:[^\]]*\]\s*/gi, "")
@@ -186,7 +196,11 @@ export function normalizeErrorMessage(err: any): string {
     .replace(/\s*Called by client$/i, "")
     .trim();
 
-  return clean || message || "Ha ocurrido un error inesperado.";
+  if (/Could not find public function|Failed to fetch|AssertionError/i.test(clean)) {
+    return "No se han podido guardar los cambios. Inténtalo de nuevo.";
+  }
+
+  return clean || "No se han podido guardar los cambios. Inténtalo de nuevo.";
 }
 
 export function isInsufficientError(msg: string): boolean {

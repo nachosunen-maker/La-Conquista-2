@@ -1112,9 +1112,9 @@ function KingdomOverviewContent() {
                 {kingdomData?.season && (
                   <>
                     <span aria-hidden="true" className="text-[#453d30]">•</span>
-                    <span className="inline-flex items-center gap-1" title={kingdomData.season.effectsEnabled ? 'Estación con efectos activos' : 'Estación informativa (P3): sin efectos hasta aprobar sus modificadores'}>
+                    <span className="inline-flex items-center gap-1">
                       <Sun className="w-3 h-3 text-amber-300" />
-                      {kingdomData.season.label} ({Math.round(kingdomData.season.progress * 100)} %){kingdomData.season.effectsEnabled ? '' : ' · sin efectos'}
+                      {kingdomData.season.label} ({Math.round(kingdomData.season.progress * 100)} %)
                     </span>
                   </>
                 )}
@@ -1218,27 +1218,7 @@ function KingdomOverviewContent() {
           </div>
 
           <div className="flex items-center gap-2">
-            {isOwner ? (
-              <button
-                type="button"
-                onClick={handleSettleEconomy}
-                disabled={isSettling}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#261d12] hover:bg-[#382b1a] border border-[#d4af37]/50 hover:border-[#d4af37] rounded text-[#d4af37] text-xs font-serif font-semibold transition-all shadow-md disabled:opacity-50"
-                title="Liquidar autoritativamente el tiempo transcurrido en el servidor Convex"
-              >
-                {isSettling ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Liquidando...</span>
-                  </>
-                ) : (
-                  <>
-                    <Database className="w-3.5 h-3.5" />
-                    <span>Liquidar Economía</span>
-                  </>
-                )}
-              </button>
-            ) : (
+            {!isOwner && (
               <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#1a150e] border border-amber-900/40 rounded text-[11px] text-amber-400/80 font-mono">
                 <Info className="w-3.5 h-3.5" />
                 <span>Modo Consulta (Iberia protegido)</span>
@@ -1503,7 +1483,7 @@ function KingdomOverviewContent() {
               </div>
               <p className="text-[10px] text-[#6b604e]">
                 {isOwner
-                  ? "Parámetro persistido en la base de datos de Convex mediante la mutación autoritativa 'setKingdomFoodTier'."
+                  ? "Régimen alimentario aplicado al reino."
                   : "Modo Demostración: modificación provisional en memoria (el Reino de Iberia permanece inalterado)."}
               </p>
               {tierErrorMessage && (
@@ -1513,7 +1493,7 @@ function KingdomOverviewContent() {
               )}
             </div>
 
-            {/* Selector de régimen P17 */}
+            {/* Selector de régimen */}
             <div className="flex flex-wrap items-center gap-1.5">
               {VALID_FOOD_TIERS.map((tier) => {
                 const tierLabels: Record<string, string> = {
@@ -1544,19 +1524,19 @@ function KingdomOverviewContent() {
 
           <div className="flex items-center justify-between border-t border-[#211a12] pt-2">
             <span className="text-[11px] text-[#8e816d]">
-              Regla D-12: las máquinas de asedio no consumen raciones; sus 5 operadores por pieza sí (factor 1,05 de P18).
+              Las máquinas de asedio no consumen raciones; sus operadores sí.
             </span>
             <span className="text-[10px] text-[#615545] font-mono">
-              P2: 86.400 s/año
+              1 año de juego = 1 día real
             </span>
           </div>
         </div>
 
-        {/* [M-04] Política de descanso del Castillo (P15, P55) */}
+        {/* Política de descanso del Castillo */}
         <div className="bg-[#100e0b] border border-[#292116] rounded-lg p-3 sm:p-3.5 space-y-2 text-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <span className="font-semibold text-[#e6ded0] block">Política de descanso del Castillo (P15, P55)</span>
+              <span className="font-semibold text-[#e6ded0] block">Política de descanso del Castillo</span>
               <span className="text-[11px] text-[#8e816d]">
                 Vigente: {REST_POLICIES[(kingdom.restPolicy ?? 'normal') as keyof typeof REST_POLICIES]?.label ?? kingdom.restPolicy}. Afecta a la producción, la felicidad y la fatiga del ejército en cada liquidación.
               </span>
@@ -1925,7 +1905,7 @@ function KingdomOverviewContent() {
           </div>
 
           <div className="border-t border-[#241e15] pt-3 text-[11px] text-[#7a6f5e] flex items-center justify-between">
-            <span>Modelo P10 / P12 / P19</span>
+            <span>Censo y Población del Reino</span>
             <span>Censo gobernado por servidor</span>
           </div>
         </section>
@@ -2001,7 +1981,7 @@ function KingdomOverviewContent() {
           </div>
 
           <div className="border-t border-[#241e15] pt-3 text-[11px] text-[#7a6f5e] flex items-center justify-between">
-            <span>Requisitos marciales P23</span>
+            <span>Guarnición y Tropas</span>
             <span>Unidades bajo mando directo</span>
           </div>
         </section>

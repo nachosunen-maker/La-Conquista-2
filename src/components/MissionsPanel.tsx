@@ -94,10 +94,10 @@ export class MissionsErrorBoundary extends React.Component<MissionsErrorBoundary
         >
           <div className="bg-[#18140f] border border-[#2b2419] rounded-lg p-3.5 space-y-2 text-xs text-[#c7beac]">
             <div className="flex items-center gap-2 text-[#d4af37] font-semibold text-xs">
-              <span>📜 Sistema de Misiones (P50, P51, P59)</span>
+              <span>📜 Sistema de Misiones del Reino</span>
             </div>
             <p className="text-[11px] leading-relaxed">
-              El sistema de misiones por etapas, diarias y secretas está implementado en la lógica del juego. El backend remoto conectado aún no tiene desplegado el módulo autoritativo en Convex.
+              El Gran Maestre de Misiones está preparando las encomiendas y desafíos del reino.
             </p>
           </div>
         </PanelSection>
@@ -406,10 +406,10 @@ function MissionsPanelInner(props: { kingdomId: string; isOwner: boolean }) {
       >
         <div className="bg-[#18140f] border border-[#2b2419] rounded-lg p-3.5 space-y-2 text-xs text-[#c7beac]">
           <div className="flex items-center gap-2 text-[#d4af37] font-semibold text-xs">
-            <span>📜 Sistema de Misiones (P50, P51, P59)</span>
+            <span>📜 Sistema de Misiones del Reino</span>
           </div>
           <p className="text-[11px] leading-relaxed">
-            El sistema de misiones por etapas, diarias y secretas está implementado en la lógica del juego. El backend remoto conectado aún no dispone del módulo desplegado en Convex.
+            El Gran Maestre de Misiones está preparando las encomiendas y desafíos del reino.
           </p>
         </div>
       </PanelSection>

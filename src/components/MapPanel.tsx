@@ -201,7 +201,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
           <span className="flex items-center gap-3">
             <span>Explorado: {world.exploredCount}/{world.totalCells} ({world.totalCells > 0 ? Math.round((world.exploredCount / world.totalCells) * 100) : 0} %)</span>
             <span>·</span>
-            <span className="text-[#d4af37]">{mine?.pendingClaims ?? 0} reclamación(es) (P49)</span>
+            <span className="text-[#d4af37]">{mine?.pendingClaims ?? 0} reclamación(es)</span>
           </span>
         }
       >
@@ -313,7 +313,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                           ? `${cell.cellId} · Niebla de guerra${cell.canExplore ? ' (Explorable)' : ''}`
                           : isExploring
                           ? `${cell.cellId} · Expedición en marcha`
-                          : `${cell.cellId} · ${world.terrains[cell.terrain]?.label ?? cell.terrain}${cell.ownerName ? ` · ${cell.ownerName}${cell.isHome ? ' (capital)' : ''}` : ' · libre (P49)'}`}
+                          : `${cell.cellId} · ${world.terrains[cell.terrain]?.label ?? cell.terrain}${cell.ownerName ? ` · ${cell.ownerName}${cell.isHome ? ' (capital)' : ''}` : ' · libre'}`}
                       </title>
                     </polygon>
 
@@ -385,7 +385,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                                 ? 'Enviando partida…'
                                 : world.activeExpeditions.length >= 1
                                 ? 'Expedición en curso (límite 1)'
-                                : 'Enviar expedición de exploración (P22)'}
+                                : 'Enviar expedición de exploración'}
                             </button>
                           )}
                         </div>
@@ -448,13 +448,13 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                       <p className="text-[#c7beac]">
                         {selectedCell.ownerName
                           ? `Gobernante: ${selectedCell.ownerName}${selectedCell.isHome ? ' (capital)' : ''}`
-                          : 'Territorio libre (P49) · Sin soberano'}
+                          : 'Territorio libre · Sin soberano'}
                       </p>
 
                       {/* Modificadores de terreno */}
                       {world.terrains[selectedCell.terrain] && (
                         <div className="text-[10px] text-[#a89b88] bg-[#0c0a08] p-1.5 rounded">
-                          <span className="block text-[#c7beac] font-medium mb-0.5">Rendimiento comarcal (D-24):</span>
+                          <span className="block text-[#c7beac] font-medium mb-0.5">Rendimiento comarcal:</span>
                           {Object.entries(world.terrains[selectedCell.terrain].production).map(([job, bonus]) => (
                             <span key={job} className="mr-2">+{Math.round(bonus * 100)} % {JOB_LABELS[job] ?? job}</span>
                           ))}
@@ -481,9 +481,9 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                             {action.busy === 'claim'
                               ? 'Reclamando territorio…'
                               : (mine?.pendingClaims ?? 0) === 0
-                              ? 'Sin reclamaciones (requiere victoria aplastante P47)'
+                              ? 'Sin reclamaciones (requiere victoria aplastante previa)'
                               : canClaimSelected
-                              ? 'Reclamar territorio libre (P49)'
+                              ? 'Reclamar territorio libre'
                               : 'Demasiado lejos (máximo 2 hexágonos)'}
                           </button>
                         </div>

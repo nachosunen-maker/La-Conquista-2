@@ -89,8 +89,8 @@ export function FoundingWizard(props: { defaultMonarchName: string; onFounded: (
         <div className="space-y-3">
           <h3 className="text-sm font-serif font-semibold text-[#e6ded0]">Elige el origen de tu reino</h3>
           <p className="text-[11px] text-[#8e816d]">
-            Doce civilizaciones (P6). La elección es definitiva al fundar el reino.
-            {civilizationsData && !civilizationsData.bonusesEnabled && ' Las bonificaciones por civilización están desactivadas hasta su aprobación de balance.'}
+            Doce civilizaciones. La elección es definitiva al fundar el reino.
+            {civilizationsData && !civilizationsData.bonusesEnabled && ' Las bonificaciones por civilización están temporalmente inactivas.'}
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {civilizations.map((c) => (
@@ -114,7 +114,7 @@ export function FoundingWizard(props: { defaultMonarchName: string; onFounded: (
             return (
               <div className="rounded border border-[#2b2419] bg-[#100e0b] p-2.5 text-[11px] text-[#c7beac] space-y-1">
                 <p><strong className="text-emerald-200">Ventaja:</strong> {profile.advantage}</p>
-                <p><strong className="text-rose-200">Debilidad:</strong> {profile.weakness ?? 'pendiente de diseño'}</p>
+                <p><strong className="text-rose-200">Desafío:</strong> {profile.weakness ?? 'Ninguno destacado'}</p>
                 {profile.identity && <p><strong className="text-[#e6ded0]">Tropa y edificio propios:</strong> {profile.identity.signatureUnit.name} · {profile.identity.uniqueBuilding.name}</p>}
               </div>
             );
@@ -125,7 +125,7 @@ export function FoundingWizard(props: { defaultMonarchName: string; onFounded: (
       {step === 'reino' && (
         <div className="space-y-3">
           <h3 className="text-sm font-serif font-semibold text-[#e6ded0]">Nombra tu reino</h3>
-          <p className="text-[11px] text-[#8e816d]">Ejemplo: Reino de Iberia. El nombre queda asociado permanentemente a la partida (P7).</p>
+          <p className="text-[11px] text-[#8e816d]">Ejemplo: Reino de Iberia. El nombre queda asociado permanentemente a la partida.</p>
           <input
             className={`${inputClass} w-full text-sm py-2`}
             value={kingdomName}
@@ -140,7 +140,7 @@ export function FoundingWizard(props: { defaultMonarchName: string; onFounded: (
       {step === 'castillo' && (
         <div className="space-y-3">
           <h3 className="text-sm font-serif font-semibold text-[#e6ded0]">Nombra tu castillo</h3>
-          <p className="text-[11px] text-[#8e816d]">Ejemplo: Castillo de Zaragoza. El castillo es el centro administrativo del reino (P8).</p>
+          <p className="text-[11px] text-[#8e816d]">Ejemplo: Castillo de Zaragoza. El castillo es el centro administrativo del reino.</p>
           <input
             className={`${inputClass} w-full text-sm py-2`}
             value={castleName}
@@ -155,7 +155,7 @@ export function FoundingWizard(props: { defaultMonarchName: string; onFounded: (
       {step === 'monarca' && (
         <div className="space-y-3">
           <h3 className="text-sm font-serif font-semibold text-[#e6ded0]">Nombre del monarca</h3>
-          <p className="text-[11px] text-[#8e816d]">Así te conocerán los demás reinos (P5).</p>
+          <p className="text-[11px] text-[#8e816d]">Así te conocerán los demás reinos.</p>
           <input
             className={`${inputClass} w-full text-sm py-2`}
             value={monarchName}
@@ -177,7 +177,7 @@ export function FoundingWizard(props: { defaultMonarchName: string; onFounded: (
             <dt className="text-[#8e816d]">Civilización</dt><dd className="text-[#f0e8d4] font-medium">{civilizationLabel}</dd>
           </dl>
           <p className="text-[11px] text-[#8e816d] text-center">
-            Al fundar, el servidor crea el reino con 2.000 habitantes (P10), los edificios fundacionales y un territorio principal en el mapa.
+            Al fundar, el servidor crea el reino con su población inicial, los edificios fundacionales y un territorio principal en el mapa.
           </p>
         </div>
       )}

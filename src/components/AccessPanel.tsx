@@ -42,13 +42,11 @@ export function describeAuthError(error: unknown): string {
   if (error instanceof ConvexError && typeof error.data === 'string') return error.data;
   const message = error instanceof Error ? error.message : String(error);
 
-  // Funciones no desplegadas en el backend remoto de Convex
-  if (/Could not find public function for 'auth:signIn'/i.test(message)) {
-    return 'El servidor Convex remoto aún no tiene desplegado el módulo de autenticación (falta "auth:signIn"). Es necesario desplegar el backend Convex mediante "npx convex dev" o "npx convex deploy".';
-  }
-  if (/Could not find public function for '([^']+)'/i.test(message)) {
-    const match = /Could not find public function for '([^']+)'/i.exec(message);
-    return `Función "${match ? match[1] : 'requerida'}" no disponible en el servidor Convex remoto. Requiere desplegar el backend.`;
+  console.error('[La Conquista - Error Autenticación Técnico]:', message);
+
+  // Funciones no desplegadas o red
+  if (/Could not find public function for|Failed to fetch|NetworkError|Network request failed|net::ERR_|Failed to load resource/i.test(message)) {
+    return 'No ha sido posible conectar con el servidor del reino. Inténtalo de nuevo.';
   }
 
   // Nombre de gobernante ya ocupado
@@ -66,27 +64,18 @@ export function describeAuthError(error: unknown): string {
     return 'Demasiados intentos fallidos. Espera unos minutos y vuelve a intentarlo.';
   }
 
-  // Error de conexión o red con Convex
-  if (/Failed to fetch|NetworkError|Network request failed|net::ERR_|Failed to load resource/i.test(message)) {
-    return 'No se pudo conectar con el servidor Convex. Comprueba tu conexión a Internet o el estado del backend.';
-  }
-
-  // [NUEVO] Error específico de pérdida de conexión durante una operación en vuelo
   if (/Connection lost while action was in flight/i.test(message)) {
-    return 'Se ha perdido la conexión con el servidor durante la operación. Esto suele ser una interrupción temporal de la red; por favor, inténtalo de nuevo en unos segundos.';
+    return 'Se ha perdido la conexión con el servidor durante la operación. Inténtalo de nuevo en unos segundos.';
   }
 
-  // Datos encapsulados en ConvexError
   const convexData = /ConvexError:\s*([^\n\r]+)/.exec(message);
   if (convexData) return convexData[1].trim();
 
-  // Si el servidor devolvió un Server Error específico de UDF
   if (/Server Error/i.test(message)) {
-    const cleanMsg = message.replace(/\[Request ID:\s*[a-zA-Z0-9]+\]\s*/i, '').replace(/^Server Error\s*/i, '').trim();
-    if (cleanMsg) return `Error del servidor: ${cleanMsg}`;
+    return 'Este servicio del reino no está disponible en este momento.';
   }
 
-  return 'No se ha completado la operación. Comprueba los datos o el estado de la conexión.';
+  return 'No se ha podido verificar tu identidad. Comprueba tus datos e inténtalo de nuevo.';
 }
 
 /** Decoración ornamental en las 4 esquinas del marco medieval */

@@ -502,10 +502,10 @@ export function ParliamentPanel(props: {
             </p>
             <p className="text-[#8e816d]">
               Honor y gloria: {r.honorAwarded.pending
-                ? 'importes pendientes de balance (P50-P51)'
+                ? 'importes calculados por el servidor'
                 : `tú +${battle.role === 'attacker' ? r.honorAwarded.attacker : r.honorAwarded.defender} honor / ${battle.role === 'attacker' ? r.gloryAwarded.attacker : r.gloryAwarded.defender} gloria · rival +${battle.role === 'attacker' ? r.honorAwarded.defender : r.honorAwarded.attacker} honor / ${battle.role === 'attacker' ? r.gloryAwarded.defender : r.gloryAwarded.attacker} gloria`}
               {' · '}Desgaste de equipo: {battle.role === 'attacker' ? r.equipmentWear.attacker : r.equipmentWear.defender} %
-              {' · '}Botín: {r.lootTransferred ? 'transferido' : 'sin botín (D-31)'}
+              {' · '}Botín: {r.lootTransferred ? 'transferido' : 'sin botín'}
               {' · '}Territorio: {battle.crushingVictory ? 'el vencedor puede reclamar un territorio libre cercano' : 'sin cambios'}
             </p>
           </div>
@@ -523,12 +523,12 @@ export function ParliamentPanel(props: {
       >
         {!hasParliament && (
           <p className="text-xs text-amber-300 bg-amber-950/30 border border-amber-800/50 rounded p-3">
-            Se necesita Parlamento nivel {parliament.requiredParliamentLevel} para enviar o recibir desafíos (D-42). Constrúyelo desde la Aldea.
+            Se necesita Parlamento nivel {parliament.requiredParliamentLevel} para enviar o recibir desafíos. Constrúyelo desde la Aldea.
           </p>
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
           <div className={`${cardClass} space-y-2`}>
-            <span className="font-semibold text-[#e6ded0] flex items-center gap-1.5"><Award className="w-3.5 h-3.5 text-[#d4af37]" /> Bonus diario (P59)</span>
+            <span className="font-semibold text-[#e6ded0] flex items-center gap-1.5"><Award className="w-3.5 h-3.5 text-[#d4af37]" /> Bonus diario</span>
             <p className="text-[#8e816d]">+{props.dailyBonusHonor} honor una vez cada 24 horas, validado por el servidor.</p>
             {writable ? (
               <button type="button" className={primaryButton} disabled={!bonusAvailable || action.busy !== null} onClick={handleBonus}>
@@ -539,7 +539,7 @@ export function ParliamentPanel(props: {
             )}
           </div>
           <div className={`${cardClass} space-y-2`}>
-            <span className="font-semibold text-[#e6ded0] flex items-center gap-1.5"><Coins className="w-3.5 h-3.5 text-amber-400" /> Impuestos (P27)</span>
+            <span className="font-semibold text-[#e6ded0] flex items-center gap-1.5"><Coins className="w-3.5 h-3.5 text-amber-400" /> Impuestos</span>
             <p className="text-[#8e816d]">0 %–100 %. Por encima del 10 % baja la felicidad; del 30 % al 60 % penaliza la productividad hasta un 15 %; más del 60 % reduce la moral militar.</p>
             <div className="flex items-center gap-2">
               <input className={`${inputClass} w-20 text-right`} type="number" min={0} max={100} step={1} value={currentTax} disabled={!writable} onChange={(e) => setTaxInput(Number(e.target.value))} />
@@ -567,7 +567,7 @@ export function ParliamentPanel(props: {
           </div>
         </div>
         <p className="text-[10px] text-[#615545]">
-          No existen ataques sorpresa (P38): todo combate pasa por el Parlamento. Rechazar cuesta el 2 % de cada recurso; aceptar fija la batalla a 1, 3 o 7 días reales y congela el contingente 15 minutos antes.
+          Todo combate pasa por el Parlamento. Rechazar cuesta el 2 % de cada recurso; aceptar fija la batalla a 1, 3 o 7 días reales y congela el contingente 15 minutos antes.
         </p>
       </PanelSection>
 
@@ -694,7 +694,7 @@ export function ParliamentPanel(props: {
         </div>
       </PanelSection>
 
-      <PanelSection icon={<Eye className="w-4 h-4 text-sky-400" />} title="Reinos rivales (P42)">
+      <PanelSection icon={<Eye className="w-4 h-4 text-sky-400" />} title="Reinos rivales">
         {!rivals ? (
           <p className="text-xs text-[#8e816d] italic">Consultando reinos…</p>
         ) : visibleRivals.length === 0 ? (
@@ -781,7 +781,7 @@ export function ParliamentPanel(props: {
         )}
       </PanelSection>
 
-      <PanelSection icon={<Swords className="w-4 h-4 text-rose-400" />} title="Historial de batallas (P43)">
+      <PanelSection icon={<Swords className="w-4 h-4 text-rose-400" />} title="Historial de batallas">
         {!battles ? (
           <p className="text-xs text-[#8e816d] italic">Consultando batallas…</p>
         ) : battles.length === 0 ? (

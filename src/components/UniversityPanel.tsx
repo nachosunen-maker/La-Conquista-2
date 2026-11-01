@@ -131,7 +131,7 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
       <PanelSection
         icon={<GraduationCap className="w-4 h-4 text-sky-400" />}
         title="Investigación en curso"
-        aside={<span>{state.slotsFree}/{state.slots} ranuras libres · ranuras: {state.slots} (Universidad nivel {buildingLevelOf('universidad')}; nivel 3 da 2 y nivel 5 da 3)</span>}
+        aside={<span>{state.slotsFree}/{state.slots} ranuras libres · ranuras de investigación disponibles</span>}
       >
         {state.researching.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
