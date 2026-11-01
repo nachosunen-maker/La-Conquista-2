@@ -57,7 +57,7 @@ import { ParliamentPanel } from './components/ParliamentPanel';
 import { MapPanel } from './components/MapPanel';
 import { MissionsPanel, MissionCelebrations } from './components/MissionsPanel';
 import { formatCosts, formatRequirements, normalizeErrorMessage, StatusMessages } from './components/shared';
-import { ResetKingdomConfirmation } from './components/ResetKingdomConfirmation';
+
 
 const CIVILIZATION_LABELS: Record<string, string> = Object.fromEntries(CIVILIZATIONS.map((c) => [c.id, c.label]));
 
@@ -258,7 +258,7 @@ function SessionControls() {
         <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
         {viewer?.rulerName ?? 'Gobernante'}
       </span>
-      {kingdom && <ResetKingdomConfirmation kingdomId={kingdom._id} onReset={() => window.location.reload()} />}
+
       <button
         onClick={async () => {
           setBusy(true);
