@@ -157,6 +157,19 @@ export const recordFailedRecoveryAttempt = internalMutation({
 });
 
 // ----------------------------------------------------------------------------
+export const resetRecoveryAttempts = internalMutation({
+  args: { recordId: v.id("accountRecovery") },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    await ctx.db.patch(args.recordId, {
+      failedAttempts: 0,
+      lockedUntil: undefined,
+      lastUsedAt: now,
+    });
+  },
+});
+
+// ----------------------------------------------------------------------------
 // Acciones públicas
 // ----------------------------------------------------------------------------
 
@@ -179,14 +192,13 @@ export const issueRecoveryCode = action({
 });
 
 /**
- * Restablece la contraseña con nombre de gobernante + código de recuperación (sin sesión).
- * Mensajes genéricos (no revelan si falla el nombre o el código). Tras N fallos seguidos se
- * bloquea unos minutos. Si acierta: contraseña nueva, se cierran todas las sesiones y se
- * devuelve un código nuevo que se muestra una sola vez.
+ * Restablece la contraseña con nombre de gobernante + clave de recuperación (sin sesión).
+ * La clave es PERMANENTE Y REUTILIZABLE: una recuperación exitosa restablece la contraseña
+ * y el contador de fallos, pero mantiene intacta la clave de recuperación original.
  */
 export const resetPasswordWithRecoveryCode = action({
   args: { rulerName: v.string(), recoveryCode: v.string(), newPassword: v.string() },
-  handler: async (ctx, args): Promise<{ recoveryCode: string }> => {
+  handler: async (ctx, args): Promise<{ success: boolean; message: string }> => {
     const passwordCheck = validatePassword(args.newPassword);
     if (!passwordCheck.success) throw new ConvexError(passwordCheck.error);
     const code = normalizeRecoveryCode(args.recoveryCode);
@@ -210,12 +222,10 @@ export const resetPasswordWithRecoveryCode = action({
       account: { id: email, secret: args.newPassword },
     });
     await invalidateSessions(ctx, { userId });
-    const nextCode = generateRecoveryCode();
-    await ctx.runMutation(internal.account.storeRecoveryCodeHash, {
-      userId,
-      codeHash: await sha256Hex(nextCode),
-      markUsed: true,
-    });
-    return { recoveryCode: formatRecoveryCode(nextCode) };
+    await ctx.runMutation(internal.account.resetRecoveryAttempts, { recordId: record.recordId });
+    return {
+      success: true,
+      message: "Contraseña restablecida con éxito. Ya puedes iniciar sesión con tu nueva contraseña.",
+    };
   },
 });

@@ -298,55 +298,65 @@ function RecoveryCodeGate(props: { children: React.ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Generación automática al detectar cuenta recién creada sin clave
+  useEffect(() => {
+    if (status && !status.hasActiveCode && !code && !busy && !error) {
+      setBusy(true);
+      setError(null);
+      issue({})
+        .then((result) => {
+          setCode(result.recoveryCode);
+        })
+        .catch((err) => {
+          setError(describeAuthError(err));
+        })
+        .finally(() => {
+          setBusy(false);
+        });
+    }
+  }, [status, code, busy, error, issue]);
+
   if (status === undefined) {
     return (
-      <div className="min-h-[300px] flex items-center justify-center">
+      <div className="min-h-[300px] flex flex-col items-center justify-center space-y-3">
         <Loader2 className="w-6 h-6 text-[#d4af37] animate-spin" />
+        <p className="text-xs text-[#a09a8a]">Verificando estado de la cuenta...</p>
       </div>
     );
   }
   if (status === null || status.hasActiveCode || acknowledged) return <>{props.children}</>;
 
   return (
-    <div className="max-w-md mx-auto bg-[#14120e] border-2 border-[#b8902a]/70 rounded-xl p-5 sm:p-6 shadow-2xl">
+    <div className="max-w-md mx-auto bg-[#090e17] border-2 border-[#b8862d]/70 rounded-xl p-5 sm:p-6 shadow-2xl">
       {code ? (
         <RecoveryCodeCard
           code={code}
-          title="Tu código de recuperación"
-          intro="Cuenta creada. Este código sustituye al correo: con tu nombre de gobernante y este código podrás fijar una contraseña nueva si la olvidas."
+          title="CLAVE DE SEGURIDAD DE TU CUENTA"
+          intro="Tu cuenta ha sido creada correctamente. Esta clave es tu ÚNICO método para recuperar el acceso si olvidas tu contraseña."
           continueLabel="Continuar: elegir civilización"
           onContinue={() => setAcknowledged(true)}
         />
       ) : (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-5 h-5 text-[#d4af37]" />
-            <h3 className="text-base font-serif font-bold text-[#f4eedb]">Antes de seguir: tu código de recuperación</h3>
-          </div>
-          <p className="text-xs text-[#c5b7a0] leading-relaxed">
-            No usamos correo electrónico. Para poder recuperar la cuenta si olvidas la contraseña, el servidor te entregará ahora un código que <strong>solo se muestra una vez</strong>.
+        <div className="space-y-4 text-center py-6">
+          <Loader2 className="w-8 h-8 text-[#d4af37] animate-spin mx-auto" />
+          <h3 className="text-sm font-serif font-bold text-[#f4eedb]">Generando clave de seguridad para tu cuenta...</h3>
+          <p className="text-xs text-[#c5b7a0]">
+            El servidor está creando una clave aleatoria de 16 símbolos. Se mostrará una sola vez antes de continuar.
           </p>
-          {error && <p className="text-[11px] text-rose-400">{error}</p>}
-          <button
-            onClick={async () => {
-              setBusy(true);
-              setError(null);
-              try {
-                const result = (await issue({})) as { recoveryCode: string };
-                setCode(result.recoveryCode);
-              } catch (err) {
-                setError(describeAuthError(err));
-              } finally {
-                setBusy(false);
-              }
-            }}
-            disabled={busy}
-            className="w-full py-3 rounded-md bg-gradient-to-b from-[#e2c25c] to-[#b8902a] text-[#1a1407] font-serif font-bold text-sm uppercase tracking-wider shadow-md disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
-          >
-            {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-            Generar y mostrar mi código
-          </button>
-          <p className="text-[10px] text-[#6e6352] text-center">Genera tu código · gratis · inmediato · se muestra una sola vez y pasas a elegir civilización.</p>
+          {error && (
+            <div className="p-3 bg-rose-950/40 border border-rose-700/50 rounded-lg text-xs text-rose-200">
+              <p className="mb-2">{error}</p>
+              <button
+                onClick={() => {
+                  setError(null);
+                  setBusy(false);
+                }}
+                className="px-3 py-1 bg-rose-900/60 hover:bg-rose-800 text-rose-100 rounded text-xs font-semibold"
+              >
+                Reintentar generación
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

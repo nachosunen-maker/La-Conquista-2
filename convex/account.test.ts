@@ -150,7 +150,7 @@ describe("Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026]"
     expect(await t.run((ctx) => ctx.db.query("accountRecovery").collect())).toHaveLength(1);
   });
 
-  test("con nombre + código se fija una contraseña nueva, se cierran las sesiones y se entrega otro código de un solo uso", async () => {
+  test("con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones", async () => {
     const t = createTestBackend();
     const { asUser } = await signIn(t, "signUp", "Fernando el Católico", "aragon-1479");
     const { recoveryCode } = await asUser.action(api.account.issueRecoveryCode, {});
@@ -160,8 +160,7 @@ describe("Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026]"
       recoveryCode: recoveryCode.toLowerCase().replace(/-/g, " "),
       newPassword: "castilla-1474",
     });
-    expect(result.recoveryCode).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
-    expect(result.recoveryCode).not.toBe(recoveryCode);
+    expect(result.success).toBe(true);
 
     // La sesión anterior queda invalidada; la contraseña vieja ya no sirve y la nueva sí.
     const sessions = await t.run((ctx) => ctx.db.query("authSessions").collect());
@@ -170,15 +169,13 @@ describe("Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026]"
     const back = await signIn(t, "signIn", "Fernando el Católico", "castilla-1474");
     expect((await back.asUser.query(api.account.getRecoveryStatus, {}))?.lastUsedAt).toBe(T0);
 
-    // El código usado no vale una segunda vez; el nuevo sí.
-    await expect(
-      t.action(api.account.resetPasswordWithRecoveryCode, { rulerName: "Fernando el Católico", recoveryCode, newPassword: "otra-clave-999" })
-    ).rejects.toSatisfy((e: unknown) => errorMessage(e) === ACCOUNT_MESSAGES.RECOVERY_INVALID);
-    await t.action(api.account.resetPasswordWithRecoveryCode, {
+    // La misma clave permanece válida y reutilizable para restablecer la contraseña una segunda vez.
+    const result2 = await t.action(api.account.resetPasswordWithRecoveryCode, {
       rulerName: "Fernando el Católico",
-      recoveryCode: result.recoveryCode,
+      recoveryCode,
       newPassword: "tercera-clave-1",
     });
+    expect(result2.success).toBe(true);
     await signIn(t, "signIn", "Fernando el Católico", "tercera-clave-1");
   });
 
@@ -215,7 +212,7 @@ describe("Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026]"
       recoveryCode,
       newPassword: "clave-nueva-123",
     });
-    expect(result.recoveryCode).toBeDefined();
+    expect(result.success).toBe(true);
     await signIn(t, "signIn", "Isabel de Castilla", "clave-nueva-123");
   });
 });

@@ -112,13 +112,13 @@ function CornerAccent({ position }: { position: 'top-left' | 'top-right' | 'bott
   );
 }
 
-/** Tarjeta que muestra el código de recuperación una sola vez */
+/** Tarjeta que muestra la clave de recuperación de seguridad */
 export function RecoveryCodeCard(props: {
   code: string;
-  title: string;
-  intro: string;
+  title?: string;
+  intro?: string;
   onContinue: () => void;
-  continueLabel: string;
+  continueLabel?: string;
 }) {
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -133,48 +133,63 @@ export function RecoveryCodeCard(props: {
     }
   };
 
+  const title = props.title ?? 'CLAVE DE SEGURIDAD DE TU CUENTA';
+  const intro =
+    props.intro ??
+    'Tu cuenta ha sido creada correctamente. Esta clave es tu ÚNICO método para recuperar el acceso si olvidas tu contraseña.';
+  const continueLabel = props.continueLabel ?? 'Continuar a la fundación del reino';
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 text-left">
       <div className="flex items-center gap-2">
         <KeyRound className="w-5 h-5 text-[#d4af37]" />
-        <h3 className="text-base font-serif font-bold text-[#f4eedb]">{props.title}</h3>
+        <h3 className="text-base font-serif font-bold text-[#f4eedb] tracking-wide">{title}</h3>
       </div>
-      <p className="text-xs text-[#c5b7a0] leading-relaxed">{props.intro}</p>
-      <div className="p-4 bg-[#080c14] border-2 border-[#d4af37]/60 rounded-lg text-center shadow-inner">
-        <div className="font-mono text-lg sm:text-xl tracking-[0.2em] text-[#f7e7b2] select-all break-all">
+      <p className="text-xs text-[#c5b7a0] leading-relaxed">{intro}</p>
+
+      {/* Bloque destacado con la clave de 16 caracteres en 4 grupos */}
+      <div className="p-4 bg-[#080c14] border-2 border-[#d4af37]/70 rounded-lg text-center shadow-inner">
+        <div className="font-mono text-lg sm:text-2xl font-bold tracking-[0.25em] text-[#f7e7b2] select-all break-all my-1">
           {props.code}
         </div>
         <button
           type="button"
           onClick={copy}
-          className="mt-3 inline-flex items-center gap-1.5 text-xs text-[#d4af37] hover:text-[#f0d47a] cursor-pointer transition-colors"
+          className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#1c1810] hover:bg-[#282216] border border-[#d4af37]/50 text-xs font-semibold text-[#d4af37] hover:text-[#f0d47a] cursor-pointer transition-colors shadow-sm"
         >
           {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-          {copied ? 'Copiado al portapapeles' : 'Copiar código'}
+          {copied ? 'Clave copiada al portapapeles' : 'COPIAR CLAVE'}
         </button>
       </div>
-      <div className="p-3 bg-rose-950/30 border border-rose-700/40 rounded-md text-[11px] text-rose-200 leading-relaxed flex gap-2">
-        <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
-        <span>
-          <strong>Guárdalo ahora</strong> (apúntalo o haz una captura). No se volverá a mostrar y sin él no podrás recuperar la cuenta si olvidas la contraseña: no hay correo de recuperación.
-        </span>
+
+      {/* Cuadro de advertencia destacado */}
+      <div className="p-3.5 bg-rose-950/40 border-2 border-rose-700/60 rounded-md text-[11px] text-rose-200 leading-relaxed flex gap-2.5">
+        <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <strong className="block text-rose-300 font-bold mb-0.5 uppercase tracking-wider">¡ATENCIÓN! NO PIERDAS ESTA CLAVE.</strong>
+          <span>No se enviará por correo electrónico ni se volverá a mostrar. Si la pierdes y olvidas tu contraseña, no podrás recuperar tu cuenta.</span>
+        </div>
       </div>
-      <label className="flex items-center gap-2 text-xs text-[#e6ded0] cursor-pointer">
+
+      {/* Casilla de verificación obligatoria */}
+      <label className="flex items-start gap-2.5 text-xs text-[#e6ded0] cursor-pointer p-2 bg-[#0e141f] rounded border border-[#222c3d]">
         <input
           type="checkbox"
           checked={saved}
           onChange={(e) => setSaved(e.target.checked)}
-          className="accent-[#d4af37] w-4 h-4 rounded cursor-pointer"
+          className="accent-[#d4af37] w-4 h-4 rounded cursor-pointer mt-0.5 flex-shrink-0"
         />
-        <span>He guardado mi código de recuperación en un lugar seguro.</span>
+        <span className="leading-snug">«He guardado mi clave de recuperación y entiendo que no podré recuperar mi cuenta si la pierdo»</span>
       </label>
+
+      {/* Botón de acción */}
       <button
         type="button"
         disabled={!saved}
         onClick={props.onContinue}
-        className="w-full py-3 rounded-lg bg-gradient-to-r from-[#ba8332] via-[#cf993f] to-[#ba8332] text-[#140e04] font-serif font-bold text-sm tracking-wide shadow-md hover:from-[#c99138] hover:via-[#dea74b] hover:to-[#c99138] disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center justify-center gap-2"
+        className="w-full py-3 rounded-lg bg-gradient-to-r from-[#ba8332] via-[#cf993f] to-[#ba8332] text-[#140e04] font-serif font-bold text-xs sm:text-sm tracking-wider uppercase shadow-md hover:from-[#c99138] hover:via-[#dea74b] hover:to-[#c99138] disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center justify-center gap-2"
       >
-        {props.continueLabel}
+        {continueLabel}
       </button>
     </div>
   );
@@ -193,7 +208,7 @@ export function AccessPanel(props: { initialMode?: Mode; isStageOverlay?: boolea
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [issuedCode, setIssuedCode] = useState<string | null>(null);
+  const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
 
   const trimmedName = rulerName.trim();
   const availabilityResult = useQuery_experimental({
@@ -218,13 +233,14 @@ export function AccessPanel(props: { initialMode?: Mode; isStageOverlay?: boolea
   const switchMode = (next: Mode) => {
     setMode(next);
     setError(null);
-    setIssuedCode(null);
+    setResetSuccessMessage(null);
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setResetSuccessMessage(null);
     try {
       if (mode === 'crear') {
         if (availability && !availability.available) {
@@ -238,8 +254,10 @@ export function AccessPanel(props: { initialMode?: Mode; isStageOverlay?: boolea
           rulerName: trimmedName,
           recoveryCode,
           newPassword,
-        })) as { recoveryCode: string };
-        setIssuedCode(result.recoveryCode);
+        })) as { success: boolean; message: string };
+        setResetSuccessMessage(
+          result.message || 'Contraseña restablecida con éxito. Ya puedes iniciar sesión con tu nueva contraseña.'
+        );
         setRecoveryCode('');
         setNewPassword('');
       }
@@ -279,17 +297,29 @@ export function AccessPanel(props: { initialMode?: Mode; isStageOverlay?: boolea
           <CornerAccent position="bottom-left" />
           <CornerAccent position="bottom-right" />
 
-          {mode === 'recuperar' && issuedCode ? (
-            <RecoveryCodeCard
-              code={issuedCode}
-              title="Contraseña cambiada: tu nuevo código"
-              intro="Tu contraseña se ha cambiado y todas las sesiones anteriores se han cerrado. El código que usaste ya no vale: este es el nuevo."
-              continueLabel="Iniciar sesión con la nueva contraseña"
-              onContinue={() => {
-                setIssuedCode(null);
-                switchMode('entrar');
-              }}
-            />
+          {resetSuccessMessage ? (
+            <div className="space-y-4 text-left p-1">
+              <div className="flex items-center gap-2.5 text-emerald-400">
+                <Check className="w-6 h-6 p-1 rounded-full bg-emerald-950 border border-emerald-600 flex-shrink-0" />
+                <h3 className="text-base font-serif font-bold text-[#f4eedb]">Contraseña restablecida</h3>
+              </div>
+              <p className="text-xs text-[#c5b7a0] leading-relaxed">
+                {resetSuccessMessage}
+              </p>
+              <div className="p-3 bg-amber-950/30 border border-amber-600/40 rounded-md text-[11px] text-amber-200 leading-relaxed">
+                <strong>Nota de seguridad:</strong> Tu clave de recuperación de 16 símbolos es permanente y sigue siendo válida para cualquier recuperación futura.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setResetSuccessMessage(null);
+                  switchMode('entrar');
+                }}
+                className="w-full py-3 rounded-lg bg-gradient-to-r from-[#ba8332] via-[#cf993f] to-[#ba8332] text-[#140e04] font-serif font-bold text-xs sm:text-sm tracking-wider uppercase shadow-md hover:from-[#c99138] hover:via-[#dea74b] hover:to-[#c99138] cursor-pointer transition-all flex items-center justify-center gap-2"
+              >
+                Iniciar sesión con la nueva contraseña
+              </button>
+            </div>
           ) : (
             <div className="space-y-5">
               {/* Encabezado del panel según la referencia */}
