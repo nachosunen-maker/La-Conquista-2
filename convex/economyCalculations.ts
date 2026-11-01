@@ -86,11 +86,11 @@ export const INITIAL_KINGDOM_CONFIG: Omit<KingdomState, "userId" | "name" | "las
   },
   unassignedCivil: 250, // 12.5% de reserva civil libre
   resources: {
-    gold: 500,
-    wood: 1000,
-    stone: 800,
-    iron: 250,
-    food: 2500, // Reserva inicial para cubrir arranque
+    gold: 6000,
+    wood: 6000,
+    stone: 6000,
+    iron: 6000,
+    food: 6000,
   },
   foodTier: PROVISIONAL_DEFAULT_FOOD_TIER, // Régimen inicial provisional (decisión de diseño y balance)
 };

@@ -11,7 +11,7 @@
  * 7. Nombre del monarca (P5) y valor por defecto autoritativo.
  * 8. Censo inicial exacto de 2.000 habitantes (P10).
  * 9. Desglose inicial balanceado: 1.750 trabajadores + 250 libres = 2.000 (P10/P12).
- * 10. Recursos iniciales canónicos (oro 500, madera 1000, piedra 800, hierro 250, comida 2500).
+ * 10. Recursos iniciales (oro 6.000, madera 6.000, piedra 6.000, hierro 6.000, comida 6.000; total 30.000).
  * 11. Edificio inicial obligatorio: Castillo Nivel 1 (P8).
  * 12. Regla de unicidad de reino por usuario (1 reino por cuenta).
  * 13. Inmutabilidad de la civilización elegida tras la fundación.
@@ -202,14 +202,14 @@ export function runFoundationTests(): FoundationTestResult[] {
   // 10. Recursos iniciales canónicos
   const res = seed.resourcesDoc;
   const resourcesCorrect =
-    res.gold === 500 &&
-    res.wood === 1000 &&
-    res.stone === 800 &&
-    res.iron === 250 &&
-    res.food === 2500;
+    res.gold === 6000 &&
+    res.wood === 6000 &&
+    res.stone === 6000 &&
+    res.iron === 6000 &&
+    res.food === 6000;
   record(
     "ECONOMÍA INICIAL P26",
-    "10. Dotación de recursos iniciales refleja exactamente la configuración canónica",
+    "10. Dotación de recursos iniciales refleja exactamente la configuración aprobada (6.000 de cada recurso, 30.000 total)",
     resourcesCorrect,
     `Oro: ${res.gold}, Madera: ${res.wood}, Piedra: ${res.stone}, Hierro: ${res.iron}, Alimentos: ${res.food}`
   );

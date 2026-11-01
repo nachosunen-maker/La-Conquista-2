@@ -375,7 +375,7 @@ export function KingdomCreationWizard({
                 </div>
                 <div className="flex items-center gap-2 bg-[#120f0b] p-2 rounded border border-[#261e14]">
                   <Coins className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Dotación: <b className="text-[#f4eedb]">500 oro, 2500 comida, recursos base</b></span>
+                  <span>Dotación inicial: <b className="text-[#f4eedb]">6.000 de cada recurso (30.000 total)</b></span>
                 </div>
               </div>
             </div>

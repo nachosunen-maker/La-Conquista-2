@@ -121,7 +121,7 @@ export function runEconomicValidationTests(): TestResult[] {
     const expectedFraction = 43200 / 86400; // 0.5
     // Producción: 1100 * 2 = 2200; Consumo: 2000 * 1 = 2000. Superávit diario = +200.
     // Medio día = +100 comida.
-    const expectedFood = 2500 + 100;
+    const expectedFood = baseKingdom.resources.food + 100;
 
     const passed =
       Math.abs(sim.timeFractionOfDay - expectedFraction) < 1e-6 &&

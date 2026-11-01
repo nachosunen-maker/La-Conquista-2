@@ -97,7 +97,7 @@ export function runExtendedEconomyTests(): ExtendedEconomyTestResult[] {
         Math.abs(oneDay.dailyProduction.iron - expectedIron) < 1e-9 &&
         Math.abs(oneDay.dailyProduction.gold - expectedGoldMining) < 1e-9 &&
         Math.abs(oneDay.dailyProduction.food - 2200) < 1e-9 &&
-        Math.abs(oneDay.updatedResources.wood - (1000 + expectedWood)) < 1e-6,
+        Math.abs(oneDay.updatedResources.wood - (INITIAL_KINGDOM_CONFIG.resources.wood + expectedWood)) < 1e-6,
       details: `Madera ${oneDay.dailyProduction.wood}/día, piedra ${oneDay.dailyProduction.stone}, hierro ${oneDay.dailyProduction.iron}, oro ${oneDay.dailyProduction.gold}, alimentos ${oneDay.dailyProduction.food}`,
     },
     {
@@ -113,7 +113,7 @@ export function runExtendedEconomyTests(): ExtendedEconomyTestResult[] {
       test: "Impuestos (P27, D-49): recaudación = producción no monetaria × tasa; tramos de penalización",
       passed: Math.abs(oneDay.dailyTaxIncome - expectedTaxBase * 0.1) < 1e-9 &&
         Math.abs(oneDay.taxesCollected - expectedTaxBase * 0.1) < 1e-6 &&
-        Math.abs(oneDay.updatedResources.gold - (500 + expectedGoldMining + expectedTaxBase * 0.1)) < 1e-6 &&
+        Math.abs(oneDay.updatedResources.gold - (INITIAL_KINGDOM_CONFIG.resources.gold + expectedGoldMining + expectedTaxBase * 0.1)) < 1e-6 &&
         taxProductivityPenalty(0.3) === 0 && Math.abs(taxProductivityPenalty(0.45) - 0.075) < 1e-9 && Math.abs(taxProductivityPenalty(0.6) - 0.15) < 1e-9 &&
         Math.abs(highTax.productivityMultiplier - 0.85) < 1e-9 && Math.abs(extremeTax.productivityMultiplier - 0.85) < 1e-9 &&
         taxHappinessPenaltyPerDay(0.1) === 0 && Math.abs(taxHappinessPenaltyPerDay(0.3) - 2) < 1e-9 &&
