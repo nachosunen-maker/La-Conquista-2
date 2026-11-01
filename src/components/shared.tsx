@@ -160,26 +160,50 @@ export function PanelSection(props: { icon: React.ReactNode; title: string; asid
 
 export function normalizeErrorMessage(err: any): string {
   if (!err) return "Ha ocurrido un error inesperado.";
-  if (typeof err === 'string') return err;
-  
-  // Si es un objeto de error de Convex o similar
-  const message = err.message || err.data?.message || err.error?.message || err.error;
-  if (typeof message === 'string') return message;
-  
-  // Si es un objeto JSON, intentamos convertirlo
-  try {
-    return JSON.stringify(err);
-  } catch {
-    return String(err);
+  let message = "";
+  if (typeof err === "string") {
+    message = err;
+  } else if (err instanceof Error) {
+    message = err.message;
+  } else {
+    message = err.message || err.data?.message || err.error?.message || err.error || "";
+    if (!message) {
+      try {
+        message = JSON.stringify(err);
+      } catch {
+        message = String(err);
+      }
+    }
   }
+
+  // Limpiar prefijos técnicos y trazas de Convex para no exponer Request IDs ni llamadas internas al usuario
+  let clean = message
+    .replace(/^\[CONVEX[^\]]*\]\s*/gi, "")
+    .replace(/^\[Request ID:[^\]]*\]\s*/gi, "")
+    .replace(/^Server Error\s*/gi, "")
+    .replace(/^Uncaught Error:\s*/gi, "")
+    .replace(/\s*at\s+(?:handler|async|Object|\w+).*$/i, "")
+    .replace(/\s*Called by client$/i, "")
+    .trim();
+
+  return clean || message || "Ha ocurrido un error inesperado.";
 }
 
 export function isInsufficientError(msg: string): boolean {
-  return msg.toLowerCase().includes('recursos') || msg.toLowerCase().includes('insuficientes');
+  if (!msg || typeof msg !== "string") return false;
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("recursos insuficientes") ||
+    lower.includes("insuficientes") ||
+    lower.includes("insuficiente") ||
+    lower.includes("falta de recursos") ||
+    lower.includes("saldo insuficiente") ||
+    (lower.includes("recursos") && (lower.includes("requiere") || lower.includes("necesita") || lower.includes("necesarios")))
+  );
 }
 
 export function isMarketFullError(msg: string): boolean {
-  return msg.includes('NO HAY SITIO EN EL MERCADO');
+  return typeof msg === "string" && msg.includes('NO HAY SITIO EN EL MERCADO');
 }
 
 export function getNormalizedResourceMessage(isConstruction: boolean): string {
@@ -190,8 +214,8 @@ export function getNormalizedResourceMessage(isConstruction: boolean): string {
 
 export function StatusMessages(props: { error: string | null; message: string | null; isConstruction?: boolean }) {
   if (!props.error && !props.message) return null;
-  const isInsufficient = props.error && isInsufficientError(props.error);
-  const isMarketFull = props.error && isMarketFullError(props.error);
+  const isInsufficient = props.error ? isInsufficientError(props.error) : false;
+  const isMarketFull = props.error ? isMarketFullError(props.error) : false;
   
   return (
     <div className="space-y-1">
@@ -208,13 +232,13 @@ export function StatusMessages(props: { error: string | null; message: string | 
           </div>
         ) : (
           <p role="alert" className="text-xs text-rose-400 flex items-center gap-1.5">
-            <AlertCircle className="w-3.5 h-3.5" /> {props.error}
+            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" /> {props.error}
           </p>
         )
       )}
       {props.message && (
         <p role="status" className="text-xs text-emerald-400 flex items-center gap-1.5">
-          <CheckCircle2 className="w-3.5 h-3.5" /> {props.message}
+          <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" /> {props.message}
         </p>
       )}
     </div>

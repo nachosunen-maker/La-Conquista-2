@@ -111,32 +111,60 @@ function MissionRow({ mission, kingdomId, isOwner }: { mission: MissionView; kin
   const finish = useMutation(finishMissionMutation);
   const claim = useMutation(claimRewardMutation);
   const action = useActionState();
+  const [claimedLocally, setClaimedLocally] = useState(false);
+  const [finishedLocally, setFinishedLocally] = useState(false);
+
+  useEffect(() => {
+    setClaimedLocally(false);
+    setFinishedLocally(false);
+  }, [mission.progressId]);
 
   const handleFinish = async () => {
     await action.run(`finish-${mission.progressId}`, async () => {
       const res = await finish({ kingdomId, progressId: mission.progressId });
       if (res && (res as any).success === false) return res;
+      setFinishedLocally(true);
       return "¡Misión finalizada! Ya puedes cobrar la recompensa.";
     });
   };
 
   const handleClaim = async () => {
     await action.run(`claim-${mission.progressId}`, async () => {
-      const res = await claim({ kingdomId, progressId: mission.progressId });
-      if (res && (res as any).success === false) return res;
-      return "¡Recompensa cobrada con éxito!";
+      try {
+        const res = await claim({ kingdomId, progressId: mission.progressId });
+        if (res && (res as any).success === false) {
+          const errText = (res as any).error || '';
+          if (typeof errText === 'string' && (errText.toLowerCase().includes('ya ha sido cobrada') || errText.toLowerCase().includes('ya cobrada'))) {
+            setClaimedLocally(true);
+            return;
+          }
+          return res;
+        }
+        setClaimedLocally(true);
+        return "¡Recompensa cobrada con éxito!";
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        if (typeof errMsg === 'string' && (errMsg.toLowerCase().includes('ya ha sido cobrada') || errMsg.toLowerCase().includes('ya cobrada'))) {
+          setClaimedLocally(true);
+          return;
+        }
+        throw err;
+      }
     });
   };
 
   // Determinación robusta de los 4 estados canónicos:
-  // 1. Recompensa cobrada
+  // 1. Recompensa cobrada (exclusivamente distintivo COBRADA, sin botones de acción)
   const isClaimed =
+    claimedLocally ||
     mission.status === 'claimed' ||
-    mission.rewardGranted === true;
+    mission.rewardGranted === true ||
+    (mission as any).claimed === true;
 
   // 2. Misión finalizada, pendiente de cobrar
   const isPendingClaim =
     !isClaimed && (
+      finishedLocally ||
       mission.status === 'pending_claim' ||
       (mission.rewardGranted === false && (mission.completedAt != null || mission.completed === true))
     );
@@ -191,7 +219,7 @@ function MissionRow({ mission, kingdomId, isOwner }: { mission: MissionView; kin
                 disabled={action.busy !== null}
                 className="bg-[#d4af37] hover:bg-[#c29f2e] text-[#110e0a] font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
               >
-                {action.busy === `claim-${mission.progressId}` ? 'Cobrando...' : 'COBRAR RECOMPENSA'}
+                {action.busy === `claim-${mission.progressId}` ? 'PROCESANDO…' : 'COBRAR RECOMPENSA'}
               </button>
             ) : (
               <span className="text-[10px] text-[#d4af37] font-semibold uppercase">Pendiente de cobro</span>
@@ -205,7 +233,7 @@ function MissionRow({ mission, kingdomId, isOwner }: { mission: MissionView; kin
                 disabled={action.busy !== null}
                 className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
               >
-                {action.busy === `finish-${mission.progressId}` ? 'Finalizando...' : 'FINALIZAR MISIÓN'}
+                {action.busy === `finish-${mission.progressId}` ? 'PROCESANDO…' : 'FINALIZAR MISIÓN'}
               </button>
             ) : (
               <span className="text-[10px] text-blue-400 font-semibold uppercase">Objetivos cumplidos</span>
@@ -237,33 +265,64 @@ function SecretMissionRow({ mission, kingdomId, isOwner }: { mission: MissionsSt
   const finish = useMutation(finishMissionMutation);
   const claim = useMutation(claimRewardMutation);
   const action = useActionState();
+  const [claimedLocally, setClaimedLocally] = useState(false);
+  const [finishedLocally, setFinishedLocally] = useState(false);
+
+  useEffect(() => {
+    setClaimedLocally(false);
+    setFinishedLocally(false);
+  }, [mission.progressId]);
 
   const handleFinish = async () => {
     await action.run(`finish-${mission.progressId}`, async () => {
       const res = await finish({ kingdomId, progressId: mission.progressId });
       if (res && (res as any).success === false) return res;
+      setFinishedLocally(true);
       return "¡Misión secreta finalizada! Ya puedes cobrar la recompensa.";
     });
   };
 
   const handleClaim = async () => {
     await action.run(`claim-${mission.progressId}`, async () => {
-      const res = await claim({ kingdomId, progressId: mission.progressId });
-      if (res && (res as any).success === false) return res;
-      return "¡Recompensa cobrada con éxito!";
+      try {
+        const res = await claim({ kingdomId, progressId: mission.progressId });
+        if (res && (res as any).success === false) {
+          const errText = (res as any).error || '';
+          if (typeof errText === 'string' && (errText.toLowerCase().includes('ya ha sido cobrada') || errText.toLowerCase().includes('ya cobrada'))) {
+            setClaimedLocally(true);
+            return;
+          }
+          return res;
+        }
+        setClaimedLocally(true);
+        return "¡Recompensa cobrada con éxito!";
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        if (typeof errMsg === 'string' && (errMsg.toLowerCase().includes('ya ha sido cobrada') || errMsg.toLowerCase().includes('ya cobrada'))) {
+          setClaimedLocally(true);
+          return;
+        }
+        throw err;
+      }
     });
   };
 
+  // 1. Recompensa cobrada (exclusivamente distintivo COBRADA)
   const isClaimed =
+    claimedLocally ||
     mission.status === 'claimed' ||
-    mission.rewardGranted === true;
+    mission.rewardGranted === true ||
+    (mission as any).claimed === true;
 
+  // 2. Misión finalizada, pendiente de cobrar
   const isPendingClaim =
     !isClaimed && (
+      finishedLocally ||
       mission.status === 'pending_claim' ||
       (mission.rewardGranted === false && (mission.completedAt != null || (mission as any).completed === true))
     );
 
+  // 3. Objetivos cumplidos, lista para finalizar
   const isReadyToFinish =
     !isClaimed &&
     !isPendingClaim && (
@@ -292,7 +351,7 @@ function SecretMissionRow({ mission, kingdomId, isOwner }: { mission: MissionsSt
                 disabled={action.busy !== null}
                 className="bg-[#d4af37] hover:bg-[#c29f2e] text-[#110e0a] font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
               >
-                {action.busy === `claim-${mission.progressId}` ? 'Cobrando...' : 'COBRAR RECOMPENSA'}
+                {action.busy === `claim-${mission.progressId}` ? 'PROCESANDO…' : 'COBRAR RECOMPENSA'}
               </button>
             ) : (
               <span className="text-[10px] text-[#d4af37] font-semibold uppercase">Pendiente de cobro</span>
@@ -305,7 +364,7 @@ function SecretMissionRow({ mission, kingdomId, isOwner }: { mission: MissionsSt
                 disabled={action.busy !== null}
                 className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold px-3 py-1.5 rounded shadow text-[10px] uppercase tracking-wider transition-colors disabled:opacity-50"
               >
-                {action.busy === `finish-${mission.progressId}` ? 'Finalizando...' : 'FINALIZAR MISIÓN'}
+                {action.busy === `finish-${mission.progressId}` ? 'PROCESANDO…' : 'FINALIZAR MISIÓN'}
               </button>
             ) : (
               <span className="text-[10px] text-blue-400 font-semibold uppercase">Objetivos cumplidos</span>

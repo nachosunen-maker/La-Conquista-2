@@ -56,7 +56,7 @@ import { UniversityPanel } from './components/UniversityPanel';
 import { ParliamentPanel } from './components/ParliamentPanel';
 import { MapPanel } from './components/MapPanel';
 import { MissionsPanel, MissionCelebrations } from './components/MissionsPanel';
-import { formatCosts, formatRequirements } from './components/shared';
+import { formatCosts, formatRequirements, normalizeErrorMessage, StatusMessages } from './components/shared';
 
 const CIVILIZATION_LABELS: Record<string, string> = Object.fromEntries(CIVILIZATIONS.map((c) => [c.id, c.label]));
 
@@ -823,13 +823,20 @@ function KingdomOverviewContent() {
         kingdomId: kingdom._id,
         constructionId: constructionToCancel._id,
       });
+      if (result && (result as any).success === false) {
+        const rawErr = (result as any).error || "El servidor no confirmó la cancelación.";
+        console.debug("[cancelConstruction] Rechazado por validación:", rawErr);
+        setConstructionError(normalizeErrorMessage(rawErr));
+        return;
+      }
       if (!result?.success) throw new Error("El servidor no confirmó la cancelación.");
       setConstructionMessage(
         `Construcción de ${constructionToCancel.buildingType ?? "edificio"} cancelada; se aplicó el reembolso confirmado por Convex.`
       );
       setConfirmCancelConstruction(null);
     } catch (error) {
-      setConstructionError(error instanceof Error ? error.message : "No se pudo cancelar la construcción.");
+      console.debug("[cancelConstruction] Excepción capturada:", error);
+      setConstructionError(normalizeErrorMessage(error));
     } finally {
       setCancellingConstruction(null);
     }
@@ -844,11 +851,20 @@ function KingdomOverviewContent() {
     try {
       const result = await startConstruction({ kingdomId: kingdom._id, buildingType });
       if (activeOwnerKeyRef.current !== requestOwnerKey) return;
-      if (!result?.success) throw new Error("Convex no confirmó el inicio de construcción.");
+      if (result && (result as any).success === false) {
+        const rawErr = (result as any).error || "No se pudo iniciar la construcción.";
+        console.debug("[startConstruction] Rechazado por validación:", rawErr);
+        setConstructionError(normalizeErrorMessage(rawErr));
+        return;
+      }
+      if (!result?.success && !result?.targetLevel) {
+        throw new Error("Convex no confirmó el inicio de construcción.");
+      }
       setConstructionMessage(`${result.buildingType}, nivel ${result.targetLevel}, añadido a la cola del servidor.`);
     } catch (error) {
       if (activeOwnerKeyRef.current !== requestOwnerKey) return;
-      setConstructionError(error instanceof Error ? error.message : "No se pudo iniciar la construcción.");
+      console.debug("[startConstruction] Excepción capturada:", error);
+      setConstructionError(normalizeErrorMessage(error));
     } finally {
       if (activeOwnerKeyRef.current === requestOwnerKey) setStartingConstruction(null);
     }
@@ -2148,8 +2164,7 @@ function KingdomOverviewContent() {
             La capacidad residencial y la laboral se calculan como capacidad por nivel × nivel de cada edificio completado.
           </span>
         </div>
-        {constructionError && <p role="alert" className="text-xs text-rose-400">{constructionError}</p>}
-        {constructionMessage && <p role="status" className="text-xs text-emerald-400">{constructionMessage}</p>}
+        <StatusMessages error={constructionError} message={constructionMessage} isConstruction={true} />
 
         {confirmCancelConstruction && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
@@ -2174,9 +2189,7 @@ function KingdomOverviewContent() {
                 </p>
               </div>
               {constructionError && (
-                <div role="alert" className="p-2.5 rounded bg-rose-950/60 border border-rose-800/70 text-xs text-rose-300">
-                  {constructionError}
-                </div>
+                <StatusMessages error={constructionError} message={null} isConstruction={true} />
               )}
               <div className="flex items-center justify-end gap-3 pt-2 border-t border-[#2c2419]">
                 <button
