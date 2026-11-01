@@ -98,41 +98,56 @@ export const researchTechnology = mutation({
   args: { kingdomId: v.id("kingdoms"), techType: v.string() },
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
-    const now = Date.now();
-    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
-    const [progress, buildings] = await Promise.all([
-      readProgress(ctx, args.kingdomId),
-      ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
-    ]);
-    const collection = validateBuildingCollection(buildings);
-    if (!collection.success) throw new ConvexError(collection.error);
-    const planResult = createResearchPlan({
-      technologyId: args.techType,
-      resources: settled.settledResources,
-      completedIds: progress.filter((doc) => doc.status === "completed").map((doc) => doc.technologyId),
-      activeResearch: progress.filter((doc) => doc.status === "researching") as ResearchQueueEntry[],
-      buildingLevels: collection.levels,
-      now,
-      kingdomCivilization: kingdom.civilization,
-    });
-    if (!planResult.success) throw new ConvexError(planResult.error);
-    const plan = planResult.plan;
-    const nextResources: Record<ResourceType, number> = { ...settled.settledResources };
-    for (const [resource, cost] of Object.entries(plan.costs) as [ResourceType, number][]) {
-      nextResources[resource] -= cost;
+    
+    // Captura de estado previo para diagnóstico
+    console.log(`[CONVEX M(technologies:researchTechnology)] Inicio: Reino ${args.kingdomId}, Tecnología ${args.techType}`);
+    
+    try {
+      const now = Date.now();
+      const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
+      const [progress, buildings] = await Promise.all([
+        readProgress(ctx, args.kingdomId),
+        ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
+      ]);
+      const collection = validateBuildingCollection(buildings);
+      if (!collection.success) throw new ConvexError(collection.error);
+      const planResult = createResearchPlan({
+        technologyId: args.techType,
+        resources: settled.settledResources,
+        completedIds: progress.filter((doc) => doc.status === "completed").map((doc) => doc.technologyId),
+        activeResearch: progress.filter((doc) => doc.status === "researching") as ResearchQueueEntry[],
+        buildingLevels: collection.levels,
+        now,
+        kingdomCivilization: kingdom.civilization,
+      });
+      if (!planResult.success) throw new ConvexError(planResult.error);
+      const plan = planResult.plan;
+      const nextResources: Record<ResourceType, number> = { ...settled.settledResources };
+      for (const [resource, cost] of Object.entries(plan.costs) as [ResourceType, number][]) {
+        nextResources[resource] -= cost;
+      }
+      await ctx.db.patch(settled.resources._id, nextResources);
+      const progressId = await ctx.db.insert("technologyProgress", {
+        kingdomId: args.kingdomId,
+        technologyId: plan.technologyId,
+        status: "researching",
+        startedAt: plan.startedAt,
+        durationMs: plan.durationMs,
+        costs: plan.costs,
+      });
+      await ctx.scheduler.runAt(plan.completesAt, internal.technologies.completeResearch, { progressId });
+      await recordMissionEvent(ctx, args.kingdomId, "researchStarted", 1);
+      return { success: true, progressId, ...plan };
+    } catch (err: any) {
+      console.error(`[CONVEX M(technologies:researchTechnology)] ERROR en Reino ${args.kingdomId}:`, {
+        message: err.message,
+        stack: err.stack,
+        techType: args.techType,
+        kingdomName: kingdom.name,
+        civilization: kingdom.civilization,
+      });
+      throw err;
     }
-    await ctx.db.patch(settled.resources._id, nextResources);
-    const progressId = await ctx.db.insert("technologyProgress", {
-      kingdomId: args.kingdomId,
-      technologyId: plan.technologyId,
-      status: "researching",
-      startedAt: plan.startedAt,
-      durationMs: plan.durationMs,
-      costs: plan.costs,
-    });
-    await ctx.scheduler.runAt(plan.completesAt, internal.technologies.completeResearch, { progressId });
-    await recordMissionEvent(ctx, args.kingdomId, "researchStarted", 1);
-    return { success: true, progressId, ...plan };
   },
 });
 
