@@ -6,7 +6,7 @@
 import { internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import { recordMissionEvent } from "./missions";
 import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
@@ -123,71 +123,68 @@ export const startConstruction = mutation({
     buildingType: v.string(),
   },
   handler: async (ctx, args) => {
-    try {
-      const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
-      const rule = BUILDING_RULES[args.buildingType];
-      if (!rule) {
-        return { success: false as const, error: `El edificio '${args.buildingType}' no pertenece al catálogo configurado.` };
-      }
-
-      const now = Date.now();
-      const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
-      const [storedBuildings, queue] = await Promise.all([
-        ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
-        ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
-      ]);
-      const collection = validateBuildingCollection(storedBuildings);
-      if (!collection.success) return { success: false as const, error: collection.error };
-      const buildingLevels = collection.levels;
-      const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
-      const resourceSnapshot: Record<ResourceType, number> = settled.settledResources;
-      const planResult = createConstructionPlan({
-        buildingType: args.buildingType,
-        currentLevel: buildingLevels[args.buildingType] ?? 0,
-        resources: resourceSnapshot,
-        activeConstructions: queue as ConstructionQueueEntry[],
-        buildingLevels,
-        now,
-        rule,
-        durationModifier:
-          getConstructionDurationModifier(completedTechnologies) *
-          (await constructionWorkersModifier(ctx, args.kingdomId)) *
-          getCivilizationPassive(kingdom.civilization).constructionDurationMultiplier,
-      });
-      if (!planResult.success) return { success: false as const, error: planResult.error };
-
-      const nextResources = { ...resourceSnapshot };
-      for (const [resource, cost] of Object.entries(planResult.plan.costs) as [ResourceType, number][]) {
-        nextResources[resource] -= cost;
-      }
-      await ctx.db.patch(settled.resources._id, nextResources);
-
-      const constructionId = await ctx.db.insert("constructionQueue", {
-        kingdomId: args.kingdomId,
-        buildingType: args.buildingType,
-        targetLevel: planResult.plan.targetLevel,
-        startedAt: planResult.plan.startedAt,
-        durationMs: planResult.plan.durationMs,
-        costs: planResult.plan.costs,
-      });
-      await ctx.scheduler.runAt(
-        planResult.plan.completesAt,
-        internal.buildings.completeConstruction,
-        { constructionId }
-      );
-
-      return {
-        success: true as const,
-        constructionId,
-        buildingType: args.buildingType,
-        targetLevel: planResult.plan.targetLevel,
-        startedAt: planResult.plan.startedAt,
-        completesAt: planResult.plan.completesAt,
-        costs: planResult.plan.costs,
-      };
-    } catch (err: any) {
-      return { success: false as const, error: err.message || "Error al iniciar la construcción." };
+    const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
+    const rule = BUILDING_RULES[args.buildingType];
+    if (!rule) {
+      throw new ConvexError(`El edificio '${args.buildingType}' no pertenece al catálogo configurado.`);
     }
+
+    const now = Date.now();
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
+    const [storedBuildings, queue] = await Promise.all([
+      ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
+      ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
+    ]);
+    const collection = validateBuildingCollection(storedBuildings);
+    if (!collection.success) throw new ConvexError(collection.error);
+    
+    const buildingLevels = collection.levels;
+    const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
+    const resourceSnapshot: Record<ResourceType, number> = settled.settledResources;
+    const planResult = createConstructionPlan({
+      buildingType: args.buildingType,
+      currentLevel: buildingLevels[args.buildingType] ?? 0,
+      resources: resourceSnapshot,
+      activeConstructions: queue as ConstructionQueueEntry[],
+      buildingLevels,
+      now,
+      rule,
+      durationModifier:
+        getConstructionDurationModifier(completedTechnologies) *
+        (await constructionWorkersModifier(ctx, args.kingdomId)) *
+        getCivilizationPassive(kingdom.civilization).constructionDurationMultiplier,
+    });
+    if (!planResult.success) throw new ConvexError(planResult.error);
+
+    const nextResources = { ...resourceSnapshot };
+    for (const [resource, cost] of Object.entries(planResult.plan.costs) as [ResourceType, number][]) {
+      nextResources[resource] -= cost;
+    }
+    await ctx.db.patch(settled.resources._id, nextResources);
+
+    const constructionId = await ctx.db.insert("constructionQueue", {
+      kingdomId: args.kingdomId,
+      buildingType: args.buildingType,
+      targetLevel: planResult.plan.targetLevel,
+      startedAt: planResult.plan.startedAt,
+      durationMs: planResult.plan.durationMs,
+      costs: planResult.plan.costs,
+    });
+    await ctx.scheduler.runAt(
+      planResult.plan.completesAt,
+      internal.buildings.completeConstruction,
+      { constructionId }
+    );
+
+    return {
+      success: true as const,
+      constructionId,
+      buildingType: args.buildingType,
+      targetLevel: planResult.plan.targetLevel,
+      startedAt: planResult.plan.startedAt,
+      completesAt: planResult.plan.completesAt,
+      costs: planResult.plan.costs,
+    };
   },
 });
 
@@ -209,7 +206,7 @@ export const cancelConstruction = mutation({
       construction: construction as ConstructionQueueEntry,
       serverTimeMs: now,
     });
-    if (!refundResult.success) throw new Error(refundResult.error);
+    if (!refundResult.success) throw new ConvexError(refundResult.error);
 
     const updatedResources: Record<ResourceType, number> = { ...settled.settledResources };
     for (const [resource, amount] of Object.entries(refundResult.refund) as [ResourceType, number][]) {

@@ -182,25 +182,48 @@ export function normalizeErrorMessage(err: any): string {
   if (lower.includes("failed to fetch") || lower.includes("network") || lower.includes("could not find public function")) {
     return "No ha sido posible conectar con el servidor del reino. Inténtalo de nuevo.";
   }
+
+  // If it looks like an insufficient resources error, let it through to be caught by isInsufficientError
+  if (isInsufficientError(message)) {
+    // Return a cleaned version for further processing
+    return message
+      .replace(/^\[CONVEX[^\]]*\]\s*/gi, "")
+      .replace(/^\[Request ID:[^\]]*\]\s*/gi, "")
+      .replace(/^Server Error\s*/gi, "")
+      .replace(/^Uncaught Error:\s*/gi, "")
+      .replace(/\s*at\s+(?:handler|async|Object|\w+).*$/i, "")
+      .replace(/\s*Called by client$/i, "")
+      .trim();
+  }
+
   if (lower.includes("server error") || lower.includes("convexerror")) {
+    // Check if after cleaning there's still a specific message
+    const tempClean = message
+      .replace(/^\[CONVEX[^\]]*\]\s*/gi, "")
+      .replace(/^\[Request ID:[^\]]*\]\s*/gi, "")
+      .replace(/^Server Error\s*/gi, "")
+      .replace(/^Uncaught Error:\s*/gi, "")
+      .replace(/\s*at\s+(?:handler|async|Object|\w+).*$/i, "")
+      .replace(/\s*Called by client$/i, "")
+      .trim();
+    
+    if (tempClean && !tempClean.toLowerCase().includes("server error")) {
+       return tempClean;
+    }
+
     return "Este servicio del reino no está disponible en este momento.";
   }
 
-  // If there's already a clean user-facing message, keep it
-  let clean = message
+  // Final cleaning for any other messages
+  return message
     .replace(/^\[CONVEX[^\]]*\]\s*/gi, "")
     .replace(/^\[Request ID:[^\]]*\]\s*/gi, "")
+    .replace(/^ConvexError:\s*/gi, "")
     .replace(/^Server Error\s*/gi, "")
     .replace(/^Uncaught Error:\s*/gi, "")
     .replace(/\s*at\s+(?:handler|async|Object|\w+).*$/i, "")
     .replace(/\s*Called by client$/i, "")
-    .trim();
-
-  if (/Could not find public function|Failed to fetch|AssertionError/i.test(clean)) {
-    return "No se han podido guardar los cambios. Inténtalo de nuevo.";
-  }
-
-  return clean || "No se han podido guardar los cambios. Inténtalo de nuevo.";
+    .trim() || "No se han podido guardar los cambios. Inténtalo de nuevo.";
 }
 
 export function isInsufficientError(msg: string): boolean {
@@ -237,7 +260,7 @@ export function StatusMessages(props: { error: string | null; message: string | 
         isInsufficient ? (
           <div className="bg-rose-950/50 border border-rose-900 rounded-lg p-2.5 text-xs text-rose-300 space-y-0.5 shadow-md">
             <p className="font-bold uppercase tracking-wide">NO HAY RECURSOS SUFICIENTES</p>
-            <p>{getNormalizedResourceMessage(!!props.isConstruction)}</p>
+            <p>{props.error}</p>
           </div>
         ) : isMarketFull ? (
           <div className="bg-rose-950/50 border border-rose-900 rounded-lg p-2.5 text-xs text-rose-300 space-y-0.5 shadow-md">
@@ -292,10 +315,7 @@ export function useActionState(isConstruction: boolean = false) {
         // Soporte para el contrato { success: boolean, error?: string }
         if ('success' in result) {
           if (result.success === false) {
-            const rawMsg = result.error || "Ha ocurrido un error inesperado.";
-            const finalMsg = isInsufficientError(rawMsg) 
-              ? getNormalizedResourceMessage(isConstruction) 
-              : rawMsg;
+            const finalMsg = result.error || "Ha ocurrido un error inesperado.";
             setError(finalMsg);
           } else if (typeof result === 'object' && result !== null) {
             // Si es éxito pero no devolvió string, al menos no es error
@@ -304,10 +324,7 @@ export function useActionState(isConstruction: boolean = false) {
       }
     } catch (err) {
       const rawMsg = normalizeErrorMessage(err);
-      const finalMsg = isInsufficientError(rawMsg) 
-        ? getNormalizedResourceMessage(isConstruction) 
-        : rawMsg;
-      setError(finalMsg);
+      setError(rawMsg);
     } finally {
       setBusy(null);
     }

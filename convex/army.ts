@@ -6,7 +6,7 @@
 import { internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
 import { evaluateKingdomMissions, recordMissionEvent } from "./missions";
@@ -254,7 +254,7 @@ export const upgradeArmyLevel = mutation({
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
     const collection = validateBuildingCollection(buildings);
-    if (!collection.success) throw new Error(collection.error);
+    if (!collection.success) throw new ConvexError(collection.error);
 
     const validation = validateGlobalArmyUpgrade({
       currentLevel,
@@ -262,7 +262,7 @@ export const upgradeArmyLevel = mutation({
       buildingLevels: collection.levels,
       resources: settled.settledResources,
     });
-    if (!validation.success) throw new Error(validation.error);
+    if (!validation.success) throw new ConvexError(validation.error);
 
     // Deduct costs
     const nextResources: Record<ResourceType, number> = { ...settled.settledResources };
@@ -307,7 +307,7 @@ export const startTraining = mutation({
       readTrainingQueue(ctx, args.kingdomId),
     ]);
     const collection = validateBuildingCollection(buildings);
-    if (!collection.success) throw new Error(collection.error);
+    if (!collection.success) throw new ConvexError(collection.error);
     const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
     const modifiers = computeTechnologyModifiers(completedTechnologies);
     const population = await ctx.db.get(settled.population._id);
@@ -328,7 +328,7 @@ export const startTraining = mutation({
       costModifier: civUnitType ? civilizationTrainingCostMultiplier(civUnitType, kingdom.civilization) : 1,
       civilization: kingdom.civilization,
     });
-    if (!planResult.success) throw new Error(planResult.error);
+    if (!planResult.success) throw new ConvexError(planResult.error);
     const plan = planResult.plan;
 
     const nextResources: Record<ResourceType, number> = { ...settled.settledResources };
@@ -358,11 +358,11 @@ export const cancelTraining = mutation({
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
     const entry = await ctx.db.get(args.trainingId);
-    if (!entry || entry.kingdomId !== args.kingdomId) throw new Error("El lote de entrenamiento no existe en este reino.");
+    if (!entry || entry.kingdomId !== args.kingdomId) throw new ConvexError("El lote de entrenamiento no existe en este reino.");
     const now = Date.now();
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const cancellation = calculateTrainingCancellation({ entry: entry as TrainingQueueEntry, serverTimeMs: now });
-    if (!cancellation.success) throw new Error(cancellation.error);
+    if (!cancellation.success) throw new ConvexError(cancellation.error);
     const nextResources: Record<ResourceType, number> = { ...settled.settledResources };
     for (const [resource, amount] of Object.entries(cancellation.refund) as [ResourceType, number][]) {
       nextResources[resource] += amount;
@@ -426,7 +426,7 @@ export const setArmyEquipment = mutation({
     await requireOwner(ctx, args.kingdomId);
     const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
     const collection = validateBuildingCollection(buildings);
-    if (!collection.success) throw new Error(collection.error);
+    if (!collection.success) throw new ConvexError(collection.error);
     const modifiers = computeTechnologyModifiers(await readCompletedTechnologyIds(ctx, args.kingdomId));
     const selection = validateEquipmentSelection({
       weaponTier: args.weaponTier,
@@ -437,7 +437,7 @@ export const setArmyEquipment = mutation({
       unlockedArmors: modifiers.unlockedArmors,
       tacticalFormation: args.tacticalFormation,
     });
-    if (!selection.success) throw new Error(selection.error);
+    if (!selection.success) throw new ConvexError(selection.error);
     const patch: any = {
       weaponTier: selection.weaponTier,
       armorTier: selection.armorTier,
@@ -472,7 +472,7 @@ export const hireMercenaries = mutation({
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
     const collection = validateBuildingCollection(buildings);
-    if (!collection.success) throw new Error(collection.error);
+    if (!collection.success) throw new ConvexError(collection.error);
     const tavernLevel = collection.levels.taberna ?? 0;
     const units = await readArmyUnitsWithMigration(ctx, args.kingdomId);
     const active = units.filter((doc) => doc.isMercenary).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
@@ -483,7 +483,7 @@ export const hireMercenaries = mutation({
       activeMercenaries: active,
       gold: settled.settledResources.gold,
     });
-    if (!hire.success) throw new Error(hire.error);
+    if (!hire.success) throw new ConvexError(hire.error);
     await ctx.db.patch(settled.resources._id, { ...settled.settledResources, gold: settled.settledResources.gold - hire.cost });
     const contractEndsAt = now + MERCENARIES.CONTRACT_DAYS * TIME.MS_PER_GAME_YEAR;
     await ctx.db.insert("armyUnits", {
@@ -516,7 +516,7 @@ export const setTacticalFormation = mutation({
   args: { kingdomId: v.id("kingdoms"), tacticalFormation: v.string() },
   handler: async (ctx, args) => {
     await requireOwner(ctx, args.kingdomId);
-    if (!isTacticalFormation(args.tacticalFormation)) throw new Error(`Formación desconocida: '${args.tacticalFormation}'.`);
+    if (!isTacticalFormation(args.tacticalFormation)) throw new ConvexError(`Formación desconocida: '${args.tacticalFormation}'.`);
     await ctx.db.patch(args.kingdomId, { tacticalFormation: args.tacticalFormation, updatedAt: Date.now() });
     return { success: true, tacticalFormation: args.tacticalFormation, ...TACTICAL_FORMATIONS[args.tacticalFormation] };
   },
@@ -534,7 +534,7 @@ export const setFormation = mutation({
     for (const type of UNIT_TYPES) {
       const value = args.formation[type];
       if (value === undefined) continue;
-      if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error(`La fracción de '${type}' debe estar entre 0 y 1.`);
+      if (!Number.isFinite(value) || value < 0 || value > 1) throw new ConvexError(`La fracción de '${type}' debe estar entre 0 y 1.`);
       formation[type] = Math.round(value * 100) / 100;
     }
     await ctx.db.patch(args.kingdomId, { formation, updatedAt: Date.now() });
@@ -623,7 +623,7 @@ export const launchAttack = mutation({
       const availableDoc = currentArmy.find((d) => normalizeUnitType(d.unitType) === normalized && unitLevelOf(d) === (req.level ?? 1));
       const availableCount = availableDoc ? (availableDoc.count ?? 0) : 0;
       if (availableCount < req.count) {
-        throw new Error(`Tropas insuficientes de '${normalized}' nivel ${req.level ?? 1}: solicitadas ${req.count}, disponibles ${availableCount}.`);
+        throw new ConvexError(`Tropas insuficientes de '${normalized}' nivel ${req.level ?? 1}: solicitadas ${req.count}, disponibles ${availableCount}.`);
       }
       requestedComposition[normalized as UnitType] = (requestedComposition[normalized as UnitType] ?? 0) + req.count;
     }

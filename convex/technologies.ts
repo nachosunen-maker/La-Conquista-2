@@ -6,7 +6,7 @@
 import { internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import { recordMissionEvent } from "./missions";
 import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
@@ -99,26 +99,13 @@ export const researchTechnology = mutation({
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
     const now = Date.now();
-    let settled;
-    try {
-      console.log("DEBUG: Calling settleRelationalKingdomEconomy for kingdom:", args.kingdomId);
-      settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
-      console.log("DEBUG: settleRelationalKingdomEconomy completed successfully for kingdom:", args.kingdomId);
-    } catch (error: any) {
-      console.error("DEBUG: FATAL ERROR in settleRelationalKingdomEconomy during researchTechnology:", {
-        kingdomId: args.kingdomId,
-        techType: args.techType,
-        error: error.message,
-        stack: error.stack,
-      });
-      throw error;
-    }
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const [progress, buildings] = await Promise.all([
       readProgress(ctx, args.kingdomId),
       ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
     ]);
     const collection = validateBuildingCollection(buildings);
-    if (!collection.success) throw new Error(collection.error);
+    if (!collection.success) throw new ConvexError(collection.error);
     const planResult = createResearchPlan({
       technologyId: args.techType,
       resources: settled.settledResources,
@@ -128,7 +115,7 @@ export const researchTechnology = mutation({
       now,
       kingdomCivilization: kingdom.civilization,
     });
-    if (!planResult.success) throw new Error(planResult.error);
+    if (!planResult.success) throw new ConvexError(planResult.error);
     const plan = planResult.plan;
     const nextResources: Record<ResourceType, number> = { ...settled.settledResources };
     for (const [resource, cost] of Object.entries(plan.costs) as [ResourceType, number][]) {
@@ -154,12 +141,12 @@ export const cancelResearch = mutation({
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
     const doc = await ctx.db.get(args.progressId);
-    if (!doc || doc.kingdomId !== args.kingdomId) throw new Error("La investigación no existe en este reino.");
-    if (doc.status !== "researching") throw new Error("Solo se puede cancelar una investigación en curso.");
+    if (!doc || doc.kingdomId !== args.kingdomId) throw new ConvexError("La investigación no existe en este reino.");
+    if (doc.status !== "researching") throw new ConvexError("Solo se puede cancelar una investigación en curso.");
     const now = Date.now();
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const refundResult = calculateResearchCancellationRefund({ entry: doc as ResearchQueueEntry, serverTimeMs: now });
-    if (!refundResult.success) throw new Error(refundResult.error);
+    if (!refundResult.success) throw new ConvexError(refundResult.error);
     const nextResources: Record<ResourceType, number> = { ...settled.settledResources };
     for (const [resource, amount] of Object.entries(refundResult.refund) as [ResourceType, number][]) {
       nextResources[resource] += amount;

@@ -1,5 +1,5 @@
 import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import { completeDueConstructions, insertInitialBuildings } from "./buildings";
 import { evaluateKingdomMissions } from "./missions";
 import { activeProductionBonusMultiplier } from "./missionRules";
@@ -169,13 +169,9 @@ export async function settleRelationalKingdomEconomy(
   callerUserId: string,
   now: number
 ) {
-  console.log("DEBUG: settleRelationalKingdomEconomy starting for kingdom:", kingdom._id);
   await completeDueConstructions(ctx, kingdom._id, now);
-  console.log("DEBUG: completeDueConstructions done");
   await completeDueTraining(ctx, kingdom._id, now);
-  console.log("DEBUG: completeDueTraining done");
   await completeDueResearch(ctx, kingdom._id, now);
-  console.log("DEBUG: completeDueResearch done");
 
   // [DECISIÓN 21-10-2026] Migración perezosa de identificadores de civilización antiguos (Navajos, Masáis).
   const normalizedCivilization = normalizeCivilizationId(kingdom.civilization);
@@ -183,39 +179,31 @@ export async function settleRelationalKingdomEconomy(
     await ctx.db.patch(kingdom._id, { civilization: normalizedCivilization });
     kingdom = { ...kingdom, civilization: normalizedCivilization };
   }
-  console.log("DEBUG: civilization normalized");
   const state = await readRelationalKingdomState(ctx, kingdom._id);
-  console.log("DEBUG: state read, hasResources:", !!state.resources, "hasPopulation:", !!state.population);
   if (!state.resources) throw new Error("No existen recursos para el reino.");
   if (!state.population) {
-    console.log("DEBUG: population missing, inserting default...");
     const populationId = await ctx.db.insert("population" as any, {
       kingdomId: kingdom._id,
       total: INITIAL_KINGDOM_CONFIG.population,
       available: INITIAL_KINGDOM_CONFIG.unassignedCivil,
     });
     state.population = await ctx.db.get(populationId);
-    console.log("DEBUG: population inserted");
   }
 
   const isFirstInitialization = state.resources.settlementInitialized !== true;
-  console.log("DEBUG: calling calculateSettlementProgress, isFirstInitialization:", isFirstInitialization);
   const settlement = calculateSettlementProgress({
     kingdom,
     ...state,
     currentServerTimeMs: now,
     options: { isFirstInitialization, callerUserId },
   });
-  console.log("DEBUG: calculateSettlementProgress result success:", settlement.success);
   if (!settlement.success || settlement.updatedFood === undefined) {
     throw new Error(settlement.error ?? "Fallo al liquidar la economía relacional.");
   }
 
   const collection = validateBuildingCollection(state.buildings);
-  console.log("DEBUG: validateBuildingCollection success:", collection.success);
   const buildingLevels = collection.success ? collection.levels : {};
   const completedTechnologies = await readCompletedTechnologyIds(ctx, kingdom._id);
-  console.log("DEBUG: readCompletedTechnologyIds count:", completedTechnologies.length);
 
   let extended: ExtendedEconomyResult | null = null;
   let settledResources: KingdomResources = {
@@ -227,7 +215,6 @@ export async function settleRelationalKingdomEconomy(
   };
 
   if (!isFirstInitialization) {
-    console.log("DEBUG: non-first init, calling adaptRemoteDocumentsToEconomicState");
     const adapted = adaptRemoteDocumentsToEconomicState({
       kingdom,
       resources: state.resources,
@@ -237,12 +224,10 @@ export async function settleRelationalKingdomEconomy(
       buildings: state.buildings,
       foodTier: settlement.appliedFoodTier ?? (kingdom.foodTier || "normal"),
     });
-    console.log("DEBUG: adaptRemoteDocumentsToEconomicState success:", adapted.success);
     if (!adapted.success || !adapted.kingdomState || !adapted.militaryClassification) {
       throw new Error(adapted.error ?? "No se pudo adaptar el estado relacional del reino.");
     }
     const terrainBonuses = await readTerrainBonuses(ctx, kingdom._id);
-    console.log("DEBUG: calling simulateExtendedEconomy");
     extended = simulateExtendedEconomy({
       kingdomState: adapted.kingdomState,
       now,
@@ -267,7 +252,6 @@ export async function settleRelationalKingdomEconomy(
       civilization: kingdom.civilization,
       bonusProductionMultiplier: activeProductionBonusMultiplier(kingdom.temporaryBonuses, now),
     });
-    console.log("DEBUG: simulateExtendedEconomy done");
     settledResources = extended.updatedResources;
   }
 
@@ -520,7 +504,7 @@ export const getOrInitializeKingdom = mutation({
   handler: async (ctx, args) => {
     const callerUserId = await requireAuthenticatedUser(ctx);
     const name = args.name.trim();
-    if (!name) throw new Error("El nombre del reino es obligatorio (P7).");
+    if (!name) throw new ConvexError("El nombre del reino es obligatorio (P7).");
     let existing = await ctx.db
       .query("kingdoms")
       .withIndex("by_user_id_and_name", (q) =>
@@ -547,7 +531,7 @@ export const getOrInitializeKingdom = mutation({
 
     if (existing) {
       if (args.civilization !== undefined && existing.civilization && args.civilization !== existing.civilization) {
-        throw new Error("La civilización se elige al fundar el reino y no puede cambiarse (D-45).");
+        throw new ConvexError("La civilización se elige al fundar el reino y no puede cambiarse (D-45).");
       }
       const identityPatch: Record<string, unknown> = {};
       if (!existing.civilization && isCivilizationId(args.civilization)) identityPatch.civilization = args.civilization;
@@ -564,7 +548,7 @@ export const getOrInitializeKingdom = mutation({
     }
 
     if (args.civilization !== undefined && !isCivilizationId(args.civilization)) {
-      throw new Error(`Civilización desconocida: '${args.civilization}'. Opciones: ${CIVILIZATIONS.map((c) => c.id).join(", ")}.`);
+      throw new ConvexError(`Civilización desconocida: '${args.civilization}'. Opciones: ${CIVILIZATIONS.map((c) => c.id).join(", ")}.`);
     }
     const now = Date.now();
     const kingdomId = await ctx.db.insert("kingdoms", {
@@ -659,7 +643,7 @@ export const spendResource = mutation({
       throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
     }
     const cleanKey = args.idempotencyKey.trim();
-    if (!cleanKey) throw new Error("Se requiere una clave de idempotencia ('idempotencyKey') no vacía.");
+    if (!cleanKey) throw new ConvexError("Se requiere una clave de idempotencia ('idempotencyKey') no vacía.");
 
     const existingTx = await ctx.db
       .query("transactions")
@@ -674,7 +658,7 @@ export const spendResource = mutation({
         args.amount,
         args.reason
       );
-      if (!duplicate.matchesPayload) throw new Error(duplicate.error ?? "Conflicto de idempotencia.");
+      if (!duplicate.matchesPayload) throw new ConvexError(duplicate.error ?? "Conflicto de idempotencia.");
       return {
         success: true,
         idempotentDuplicate: true,
@@ -687,7 +671,7 @@ export const spendResource = mutation({
     }
 
     const validation = validateSpendParameters(args.resourceType, args.amount, args.reason);
-    if (!validation.valid) throw new Error(validation.error);
+    if (!validation.valid) throw new ConvexError(validation.error);
 
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, Date.now());
     const currentResources = {
@@ -698,7 +682,7 @@ export const spendResource = mutation({
       food: settled.settlement.updatedFood,
     } as KingdomResources;
     if (currentResources[args.resourceType as keyof KingdomResources] < args.amount) {
-      throw new Error(
+      throw new ConvexError(
         `Saldo insuficiente para ${args.resourceType}: disponible ${currentResources[args.resourceType as keyof KingdomResources].toFixed(2)}, requerido ${args.amount}`
       );
     }
@@ -747,10 +731,10 @@ export const reassignWorkers = mutation({
     }
 
     if (!isWorkersDistribution(args.newWorkers)) {
-      throw new Error("Las asignaciones deben ser enteros no negativos.");
+      throw new ConvexError("Las asignaciones deben ser enteros no negativos.");
     }
     if (!Number.isInteger(args.newRegularSoldiers) || args.newRegularSoldiers < 0) {
-      throw new Error("Los soldados regulares deben ser un entero no negativo.");
+      throw new ConvexError("Los soldados regulares deben ser un entero no negativo.");
     }
 
     const current = await readRelationalKingdomState(ctx, kingdom._id);
@@ -798,7 +782,7 @@ export const reassignWorkers = mutation({
     const requestedLegacyAssigned = Object.values(args.newWorkers).reduce((sum, count) => sum + count, 0);
     const available = current.population.available + previousLegacyAssigned - requestedLegacyAssigned;
     if (available < 0) {
-      throw new Error("No hay suficientes habitantes disponibles para esta reasignación.");
+      throw new ConvexError("No hay suficientes habitantes disponibles para esta reasignación.");
     }
     const unchanged = legacyJobTypes.every(
       (jobType) =>
@@ -888,7 +872,7 @@ export const reassignPopulationJob = mutation({
       reassignment.previousAssignedCount === undefined ||
       reassignment.available === undefined ||
       !reassignment.persistence) {
-      throw new Error(reassignment.error ?? "Reasignación de trabajadores inválida.");
+      throw new ConvexError(reassignment.error ?? "Reasignación de trabajadores inválida.");
     }
 
     if (reassignment.persistence.operation === "unchanged") {
@@ -1143,12 +1127,12 @@ export const setRestPolicy = mutation({
   handler: async (ctx, args) => {
     const callerUserId = await requireAuthenticatedUser(ctx);
     const kingdom = await ctx.db.get(args.kingdomId);
-    if (!kingdom) throw new Error("Reino no encontrado.");
+    if (!kingdom) throw new ConvexError("Reino no encontrado.");
     if (!isKingdomOwner(kingdom.userId, callerUserId)) {
-      throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
+      throw new ConvexError("No autorizado: el reino no pertenece al usuario autenticado.");
     }
     if (!Object.hasOwn(REST_POLICIES, args.restPolicy)) {
-      throw new Error(`Política de descanso desconocida: '${args.restPolicy}'. Opciones: ${Object.keys(REST_POLICIES).join(", ")}.`);
+      throw new ConvexError(`Política de descanso desconocida: '${args.restPolicy}'. Opciones: ${Object.keys(REST_POLICIES).join(", ")}.`);
     }
     const now = Date.now();
     await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
@@ -1195,7 +1179,7 @@ export const setKingdomFoodTier = mutation({
     const callerUserId = await requireAuthenticatedUser(ctx);
     const requestedTier = args.foodTier.toLowerCase().trim();
     if (!["minima", "normal", "abundante", "excelente"].includes(requestedTier)) {
-      throw new Error(`Régimen alimentario inválido '${args.foodTier}'. Permitidos: minima, normal, abundante, excelente.`);
+      throw new ConvexError(`Régimen alimentario inválido '${args.foodTier}'. Permitidos: minima, normal, abundante, excelente.`);
     }
     const kingdom = await resolveOwnedKingdom(ctx, callerUserId, args.kingdomId);
     const previousTier = (kingdom as any).foodTier ?? "normal";
@@ -1223,12 +1207,12 @@ export const setTaxRate = mutation({
   handler: async (ctx, args) => {
     const callerUserId = await requireAuthenticatedUser(ctx);
     const kingdom = await ctx.db.get(args.kingdomId);
-    if (!kingdom) throw new Error("Reino no encontrado.");
+    if (!kingdom) throw new ConvexError("Reino no encontrado.");
     if (!isKingdomOwner(kingdom.userId, callerUserId)) {
-      throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
+      throw new ConvexError("No autorizado: el reino no pertenece al usuario autenticado.");
     }
     if (!Number.isFinite(args.taxRate) || args.taxRate < TAXES.MIN_RATE || args.taxRate > TAXES.MAX_RATE) {
-      throw new Error(`La tasa impositiva debe estar entre ${TAXES.MIN_RATE * 100} % y ${TAXES.MAX_RATE * 100} %.`);
+      throw new ConvexError(`La tasa impositiva debe estar entre ${TAXES.MIN_RATE * 100} % y ${TAXES.MAX_RATE * 100} %.`);
     }
     const now = Date.now();
     await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);
