@@ -57,6 +57,7 @@ import { ParliamentPanel } from './components/ParliamentPanel';
 import { MapPanel } from './components/MapPanel';
 import { MissionsPanel, MissionCelebrations } from './components/MissionsPanel';
 import { formatCosts, formatRequirements, normalizeErrorMessage, StatusMessages } from './components/shared';
+import { ResetKingdomConfirmation } from './components/ResetKingdomConfirmation';
 
 const CIVILIZATION_LABELS: Record<string, string> = Object.fromEntries(CIVILIZATIONS.map((c) => [c.id, c.label]));
 
@@ -246,7 +247,9 @@ const issueRecoveryCodeAction = makeFunctionReference<"action">("account:issueRe
 function SessionControls() {
   const { isAuthenticated } = useConvexAuth();
   const { signOut } = useAuthActions();
-  const viewer = useQuery(getViewerQuery) as { rulerName?: string | null } | null | undefined;
+  const viewer = useQuery(getViewerQuery) as { rulerName?: string | null; userId: string; subject: string } | null | undefined;
+  const kingdomData = useQuery(getKingdomFullQuery, isAuthenticated && viewer ? { userId: (viewer.userId ?? viewer.subject.split('|')[0]) } : "skip") as KingdomFullResponse | undefined | null;
+  const kingdom = kingdomData?.kingdom;
   const [busy, setBusy] = useState(false);
   if (!isAuthenticated) return null;
   return (
@@ -255,6 +258,7 @@ function SessionControls() {
         <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
         {viewer?.rulerName ?? 'Gobernante'}
       </span>
+      {kingdom && <ResetKingdomConfirmation kingdomId={kingdom._id} onReset={() => window.location.reload()} />}
       <button
         onClick={async () => {
           setBusy(true);
