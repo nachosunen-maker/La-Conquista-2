@@ -564,6 +564,75 @@ function formatSecondsDuration(seconds: number): string {
   return `${hours}h ${remainingMins}m`;
 }
 
+function ResourceSparkline({ rate }: { rate: number }) {
+  const isPositive = rate > 0.001;
+  const isNegative = rate < -0.001;
+
+  if (isPositive) {
+    return (
+      <svg className="w-full h-6" viewBox="0 0 100 24" fill="none" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="2" y1="12" x2="98" y2="12" stroke="#2c2419" strokeWidth="1" strokeDasharray="3 3" />
+        <path
+          d="M 4 19 C 28 18, 55 12, 94 5"
+          stroke="#34d399"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <circle cx="94" cy="5" r="2.5" fill="#34d399" />
+      </svg>
+    );
+  }
+
+  if (isNegative) {
+    return (
+      <svg className="w-full h-6" viewBox="0 0 100 24" fill="none" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="2" y1="12" x2="98" y2="12" stroke="#2c2419" strokeWidth="1" strokeDasharray="3 3" />
+        <path
+          d="M 4 5 C 28 6, 55 12, 94 19"
+          stroke="#f87171"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <circle cx="94" cy="19" r="2.5" fill="#f87171" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className="w-full h-6" viewBox="0 0 100 24" fill="none" preserveAspectRatio="none" aria-hidden="true">
+      <line x1="2" y1="12" x2="98" y2="12" stroke="#2c2419" strokeWidth="1" strokeDasharray="3 3" />
+      <line x1="4" y1="12" x2="94" y2="12" stroke="#8e816d" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="94" cy="12" r="2.5" fill="#8e816d" />
+    </svg>
+  );
+}
+
+function formatResourceRate(rate: number, unitSuffix: string = ''): { text: string; isPositive: boolean; isNegative: boolean } {
+  const isPositive = rate > 0.001;
+  const isNegative = rate < -0.001;
+
+  if (!isPositive && !isNegative) {
+    return { text: `0${unitSuffix}`, isPositive: false, isNegative: false };
+  }
+
+  const sign = isPositive ? '+' : '';
+  const abs = Math.abs(rate);
+  let formatted: string;
+  if (abs >= 100) {
+    formatted = Math.round(rate).toLocaleString('es-ES');
+  } else if (abs >= 10) {
+    formatted = Number(rate.toFixed(1)).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+  } else {
+    formatted = Number(rate.toFixed(2)).toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+  }
+
+  return {
+    text: `${sign}${formatted}${unitSuffix}`,
+    isPositive,
+    isNegative,
+  };
+}
+
 /* ==========================================================================
    PANTALLA PRINCIPAL: RESUMEN DEL REINO (JUEGO DE ESTRATEGIA MEDIEVAL)
    ========================================================================== */
@@ -994,6 +1063,129 @@ function KingdomOverviewContent() {
     : 0;
 
   const dailySurplus = simulationResult?.productionAndConsumption?.dailyFoodNetSurplus ?? 0;
+
+  const resourceRates = useMemo(() => {
+    const getAssigned = (job: string) =>
+      populationJobs?.find(j => j.jobType.trim().toLowerCase() === job)?.assignedCount ?? 0;
+
+    const woodWorkers = getAssigned('wood');
+    const stoneWorkers = getAssigned('stone');
+    const ironWorkers = getAssigned('iron');
+    const goldWorkers = getAssigned('gold');
+    const agriWorkers = getAssigned('agriculture');
+
+    const taxIncome = lastSettlement?.dailyTaxIncome ?? ((population?.total ?? 0) * (kingdom?.taxRate ?? 0.1) * 0.5);
+    const goldDaily = lastSettlement?.dailyProduction?.gold != null
+      ? (lastSettlement.dailyProduction.gold + (lastSettlement.dailyTaxIncome ?? 0))
+      : (goldWorkers * 0.2) + taxIncome;
+
+    const woodDaily = lastSettlement?.dailyProduction?.wood != null
+      ? lastSettlement.dailyProduction.wood
+      : woodWorkers * 3.0;
+
+    const stoneDaily = lastSettlement?.dailyProduction?.stone != null
+      ? lastSettlement.dailyProduction.stone
+      : stoneWorkers * 1.5;
+
+    const ironDaily = lastSettlement?.dailyProduction?.iron != null
+      ? lastSettlement.dailyProduction.iron
+      : ironWorkers * 1.2;
+
+    const foodDaily = simulationResult?.productionAndConsumption?.dailyFoodNetSurplus != null
+      ? simulationResult.productionAndConsumption.dailyFoodNetSurplus
+      : (lastSettlement?.dailyProduction?.food != null
+          ? lastSettlement.dailyProduction.food - (lastSettlement.dailyFoodConsumption ?? 0)
+          : (agriWorkers * 2.0) - (population?.total ?? 0));
+
+    return {
+      gold: { daily: goldDaily, hourly: goldDaily / 24 },
+      wood: { daily: woodDaily, hourly: woodDaily / 24 },
+      stone: { daily: stoneDaily, hourly: stoneDaily / 24 },
+      iron: { daily: ironDaily, hourly: ironDaily / 24 },
+      food: { daily: foodDaily, hourly: foodDaily / 24 },
+    };
+  }, [populationJobs, lastSettlement, simulationResult, population?.total, kingdom?.taxRate]);
+
+  const resourceCards = useMemo(() => {
+    if (!resources) return [];
+
+    const simulated = simulationResult?.simulatedResources;
+    const isStarvingState = Boolean(simulationResult?.exhaustionMetrics?.isStarving || population?.starving);
+
+    return [
+      {
+        key: 'gold',
+        name: 'Oro',
+        subtitle: 'Moneda del tesoro e impuestos',
+        currentAmount: simulated ? simulated.gold : resources.gold,
+        dailyRate: resourceRates.gold.daily,
+        hourlyRate: resourceRates.gold.hourly,
+        icon: Coins,
+        iconColor: 'text-amber-400',
+        iconBg: 'bg-amber-500/10',
+        borderColor: 'hover:border-[#d4af37]/40',
+        numberColor: 'text-amber-300',
+        isStarving: false,
+      },
+      {
+        key: 'wood',
+        name: 'Madera',
+        subtitle: 'Tala y carpintería',
+        currentAmount: simulated ? simulated.wood : resources.wood,
+        dailyRate: resourceRates.wood.daily,
+        hourlyRate: resourceRates.wood.hourly,
+        icon: TreePine,
+        iconColor: 'text-amber-600',
+        iconBg: 'bg-amber-700/10',
+        borderColor: 'hover:border-[#a16207]/40',
+        numberColor: 'text-[#e0a96d]',
+        isStarving: false,
+      },
+      {
+        key: 'stone',
+        name: 'Piedra',
+        subtitle: 'Sillares de cantera',
+        currentAmount: simulated ? simulated.stone : resources.stone,
+        dailyRate: resourceRates.stone.daily,
+        hourlyRate: resourceRates.stone.hourly,
+        icon: Pickaxe,
+        iconColor: 'text-slate-300',
+        iconBg: 'bg-slate-500/10',
+        borderColor: 'hover:border-slate-500/40',
+        numberColor: 'text-slate-200',
+        isStarving: false,
+      },
+      {
+        key: 'iron',
+        name: 'Hierro',
+        subtitle: 'Metal para forja y armas',
+        currentAmount: simulated ? simulated.iron : resources.iron,
+        dailyRate: resourceRates.iron.daily,
+        hourlyRate: resourceRates.iron.hourly,
+        icon: Anvil,
+        iconColor: 'text-zinc-300',
+        iconBg: 'bg-zinc-500/10',
+        borderColor: 'hover:border-zinc-400/40',
+        numberColor: 'text-zinc-200',
+        isStarving: false,
+      },
+      {
+        key: 'food',
+        name: 'Alimentos',
+        subtitle: 'Grano y sustento de la población',
+        currentAmount: simulated ? simulated.food : resources.food,
+        dailyRate: resourceRates.food.daily,
+        hourlyRate: resourceRates.food.hourly,
+        icon: Wheat,
+        iconColor: isStarvingState ? 'text-rose-400' : 'text-emerald-400',
+        iconBg: isStarvingState ? 'bg-rose-500/10' : 'bg-emerald-500/10',
+        borderColor: isStarvingState ? 'border-rose-700/60' : 'hover:border-emerald-600/40',
+        numberColor: isStarvingState ? 'text-rose-400' : 'text-emerald-400',
+        isStarving: isStarvingState,
+      },
+    ];
+  }, [resources, simulationResult, population?.starving, resourceRates]);
+
   const constructionDisplayServerTime = constructionClockAnchor
     ? constructionClockAnchor.serverTimeMs + (clientTime - constructionClockAnchor.clientTimeMs)
     : constructionState?.serverTimeMs ?? clientTime;
@@ -1388,75 +1580,91 @@ function KingdomOverviewContent() {
 
         {resources ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {/* Oro */}
-            <div className="bg-[#1a1610] border border-[#3b3121] hover:border-[#d4af37]/40 transition-colors rounded-lg p-3 flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] text-[#9c8e76] font-medium uppercase tracking-wider">Oro</span>
-                <div className="p-1.5 rounded bg-amber-500/10 text-amber-400">
-                  <Coins className="w-4 h-4" />
-                </div>
-              </div>
-              <span className="text-xl sm:text-2xl font-bold text-amber-300 font-serif tracking-tight">
-                {resources.gold?.toLocaleString('es-ES') ?? '0'}
-              </span>
-              <span className="text-[10px] text-[#6b604e] mt-1">Moneda del tesoro</span>
-            </div>
+            {resourceCards.map((card) => {
+              const IconComponent = card.icon;
+              const hourly = formatResourceRate(card.hourlyRate, ' /h');
+              const daily = formatResourceRate(card.dailyRate, ' /día');
+              const isGrowth = card.dailyRate > 0.001;
+              const isLoss = card.dailyRate < -0.001;
 
-            {/* Madera */}
-            <div className="bg-[#1a1610] border border-[#3b3121] hover:border-[#a16207]/40 transition-colors rounded-lg p-3 flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] text-[#9c8e76] font-medium uppercase tracking-wider">Madera</span>
-                <div className="p-1.5 rounded bg-amber-700/10 text-amber-600">
-                  <TreePine className="w-4 h-4" />
-                </div>
-              </div>
-              <span className="text-xl sm:text-2xl font-bold text-[#e0a96d] font-serif tracking-tight">
-                {resources.wood?.toLocaleString('es-ES') ?? '0'}
-              </span>
-              <span className="text-[10px] text-[#6b604e] mt-1">Tala y carpintería</span>
-            </div>
+              return (
+                <div
+                  key={card.key}
+                  className={`bg-[#1a1610] border ${
+                    card.isStarving ? 'border-rose-700/60 bg-rose-950/20' : 'border-[#3b3121]'
+                  } ${card.borderColor} transition-colors rounded-lg p-3 flex flex-col justify-between ${
+                    card.key === 'food' ? 'col-span-2 sm:col-span-1' : ''
+                  }`}
+                >
+                  <div>
+                    {/* Cabecera del recurso: nombre e icono */}
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] text-[#9c8e76] font-medium uppercase tracking-wider">
+                        {card.name}
+                      </span>
+                      <div className={`p-1.5 rounded ${card.iconBg} ${card.iconColor}`}>
+                        <IconComponent className="w-4 h-4" />
+                      </div>
+                    </div>
 
-            {/* Piedra */}
-            <div className="bg-[#1a1610] border border-[#3b3121] hover:border-slate-500/40 transition-colors rounded-lg p-3 flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] text-[#9c8e76] font-medium uppercase tracking-wider">Piedra</span>
-                <div className="p-1.5 rounded bg-slate-500/10 text-slate-300">
-                  <Pickaxe className="w-4 h-4" />
-                </div>
-              </div>
-              <span className="text-xl sm:text-2xl font-bold text-slate-200 font-serif tracking-tight">
-                {resources.stone?.toLocaleString('es-ES') ?? '0'}
-              </span>
-              <span className="text-[10px] text-[#6b604e] mt-1">Sillares de cantera</span>
-            </div>
+                    {/* Cantidad actual */}
+                    <div className="mb-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-[#6b604e] uppercase tracking-wider">
+                          Cantidad actual
+                        </span>
+                        {card.key === 'food' && foodDelta !== 0 && (
+                          <span className={`text-[9px] font-mono px-1 rounded ${
+                            foodDelta > 0 ? 'text-emerald-400 bg-emerald-950/50' : 'text-rose-400 bg-rose-950/50'
+                          }`}>
+                            {foodDelta > 0 ? `+${foodDelta.toFixed(1)}` : foodDelta.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+                      <span className={`text-xl sm:text-2xl font-bold font-serif tracking-tight ${card.numberColor}`}>
+                        {typeof card.currentAmount === 'number'
+                          ? card.currentAmount.toLocaleString('es-ES', { maximumFractionDigits: card.key === 'food' ? 1 : 0 })
+                          : '0'}
+                      </span>
+                    </div>
 
-            {/* Hierro */}
-            <div className="bg-[#1a1610] border border-[#3b3121] hover:border-zinc-400/40 transition-colors rounded-lg p-3 flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] text-[#9c8e76] font-medium uppercase tracking-wider">Hierro</span>
-                <div className="p-1.5 rounded bg-zinc-500/10 text-zinc-300">
-                  <Anvil className="w-4 h-4" />
-                </div>
-              </div>
-              <span className="text-xl sm:text-2xl font-bold text-zinc-200 font-serif tracking-tight">
-                {resources.iron?.toLocaleString('es-ES') ?? '0'}
-              </span>
-              <span className="text-[10px] text-[#6b604e] mt-1">Metal para forja</span>
-            </div>
+                    {/* Gráfica visual de evolución (sparkline) */}
+                    <div className="bg-[#120f0b] rounded p-1.5 border border-[#261f14] mb-2.5">
+                      <div className="flex items-center justify-between text-[9px] text-[#6b604e] px-0.5 mb-0.5">
+                        <span className="uppercase tracking-wider">Evolución</span>
+                        <span className={`font-mono ${isGrowth ? 'text-emerald-400' : isLoss ? 'text-rose-400' : 'text-[#8e816d]'}`}>
+                          {isGrowth ? '↗ Crecimiento' : isLoss ? '↘ Pérdida' : '― Estable'}
+                        </span>
+                      </div>
+                      <ResourceSparkline rate={card.dailyRate} />
+                    </div>
+                  </div>
 
-            {/* Alimentos */}
-            <div className="col-span-2 sm:col-span-1 bg-[#1a1610] border border-[#3b3121] hover:border-emerald-600/40 transition-colors rounded-lg p-3 flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] text-[#9c8e76] font-medium uppercase tracking-wider">Alimentos</span>
-                <div className="p-1.5 rounded bg-emerald-500/10 text-emerald-400">
-                  <Wheat className="w-4 h-4" />
+                  {/* Estimaciones por hora y por día */}
+                  <div className="pt-2 border-t border-[#261f14] space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-[10px] text-[#80725d]">Por hora:</span>
+                      <span className={`font-mono font-semibold text-[11px] ${
+                        hourly.isPositive ? 'text-emerald-400' : hourly.isNegative ? 'text-rose-400' : 'text-[#8e816d]'
+                      }`}>
+                        {hourly.text}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-[10px] text-[#80725d]">Por día:</span>
+                      <span className={`font-mono font-semibold text-[11px] ${
+                        daily.isPositive ? 'text-emerald-400' : daily.isNegative ? 'text-rose-400' : 'text-[#8e816d]'
+                      }`}>
+                        {daily.text}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-[#5e5343] block pt-0.5 truncate">
+                      {card.subtitle}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <span className="text-xl sm:text-2xl font-bold text-emerald-400 font-serif tracking-tight">
-                {resources.food?.toLocaleString('es-ES') ?? '0'}
-              </span>
-              <span className="text-[10px] text-[#6b604e] mt-1">Grano y sustento</span>
-            </div>
+              );
+            })}
           </div>
         ) : (
           <div className="p-4 bg-[#18140f] border border-neutral-800 rounded text-xs text-neutral-400">
@@ -1468,7 +1676,7 @@ function KingdomOverviewContent() {
       {/* ====================================================================
           2.B. PROYECCIÓN LOCAL ESTIMADA (MOTOR ECONÓMICO P2 / P17 / P18)
           ==================================================================== */}
-      <section className="bg-gradient-to-b from-[#18140f] to-[#12100c] border border-[#3d3221] rounded-xl p-4 sm:p-5 shadow-lg space-y-4">
+      <section className="bg-[#14110d] border border-[#2b2419] rounded-xl p-4 sm:p-5 shadow-sm space-y-4">
         {/* Cabecera del bloque */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#2b2317] pb-3">
           <div className="flex items-center gap-2.5">
@@ -1627,76 +1835,10 @@ function KingdomOverviewContent() {
               El motor se detiene por seguridad sin inventar valores ficticios.
             </p>
           </div>
-        ) : simulationResult?.simulatedResources ? (
+        ) : showProjectionDetails && simulationResult?.productionAndConsumption ? (
           <div className="space-y-3">
-            {/* Existencias proyectadas */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-              {/* Oro proyectado */}
-              <div className="bg-[#120f0b] border border-[#2b2214] rounded-lg p-2.5">
-                <span className="text-[10px] text-[#80725d] uppercase tracking-wider block">Oro Proyectado</span>
-                <span className="text-lg font-bold text-amber-200/90 font-serif">
-                  {simulationResult.simulatedResources.gold.toLocaleString('es-ES')}
-                </span>
-                <span className="text-[10px] text-[#5e5343] block mt-0.5">{lastSettlement?.dailyProduction ? `+${lastSettlement.dailyProduction.gold.toFixed(1)}/día + impuestos (servidor)` : 'Se liquida en el servidor'}</span>
-              </div>
-
-              {/* Madera proyectada */}
-              <div className="bg-[#120f0b] border border-[#2b2214] rounded-lg p-2.5">
-                <span className="text-[10px] text-[#80725d] uppercase tracking-wider block">Madera Proyectada</span>
-                <span className="text-lg font-bold text-[#e0a96d]/90 font-serif">
-                  {simulationResult.simulatedResources.wood.toLocaleString('es-ES')}
-                </span>
-                <span className="text-[10px] text-[#5e5343] block mt-0.5">{lastSettlement?.dailyProduction ? `+${lastSettlement.dailyProduction.wood.toFixed(1)}/día (servidor)` : 'Se liquida en el servidor'}</span>
-              </div>
-
-              {/* Piedra proyectada */}
-              <div className="bg-[#120f0b] border border-[#2b2214] rounded-lg p-2.5">
-                <span className="text-[10px] text-[#80725d] uppercase tracking-wider block">Piedra Proyectada</span>
-                <span className="text-lg font-bold text-slate-300/90 font-serif">
-                  {simulationResult.simulatedResources.stone.toLocaleString('es-ES')}
-                </span>
-                <span className="text-[10px] text-[#5e5343] block mt-0.5">{lastSettlement?.dailyProduction ? `+${lastSettlement.dailyProduction.stone.toFixed(1)}/día (servidor)` : 'Se liquida en el servidor'}</span>
-              </div>
-
-              {/* Hierro proyectado */}
-              <div className="bg-[#120f0b] border border-[#2b2214] rounded-lg p-2.5">
-                <span className="text-[10px] text-[#80725d] uppercase tracking-wider block">Hierro Proyectado</span>
-                <span className="text-lg font-bold text-zinc-300/90 font-serif">
-                  {simulationResult.simulatedResources.iron.toLocaleString('es-ES')}
-                </span>
-                <span className="text-[10px] text-[#5e5343] block mt-0.5">{lastSettlement?.dailyProduction ? `+${lastSettlement.dailyProduction.iron.toFixed(1)}/día (servidor)` : 'Se liquida en el servidor'}</span>
-              </div>
-
-              {/* Alimentos proyectados con indicador dinámico de delta */}
-              <div className={`col-span-2 sm:col-span-1 bg-[#120f0b] border rounded-lg p-2.5 transition-colors ${
-                simulationResult.exhaustionMetrics?.isStarving
-                  ? 'border-rose-700/60 bg-rose-950/20'
-                  : 'border-emerald-700/40'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-[#80725d] uppercase tracking-wider">Alimentos Proyectados</span>
-                  {foodDelta !== 0 && (
-                    <span className={`text-[10px] font-mono px-1 rounded ${
-                      foodDelta > 0 ? 'text-emerald-400 bg-emerald-950/50' : 'text-rose-400 bg-rose-950/50'
-                    }`}>
-                      {foodDelta > 0 ? `+${foodDelta.toFixed(1)}` : foodDelta.toFixed(1)}
-                    </span>
-                  )}
-                </div>
-                <span className={`text-lg font-bold font-serif ${
-                  simulationResult.exhaustionMetrics?.isStarving ? 'text-rose-400' : 'text-emerald-300'
-                }`}>
-                  {simulationResult.simulatedResources.food.toLocaleString('es-ES', { maximumFractionDigits: 1 })}
-                </span>
-                <span className="text-[10px] text-[#6b604e] block mt-0.5">
-                  Base servidor: {resources?.food ?? 0}
-                </span>
-              </div>
-            </div>
-
             {/* Métricas analíticas del motor económico */}
-            {showProjectionDetails && simulationResult.productionAndConsumption && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
                 {/* Producción diaria */}
                 <div className="bg-[#100e0b] border border-[#261e13] rounded-lg p-3 space-y-1">
                   <div className="flex items-center justify-between text-xs text-[#a0937e]">
@@ -1756,7 +1898,6 @@ function KingdomOverviewContent() {
                   )}
                 </div>
               </div>
-            )}
           </div>
         ) : null}
 
@@ -1832,7 +1973,7 @@ function KingdomOverviewContent() {
                 </div>
                 <div className="w-full h-2 bg-[#1b1712] rounded-full overflow-hidden border border-[#2d2418]">
                   <div 
-                    className="h-full bg-gradient-to-r from-amber-600 to-[#d4af37] transition-all duration-500 rounded-full"
+                    className="h-full bg-[#d4af37] transition-all duration-500 rounded-full"
                     style={{ width: `${Math.min(100, Math.round((totalPop / capacityPop) * 100))}%` }}
                   ></div>
                 </div>
