@@ -279,10 +279,15 @@ function SessionControls() {
   );
 }
 
+const PENDING_RECOVERY_CODE_STORAGE_KEY = 'conquista_pending_recovery_code';
+
 /**
  * Código de recuperación [DECISIÓN 21-10-2026]: se muestra UNA SOLA VEZ nada más crear la
  * cuenta. Mientras la cuenta no tenga código activo (recién creada), esta pantalla lo genera,
  * lo enseña y exige confirmar que se ha guardado antes de seguir.
+ *
+ * REGLA CRÍTICA: La pantalla permanece visible hasta que el usuario marque expresamente la
+ * casilla y pulse «Continuar». Ninguna actualización reactiva de Convex puede desmontarla antes.
  */
 function RecoveryCodeGate(props: { children: React.ReactNode }) {
   const statusResult = useQuery_experimental({
@@ -297,19 +302,32 @@ function RecoveryCodeGate(props: { children: React.ReactNode }) {
         ? null
         : undefined;
   const issue = useAction(issueRecoveryCodeAction);
-  const [code, setCode] = useState<string | null>(null);
+  const [code, setCode] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem(PENDING_RECOVERY_CODE_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
   const [acknowledged, setAcknowledged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Generación automática al detectar cuenta recién creada sin clave
+  // Generación automática al detectar cuenta recién creada sin clave en backend ni en sesión
   useEffect(() => {
     if (status && !status.hasActiveCode && !code && !busy && !error) {
       setBusy(true);
       setError(null);
       issue({})
         .then((result) => {
-          setCode(result.recoveryCode);
+          if (result?.recoveryCode) {
+            try {
+              sessionStorage.setItem(PENDING_RECOVERY_CODE_STORAGE_KEY, result.recoveryCode);
+            } catch {
+              // Si sessionStorage falla por cuota o modo privado, se conserva en estado local
+            }
+            setCode(result.recoveryCode);
+          }
         })
         .catch((err) => {
           setError(describeAuthError(err));
@@ -320,6 +338,37 @@ function RecoveryCodeGate(props: { children: React.ReactNode }) {
     }
   }, [status, code, busy, error, issue]);
 
+  const handleContinue = () => {
+    try {
+      sessionStorage.removeItem(PENDING_RECOVERY_CODE_STORAGE_KEY);
+    } catch {
+      // Ignorar fallo de almacenamiento
+    }
+    setAcknowledged(true);
+  };
+
+  // 1. Confirmación explícita del usuario
+  if (acknowledged) {
+    return <>{props.children}</>;
+  }
+
+  // 2. PRIORIDAD MÁXIMA: Si existe un código generado pendiente de confirmación, se muestra SIEMPRE.
+  // Ni la reactividad de Convex (hasActiveCode: true) ni re-renderizados pueden desmontar esta vista.
+  if (code) {
+    return (
+      <div className="max-w-md mx-auto bg-[#090e17] border-2 border-[#b8862d]/70 rounded-xl p-5 sm:p-6 shadow-2xl">
+        <RecoveryCodeCard
+          code={code}
+          title="CLAVE DE SEGURIDAD DE TU CUENTA"
+          intro="Tu cuenta ha sido creada correctamente. Esta clave es tu ÚNICO método para recuperar el acceso si olvidas tu contraseña."
+          continueLabel="Continuar: elegir civilización"
+          onContinue={handleContinue}
+        />
+      </div>
+    );
+  }
+
+  // 3. Consulta de estado en curso en Convex
   if (status === undefined) {
     return (
       <div className="min-h-[300px] flex flex-col items-center justify-center space-y-3">
@@ -328,41 +377,37 @@ function RecoveryCodeGate(props: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (status === null || status.hasActiveCode || acknowledged) return <>{props.children}</>;
 
+  // 4. Usuario existente: si la cuenta ya disponía de código activo antes de esta sesión
+  // y no hay ningún código recién emitido en memoria, continúa con normalidad.
+  if (status === null || (status.hasActiveCode && !busy)) {
+    return <>{props.children}</>;
+  }
+
+  // 5. Cuenta nueva en proceso de emisión o reintento por error
   return (
     <div className="max-w-md mx-auto bg-[#090e17] border-2 border-[#b8862d]/70 rounded-xl p-5 sm:p-6 shadow-2xl">
-      {code ? (
-        <RecoveryCodeCard
-          code={code}
-          title="CLAVE DE SEGURIDAD DE TU CUENTA"
-          intro="Tu cuenta ha sido creada correctamente. Esta clave es tu ÚNICO método para recuperar el acceso si olvidas tu contraseña."
-          continueLabel="Continuar: elegir civilización"
-          onContinue={() => setAcknowledged(true)}
-        />
-      ) : (
-        <div className="space-y-4 text-center py-6">
-          <Loader2 className="w-8 h-8 text-[#d4af37] animate-spin mx-auto" />
-          <h3 className="text-sm font-serif font-bold text-[#f4eedb]">Generando clave de seguridad para tu cuenta...</h3>
-          <p className="text-xs text-[#c5b7a0]">
-            El servidor está creando una clave aleatoria de 16 símbolos. Se mostrará una sola vez antes de continuar.
-          </p>
-          {error && (
-            <div className="p-3 bg-rose-950/40 border border-rose-700/50 rounded-lg text-xs text-rose-200">
-              <p className="mb-2">{error}</p>
-              <button
-                onClick={() => {
-                  setError(null);
-                  setBusy(false);
-                }}
-                className="px-3 py-1 bg-rose-900/60 hover:bg-rose-800 text-rose-100 rounded text-xs font-semibold"
-              >
-                Reintentar generación
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      <div className="space-y-4 text-center py-6">
+        <Loader2 className="w-8 h-8 text-[#d4af37] animate-spin mx-auto" />
+        <h3 className="text-sm font-serif font-bold text-[#f4eedb]">Generando clave de seguridad para tu cuenta...</h3>
+        <p className="text-xs text-[#c5b7a0]">
+          El servidor está creando una clave aleatoria de 16 símbolos. Se mostrará una sola vez antes de continuar.
+        </p>
+        {error && (
+          <div className="p-3 bg-rose-950/40 border border-rose-700/50 rounded-lg text-xs text-rose-200">
+            <p className="mb-2">{error}</p>
+            <button
+              onClick={() => {
+                setError(null);
+                setBusy(false);
+              }}
+              className="px-3 py-1 bg-rose-900/60 hover:bg-rose-800 text-rose-100 rounded text-xs font-semibold"
+            >
+              Reintentar generación
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

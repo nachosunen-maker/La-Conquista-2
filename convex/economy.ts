@@ -671,7 +671,7 @@ export const spendResource = mutation({
     }
 
     const validation = validateSpendParameters(args.resourceType, args.amount, args.reason);
-    if (!validation.valid) throw new ConvexError(validation.error);
+    if (!validation.valid) throw new ConvexError(validation.error ?? "Parámetros de gasto inválidos.");
 
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, Date.now());
     const currentResources = {
