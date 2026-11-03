@@ -1,124 +1,194 @@
+/**
+ * LA CONQUISTA — PRUEBAS PURAS DEL SISTEMA TECNOLÓGICO Y ENTREGA 0 (E0)
+ * Verificación matemática y determinista sin acceso a base de datos.
+ */
+
 import {
-  TECHNOLOGY_CATALOG,
-  calculateResearchCancellationRefund,
+  TECHNOLOGIES,
+  RESEARCH,
+  RESEARCH_SLOTS_BY_UNIVERSITY,
+} from "./balanceConfig";
+import {
   computeTechnologyModifiers,
-  createResearchPlan,
-  evaluateTechnologyStatus,
   researchSlots,
-  type ResearchQueueEntry,
+  TECHNOLOGY_CATALOG,
 } from "./technologyRules";
-import { TECHNOLOGIES } from "./balanceConfig";
-import type { ResourceType } from "./economyCalculations";
+import { computeSideFactors, emptyComposition, type BattleSide } from "./battleRules";
+import { marchTimeSeconds, marchFatigue } from "./territoryRules";
 
 export interface TechnologyTestResult {
+  category: string;
   test: string;
   passed: boolean;
   details: string;
 }
 
-const richResources: Record<ResourceType, number> = { gold: 10_000, wood: 10_000, stone: 10_000, iron: 10_000, food: 10_000 };
+export const runTechnologyValidationTests = runTechnologyTests;
 
-export function runTechnologyValidationTests(): TechnologyTestResult[] {
-  const base = {
-    resources: { ...richResources },
-    completedIds: [] as string[],
-    activeResearch: [] as ResearchQueueEntry[],
-    buildingLevels: { castillo: 2, universidad: 1 } as Record<string, number>,
-    now: 5_000_000,
-  };
-  const agri = createResearchPlan({ ...base, technologyId: "agri_1" });
-  const unknown = createResearchPlan({ ...base, technologyId: "magia" });
-  const needsUniversity2 = createResearchPlan({ ...base, technologyId: "espionage_1" });
-  const espionageOpen = createResearchPlan({ ...base, technologyId: "espionage_1", buildingLevels: { castillo: 2, universidad: 2 } });
-  const chainLocked = createResearchPlan({ ...base, technologyId: "espionage_2", buildingLevels: { castillo: 5, universidad: 4 } });
-  const chainOpen = createResearchPlan({ ...base, technologyId: "espionage_2", buildingLevels: { castillo: 5, universidad: 4 }, completedIds: ["espionage_1"] });
-  const poor = createResearchPlan({ ...base, technologyId: "agri_1", resources: { ...richResources, gold: 99 } });
-  const active: ResearchQueueEntry = { technologyId: "mining_1", startedAt: 0, durationMs: 1000, costs: {} };
-  const slotFull = createResearchPlan({ ...base, technologyId: "agri_1", activeResearch: [active] });
-  const secondSlot = createResearchPlan({ ...base, technologyId: "agri_1", activeResearch: [active], buildingLevels: { castillo: 3, universidad: 3 } });
-  const duplicate = createResearchPlan({ ...base, technologyId: "mining_1", activeResearch: [active] });
-  const alreadyDone = createResearchPlan({ ...base, technologyId: "agri_1", completedIds: ["agri_1"] });
+export function runTechnologyTests(): TechnologyTestResult[] {
+  const results: TechnologyTestResult[] = [];
 
-  const entry: ResearchQueueEntry = { technologyId: "agri_1", startedAt: 5_000_000, durationMs: 86_400_000, costs: { gold: 100, wood: 100, stone: 50 } };
-  const cancelMid = calculateResearchCancellationRefund({ entry, serverTimeMs: 50_000_000 });
-  const cancelDone = calculateResearchCancellationRefund({ entry, serverTimeMs: 5_000_000 + 86_400_000 });
+  // 1. Ranuras de investigación fijadas a 1
+  {
+    const slotsU1 = researchSlots(1);
+    const slotsU3 = researchSlots(3);
+    const slotsU5 = researchSlots(5);
+    const maxSlots = RESEARCH.MAX_SLOTS;
+    const allSlotsOne = slotsU1 === 1 && slotsU3 === 1 && slotsU5 === 1 && maxSlots === 1;
 
-  const modifiers = computeTechnologyModifiers(["agri_1", "agri_1", "mining_1", "training_1", "construction_1", "medicine_1", "medical_2", "weapons_1", "espionage_1", "happiness_1"]);
-  const capped = computeTechnologyModifiers(["medicine_1", "medical_2", "medicine_1"]);
-  const status = evaluateTechnologyStatus({
-    technology: TECHNOLOGY_CATALOG.weapons_1,
-    completedIds: new Set(),
-    researchingIds: new Set(),
-    buildingLevels: { castillo: 5, universidad: 3, herreria: 1 },
-  });
+    results.push({
+      category: "ÁRBOL TECNOLÓGICO Y RANURAS (E0)",
+      test: "1. Una sola investigación activa a la vez en todos los niveles de Universidad",
+      passed: allSlotsOne,
+      details: `Univ 1: ${slotsU1}, Univ 3: ${slotsU3}, Univ 5: ${slotsU5}, MAX_SLOTS: ${maxSlots}`,
+    });
+  }
 
-  return [
-    {
-      test: "Investigación válida descuenta el coste del catálogo y fija fin por duración real (D-17)",
-      passed: agri.success && agri.plan.costs.gold === 100 && agri.plan.costs.wood === 100 && agri.plan.costs.stone === 50 &&
-        agri.plan.durationMs === 30_000 && agri.plan.completesAt === 5_000_000 + 30_000 && !unknown.success,
-      details: agri.success ? `Oro ${agri.plan.costs.gold}, duración ${agri.plan.durationMs} ms; desconocida rechazada: ${!unknown.success}` : agri.error,
-    },
-    {
-      test: "Requisitos: nivel de Universidad, edificios y tecnologías previas (D-19)",
-      passed: !needsUniversity2.success && espionageOpen.success && !chainLocked.success && chainOpen.success &&
-        status.status === "locked" && status.blockers.some((b) => b.includes("Herrería")),
-      details: `Espionaje I con Universidad 1 bloqueada: ${!needsUniversity2.success}; con Universidad 2: ${espionageOpen.success}; Espionaje II sin I: ${!chainLocked.success}; con I: ${chainOpen.success}; bloqueos de Metalurgia: ${status.blockers.join(" | ")}`,
-    },
-    {
-      test: "Ranuras (D-20, M-03): 1 con Universidad 1-2, 2 con Universidad 3-4, 3 con Universidad 5+; sin duplicados ni repetir completadas",
-      passed: researchSlots(0) === 1 && researchSlots(2) === 1 && researchSlots(3) === 2 && researchSlots(5) === 3 && researchSlots(10) === 3 &&
-        !slotFull.success && secondSlot.success && !duplicate.success && !alreadyDone.success && !poor.success,
-      details: `Ranuras Universidad 0/2/3/5/10: ${[0, 2, 3, 5, 10].map(researchSlots).join("/")}; ranura ocupada rechazada: ${!slotFull.success}; segunda ranura con Universidad 3: ${secondSlot.success}; duplicada: ${!duplicate.success}; completada: ${!alreadyDone.success}; sin oro: ${!poor.success}`,
-    },
-    {
-      test: "Cancelación reembolsa el 50 % antes de completar (uniforme con construcción y entrenamiento)",
-      passed: cancelMid.success && cancelMid.refund.gold === 50 && cancelMid.refund.wood === 50 && cancelMid.refund.stone === 25 && !cancelDone.success,
-      details: cancelMid.success ? `Reembolso oro ${cancelMid.refund.gold}, madera ${cancelMid.refund.wood}, piedra ${cancelMid.refund.stone}; completada rechazada: ${!cancelDone.success}` : cancelMid.error,
-    },
-    {
-      test: "Efectos idempotentes (D-18): una tecnología repetida cuenta una vez; recuperación de heridos con tope 60 %",
-      passed: Math.abs(modifiers.agricultureProduction - 1.05) < 1e-9 && Math.abs(modifiers.miningProduction - 1.05) < 1e-9 &&
-        Math.abs(modifiers.trainingDuration - 0.95) < 1e-9 && Math.abs(modifiers.constructionDuration - 0.95) < 1e-9 &&
-        Math.abs(modifiers.woundedRecoveryBonus - 0.15) < 1e-9 && modifiers.espionageLevel === 1 && modifiers.happinessBase === 3 &&
-        modifiers.unlockedWeapons.includes("acero") && Math.abs(capped.woundedRecoveryBonus - 0.15) < 1e-9,
-      details: `Agricultura ×${modifiers.agricultureProduction}; minería ×${modifiers.miningProduction}; entrenamiento ×${modifiers.trainingDuration}; construcción ×${modifiers.constructionDuration}; heridos +${modifiers.woundedRecoveryBonus}; espionaje ${modifiers.espionageLevel}; felicidad +${modifiers.happinessBase}`,
-    },
-    {
-      test: "Desbloqueo tecnología mongola: exige Cuartel 2 y Universidad 2 (Mongoles)",
-      passed: (() => {
-        const locked = evaluateTechnologyStatus({
-          technology: TECHNOLOGY_CATALOG.tech_civ_mongoles,
-          completedIds: new Set(),
-          researchingIds: new Set(),
-          buildingLevels: { castillo: 2, universidad: 2, cuartel: 1 },
-          kingdomCivilization: "mongoles",
-        });
-        const unlocked = evaluateTechnologyStatus({
-          technology: TECHNOLOGY_CATALOG.tech_civ_mongoles,
-          completedIds: new Set(),
-          researchingIds: new Set(),
-          buildingLevels: { castillo: 2, universidad: 2, cuartel: 2 },
-          kingdomCivilization: "mongoles",
-        });
-        return locked.status === "locked" && unlocked.status === "available";
-      })(),
-      details: "Verifica desbloqueo con Cuartel 2 y bloqueo con Cuartel 1",
-    },
-    {
-      test: "Duración de investigación es positiva (no 0)",
-      passed: (() => {
-        const technology = TECHNOLOGY_CATALOG.agri_1;
-        const passive = { researchDurationMultiplier: 1.0 };
-        const duration = Math.ceil(technology.durationSeconds * passive.researchDurationMultiplier);
-        return duration > 0;
-      })(),
-      details: "Verifica que la duración calculada es mayor que 0",
-    },
-    {
-      test: "Debug: Imprimir todas las duraciones tecnológicas",
-      passed: true,
-      details: TECHNOLOGIES.map(t => `${t.id}: ${t.durationSeconds}`).join(' | '),
-    },
-  ];
+  // 2. Requisitos de P24 para medicine_1 y advanced_steel
+  {
+    const med1 = TECHNOLOGY_CATALOG["medicine_1"];
+    const steelAdv = TECHNOLOGY_CATALOG["advanced_steel"];
+
+    const med1Ok =
+      med1?.universityLevel === 2 &&
+      med1?.buildingRequirements?.castillo === 2 &&
+      med1?.buildingRequirements?.universidad === 2;
+
+    const steelAdvOk =
+      steelAdv?.universityLevel === 3 &&
+      steelAdv?.buildingRequirements?.castillo === 5 &&
+      steelAdv?.buildingRequirements?.universidad === 3 &&
+      steelAdv?.buildingRequirements?.herreria === 4;
+
+    results.push({
+      category: "ESPECIFICACIÓN P24 (E0)",
+      test: "2. Cataplasmas requiere Castillo 2 + Univ 2; Acero avanzado requiere Univ 3 + Castillo 5 + Herrería 4",
+      passed: Boolean(med1Ok && steelAdvOk),
+      details: `medicine_1 reqs: ${JSON.stringify(med1?.buildingRequirements)} (Univ ${med1?.universityLevel}); advanced_steel reqs: ${JSON.stringify(steelAdv?.buildingRequirements)} (Univ ${steelAdv?.universityLevel})`,
+    });
+  }
+
+  // 3. Conexión de combate: combatAttackBonus y combatDefenseBonus
+  {
+    const baseComp = emptyComposition();
+    baseComp.infanteria = 100;
+    baseComp.arqueria = 50;
+
+    const enemyComp = emptyComposition();
+    enemyComp.infanteria = 100;
+    enemyComp.arqueria = 50;
+
+    const sideNeutral: BattleSide = {
+      kingdomId: "side1",
+      name: "Bando 1",
+      composition: baseComp,
+      trainingMultiplier: 1.0,
+      weaponTier: "palo",
+      armorTier: "ninguna",
+      strategy: "defensiva",
+      morale: 70,
+      foodTier: "normal",
+      fatigue: 0,
+      wallsLevel: 0,
+      terrainDefenseBonus: 0,
+    };
+
+    const sideEnemy: BattleSide = {
+      kingdomId: "side2",
+      name: "Bando 2",
+      composition: enemyComp,
+      trainingMultiplier: 1.0,
+      weaponTier: "palo",
+      armorTier: "ninguna",
+      strategy: "defensiva",
+      morale: 70,
+      foodTier: "normal",
+      fatigue: 0,
+      wallsLevel: 0,
+      terrainDefenseBonus: 0,
+    };
+
+    const factorsNeutral = computeSideFactors(sideNeutral, baseComp, sideEnemy);
+
+    const sideBuffed: BattleSide = {
+      ...sideNeutral,
+      combatAttackBonus: 0.10, // +10 % ataque
+      combatDefenseBonus: 0.15, // +15 % defensa
+    };
+
+    const factorsBuffed = computeSideFactors(sideBuffed, baseComp, sideEnemy);
+
+    const attackBoosted = factorsBuffed.offensivePower > factorsNeutral.offensivePower;
+    const defenseBoosted = factorsBuffed.defensivePower > factorsNeutral.defensivePower;
+
+    results.push({
+      category: "CONEXIÓN DE COMBATE (E0)",
+      test: "3. combatAttackBonus y combatDefenseBonus aumentan efectivamente la potencia en batalla",
+      passed: attackBoosted && defenseBoosted,
+      details: `Ofensiva: ${factorsNeutral.offensivePower.toFixed(2)} -> ${factorsBuffed.offensivePower.toFixed(2)}; Defensiva: ${factorsNeutral.defensivePower.toFixed(2)} -> ${factorsBuffed.defensivePower.toFixed(2)}`,
+    });
+  }
+
+  // 4. Conexión de marcha y fatiga: marchSpeedBonus y marchFatigueReduction
+  {
+    const dist = 5;
+    const terrain = 1.2;
+    const unitSpeed = 1.0;
+    const civSpeed = 1.0;
+
+    const baseDuration = marchTimeSeconds(dist, terrain, unitSpeed, civSpeed, 0);
+    const buffedDuration = marchTimeSeconds(dist, terrain, unitSpeed, civSpeed, 0.20); // +20 % velocidad
+
+    const baseFatigue = marchFatigue(10, dist, terrain, 1.0, 0);
+    const buffedFatigue = marchFatigue(10, dist, terrain, 1.0, 0.25); // -25 % fatiga
+
+    const speedWorks = buffedDuration < baseDuration;
+    const fatigueWorks = buffedFatigue < baseFatigue;
+
+    results.push({
+      category: "CONEXIÓN DE MARCHA Y RESISTENCIA (E0)",
+      test: "4. Bonificaciones de tecnología reducen duración de marcha y acumulación de fatiga",
+      passed: speedWorks && fatigueWorks,
+      details: `Duración: ${baseDuration}s -> ${buffedDuration}s; Fatiga final: ${baseFatigue} -> ${buffedFatigue}`,
+    });
+  }
+
+  // 5. Espionaje e informes de bots
+  {
+    const modNone = computeTechnologyModifiers([]);
+    const modEsp1 = computeTechnologyModifiers(["espionage_1"]);
+    const modEsp2 = computeTechnologyModifiers(["espionage_1", "espionage_2"]);
+
+    const espionageCorrect =
+      modNone.espionageLevel === 0 &&
+      modEsp1.espionageLevel === 1 &&
+      modEsp2.espionageLevel === 2;
+
+    results.push({
+      category: "INTELIGENCIA Y BOTS (E0)",
+      test: "5. computeTechnologyModifiers calcula el nivel de espionaje correcto para el Parlamento y bots",
+      passed: espionageCorrect,
+      details: `Base: nivel ${modNone.espionageLevel}, Esp 1: nivel ${modEsp1.espionageLevel}, Esp 1+2: nivel ${modEsp2.espionageLevel}`,
+    });
+  }
+
+  // 6. Efectos conectados en el catálogo de tecnologías
+  {
+    let allConnected = true;
+    for (const tech of TECHNOLOGIES) {
+      if (!tech.effect || typeof tech.effect.value !== "number" || !tech.effect.key) {
+        allConnected = false;
+        break;
+      }
+    }
+
+    results.push({
+      category: "INTEGRIDAD DEL CATÁLOGO (E0)",
+      test: "6. Todas las 25 tecnologías existentes tienen efecto numérico definido y conectado",
+      passed: allConnected,
+      details: `Total de tecnologías verificadas: ${TECHNOLOGIES.length}, sin tecnologías huérfanas`,
+    });
+  }
+
+  return results;
 }

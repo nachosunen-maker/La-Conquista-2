@@ -471,11 +471,11 @@ export const MERCENARIES = {
 export type MercenaryTypeId = (typeof MERCENARIES.TYPES)[number]["id"];
 export type MercenaryType = (typeof MERCENARIES.TYPES)[number];
 
-/** [DECISIÓN 17-10-2026, M-03 opción B] Ranuras de investigación según nivel de Universidad (P25). */
+/** [DECISIÓN 17-10-2026, actualizada 03-11-2026] Ranuras de investigación fijadas a 1 activa por decisión técnica. */
 export const RESEARCH_SLOTS_BY_UNIVERSITY: readonly { minLevel: number; slots: number }[] = [
   { minLevel: 1, slots: 1 },
-  { minLevel: 3, slots: 2 },
-  { minLevel: 5, slots: 3 },
+  { minLevel: 3, slots: 1 },
+  { minLevel: 5, slots: 1 },
 ];
 
 /** [DECISIÓN 17-10-2026, M-04 opción A] Políticas de descanso del Castillo (P15, P55). */
@@ -902,11 +902,11 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   // --- RAMA MILITAR, METALURGIA Y DOCTRINA ---
   { id: "training_1", name: "Doctrina de instrucción de levas", branch: "militar", universityLevel: 1, costs: { gold: 100, wood: 80, stone: 50, iron: 20, food: 0 }, durationSeconds: 45, buildingRequirements: { cuartel: 1 }, technologyRequirements: [], effect: { key: "trainingDuration", value: -0.05, description: "−5 % duración de entrenamiento militar" } },
   { id: "training_2", name: "Ordenanzas de regimiento", branch: "militar", universityLevel: 3, costs: { gold: 300, wood: 150, stone: 100, iron: 80, food: 0 }, durationSeconds: 300, buildingRequirements: { cuartel: 3, universidad: 3 }, technologyRequirements: ["training_1"], effect: { key: "trainingDuration", value: -0.10, description: "−10 % duración de adiestramiento en filas" } },
-  { id: "medicine_1", name: "Cataplasmas y huertos medicinales", branch: "militar", universityLevel: 1, costs: { gold: 100, wood: 80, stone: 80, iron: 10, food: 0 }, durationSeconds: 45, buildingRequirements: {}, technologyRequirements: [], effect: { key: "woundedRecovery", value: 0.05, description: "+5 pp de recuperación de heridos" } },
+  { id: "medicine_1", name: "Cataplasmas y huertos medicinales", branch: "militar", universityLevel: 2, costs: { gold: 100, wood: 80, stone: 80, iron: 10, food: 0 }, durationSeconds: 45, buildingRequirements: { castillo: 2, universidad: 2 }, technologyRequirements: [], effect: { key: "woundedRecovery", value: 0.05, description: "+5 pp de recuperación de heridos" } },
   { id: "medical_2", name: "Cirugía de campaña y triaje", branch: "militar", universityLevel: 3, costs: { gold: 400, wood: 150, stone: 200, iron: 100, food: 0 }, durationSeconds: 360, buildingRequirements: { hospitalMilitar: 2, universidad: 3 }, technologyRequirements: ["medicine_1"], effect: { key: "woundedRecovery", value: 0.10, description: "+10 pp recuperación de heridos en hospital" } },
   { id: "weapons_1", name: "Metalurgia del acero", branch: "militar", universityLevel: 3, costs: { gold: 300, wood: 100, stone: 150, iron: 100, food: 0 }, durationSeconds: 300, buildingRequirements: { castillo: 3, universidad: 3, herreria: 3 }, technologyRequirements: [], effect: { key: "unlockWeaponSteel", value: 1, description: "Desbloquea arma de acero (×1,15)" } },
   { id: "armor_1", name: "Armaduras de hierro y malla", branch: "militar", universityLevel: 3, costs: { gold: 300, wood: 100, stone: 150, iron: 100, food: 0 }, durationSeconds: 300, buildingRequirements: { castillo: 3, universidad: 3, herreria: 3 }, technologyRequirements: [], effect: { key: "unlockArmorSteel", value: 1, description: "Desbloquea armadura de acero (×1,25)" } },
-  { id: "advanced_steel", name: "Acero al crisol y caldeado", branch: "militar", universityLevel: 4, costs: { gold: 600, wood: 200, stone: 250, iron: 200, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 5, universidad: 4, herreria: 4 }, technologyRequirements: ["weapons_1"], effect: { key: "unlockWeaponAdvancedSteel", value: 1, description: "Desbloquea arma de acero avanzado (×1,30)" } },
+  { id: "advanced_steel", name: "Acero al crisol y caldeado", branch: "militar", universityLevel: 3, costs: { gold: 600, wood: 200, stone: 250, iron: 200, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 5, universidad: 3, herreria: 4 }, technologyRequirements: ["weapons_1"], effect: { key: "unlockWeaponAdvancedSteel", value: 1, description: "Desbloquea arma de acero avanzado (×1,30)" } },
 
   // --- RAMA INTELIGENCIA Y EXPLORACIÓN ---
   { id: "espionage_1", name: "Red de confidentes I", branch: "inteligencia", universityLevel: 2, costs: { gold: 200, wood: 100, stone: 100, iron: 20, food: 0 }, durationSeconds: 180, buildingRequirements: { castillo: 2, universidad: 2 }, technologyRequirements: [], effect: { key: "espionageAccuracy", value: 1, description: "Informe militar aproximado (±15 %)" } },
@@ -928,9 +928,9 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
 ];
 
 export const RESEARCH = {
-  /** [COMPLEMENTO §4] Una investigación activa por reino sin supervisores; máximo 3. */
+  /** [COMPLEMENTO §4, actualizado 03-11-2026] Una investigación activa por reino fijada a 1 por decisión. */
   BASE_SLOTS: 1,
-  MAX_SLOTS: 3,
+  MAX_SLOTS: 1,
   /** [COMPLEMENTO §4] Reembolso del 50 % al cancelar. */
   CANCEL_REFUND_RATIO: 0.5,
   /** [COMPLEMENTO §4] Mínimo de duración de construcción tras reducciones tecnológicas. */

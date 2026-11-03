@@ -10,7 +10,7 @@ import { runMissionTests, type MissionTestResult } from "../convex/missionPureTe
 import { runBotPureTests } from "../convex/botPureTests";
 
 console.log("================================================================================");
-console.log("LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAMENTO + BOTS + EXPLORACIÓN + CIVILIZACIONES + CUENTA + MISIONES)");
+console.log("LA CONQUISTA — BATERÍA DE PRUEBAS (ECONOMÍA + MILITAR + FUNDACIÓN + PARLAMENTO + BOTS + EXPLORACIÓN + CIVILIZACIONES + CUENTA + MISIONES + TECNOLOGÍAS)");
 console.log("================================================================================\n");
 
 const startTime = Date.now();

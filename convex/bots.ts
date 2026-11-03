@@ -13,7 +13,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { isKingdomOwner } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
 import { settleRelationalKingdomEconomy } from "./economy";
-import { readCompletedTechnologyIds } from "./technologyRules";
+import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import { validateBuildingCollection } from "./buildingRules";
 import { simulateBattle } from "./battleRules";
 import { evaluateKingdomMissions, recordMissionEvent } from "./missions";
@@ -65,9 +65,10 @@ export const listBots = query({
     const levels = collection.success ? collection.levels : {};
     const parliamentLevel = levels.parlamento ?? 0;
 
-    const hasEspionage1 = completedTech.includes("espionaje_1");
-    const hasEspionage2 = completedTech.includes("espionaje_2");
-    const playerEspionageLevel = hasEspionage2 ? 2 : hasEspionage1 ? 1 : 0;
+    const techModifiers = computeTechnologyModifiers(completedTech);
+    const playerEspionageLevel = techModifiers.espionageLevel;
+    const hasEspionage1 = playerEspionageLevel >= 1;
+    const hasEspionage2 = playerEspionageLevel >= 2;
     const espionageCost = playerEspionageLevel === 2
       ? PARLIAMENT.ESPIONAGE.costByLevel[2]
       : PARLIAMENT.ESPIONAGE.costByLevel[1];
@@ -139,13 +140,13 @@ export const requestBotEspionage = mutation({
     if (!bot) throw new Error(`Bot militar "${args.botId}" no encontrado.`);
 
     const completedTech = await readCompletedTechnologyIds(ctx, args.kingdomId);
-    const hasEspionage1 = completedTech.includes("espionaje_1");
-    const hasEspionage2 = completedTech.includes("espionaje_2");
-    if (!hasEspionage1) {
+    const techModifiers = computeTechnologyModifiers(completedTech);
+    const playerEspionageLevel = techModifiers.espionageLevel;
+    if (playerEspionageLevel < 1) {
       throw new Error("Requiere la tecnología Espionaje I investigada en la Universidad.");
     }
 
-    const level = hasEspionage2 ? 2 : 1;
+    const level = playerEspionageLevel >= 2 ? 2 : 1;
     const cost = level === 2 ? PARLIAMENT.ESPIONAGE.costByLevel[2] : PARLIAMENT.ESPIONAGE.costByLevel[1];
 
     const now = Date.now();

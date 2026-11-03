@@ -56,6 +56,10 @@ export interface BattleSide {
   terrainDefenseBonus: number;
   /** [P6, Bloque 10] Identificador de civilización oficial. */
   civilization?: string;
+  /** Bonificación ofensiva tecnológica aditiva (+0,05 = +5 %). */
+  combatAttackBonus?: number;
+  /** Bonificación defensiva tecnológica aditiva (+0,05 = +5 %). */
+  combatDefenseBonus?: number;
 }
 
 export interface SideFactors {
@@ -206,8 +210,10 @@ export function computeSideFactors(side: BattleSide, composition: Composition, e
   const effectives = totalUnits(composition);
   const rawStrengths = strengths(composition, enemyComposition ?? enemy.composition, enemy.wallsLevel);
   const civPassive = getCivilizationPassive(side.civilization);
-  const offensive = rawStrengths.offensive * civPassive.combatAttackMultiplier;
-  const defensive = rawStrengths.defensive * civPassive.combatDefenseMultiplier;
+  const techAttack = 1 + Math.max(0, side.combatAttackBonus ?? 0);
+  const techDefense = 1 + Math.max(0, side.combatDefenseBonus ?? 0);
+  const offensive = rawStrengths.offensive * civPassive.combatAttackMultiplier * techAttack;
+  const defensive = rawStrengths.defensive * civPassive.combatDefenseMultiplier * techDefense;
   const training = Math.max(0.01, side.trainingMultiplier);
   const weapons = WEAPONS[side.weaponTier]?.multiplier ?? WEAPONS.palo.multiplier;
   const armor = ARMORS[side.armorTier]?.multiplier ?? ARMORS.ninguna.multiplier;

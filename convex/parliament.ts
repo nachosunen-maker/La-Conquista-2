@@ -272,13 +272,16 @@ export const acceptChallenge = mutation({
     const attackerUnits = await readArmyUnitDocs(ctx, challenge.challengerKingdomId);
     const attackerKingdom = await ctx.db.get(challenge.challengerKingdomId);
     const civPassive = getCivilizationPassive(attackerKingdom?.civilization);
+    const attackerTech = await readCompletedTechnologyIds(ctx, challenge.challengerKingdomId);
+    const attackerTechModifiers = computeTechnologyModifiers(attackerTech);
     // [R-14, decisión 23-10-2026] Terreno medio del camino entre los territorios principales.
     const terrainMultiplier = await pathTerrainBetweenKingdoms(ctx, challenge.challengerKingdomId, challenge.targetKingdomId);
     const marchSeconds = marchTimeSeconds(
       challenge.distance ?? 0,
       terrainMultiplier,
       armyMarchMultiplier(activeComposition(attackerUnits)),
-      civPassive?.marchSpeedMultiplier ?? 1.0
+      civPassive?.marchSpeedMultiplier ?? 1.0,
+      attackerTechModifiers.marchSpeedBonus
     );
     await ctx.db.patch(args.challengeId, { status: "ACCEPTED", respondedAt: now, window: args.window, scheduledAt, freezeAt, marchSeconds, terrainMultiplier });
     await ctx.scheduler.runAt(freezeAt, internal.parliament.freezeChallenge, { challengeId: args.challengeId });
@@ -386,9 +389,12 @@ export async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, 
   }
   const civPassive = getCivilizationPassive(refreshed.civilization);
   const currentFatigue = typeof refreshed.armyFatigue === "number" ? refreshed.armyFatigue : 0;
+  const completedTech = await readCompletedTechnologyIds(ctx, kingdomId);
+  const techModifiers = computeTechnologyModifiers(completedTech);
   return {
     kingdomId,
     name: refreshed.name,
+    civilization: refreshed.civilization,
     // [P37, M-11] Solo participa la fracción de cada tipo fijada en la formación del reino.
     composition: applyFormation(activeComposition(units), refreshed.formation ?? null),
     trainingMultiplier: summary.trainingMultiplier,
@@ -398,9 +404,11 @@ export async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, 
     tacticalFormation: isTacticalFormation(refreshed.tacticalFormation ?? "") ? (refreshed.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
     morale: typeof refreshed.militaryMorale === "number" ? refreshed.militaryMorale : WELLBEING.INITIAL_MORALE,
     foodTier: refreshed.foodTier ?? "normal",
-    fatigue: role === "attacker" ? marchFatigue(currentFatigue, distance, terrainMultiplier, civPassive.fatigueAccrualMultiplier) : currentFatigue,
+    fatigue: role === "attacker" ? marchFatigue(currentFatigue, distance, terrainMultiplier, civPassive.fatigueAccrualMultiplier, techModifiers.marchFatigueReduction) : currentFatigue,
     wallsLevel: role === "defender" ? levels.murallas ?? 0 : 0,
     terrainDefenseBonus: role === "defender" ? terrainDefenseBonus : 0,
+    combatAttackBonus: techModifiers.combatAttackBonus,
+    combatDefenseBonus: techModifiers.combatDefenseBonus,
   };
 }
 

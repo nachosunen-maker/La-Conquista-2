@@ -199,25 +199,29 @@ export function marchTimeSeconds(
   distance: number,
   terrainMultiplier: number = 1,
   unitMultiplier: number = 1,
-  civSpeedMultiplier: number = 1
+  civSpeedMultiplier: number = 1,
+  techSpeedBonus: number = 0
 ): number {
   if (!Number.isFinite(distance) || distance <= 0) return 0;
   const civSpeed = civSpeedMultiplier > 0 ? civSpeedMultiplier : 1;
-  const rawSeconds = (MAP.MARCH_SECONDS_PER_HEX * distance * terrainMultiplier * unitMultiplier) / civSpeed;
+  const effectiveSpeed = Math.max(0.1, civSpeed * (1 + Math.max(0, techSpeedBonus)));
+  const rawSeconds = (MAP.MARCH_SECONDS_PER_HEX * distance * terrainMultiplier * unitMultiplier) / effectiveSpeed;
   return Math.max(MARCH.MIN_DURATION_SECONDS, Math.min(MARCH.MAX_DURATION_SECONDS, Math.ceil(rawSeconds)));
 }
 
-/** [COMPLEMENTO §5] F_nueva = min(100, F_actual + ceil(2·d·M_terreno·M_civFatiga)). */
+/** [COMPLEMENTO §5] F_nueva = min(100, F_actual + ceil(2·d·M_terreno·M_civFatiga·(1−ReducciónTecnológica))). */
 export function marchFatigue(
   currentFatigue: number,
   distance: number,
   terrainMultiplier: number = 1,
-  civFatigueMultiplier: number = 1
+  civFatigueMultiplier: number = 1,
+  techFatigueReduction: number = 0
 ): number {
   const current = Number.isFinite(currentFatigue) ? Math.max(0, currentFatigue) : 0;
   if (!Number.isFinite(distance) || distance <= 0) return Math.min(100, current);
   const civFatigue = civFatigueMultiplier > 0 ? civFatigueMultiplier : 1;
-  const rawFatigue = FATIGUE.PER_HEX * distance * terrainMultiplier * civFatigue;
+  const fatigueFactor = civFatigue * Math.max(0.1, 1 - Math.min(0.5, techFatigueReduction));
+  const rawFatigue = FATIGUE.PER_HEX * distance * terrainMultiplier * fatigueFactor;
   return Math.min(100, current + Math.max(0, Math.ceil(rawFatigue)));
 }
 
@@ -322,6 +326,7 @@ export function calculateArmyMarchPlan(input: {
   terrainMultiplier?: number;
   terrainByCell?: ReadonlyMap<string, TerrainType | string> | Record<string, TerrainType | string>;
   civilizationPassive?: { marchSpeedMultiplier?: number; fatigueAccrualMultiplier?: number } | null;
+  technologyModifiers?: { marchSpeedBonus?: number; marchFatigueReduction?: number } | null;
 }): ArmyMarchPlan {
   const distance = hexDistance(input.from, input.to);
   const pathCells = hexLine(input.from, input.to);
@@ -349,13 +354,17 @@ export function calculateArmyMarchPlan(input: {
 
   const civSpeed = input.civilizationPassive?.marchSpeedMultiplier ?? 1.0;
   const civFatigue = input.civilizationPassive?.fatigueAccrualMultiplier ?? 1.0;
+  const techSpeed = 1 + Math.max(0, input.technologyModifiers?.marchSpeedBonus ?? 0);
+  const techFatigue = Math.max(0.1, 1 - Math.min(0.5, input.technologyModifiers?.marchFatigueReduction ?? 0));
+  const effectiveSpeed = Math.max(0.1, civSpeed * techSpeed);
+  const effectiveFatigue = civFatigue * techFatigue;
 
   let durationSeconds = 0;
   let minBoundApplied = false;
   let maxBoundApplied = false;
 
   if (distance > 0) {
-    const rawSeconds = (MAP.MARCH_SECONDS_PER_HEX * distance * terrainMultiplier * unitSpeedMultiplier) / Math.max(0.1, civSpeed);
+    const rawSeconds = (MAP.MARCH_SECONDS_PER_HEX * distance * terrainMultiplier * unitSpeedMultiplier) / effectiveSpeed;
     if (rawSeconds < MARCH.MIN_DURATION_SECONDS) {
       durationSeconds = MARCH.MIN_DURATION_SECONDS;
       minBoundApplied = true;
@@ -371,7 +380,7 @@ export function calculateArmyMarchPlan(input: {
   const departureTimeMs = Number.isFinite(input.departureTimeMs) ? input.departureTimeMs : 0;
   const arrivalTimeMs = departureTimeMs + durationMs;
 
-  const rawFatigue = distance > 0 ? FATIGUE.PER_HEX * distance * terrainMultiplier * civFatigue : 0;
+  const rawFatigue = distance > 0 ? FATIGUE.PER_HEX * distance * terrainMultiplier * effectiveFatigue : 0;
   const fatigueAccrued = Math.max(0, Math.ceil(rawFatigue));
   const currentFatigue = Number.isFinite(input.currentFatigue) ? Math.max(0, Math.min(100, input.currentFatigue)) : 0;
   const finalFatigue = Math.min(100, currentFatigue + fatigueAccrued);
