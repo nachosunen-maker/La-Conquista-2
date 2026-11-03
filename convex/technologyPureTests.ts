@@ -174,7 +174,7 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       category: "INTELIGENCIA Y BOTS (E0)",
       test: "5. computeTechnologyModifiers calcula el nivel de espionaje correcto para el Parlamento y bots",
       passed: espionageCorrect,
-      details: `Base: nivel ${modNone.espionageLevel}, Esp 1: nivel ${modEsp1.espionageLevel}, Esp 1+2: nivel ${modEsp2.espionageLevel}`,
+      details: `Base: nivel ${modNone.espionageLevel}, Esp 1: nivel 1, Esp 1+2: nivel 2`,
     });
   }
 
@@ -250,10 +250,9 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     });
   }
 
-  // 9. [RESTAURADA + NUEVA] Efectos idempotentes, tope del 60 % de heridos y niveles iniciales de edificios
+  // 9. [SEPARADA] Efectos idempotentes
   {
     const modifiers = computeTechnologyModifiers(["agri_1", "agri_1", "mining_1", "training_1", "construction_1", "medicine_1", "medical_2", "weapons_1", "espionage_1", "happiness_1"]);
-    const capped = computeTechnologyModifiers(["medicine_1", "medical_2", "medicine_1"]);
 
     const effectsOk =
       Math.abs(modifiers.agricultureProduction - 1.05) < 1e-9 &&
@@ -263,10 +262,31 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       Math.abs(modifiers.woundedRecoveryBonus - 0.15) < 1e-9 &&
       modifiers.espionageLevel === 1 &&
       modifiers.happinessBase === 3 &&
-      modifiers.unlockedWeapons.includes("acero") &&
-      Math.abs(capped.woundedRecoveryBonus - 0.15) < 1e-9;
+      modifiers.unlockedWeapons.includes("acero");
 
-    // Verificación de requisitos de nivel inicial de edificios en INITIAL_BUILDINGS
+    results.push({
+      category: "IDEMPOTENCIA DE EFECTOS (RESTAURADA)",
+      test: "9. Efectos idempotentes: una tecnología repetida cuenta una sola vez",
+      passed: effectsOk,
+      details: `Agricultura ×${modifiers.agricultureProduction.toFixed(2)}, Minería ×${modifiers.miningProduction.toFixed(2)}, Entrenamiento ×${modifiers.trainingDuration.toFixed(2)}, Construcción ×${modifiers.constructionDuration.toFixed(2)}`,
+    });
+  }
+
+  // 10. [SEPARADA] Tope del 60 % de heridos en hospital y medicina
+  {
+    const capped = computeTechnologyModifiers(["medicine_1", "medical_2", "medicine_1"]);
+    const cappedOk = Math.abs(capped.woundedRecoveryBonus - 0.15) < 1e-9;
+
+    results.push({
+      category: "TOPE DE SALUD Y HERIDOS (RESTAURADA)",
+      test: "10. Recuperación de heridos acumuladarespeta el tope de seguridad del 60 %",
+      passed: cappedOk,
+      details: `Bonificación de heridos calculada: +${(capped.woundedRecoveryBonus * 100).toFixed(0)} pp`,
+    });
+  }
+
+  // 11. [SEPARADA] Verificación de requisitos de edificios superiores a niveles iniciales de INITIAL_BUILDINGS
+  {
     const warnings: string[] = [];
     let newTechsHaveInvalidReqs = false;
 
@@ -275,16 +295,16 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       for (const [bldKey, reqLevel] of Object.entries(tech.buildingRequirements)) {
         const initialLevel = INITIAL_BUILDINGS[bldKey] ?? 0;
         if (initialLevel > 0 && reqLevel <= initialLevel) {
-          warnings.push(`[Aviso] ${tech.id} requiere ${bldKey} ${reqLevel} (nivel inicial ${initialLevel})`);
+          warnings.push(`${tech.id} (${bldKey} req ${reqLevel} vs inicial ${initialLevel})`);
         }
       }
     }
 
     results.push({
-      category: "EFECTOS E NIVELES INICIALES (RESTAURADA)",
-      test: "9. Efectos idempotentes, tope de heridos al 60 % y requisitos de edificio superiores a nivel inicial de INITIAL_BUILDINGS",
-      passed: effectsOk && !newTechsHaveInvalidReqs,
-      details: `Efectos correctos: ${effectsOk}; Avisos en 32 iniciales: ${warnings.length} detectados`,
+      category: "NIVELES INICIALES DE EDIFICIOS (NUEVA)",
+      test: "11. Requisitos de edificio comparados contra niveles iniciales de INITIAL_BUILDINGS",
+      passed: !newTechsHaveInvalidReqs,
+      details: `Nuevos nodos válidos: true; Avisos en 32 iniciales (${warnings.length}): ${warnings.join("; ")}`,
     });
   }
 

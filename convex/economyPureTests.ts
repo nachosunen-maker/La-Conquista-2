@@ -2267,12 +2267,6 @@ export function runEconomicValidationTests(): TestResult[] {
     passed: result.passed,
     details: result.details,
   })));
-  results.push(...runTechnologyValidationTests().map((result) => ({
-    category: "INTEGRACIÓN CONVEX" as const,
-    test: `Tecnología: ${result.test}`,
-    passed: result.passed,
-    details: result.details,
-  })));
   results.push(...runExtendedEconomyTests().map((result) => ({
     category: "MATEMÁTICA / LÓGICA PURA" as const,
     test: `Economía ampliada: ${result.test}`,

@@ -7,6 +7,7 @@ import {
   constructionProgress,
   costsForTargetLevel,
   createConstructionPlan,
+  describeCatalogForLevels,
   durationForTargetLevel,
   isConstructionDue,
   validateConstructionCompletion,
@@ -150,7 +151,78 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
   const upgradedBuilding = validateConstructionCompletion({ buildingType: "granja", targetLevel: 100, existingLevels: [99] });
   const invalidUpgrade = validateConstructionCompletion({ buildingType: "granja", targetLevel: 4, existingLevels: [2] });
 
+  // [EXCEPCIÓN VIVIENDAS] Pruebas de progresión de Viviendas por nivel del Castillo
+  const viviendasInput = (currentLevel: number, castleLevel: number) => ({
+    buildingType: "viviendas",
+    currentLevel,
+    resources: { gold: 10_000, wood: 10_000, stone: 10_000, iron: 10_000, food: 10_000 },
+    activeConstructions: [] as ConstructionQueueEntry[],
+    buildingLevels: { castillo: castleLevel, viviendas: currentLevel },
+    now: 10_000,
+    rule: BUILDING_RULES.viviendas,
+  });
+
+  const viv_c1_v20 = createConstructionPlan(viviendasInput(20, 1));
+  const viv_c2_v20 = createConstructionPlan(viviendasInput(20, 2));
+  const viv_c3_v20 = createConstructionPlan(viviendasInput(20, 3));
+  const viv_c3_v21 = createConstructionPlan(viviendasInput(21, 3));
+  const viv_c4_v21 = createConstructionPlan(viviendasInput(21, 4));
+  const viv_c4_v22 = createConstructionPlan(viviendasInput(22, 4));
+  const viv_c5_v22 = createConstructionPlan(viviendasInput(22, 5));
+  const viv_c5_v23 = createConstructionPlan(viviendasInput(23, 5));
+
+  const granjaInput = (currentLevel: number, castleLevel: number) => ({
+    buildingType: "granja",
+    currentLevel,
+    resources: { gold: 10_000, wood: 10_000, stone: 10_000, iron: 10_000, food: 10_000 },
+    activeConstructions: [] as ConstructionQueueEntry[],
+    buildingLevels: { castillo: castleLevel, granja: currentLevel },
+    now: 10_000,
+    rule: BUILDING_RULES.granja,
+  });
+
+  const granja_c1_g1 = createConstructionPlan(granjaInput(1, 1));
+  const granja_c2_g1 = createConstructionPlan(granjaInput(1, 2));
+
+  // Verificación explícita de describeCatalogForLevels para Viviendas en cada nivel del Castillo
+  const cat_c1_v20 = describeCatalogForLevels({ castillo: 1, viviendas: 20 }).viviendas;
+  const cat_c2_v20 = describeCatalogForLevels({ castillo: 2, viviendas: 20 }).viviendas;
+  const cat_c3_v20 = describeCatalogForLevels({ castillo: 3, viviendas: 20 }).viviendas;
+  const cat_c3_v21 = describeCatalogForLevels({ castillo: 3, viviendas: 21 }).viviendas;
+  const cat_c4_v21 = describeCatalogForLevels({ castillo: 4, viviendas: 21 }).viviendas;
+  const cat_c4_v22 = describeCatalogForLevels({ castillo: 4, viviendas: 22 }).viviendas;
+  const cat_c5_v22 = describeCatalogForLevels({ castillo: 5, viviendas: 22 }).viviendas;
+  const cat_c5_v23 = describeCatalogForLevels({ castillo: 5, viviendas: 23 }).viviendas;
+
+  const catalogCapPassed =
+    !cat_c1_v20.castleCapSatisfied &&
+    !cat_c2_v20.castleCapSatisfied &&
+    cat_c3_v20.castleCapSatisfied &&
+    !cat_c3_v21.castleCapSatisfied &&
+    cat_c4_v21.castleCapSatisfied &&
+    !cat_c4_v22.castleCapSatisfied &&
+    cat_c5_v22.castleCapSatisfied &&
+    !cat_c5_v23.castleCapSatisfied;
+
+  const viviendasProgressionPassed =
+    !viv_c1_v20.success &&
+    !viv_c2_v20.success &&
+    viv_c3_v20.success &&
+    !viv_c3_v21.success &&
+    viv_c4_v21.success &&
+    !viv_c4_v22.success &&
+    viv_c5_v22.success &&
+    !viv_c5_v23.success &&
+    !granja_c1_g1.success &&
+    granja_c2_g1.success &&
+    catalogCapPassed;
+
   return [
+    {
+      test: "Excepción de progresión para Viviendas (Castillo + 18 desde nivel 3) y regla D-05 para el resto de edificios",
+      passed: viviendasProgressionPassed,
+      details: `Catálogo C3_V20 cap ok: ${cat_c3_v20.castleCapSatisfied}; C3_V21 cap blocked: ${!cat_c3_v21.castleCapSatisfied}; C4_V21 cap ok: ${cat_c4_v21.castleCapSatisfied}; C4_V22 cap blocked: ${!cat_c4_v22.castleCapSatisfied}; C5_V22 cap ok: ${cat_c5_v22.castleCapSatisfied}; C5_V23 cap blocked: ${!cat_c5_v23.castleCapSatisfied}; Plan C3_V20: ${viv_c3_v20.success ? "ok" : viv_c3_v20.error}; Granja D-05: ${!granja_c1_g1.success && granja_c2_g1.success}`,
+    },
     {
       test: "Construcción válida genera objetivo, coste inmutable y fin basado en hora de servidor",
       passed: valid.success && valid.plan.targetLevel === 1 &&

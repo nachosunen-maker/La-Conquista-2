@@ -21,6 +21,7 @@ import {
   type TacticalFormation,
   MERCENARIES,
   type MercenaryType,
+  resourceNameSpanish,
 } from "./balanceConfig";
 import { MAX_BUILDING_LEVEL, checkBuildingRequirements } from "./buildingRules";
 import { normalizeCivilizationId } from "./civilizationRules";
@@ -149,7 +150,7 @@ export function validateGlobalArmyUpgrade(input: {
 
   for (const [res, cost] of Object.entries(levelInfo.costs) as [ResourceType, number][]) {
     if (cost > 0 && (resources[res] ?? 0) < cost) {
-      return { success: false, error: `Recursos insuficientes para ascender al nivel ${targetLevel}: requiere ${cost} de ${res} y hay ${Math.floor(resources[res] ?? 0)}.` };
+      return { success: false, error: `Recursos insuficientes para ascender al nivel ${targetLevel}: requiere ${cost} de ${resourceNameSpanish(res)} y hay ${Math.floor(resources[res] ?? 0)}.` };
     }
   }
 
@@ -220,7 +221,7 @@ export function createTrainingPlan(input: {
     if (!Number.isFinite(balance) || balance < 0) return { success: false, error: `Saldo inválido para '${resource}'.` };
     if (cost > 0) {
       if (balance < cost) {
-        return { success: false, error: `Recursos insuficientes: ${resource} requiere ${cost} y hay ${Math.floor(balance)}.` };
+        return { success: false, error: `Recursos insuficientes: ${resourceNameSpanish(resource)} requiere ${cost} y hay ${Math.floor(balance)}.` };
       }
       costs[resource] = cost;
     }

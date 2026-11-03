@@ -22,6 +22,18 @@ import type { ResourceType } from "./economyCalculations";
 
 export type ResourceCosts = Record<ResourceType, number>;
 
+export const RESOURCE_NAMES_SPANISH: Record<ResourceType, string> = {
+  gold: "oro",
+  wood: "madera",
+  stone: "piedra",
+  iron: "hierro",
+  food: "alimentos",
+};
+
+export function resourceNameSpanish(resourceKey: string): string {
+  return (RESOURCE_NAMES_SPANISH as Record<string, string>)[resourceKey] ?? resourceKey;
+}
+
 // ============================================================================
 // 1. TIEMPO Y ECONOMÍA BASE
 // ============================================================================

@@ -22,7 +22,7 @@
 
 import type { ResourceType } from "./economyCalculations";
 import { getCivilizationPassive, civilizationTrainingDurationMultiplier } from "./civilizationRules";
-import { UNITS, UNIT_TYPES, type UnitType } from "./balanceConfig";
+import { UNITS, UNIT_TYPES, resourceNameSpanish, type UnitType } from "./balanceConfig";
 
 export const VALID_MILITARY_UNIT_TYPES = UNIT_TYPES;
 
@@ -232,7 +232,7 @@ export function createTrainingPlan(input: {
     if (currentStock < required) {
       return {
         success: false,
-        error: `Recursos insuficientes: '${res}' requiere ${required} y el reino dispone de ${currentStock}.`,
+        error: `Recursos insuficientes: '${resourceNameSpanish(res)}' requiere ${required} y el reino dispone de ${currentStock}.`,
       };
     }
   }

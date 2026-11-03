@@ -4,7 +4,7 @@
  * contiene lógica determinista, sin acceso a Convex.
  */
 import type { ResourceType } from "./economyCalculations";
-import { BUILDINGS, CONSTRUCTION, INITIAL_BUILDINGS, type ProductiveJob } from "./balanceConfig";
+import { BUILDINGS, CONSTRUCTION, INITIAL_BUILDINGS, resourceNameSpanish, type ProductiveJob } from "./balanceConfig";
 
 export interface BuildingRule {
   label: string;
@@ -213,6 +213,27 @@ export function validateConstructionCompletion(input: {
   return { success: true, action: "upgrade" };
 }
 
+/**
+ * [EXCEPCIÓN VIVIENDAS] Regla de progresión para el nivel máximo de cada edificio
+ * según el nivel del Castillo:
+ * - Castillo (el propio edificio): sin límite por el Castillo (hasta MAX_BUILDING_LEVEL = 100).
+ * - Viviendas: nivel inicial 20. Para Castillo <= 2, el máximo es 20 (no se permite mejorar).
+ *   Para Castillo >= 3, nivel máximo = nivel del Castillo + 18.
+ * - Resto de edificios (D-05): nivel máximo = nivel del Castillo.
+ */
+export function getMaxAllowedBuildingLevel(buildingType: string, castleLevel: number): number {
+  if (buildingType === "castillo") {
+    return MAX_BUILDING_LEVEL;
+  }
+  if (buildingType === "viviendas") {
+    if (castleLevel <= 2) {
+      return 20;
+    }
+    return castleLevel + 18;
+  }
+  return castleLevel;
+}
+
 export function createConstructionPlan(input: {
   buildingType: string;
   currentLevel: number;
@@ -266,10 +287,18 @@ export function createConstructionPlan(input: {
 
   const targetLevel = input.currentLevel + 1;
 
-  // [COMPLEMENTO D-05] Ningún edificio supera el nivel del Castillo (el propio Castillo queda exento).
-  if (CONSTRUCTION.CASTLE_CAPS_LEVELS && input.buildingType !== "castillo") {
+  // [COMPLEMENTO D-05 & EXCEPCIÓN VIVIENDAS] Límite de nivel según el Castillo
+  if (CONSTRUCTION.CASTLE_CAPS_LEVELS) {
     const castleLevel = input.buildingLevels.castillo ?? 0;
-    if (targetLevel > castleLevel) {
+    const maxAllowedLevel = getMaxAllowedBuildingLevel(input.buildingType, castleLevel);
+    if (targetLevel > maxAllowedLevel) {
+      if (input.buildingType === "viviendas") {
+        const requiredCastle = targetLevel > 20 ? targetLevel - 18 : 1;
+        return {
+          success: false,
+          error: `El Castillo (nivel ${castleLevel}) limita la progresión de Viviendas: requiere Castillo nivel ${requiredCastle} para alcanzar el nivel ${targetLevel}.`,
+        };
+      }
       return {
         success: false,
         error: `El Castillo (nivel ${castleLevel}) limita la progresión: '${input.rule.label}' no puede superar su nivel.`,
@@ -290,7 +319,7 @@ export function createConstructionPlan(input: {
     }
     if (cost > 0) {
       if (balance < cost) {
-        return { success: false, error: `Recursos insuficientes: ${resource} requiere ${cost} y hay ${Math.floor(balance)}.` };
+        return { success: false, error: `Recursos insuficientes: ${resourceNameSpanish(resource)} requiere ${cost} y hay ${Math.floor(balance)}.` };
       }
       costs[resource] = cost;
     }
@@ -396,9 +425,11 @@ export function describeCatalogForLevels(
     const requirementsSatisfied = rule.progressionRequirements
       ? checkBuildingRequirements(rule.progressionRequirements, buildingLevels).satisfied
       : false;
-    const castleCapSatisfied = type === "castillo" || !CONSTRUCTION.CASTLE_CAPS_LEVELS
+    const castleLevel = buildingLevels.castillo ?? 0;
+    const maxAllowedLevel = getMaxAllowedBuildingLevel(type, castleLevel);
+    const castleCapSatisfied = !CONSTRUCTION.CASTLE_CAPS_LEVELS
       ? true
-      : nextLevel !== null && nextLevel <= (buildingLevels.castillo ?? 0);
+      : nextLevel !== null && nextLevel <= maxAllowedLevel;
     result[type] = {
       label: rule.label,
       role: rule.role,

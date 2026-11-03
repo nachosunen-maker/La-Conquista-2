@@ -11,6 +11,7 @@ import {
   RESEARCH_SLOTS_BY_UNIVERSITY,
   TECHNOLOGIES,
   HOSPITAL_RECOVERY_CAP,
+  resourceNameSpanish,
   type TechnologyBalance,
   type TechnologyEffectKey, LEGACY_TECHNOLOGY_IDS } from "./balanceConfig";
 import { checkBuildingRequirements } from "./buildingRules";
@@ -208,7 +209,7 @@ export function createResearchPlan(input: {
     }
     if (cost > 0) {
       if (balance < cost) {
-        return { success: false, error: `Recursos insuficientes: ${resource} requiere ${cost} y hay ${Math.floor(balance)}.` };
+        return { success: false, error: `Recursos insuficientes: ${resourceNameSpanish(resource)} requiere ${cost} y hay ${Math.floor(balance)}.` };
       }
       costs[resource] = cost;
     }

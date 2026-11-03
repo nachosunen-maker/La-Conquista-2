@@ -2365,7 +2365,13 @@ function KingdomOverviewContent() {
                     blockers.push(`requiere ${formatRequirements(entry.requirements, buildingLabels)}`);
                   }
                   if (entry && !entry.castleCapSatisfied) {
-                    blockers.push(`el Castillo (nivel ${constructionState?.buildingLevels?.castillo ?? 0}) limita el nivel`);
+                    const castleLevel = constructionState?.buildingLevels?.castillo ?? 0;
+                    if (type === 'viviendas' && nextLevel !== null) {
+                      const requiredCastle = nextLevel > 20 ? nextLevel - 18 : 1;
+                      blockers.push(`requiere Castillo nivel ${requiredCastle} (Castillo actual: nivel ${castleLevel})`);
+                    } else {
+                      blockers.push(`el Castillo (nivel ${castleLevel}) limita el nivel (requiere Castillo nivel ${nextLevel})`);
+                    }
                   }
                   if (nextLevel === null) {
                     blockers.push('nivel máximo alcanzado (100)');

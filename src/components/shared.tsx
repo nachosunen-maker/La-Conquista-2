@@ -158,6 +158,16 @@ export function PanelSection(props: { icon: React.ReactNode; title: string; asid
   );
 }
 
+export function translateResourceNamesInMessage(msg: string): string {
+  if (!msg || typeof msg !== 'string') return msg;
+  return msg
+    .replace(/\bstone\b/gi, 'piedra')
+    .replace(/\bwood\b/gi, 'madera')
+    .replace(/\bgold\b/gi, 'oro')
+    .replace(/\biron\b/gi, 'hierro')
+    .replace(/\bfood\b/gi, 'alimentos');
+}
+
 export function normalizeErrorMessage(err: any): string {
   if (!err) return "No se han podido guardar los cambios. Inténtalo de nuevo.";
   let message = "";
@@ -183,10 +193,9 @@ export function normalizeErrorMessage(err: any): string {
     return "No ha sido posible conectar con el servidor del reino. Inténtalo de nuevo.";
   }
 
-  // If it looks like an insufficient resources error, let it through to be caught by isInsufficientError
+  // If it looks like an insufficient resources error, clean and translate resource names
   if (isInsufficientError(message)) {
-    // Return a cleaned version for further processing
-    return message
+    const cleaned = message
       .replace(/^\[CONVEX[^\]]*\]\s*/gi, "")
       .replace(/^\[Request ID:[^\]]*\]\s*/gi, "")
       .replace(/^Server Error\s*/gi, "")
@@ -194,10 +203,10 @@ export function normalizeErrorMessage(err: any): string {
       .replace(/\s*at\s+(?:handler|async|Object|\w+).*$/i, "")
       .replace(/\s*Called by client$/i, "")
       .trim();
+    return translateResourceNamesInMessage(cleaned);
   }
 
   if (lower.includes("server error") || lower.includes("convexerror")) {
-    // Check if after cleaning there's still a specific message
     const tempClean = message
       .replace(/^\[CONVEX[^\]]*\]\s*/gi, "")
       .replace(/^\[Request ID:[^\]]*\]\s*/gi, "")
@@ -208,14 +217,14 @@ export function normalizeErrorMessage(err: any): string {
       .trim();
     
     if (tempClean && !tempClean.toLowerCase().includes("server error")) {
-       return tempClean;
+      return translateResourceNamesInMessage(tempClean);
     }
 
     return "Este servicio del reino no está disponible en este momento.";
   }
 
   // Final cleaning for any other messages
-  return message
+  const finalClean = message
     .replace(/^\[CONVEX[^\]]*\]\s*/gi, "")
     .replace(/^\[Request ID:[^\]]*\]\s*/gi, "")
     .replace(/^ConvexError:\s*/gi, "")
@@ -223,7 +232,9 @@ export function normalizeErrorMessage(err: any): string {
     .replace(/^Uncaught Error:\s*/gi, "")
     .replace(/\s*at\s+(?:handler|async|Object|\w+).*$/i, "")
     .replace(/\s*Called by client$/i, "")
-    .trim() || "No se han podido guardar los cambios. Inténtalo de nuevo.";
+    .trim();
+
+  return translateResourceNamesInMessage(finalClean) || "No se han podido guardar los cambios. Inténtalo de nuevo.";
 }
 
 export function isInsufficientError(msg: string): boolean {
