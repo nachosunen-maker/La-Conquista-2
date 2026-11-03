@@ -7,6 +7,7 @@ import { runExplorationValidationTests, type ExplorationTestResult } from "../co
 import { runCivilizationTests, type CivilizationTestResult } from "../convex/civilizationPureTests";
 import { runAccountTests, type AccountTestResult } from "../convex/accountPureTests";
 import { runMissionTests, type MissionTestResult } from "../convex/missionPureTests";
+import { runTechnologyValidationTests, type TechnologyTestResult } from "../convex/technologyPureTests";
 import { runBotPureTests } from "../convex/botPureTests";
 
 console.log("================================================================================");
@@ -23,6 +24,7 @@ const explorationResults: ExplorationTestResult[] = runExplorationValidationTest
 const civilizationResults: CivilizationTestResult[] = runCivilizationTests();
 const accountResults: AccountTestResult[] = runAccountTests();
 const missionResults: MissionTestResult[] = runMissionTests();
+const technologyResults: TechnologyTestResult[] = runTechnologyValidationTests();
 
 const botTestRun = runBotPureTests();
 const botResults = [
@@ -46,6 +48,7 @@ const results = [
   ...civilizationResults,
   ...accountResults,
   ...missionResults,
+  ...technologyResults,
   ...botResults,
 ];
 const durationMs = Date.now() - startTime;

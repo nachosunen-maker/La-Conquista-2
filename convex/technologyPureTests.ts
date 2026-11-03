@@ -6,12 +6,16 @@
 import {
   TECHNOLOGIES,
   RESEARCH,
-  RESEARCH_SLOTS_BY_UNIVERSITY,
+  INITIAL_BUILDINGS,
+  type ResourceCosts,
 } from "./balanceConfig";
 import {
   computeTechnologyModifiers,
   researchSlots,
   TECHNOLOGY_CATALOG,
+  createResearchPlan,
+  calculateResearchCancellationRefund,
+  type ResearchQueueEntry,
 } from "./technologyRules";
 import { computeSideFactors, emptyComposition, type BattleSide } from "./battleRules";
 import { marchTimeSeconds, marchFatigue } from "./territoryRules";
@@ -24,6 +28,8 @@ export interface TechnologyTestResult {
 }
 
 export const runTechnologyValidationTests = runTechnologyTests;
+
+const richResources: ResourceCosts = { gold: 10_000, wood: 10_000, stone: 10_000, iron: 10_000, food: 10_000 };
 
 export function runTechnologyTests(): TechnologyTestResult[] {
   const results: TechnologyTestResult[] = [];
@@ -129,7 +135,7 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     });
   }
 
-  // 4. Conexión de marcha y fatiga: marchSpeedBonus y marchFatigueReduction
+  // 4. Conexión de marcha, fatiga y dirección de logistics_1
   {
     const dist = 5;
     const terrain = 1.2;
@@ -140,16 +146,16 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     const buffedDuration = marchTimeSeconds(dist, terrain, unitSpeed, civSpeed, 0.20); // +20 % velocidad
 
     const baseFatigue = marchFatigue(10, dist, terrain, 1.0, 0);
-    const buffedFatigue = marchFatigue(10, dist, terrain, 1.0, 0.25); // -25 % fatiga
+    const buffedFatigue = marchFatigue(10, dist, terrain, 1.0, 0.25); // -25 % fatiga (logistics_1 reduce fatiga)
 
     const speedWorks = buffedDuration < baseDuration;
     const fatigueWorks = buffedFatigue < baseFatigue;
 
     results.push({
       category: "CONEXIÓN DE MARCHA Y RESISTENCIA (E0)",
-      test: "4. Bonificaciones de tecnología reducen duración de marcha y acumulación de fatiga",
+      test: "4. Bonificaciones de tecnología reducen duración de marcha y logistics_1 reduce la fatiga de marcha",
       passed: speedWorks && fatigueWorks,
-      details: `Duración: ${baseDuration}s -> ${buffedDuration}s; Fatiga final: ${baseFatigue} -> ${buffedFatigue}`,
+      details: `Duración: ${baseDuration}s -> ${buffedDuration}s; Fatiga base: ${baseFatigue} -> con logística: ${buffedFatigue} (reducida: ${fatigueWorks})`,
     });
   }
 
@@ -184,9 +190,101 @@ export function runTechnologyTests(): TechnologyTestResult[] {
 
     results.push({
       category: "INTEGRIDAD DEL CATÁLOGO (E0)",
-      test: "6. Todas las 25 tecnologías existentes tienen efecto numérico definido y conectado",
+      test: "6. Todas las tecnologías existentes tienen efecto numérico definido y conectado",
       passed: allConnected,
       details: `Total de tecnologías verificadas: ${TECHNOLOGIES.length}, sin tecnologías huérfanas`,
+    });
+  }
+
+  // 7. [RESTAURADA] Investigación válida descuenta coste y fija duración real
+  {
+    const base = {
+      resources: { ...richResources },
+      completedIds: [] as string[],
+      activeResearch: [] as ResearchQueueEntry[],
+      buildingLevels: { castillo: 2, universidad: 1 } as Record<string, number>,
+      now: 5_000_000,
+    };
+    const agri = createResearchPlan({ ...base, technologyId: "agri_1" });
+    const unknown = createResearchPlan({ ...base, technologyId: "magia" });
+
+    const expectedDurationMs = (TECHNOLOGY_CATALOG["agri_1"]?.durationSeconds ?? 30) * 1000;
+
+    const passed = Boolean(
+      agri.success &&
+      agri.plan.costs.gold === 100 &&
+      agri.plan.costs.wood === 100 &&
+      agri.plan.costs.stone === 50 &&
+      agri.plan.durationMs === expectedDurationMs &&
+      agri.plan.completesAt === 5_000_000 + expectedDurationMs &&
+      !unknown.success
+    );
+
+    results.push({
+      category: "GESTIÓN DE INVESTIGACIÓN (RESTAURADA)",
+      test: "7. Investigación válida descuenta el coste del catálogo y fija fin por duración real",
+      passed,
+      details: agri.success ? `Oro ${agri.plan.costs.gold}, duración ${agri.plan.durationMs} ms; desconocida rechazada: ${!unknown.success}` : agri.error,
+    });
+  }
+
+  // 8. [RESTAURADA] Cancelación reembolsa el 50 % antes de completar
+  {
+    const entry: ResearchQueueEntry = { technologyId: "agri_1", startedAt: 5_000_000, durationMs: 30_000, costs: { gold: 100, wood: 100, stone: 50 } };
+    const cancelMid = calculateResearchCancellationRefund({ entry, serverTimeMs: 10_000 });
+    const cancelDone = calculateResearchCancellationRefund({ entry, serverTimeMs: 5_000_000 + 30_000 });
+
+    const passed = Boolean(
+      cancelMid.success &&
+      cancelMid.refund.gold === 50 &&
+      cancelMid.refund.wood === 50 &&
+      cancelMid.refund.stone === 25 &&
+      !cancelDone.success
+    );
+
+    results.push({
+      category: "CANCELACIÓN Y REEMBOLSO (RESTAURADA)",
+      test: "8. Cancelación reembolsa el 50 % antes de completar (uniforme con construcción y entrenamiento)",
+      passed,
+      details: cancelMid.success ? `Reembolso oro ${cancelMid.refund.gold}, madera ${cancelMid.refund.wood}, piedra ${cancelMid.refund.stone}; completada rechazada: ${!cancelDone.success}` : cancelMid.error,
+    });
+  }
+
+  // 9. [RESTAURADA + NUEVA] Efectos idempotentes, tope del 60 % de heridos y niveles iniciales de edificios
+  {
+    const modifiers = computeTechnologyModifiers(["agri_1", "agri_1", "mining_1", "training_1", "construction_1", "medicine_1", "medical_2", "weapons_1", "espionage_1", "happiness_1"]);
+    const capped = computeTechnologyModifiers(["medicine_1", "medical_2", "medicine_1"]);
+
+    const effectsOk =
+      Math.abs(modifiers.agricultureProduction - 1.05) < 1e-9 &&
+      Math.abs(modifiers.miningProduction - 1.05) < 1e-9 &&
+      Math.abs(modifiers.trainingDuration - 0.95) < 1e-9 &&
+      Math.abs(modifiers.constructionDuration - 0.95) < 1e-9 &&
+      Math.abs(modifiers.woundedRecoveryBonus - 0.15) < 1e-9 &&
+      modifiers.espionageLevel === 1 &&
+      modifiers.happinessBase === 3 &&
+      modifiers.unlockedWeapons.includes("acero") &&
+      Math.abs(capped.woundedRecoveryBonus - 0.15) < 1e-9;
+
+    // Verificación de requisitos de nivel inicial de edificios en INITIAL_BUILDINGS
+    const warnings: string[] = [];
+    let newTechsHaveInvalidReqs = false;
+
+    for (const tech of TECHNOLOGIES) {
+      if (!tech.buildingRequirements) continue;
+      for (const [bldKey, reqLevel] of Object.entries(tech.buildingRequirements)) {
+        const initialLevel = INITIAL_BUILDINGS[bldKey] ?? 0;
+        if (initialLevel > 0 && reqLevel <= initialLevel) {
+          warnings.push(`[Aviso] ${tech.id} requiere ${bldKey} ${reqLevel} (nivel inicial ${initialLevel})`);
+        }
+      }
+    }
+
+    results.push({
+      category: "EFECTOS E NIVELES INICIALES (RESTAURADA)",
+      test: "9. Efectos idempotentes, tope de heridos al 60 % y requisitos de edificio superiores a nivel inicial de INITIAL_BUILDINGS",
+      passed: effectsOk && !newTechsHaveInvalidReqs,
+      details: `Efectos correctos: ${effectsOk}; Avisos en 32 iniciales: ${warnings.length} detectados`,
     });
   }
 

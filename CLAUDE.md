@@ -135,7 +135,7 @@ Idioma de documentación, textos de interfaz y nombres visibles: **español**.
 | Combate (3 rondas) y cuatro formaciones tácticas | ✅ Valores por aprobar (A2) |
 | Cuenta y acceso: nombre + contraseña, código de recuperación, pantalla de acceso con crear / entrar / recuperar / invitado | ✅ Valores por aprobar (A1); falta configurar las claves de Convex Auth y probar contra el servidor real |
 | Misiones (etapas, diarias, secretas) | ✅ Cantidades y hora de reinicio por aprobar (A4); objetos únicos sin catálogo |
-| Civilizaciones | 🟡 Pasiva + debilidad (10 de 12) + tecnología única. **Falta:** equipo, armas, armaduras, edificios y tropas propios; **Navajos y Masáis** sin debilidad ni singularidades |
+| Civilizaciones | 🟡 Pasiva + debilidad (10 de 12) + tecnología única. **Falta:** equipo, armas, armaduras, edificios y tropas propios; **Navajos y Masáis** (nombres canónicos fijados) sin debilidad ni singularidades |
 | Despliegue real y pruebas contra el servidor de Convex (T-02) | ⛔ Decisión 23-10-2026: todavía no |
 | Bots PvE · apuestas en desafíos · efectos del clima | ⛔ Descartados o desactivados por decisión |
 
@@ -190,6 +190,8 @@ Informes del equipo (23-10-2026): lint y compilación limpios · 200 pruebas pur
 ## 6. Civilizaciones (P6, D-43 a D-45, M-09)
 
 Ingleses · Romanos · Griegos · Vikingos · Bizantinos · Árabes · Mongoles · Chinos · Japoneses · Navajos · Aztecas · Masáis.
+
+*Nombres canónicos:* Navajos (antes «Indios americanos») y Masáis (antes «Keniatas»). Los identificadores técnicos antiguos (indiosAmericanos, keniatas) siguen como alias de retrocompatibilidad (LEGACY_CIVILIZATION_IDS y LEGACY_TECHNOLOGY_IDS).
 
 **Reglas fijas:** cada una con bonificaciones y estilo propios; **ninguna objetivamente superior**; se elige al fundar y es inmutable; cada civilización debe tener **armas, armaduras, edificios y soldados personalizados** a su estilo, lo máximo posible. Los multiplicadores de calidad de armas/armaduras (P30–P31) y de nivel militar (P29) son **iguales para todas**: cambia el nombre, la estética y las bonificaciones.
 
