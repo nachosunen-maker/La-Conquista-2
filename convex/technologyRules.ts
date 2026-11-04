@@ -88,6 +88,7 @@ export interface TechnologyModifiers {
   mercenaryCost: number; // reducción de coste (e.g. 0.08 = -8 %, máx 0.30)
   woundedRateBonus: number; // puntos porcentuales adicionales (0,05 = +5 pp)
   fatigueAccrualReduction: number; // reducción de fatiga acumulada (0,05 = −5 %)
+  counterEspionage: number; // probabilidad de contrainteligencia (e.g. 0.10 = 10 %, máx 0.60)
 }
 
 export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>): TechnologyModifiers {
@@ -119,6 +120,7 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
   let sumMercCost = 0;
   let sumWoundedRate = 0;
   let sumFatigueAccrual = 0;
+  let sumCounterEspionage = 0;
   const unlockedWeapons: string[] = [];
   const unlockedArmors: string[] = [];
 
@@ -163,6 +165,7 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
       case "mercenaryCost": sumMercCost += Math.abs(value); break;
       case "woundedRate": sumWoundedRate += value; break;
       case "fatigueAccrual": sumFatigueAccrual += Math.abs(value); break;
+      case "counterEspionage": sumCounterEspionage += value; break;
     }
   }
 
@@ -197,6 +200,7 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     mercenaryCostReduction: Math.min(TECH_EFFECT_CAPS.mercenaryCost, Math.max(0, sumMercCost)),
     woundedRateBonus: Math.min(TECH_EFFECT_CAPS.woundedRate, Math.max(0, sumWoundedRate)),
     fatigueAccrualReduction: Math.min(TECH_EFFECT_CAPS.fatigueAccrual, Math.max(0, sumFatigueAccrual)),
+    counterEspionage: Math.min(TECH_EFFECT_CAPS.counterEspionage, Math.max(0, sumCounterEspionage)),
   };
 }
 

@@ -56,6 +56,7 @@ interface TechnologiesState {
     mercenaryCostReduction?: number;
     woundedRateBonus?: number;
     fatigueAccrualReduction?: number;
+    counterEspionage?: number;
   };
   researching: Array<{ _id: string; technologyId: string; name: string; startedAt?: number; durationMs?: number; costs?: Record<string, number>; progressPercent: number | null; completesAt: number | null }>;
   catalog: Array<{
@@ -163,6 +164,7 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
   if (m.mercenaryCostReduction && m.mercenaryCostReduction > 0) activeEffects.push(`coste mercenarios −${Math.round(m.mercenaryCostReduction * 100)} %`);
   if (m.woundedRateBonus && m.woundedRateBonus > 0) activeEffects.push(`bajas que pasan a heridos +${Math.round(m.woundedRateBonus * 100)} %`);
   if (m.fatigueAccrualReduction && m.fatigueAccrualReduction > 0) activeEffects.push(`fatiga acumulada −${Math.round(m.fatigueAccrualReduction * 100)} %`);
+  if (m.counterEspionage && m.counterEspionage > 0) activeEffects.push(`contrainteligencia +${Math.round(m.counterEspionage * 100)} %`);
   if (m.unlockedWeapons.length) activeEffects.push(`armas: ${m.unlockedWeapons.join(', ')}`);
   if (m.unlockedArmors.length) activeEffects.push(`armaduras: ${m.unlockedArmors.join(', ')}`);
 

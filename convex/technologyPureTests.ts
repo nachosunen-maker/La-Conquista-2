@@ -381,7 +381,7 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       "foodConsumption", "woodProduction", "stoneProduction", "ironProduction", "goldProduction",
       "researchDuration", "constructionCost", "housingCapacity", "taxTolerance",
       "moraleBase", "unitEfficiencyInf", "unitEfficiencyArc", "unitEfficiencyCav", "unitEfficiencyAll", "mercenaryCost",
-      "woundedRate", "fatigueAccrual",
+      "woundedRate", "fatigueAccrual", "counterEspionage",
     ]);
     const allEffectsKnown = TECHNOLOGIES.every((t) => KNOWN_EFFECT_KEYS.has(t.effect.key));
 
@@ -415,10 +415,10 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     const allValid = uniqueIds && allPrereqsExist && !hasCycle && univLevelValid && allEffectsKnown && capsRespected;
 
     results.push({
-      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E3)",
-      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, 24 tipos de efectos conocidos y topes respetados",
+      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E5)",
+      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, 25 tipos de efectos conocidos y topes respetados",
       passed: allValid,
-      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 + 12 E3 + 13 E4a + 2 E4b + 7 E4c = 94). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
+      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 + 12 E3 + 13 E4a + 2 E4b + 7 E4c + 5 E5 = 99). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
     });
   }
 
@@ -541,6 +541,37 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       test: "18. fatigueAccrual reduce la fatiga acumulada en marchas multiplicativamente",
       passed,
       details: `Fatiga base: ${fatBase}, con tech: ${fatWithTech} (reducción tech: ${modFatigue.fatigueAccrualReduction.toFixed(2)})`,
+    });
+  }
+
+  // 19. Verificación de E5: counterEspionage
+  {
+    const modSpy1 = computeTechnologyModifiers(["spy_1"]);
+    const spy1Ok = Math.abs(modSpy1.counterEspionage - 0.10) < 1e-9;
+    const allSpy = computeTechnologyModifiers(["spy_1", "spy_3", "spy_4"]);
+    const allSpyOk = Math.abs(allSpy.counterEspionage - 0.37) < 1e-9; // 0.10 + 0.12 + 0.15 = 0.37
+
+    results.push({
+      category: "NUEVOS EFECTOS DE INTELIGENCIA (ENTREGA 5)",
+      test: "19. counterEspionage calcula modificadores y respeta topes",
+      passed: spy1Ok && allSpyOk,
+      details: `spy_1: ${modSpy1.counterEspionage}, todos spy: ${allSpy.counterEspionage}`,
+    });
+  }
+
+  // 20. Verificación de E5: espionageAccuracy niveles 3 y 4
+  {
+    const modEsp3 = computeTechnologyModifiers(["espionage_3"]);
+    const modEsp4 = computeTechnologyModifiers(["espionage_4"]);
+
+    const esp3Ok = modEsp3.espionageLevel === 3;
+    const esp4Ok = modEsp4.espionageLevel === 4;
+
+    results.push({
+      category: "AMPLIACIÓN DE ESPIONAJE (ENTREGA 5)",
+      test: "20. espionageAccuracy soporta niveles 3 (±3 %) y 4 (exacto)",
+      passed: esp3Ok && esp4Ok,
+      details: `Esp 3: nivel ${modEsp3.espionageLevel}, Esp 4: nivel ${modEsp4.espionageLevel}`,
     });
   }
 

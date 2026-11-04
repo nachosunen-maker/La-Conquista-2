@@ -894,7 +894,8 @@ export type TechnologyEffectKey =
   | "unitEfficiencyAll"
   | "mercenaryCost"
   | "woundedRate"
-  | "fatigueAccrual";
+  | "fatigueAccrual"
+  | "counterEspionage";
 
 export interface TechnologyBalance {
   id: string;
@@ -925,7 +926,7 @@ export const TECH_EFFECT_CAPS = {
   woundedRecovery: 0.60,
   trainingDurationFloor: 0.60,
   constructionDurationFloor: 0.60,
-  espionageAccuracyMax: 2,
+  espionageAccuracyMax: 4,
   foodConsumption: 0.15,
   woodProduction: 0.30,
   stoneProduction: 0.30,
@@ -940,6 +941,7 @@ export const TECH_EFFECT_CAPS = {
   mercenaryCost: 0.30,
   woundedRate: 0.20,
   fatigueAccrual: 0.30,
+  counterEspionage: 0.60,
 } as const;
 
 const DAY = TIME.SECONDS_PER_GAME_YEAR;
@@ -1011,7 +1013,12 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   // --- RAMA INTELIGENCIA Y EXPLORACIÓN ---
   { id: "espionage_1", name: "Red de confidentes I", branch: "inteligencia", universityLevel: 2, costs: { gold: 200, wood: 100, stone: 100, iron: 20, food: 0 }, durationSeconds: 180, buildingRequirements: { castillo: 2, universidad: 2 }, technologyRequirements: [], effect: { key: "espionageAccuracy", value: 1, description: "Informe militar aproximado (±15 %)" } },
   { id: "espionage_2", name: "Criptografía y agentes II", branch: "inteligencia", universityLevel: 4, costs: { gold: 500, wood: 200, stone: 200, iron: 100, food: 0 }, durationSeconds: 480, buildingRequirements: { universidad: 4 }, technologyRequirements: ["espionage_1"], effect: { key: "espionageAccuracy", value: 2, description: "Informe militar preciso (±7 %)" } },
+  { id: "espionage_3", name: "Informantes en la corte III", branch: "inteligencia", universityLevel: 4, costs: { gold: 800, wood: 320, stone: 300, iron: 90, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 5 }, technologyRequirements: ["espionage_2", "spy_2"], effect: { key: "espionageAccuracy", value: 3, description: "Informe militar detallado (±3 %)" } },
+  { id: "espionage_4", name: "Maestros del espionaje IV", branch: "inteligencia", universityLevel: 5, costs: { gold: 2340, wood: 640, stone: 700, iron: 230, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8 }, technologyRequirements: ["espionage_3", "spy_3"], effect: { key: "espionageAccuracy", value: 4, description: "Informe militar exacto" } },
+  { id: "spy_1", name: "Ojos y oídos en el reino", branch: "inteligencia", universityLevel: 2, costs: { gold: 250, wood: 150, stone: 100, iron: 40, food: 0 }, durationSeconds: 240, buildingRequirements: { castillo: 2 }, technologyRequirements: [], effect: { key: "counterEspionage", value: 0.10, description: "+10 % probabilidad de contrainteligencia" } },
   { id: "spy_2", name: "Exploradores y atalayas", branch: "inteligencia", universityLevel: 3, costs: { gold: 480, wood: 160, stone: 160, iron: 60, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3 }, technologyRequirements: ["espionage_1"], effect: { key: "marchSpeed", value: 0.05, description: "+5 % velocidad de marcha" } },
+  { id: "spy_3", name: "Guardia del silencio", branch: "inteligencia", universityLevel: 4, costs: { gold: 750, wood: 300, stone: 280, iron: 80, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4 }, technologyRequirements: ["spy_1", "spy_2"], effect: { key: "counterEspionage", value: 0.12, description: "+12 % probabilidad de contrainteligencia" } },
+  { id: "spy_4", name: "Sombras del trono", branch: "inteligencia", universityLevel: 5, costs: { gold: 2100, wood: 600, stone: 700, iron: 220, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8 }, technologyRequirements: ["spy_3", "espionage_3"], effect: { key: "counterEspionage", value: 0.15, description: "+15 % probabilidad de contrainteligencia" } },
 
   // --- TECNOLOGÍAS ÚNICAS POR CIVILIZACIÓN (420 s / 7 minutos cada una) ---
   { id: "tech_civ_ingleses", name: "Arco largo inglés", branch: "civilizacion", universityLevel: 2, costs: { gold: 200, wood: 250, stone: 80, iron: 50, food: 0 }, durationSeconds: 420, buildingRequirements: { cuartel: 2, universidad: 2 }, technologyRequirements: [], civilizationRequirement: "ingleses", effect: { key: "combatAttack", value: 0.05, description: "+5 % ataque militar (alcance letal de arquería)" } },
@@ -1141,8 +1148,8 @@ export const PARLIAMENT = {
   REQUIRED_PARLIAMENT_LEVEL: 1,
   /** [COMPLEMENTO D-39] Espionaje: error de estimación según nivel y coste por informe. */
   ESPIONAGE: {
-    errorByLevel: { 0: 0.25, 1: 0.15, 2: 0.07 } as Readonly<Record<number, number>>,
-    costByLevel: { 1: 100, 2: 250 } as Readonly<Record<number, number>>,
+    errorByLevel: { 0: 0.25, 1: 0.15, 2: 0.07, 3: 0.03, 4: 0 } as Readonly<Record<number, number>>,
+    costByLevel: { 1: 100, 2: 250, 3: 500, 4: 1000 } as Readonly<Record<number, number>>,
     reportTtlMs: 24 * 60 * 60 * 1000,
   },
   /** [DERIVADO] Un desafío pendiente caduca si no se responde antes de la ventana más larga (7 días reales). */

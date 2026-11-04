@@ -334,9 +334,19 @@ export const requestEspionageReport = mutation({
     const target = await ctx.db.get(args.targetKingdomId);
     if (!target) throw new Error("El reino objetivo no existe.");
     const modifiers = computeTechnologyModifiers(await readCompletedTechnologyIds(ctx, args.kingdomId));
-    const level = modifiers.espionageLevel;
-    if (level < 1) throw new Error("Se necesita la tecnología Espionaje I para solicitar informes (P42).");
-    const cost = PARLIAMENT.ESPIONAGE.costByLevel[level] ?? PARLIAMENT.ESPIONAGE.costByLevel[1];
+    const spyLevel = modifiers.espionageLevel;
+    if (spyLevel < 1) throw new Error("Se necesita la tecnología Espionaje I para solicitar informes (P42).");
+
+    const targetTech = await readCompletedTechnologyIds(ctx, args.targetKingdomId);
+    const targetModifiers = computeTechnologyModifiers(targetTech);
+    const counterProb = targetModifiers.counterEspionage;
+
+    let effectiveLevel = spyLevel;
+    if (Math.random() < counterProb) {
+      effectiveLevel = Math.max(1, spyLevel - 1);
+    }
+
+    const cost = PARLIAMENT.ESPIONAGE.costByLevel[spyLevel] ?? PARLIAMENT.ESPIONAGE.costByLevel[1];
     const now = Date.now();
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     if (settled.settledResources.gold < cost) throw new Error(`Oro insuficiente: el informe cuesta ${cost} y hay ${Math.floor(settled.settledResources.gold)}.`);
@@ -344,18 +354,18 @@ export const requestEspionageReport = mutation({
     const units = await readArmyUnitDocs(ctx, args.targetKingdomId);
     const composition = activeComposition(units);
     const estimated: Record<string, { min: number; max: number }> = {};
-    for (const type of UNIT_TYPES) estimated[type] = approximateEstimate(composition[type], level);
-    const total = approximateEstimate(Object.values(composition).reduce((a, b) => a + b, 0), level);
+    for (const type of UNIT_TYPES) estimated[type] = approximateEstimate(composition[type], effectiveLevel);
+    const total = approximateEstimate(Object.values(composition).reduce((a, b) => a + b, 0), effectiveLevel);
     const reportId = await ctx.db.insert("espionageReports", {
       kingdomId: args.kingdomId,
       targetKingdomId: args.targetKingdomId,
-      level,
+      level: effectiveLevel,
       createdAt: now,
       expiresAt: now + PARLIAMENT.ESPIONAGE.reportTtlMs,
       estimate: { min: total.min, max: total.max },
       composition: estimated,
     });
-    return { success: true, reportId, cost, level, estimate: total, composition: estimated, expiresAt: now + PARLIAMENT.ESPIONAGE.reportTtlMs };
+    return { success: true, reportId, cost, level: effectiveLevel, originalLevel: spyLevel, estimate: total, composition: estimated, expiresAt: now + PARLIAMENT.ESPIONAGE.reportTtlMs };
   },
 });
 
