@@ -415,10 +415,10 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     const allValid = uniqueIds && allPrereqsExist && !hasCycle && univLevelValid && allEffectsKnown && capsRespected;
 
     results.push({
-      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E5)",
+      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E6a)",
       test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, 25 tipos de efectos conocidos y topes respetados",
       passed: allValid,
-      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 + 12 E3 + 13 E4a + 2 E4b + 7 E4c + 5 E5 = 99). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
+      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 + 12 E3 + 13 E4a + 2 E4b + 7 E4c + 5 E5 + 18 E6a = 117). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
     });
   }
 
@@ -474,11 +474,13 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       const infOk = Math.abs(modInf.unitEfficiencyInf - 0.04) < 1e-9;
       const cavOk = modInf.unitEfficiencyCav === 0;
 
+      const isolationOk = testEfficiencyIsolation();
+
       results.push({
           category: "NUEVOS EFECTOS DE MORAL Y EFICACIA (ENTREGA 4a)",
           test: "15. moraleBase y unitEfficiency calculan modificadores, respetan topes y demuestran aislamiento de tipos",
-          passed: moraleOk && infOk && cavOk && testEfficiencyIsolation,
-          details: `MoralBase: ${modHap3.moraleBase}, InfEficacia: ${modInf.unitEfficiencyInf}, CavEficacia: ${modInf.unitEfficiencyCav}, Aislamiento: ${testEfficiencyIsolation}`,
+          passed: moraleOk && infOk && cavOk && isolationOk,
+          details: `MoralBase: ${modHap3.moraleBase}, InfEficacia: ${modInf.unitEfficiencyInf}, CavEficacia: ${modInf.unitEfficiencyCav}, Aislamiento: ${isolationOk}`,
       });
   }
 
@@ -572,6 +574,44 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       test: "20. espionageAccuracy soporta niveles 3 (±3 %) y 4 (exacto)",
       passed: esp3Ok && esp4Ok,
       details: `Esp 3: nivel ${modEsp3.espionageLevel}, Esp 4: nivel ${modEsp4.espionageLevel}`,
+    });
+  }
+
+  // 21. Verificación de E6a: Cadenas de civilización (6/12)
+  {
+    const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes"];
+    let allCivsOk = true;
+    const errors: string[] = [];
+
+    for (const civ of civs) {
+      const idA = `tech_civ_${civ}_a`;
+      const idB = `tech_civ_${civ}_b`;
+      const idC = `tech_civ_${civ}_c`;
+      const parentBase = `tech_civ_${civ}`;
+
+      const nodeA = TECHNOLOGY_CATALOG[idA];
+      const nodeB = TECHNOLOGY_CATALOG[idB];
+      const nodeC = TECHNOLOGY_CATALOG[idC];
+
+      if (!nodeA || nodeA.civilizationRequirement !== civ || !nodeA.technologyRequirements.includes(parentBase)) {
+        allCivsOk = false;
+        errors.push(`${idA} incorrecto`);
+      }
+      if (!nodeB || nodeB.civilizationRequirement !== civ || !nodeB.technologyRequirements.includes(parentBase)) {
+        allCivsOk = false;
+        errors.push(`${idB} incorrecto`);
+      }
+      if (!nodeC || nodeC.civilizationRequirement !== civ || !nodeC.technologyRequirements.includes(idA) || !nodeC.technologyRequirements.includes(idB)) {
+        allCivsOk = false;
+        errors.push(`${idC} incorrecto`);
+      }
+    }
+
+    results.push({
+      category: "CADENAS DE CIVILIZACIÓN (ENTREGA 6a)",
+      test: "21. Los 18 nuevos nodos de civilización tienen requisitos de civ y de tecnología coherentes",
+      passed: allCivsOk,
+      details: allCivsOk ? "Todos los nodos (6 civs) validados" : `Errores en: ${errors.join(", ")}`,
     });
   }
 
