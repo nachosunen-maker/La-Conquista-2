@@ -379,6 +379,7 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       "constructionDuration", "happinessBase", "unlockWeaponAdvancedSteel", "combatAttack",
       "combatDefense", "marchSpeed", "marchFatigue",
       "foodConsumption", "woodProduction", "stoneProduction", "ironProduction", "goldProduction",
+      "researchDuration", "constructionCost", "housingCapacity", "taxTolerance",
     ]);
     const allEffectsKnown = TECHNOLOGIES.every((t) => KNOWN_EFFECT_KEYS.has(t.effect.key));
 
@@ -401,15 +402,19 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       maxModifiers.woodProductionBonus <= TECH_EFFECT_CAPS.woodProduction + 1e-9 &&
       maxModifiers.stoneProductionBonus <= TECH_EFFECT_CAPS.stoneProduction + 1e-9 &&
       maxModifiers.ironProductionBonus <= TECH_EFFECT_CAPS.ironProduction + 1e-9 &&
-      maxModifiers.goldProductionBonus <= TECH_EFFECT_CAPS.goldProduction + 1e-9;
+      maxModifiers.goldProductionBonus <= TECH_EFFECT_CAPS.goldProduction + 1e-9 &&
+      maxModifiers.researchDuration >= 1 - TECH_EFFECT_CAPS.researchDuration - 1e-9 &&
+      maxModifiers.constructionCost >= 1 - TECH_EFFECT_CAPS.constructionCost - 1e-9 &&
+      maxModifiers.housingCapacityBonus <= TECH_EFFECT_CAPS.housingCapacity + 1e-9 &&
+      maxModifiers.taxToleranceReduction <= TECH_EFFECT_CAPS.taxTolerance + 1e-9;
 
     const allValid = uniqueIds && allPrereqsExist && !hasCycle && univLevelValid && allEffectsKnown && capsRespected;
 
     results.push({
-      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E2)",
-      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, 20 tipos de efectos conocidos y topes respetados",
+      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E3)",
+      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, 24 tipos de efectos conocidos y topes respetados",
       passed: allValid,
-      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 = 60). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
+      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 + 12 E3 = 72). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
     });
   }
 
@@ -432,6 +437,27 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       test: "13. foodConsumption, resourceProduction (madera, piedra, hierro) y goldProduction calculan modificadores y respetan topes",
       passed: foodOk && woodOk && stoneOk && ironOk && goldOk,
       details: `Comprobados: foodCons: ${modFood.foodConsumptionReduction}, wood: ${modWood.woodProductionBonus}, stone: ${modStone.stoneProductionBonus}, iron: ${modIron.ironProductionBonus}, gold: ${modGold.goldProductionBonus}`,
+    });
+  }
+
+  // 14. Verificación de los 4 nuevos efectos de la Entrega 3 (researchDuration, constructionCost, housingCapacity, taxTolerance) con y sin investigación
+  {
+    const modNone = computeTechnologyModifiers([]);
+    const modEdu = computeTechnologyModifiers(["educ_1"]);
+    const modCon = computeTechnologyModifiers(["construction_4"]);
+    const modTax = computeTechnologyModifiers(["happiness_5"]);
+
+    const noneOk = modNone.researchDuration === 1.0 && modNone.constructionCost === 1.0 && modNone.housingCapacityBonus === 0 && modNone.taxToleranceReduction === 0;
+    const eduOk = Math.abs(modEdu.researchDuration - 0.92) < 1e-9;
+    const conOk = Math.abs(modCon.constructionCost - 0.94) < 1e-9;
+    const taxOk = Math.abs(modTax.taxToleranceReduction - 0.50) < 1e-9;
+    const houCapOk = TECH_EFFECT_CAPS.housingCapacity === 0.30;
+
+    results.push({
+      category: "NUEVOS EFECTOS DE CIVIL Y UNIVERSIDAD (ENTREGA 3)",
+      test: "14. researchDuration, constructionCost, housingCapacity y taxTolerance calculan modificadores con y sin investigación y respetan topes",
+      passed: noneOk && eduOk && conOk && taxOk && houCapOk,
+      details: `Sin investigación: base correcta (1.0/0). Con investigación: researchDuration: ${modEdu.researchDuration}, constructionCost: ${modCon.constructionCost}, taxTolerance: ${modTax.taxToleranceReduction}, tope housingCapacity: ${TECH_EFFECT_CAPS.housingCapacity}`,
     });
   }
 

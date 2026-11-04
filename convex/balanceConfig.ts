@@ -882,7 +882,11 @@ export type TechnologyEffectKey =
   | "woodProduction"
   | "stoneProduction"
   | "ironProduction"
-  | "goldProduction";
+  | "goldProduction"
+  | "researchDuration"
+  | "constructionCost"
+  | "housingCapacity"
+  | "taxTolerance";
 
 export interface TechnologyBalance {
   id: string;
@@ -900,7 +904,7 @@ export interface TechnologyBalance {
 
 export const RESEARCH_TIME_SCALE = 1.0;
 
-/** [ENTREGA 1 y 2] Topes máximos para los efectos acumulados de tecnologías (suma aditiva con techo). */
+/** [ENTREGA 1, 2 y 3] Topes máximos para los efectos acumulados de tecnologías (suma aditiva con techo). */
 export const TECH_EFFECT_CAPS = {
   agricultureProduction: 0.65,
   miningProduction: 0.50,
@@ -919,6 +923,10 @@ export const TECH_EFFECT_CAPS = {
   stoneProduction: 0.30,
   ironProduction: 0.30,
   goldProduction: 0.60,
+  researchDuration: 0.40,
+  constructionCost: 0.25,
+  housingCapacity: 0.30,
+  taxTolerance: 0.50,
 } as const;
 
 const DAY = TIME.SECONDS_PER_GAME_YEAR;
@@ -954,9 +962,21 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   { id: "construction_1", name: "Cantería de sillería", branch: "civil", universityLevel: 1, costs: { gold: 100, wood: 100, stone: 150, iron: 10, food: 0 }, durationSeconds: 45, buildingRequirements: {}, technologyRequirements: [], effect: { key: "constructionDuration", value: -0.05, description: "−5 % duración de construcción" } },
   { id: "construction_2", name: "Grúas de rueda de ardilla", branch: "civil", universityLevel: 2, costs: { gold: 250, wood: 200, stone: 200, iron: 30, food: 0 }, durationSeconds: 240, buildingRequirements: { castillo: 2, universidad: 2 }, technologyRequirements: ["construction_1"], effect: { key: "constructionDuration", value: -0.08, description: "−8 % duración en izado de cargas pesadas" } },
   { id: "construction_3", name: "Andamios y maestros de obra", branch: "civil", universityLevel: 3, costs: { gold: 400, wood: 220, stone: 260, iron: 40, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3 }, technologyRequirements: ["construction_2"], effect: { key: "constructionDuration", value: -0.06, description: "−6 % duración de construcción" } },
+  { id: "construction_4", name: "Arbotantes y contrafuertes", branch: "civil", universityLevel: 3, costs: { gold: 500, wood: 260, stone: 320, iron: 50, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 4, universidad: 3, cantera: 5 }, technologyRequirements: ["construction_3"], effect: { key: "constructionCost", value: -0.06, description: "−6 % coste de construcción de edificios" } },
+  { id: "construction_5", name: "Encofrados y mortero hidráulico", branch: "civil", universityLevel: 4, costs: { gold: 800, wood: 350, stone: 450, iron: 80, food: 0 }, durationSeconds: Math.round(480 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 5, universidad: 4 }, technologyRequirements: ["construction_4"], effect: { key: "constructionCost", value: -0.07, description: "−7 % coste de construcción de edificios" } },
+  { id: "construction_6", name: "Maestros de cantería y gremios", branch: "civil", universityLevel: 4, costs: { gold: 950, wood: 400, stone: 520, iron: 90, food: 0 }, durationSeconds: Math.round(480 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 5, universidad: 4, cantera: 6 }, technologyRequirements: ["construction_5"], effect: { key: "constructionCost", value: -0.06, description: "−6 % coste de construcción de edificios" } },
+  { id: "construction_7", name: "Arquitectura monumental de fábrica", branch: "civil", universityLevel: 5, costs: { gold: 1500, wood: 650, stone: 800, iron: 150, food: 0 }, durationSeconds: Math.round(720 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 7, universidad: 5 }, technologyRequirements: ["construction_6"], effect: { key: "constructionCost", value: -0.06, description: "−6 % coste de construcción de edificios" } },
+  { id: "construction_8", name: "Obra maestra del reino", branch: "civil", universityLevel: 5, costs: { gold: 1800, wood: 880, stone: 910, iron: 190, food: 0 }, durationSeconds: Math.round(1080 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 8, universidad: 5 }, technologyRequirements: ["construction_6", "construction_7"], effect: { key: "constructionCost", value: -0.06, description: "−6 % coste de construcción de edificios" } },
+  { id: "educ_1", name: "Tratados escolásticos y trivium", branch: "civil", universityLevel: 2, costs: { gold: 200, wood: 120, stone: 100, iron: 20, food: 0 }, durationSeconds: 180, buildingRequirements: { castillo: 2, universidad: 2 }, technologyRequirements: [], effect: { key: "researchDuration", value: -0.08, description: "−8 % duración de investigaciones" } },
+  { id: "educ_2", name: "Quadrivium y cátedras reales", branch: "civil", universityLevel: 3, costs: { gold: 450, wood: 200, stone: 180, iron: 40, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3 }, technologyRequirements: ["educ_1"], effect: { key: "researchDuration", value: -0.10, description: "−10 % duración de investigaciones" } },
+  { id: "educ_3", name: "Bibliotecas monacales y cartularios", branch: "civil", universityLevel: 4, costs: { gold: 750, wood: 300, stone: 280, iron: 70, food: 0 }, durationSeconds: Math.round(480 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 4, universidad: 4 }, technologyRequirements: ["educ_2"], effect: { key: "researchDuration", value: -0.12, description: "−12 % duración de investigaciones" } },
+  { id: "educ_4", name: "Academia de ciencias reales", branch: "civil", universityLevel: 5, costs: { gold: 1250, wood: 500, stone: 480, iron: 120, food: 0 }, durationSeconds: Math.round(720 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 6, universidad: 5 }, technologyRequirements: ["educ_3"], effect: { key: "researchDuration", value: -0.10, description: "−10 % duración de investigaciones" } },
+  { id: "educ_5", name: "Ingeniería y mecánica", branch: "civil", universityLevel: 4, costs: { gold: 850, wood: 240, stone: 300, iron: 80, food: 0 }, durationSeconds: Math.round(480 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 4, universidad: 4 }, technologyRequirements: ["educ_2", "construction_3"], effect: { key: "constructionDuration", value: -0.05, description: "−5 % duración de construcción" } },
+  { id: "educ_6", name: "Sabios y consejeros del reino", branch: "civil", universityLevel: 5, costs: { gold: 2340, wood: 640, stone: 700, iron: 230, food: 0 }, durationSeconds: Math.round(1080 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 8, universidad: 5 }, technologyRequirements: ["educ_3", "educ_5"], effect: { key: "researchDuration", value: -0.08, description: "−8 % duración de investigaciones" } },
   { id: "happiness_1", name: "Fiestas y ferias comunales", branch: "civil", universityLevel: 1, costs: { gold: 100, wood: 100, stone: 50, iron: 0, food: 0 }, durationSeconds: 45, buildingRequirements: {}, technologyRequirements: [], effect: { key: "happinessBase", value: 3, description: "+3 felicidad base" } },
   { id: "happiness_2", name: "Fueros de villa y gremios", branch: "civil", universityLevel: 3, costs: { gold: 350, wood: 150, stone: 150, iron: 20, food: 0 }, durationSeconds: 360, buildingRequirements: { castillo: 3, mercado: 2 }, technologyRequirements: ["happiness_1"], effect: { key: "happinessBase", value: 5, description: "+5 felicidad base por autogobierno gremial" } },
   { id: "happiness_4", name: "Justas, circo y festejos", branch: "civil", universityLevel: 3, costs: { gold: 400, wood: 220, stone: 260, iron: 40, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3, circo: 3 }, technologyRequirements: ["happiness_1"], effect: { key: "happinessBase", value: 3, description: "+3 felicidad base" } },
+  { id: "happiness_5", name: "Exención de cargas y patronato", branch: "civil", universityLevel: 3, costs: { gold: 400, wood: 180, stone: 180, iron: 40, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3, mercado: 2 }, technologyRequirements: ["happiness_1"], effect: { key: "taxTolerance", value: -0.50, description: "−50 % penalización por impuestos altos" } },
 
   // --- RAMA MILITAR, METALURGIA Y DOCTRINA ---
   { id: "training_1", name: "Doctrina de instrucción de levas", branch: "militar", universityLevel: 1, costs: { gold: 100, wood: 80, stone: 50, iron: 20, food: 0 }, durationSeconds: 45, buildingRequirements: { cuartel: 1 }, technologyRequirements: [], effect: { key: "trainingDuration", value: -0.05, description: "−5 % duración de entrenamiento militar" } },

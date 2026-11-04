@@ -86,10 +86,12 @@ export function durationForTargetLevel(
 /** [COMPLEMENTO D-02] coste(n) = redondear(base × 1,15^(n−1)). */
 export function costsForTargetLevel(
   baseCosts: Record<ResourceType, number>,
-  targetLevel: number
+  targetLevel: number,
+  costMultiplier: number = 1
 ): Record<ResourceType, number> | null {
   if (!Number.isInteger(targetLevel) || targetLevel < 1 || targetLevel > MAX_BUILDING_LEVEL) return null;
-  const multiplier = (1 + COST_GROWTH_PER_LEVEL) ** (targetLevel - 1);
+  const growth = (1 + COST_GROWTH_PER_LEVEL) ** (targetLevel - 1);
+  const multiplier = growth * Math.max(0.75, Math.min(1, costMultiplier));
   const result = {} as Record<ResourceType, number>;
   for (const resource of ["gold", "wood", "stone", "iron", "food"] as const) {
     const base = baseCosts[resource];
@@ -150,7 +152,8 @@ export function calculateJobCapacities(
 
 /** [COMPLEMENTO D-03] Capacidad residencial = suma de viviendas completadas × capacidad por nivel. */
 export function calculateResidentialCapacity(
-  buildings: ReadonlyArray<{ buildingType: string; level: number }>
+  buildings: ReadonlyArray<{ buildingType: string; level: number }>,
+  housingCapacityBonus: number = 0
 ): number | null {
   const capacityPerLevel = BUILDING_RULES.viviendas?.residentialCapacityPerLevel;
   if (capacityPerLevel === null || capacityPerLevel === undefined || !Number.isFinite(capacityPerLevel) || capacityPerLevel < 0) {
@@ -160,7 +163,9 @@ export function calculateResidentialCapacity(
   if (residences.some((building) => !Number.isInteger(building.level) || building.level < 1 || building.level > MAX_BUILDING_LEVEL)) {
     return null;
   }
-  return residences.reduce((total, building) => total + building.level * capacityPerLevel, 0);
+  const base = residences.reduce((total, building) => total + building.level * capacityPerLevel, 0);
+  const bonus = Number.isFinite(housingCapacityBonus) && housingCapacityBonus > 0 ? housingCapacityBonus : 0;
+  return Math.round(base * (1 + bonus));
 }
 
 /** Nivel de un edificio en una colección (0 si no existe). */
@@ -244,6 +249,8 @@ export function createConstructionPlan(input: {
   rule?: BuildingRule;
   /** Multiplicador de duración por tecnologías (p. ej. 0,95); nunca por debajo del mínimo configurado. */
   durationModifier?: number;
+  /** Multiplicador de coste de construcción por tecnologías (p. ej. 0,94). */
+  constructionCostMultiplier?: number;
 }): { success: true; plan: ConstructionPlan } | { success: false; error: string } {
   if (!input.buildingType.trim()) {
     return { success: false, error: "El tipo de edificio es obligatorio." };
@@ -306,7 +313,7 @@ export function createConstructionPlan(input: {
     }
   }
 
-  const scaledCosts = costsForTargetLevel(input.rule.costs, targetLevel);
+  const scaledCosts = costsForTargetLevel(input.rule.costs, targetLevel, input.constructionCostMultiplier ?? 1);
   if (!scaledCosts) {
     return { success: false, error: "No se pudo calcular el coste escalado del nivel objetivo." };
   }
@@ -403,7 +410,8 @@ export function calculateConstructionCancellationRefund(input: {
 /** Catálogo serializable para la interfaz: coste y duración del siguiente nivel de cada edificio. */
 export function describeCatalogForLevels(
   buildingLevels: Readonly<Record<string, number>>,
-  durationModifier: number = 1
+  durationModifier: number = 1,
+  constructionCostMultiplier: number = 1
 ): Record<string, {
   label: string;
   role: string;
@@ -435,7 +443,7 @@ export function describeCatalogForLevels(
       role: rule.role,
       currentLevel,
       nextLevel,
-      nextCosts: nextLevel !== null && rule.costs ? costsForTargetLevel(rule.costs, nextLevel) : null,
+      nextCosts: nextLevel !== null && rule.costs ? costsForTargetLevel(rule.costs, nextLevel, constructionCostMultiplier) : null,
       nextDurationMs: nextLevel !== null && rule.baseDurationMs ? durationForTargetLevel(rule.baseDurationMs, nextLevel, durationModifier) : null,
       requirements: rule.progressionRequirements ?? {},
       requirementsSatisfied,

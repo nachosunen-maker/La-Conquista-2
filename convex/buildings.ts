@@ -24,7 +24,7 @@ import {
   validateConstructionCompletion,
   type ConstructionQueueEntry,
 } from "./buildingRules";
-import { getConstructionDurationModifier, readCompletedTechnologyIds } from "./technologyRules";
+import { getConstructionDurationModifier, readCompletedTechnologyIds, computeTechnologyModifiers } from "./technologyRules";
 import { computeProfessionEffects, PROFESSION_BUILDING_CAPACITY } from "./economyExtended";
 import { civilizationBuildingLabel, getCivilizationPassive } from "./civilizationRules";
 import type { ResourceType } from "./economyCalculations";
@@ -81,6 +81,7 @@ export const getConstructionState = query({
       ctx.db.query("constructionQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
     ]);
     const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
+    const techModifiers = computeTechnologyModifiers(completedTechnologies);
     const civPassive = getCivilizationPassive(kingdom.civilization);
     const durationModifier =
       getConstructionDurationModifier(completedTechnologies) *
@@ -92,7 +93,7 @@ export const getConstructionState = query({
     return {
       buildings,
       buildingLevels,
-      residentialCapacity: calculateResidentialCapacity(buildings),
+      residentialCapacity: calculateResidentialCapacity(buildings, techModifiers.housingCapacityBonus),
       jobCapacities: calculateJobCapacities(buildings),
       constructionQueue: queue.map((entry) => ({
         ...entry,
@@ -109,7 +110,7 @@ export const getConstructionState = query({
       pendingBuildingTypes: [] as string[],
       // [Decisión 21-10-2026] El edificio único de la civilización lleva su nombre propio (solo estética).
       catalog: Object.fromEntries(Object.entries(BUILDING_RULES).map(([type, rule]) => [type, { ...rule, label: civilizationBuildingLabel(kingdom.civilization, type) }])),
-      catalogForLevels: describeCatalogForLevels(buildingLevels, durationModifier),
+      catalogForLevels: describeCatalogForLevels(buildingLevels, durationModifier, techModifiers.constructionCost),
       constructionDurationModifier: durationModifier,
       pendingParameters: BUILDING_PARAMETERS_PENDING,
       hasInitialBuildings: buildings.length > 0,
@@ -140,6 +141,7 @@ export const startConstruction = mutation({
     
     const buildingLevels = collection.levels;
     const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
+    const techModifiers = computeTechnologyModifiers(completedTechnologies);
     const resourceSnapshot: Record<ResourceType, number> = settled.settledResources;
     const planResult = createConstructionPlan({
       buildingType: args.buildingType,
@@ -153,6 +155,7 @@ export const startConstruction = mutation({
         getConstructionDurationModifier(completedTechnologies) *
         (await constructionWorkersModifier(ctx, args.kingdomId)) *
         getCivilizationPassive(kingdom.civilization).constructionDurationMultiplier,
+      constructionCostMultiplier: techModifiers.constructionCost,
     });
     if (!planResult.success) throw new ConvexError(planResult.error);
 

@@ -148,33 +148,36 @@ export function starvationPhase(seconds: number): 0 | 1 | 2 | 3 {
 }
 
 /** [COMPLEMENTO D-49] Penalización de productividad por impuestos: lineal entre 30 % y 60 %, tope −15 %. */
-export function taxProductivityPenalty(taxRate: number): number {
+export function taxProductivityPenalty(taxRate: number, taxToleranceReduction: number = 0): number {
   const rate = clamp(taxRate, TAXES.MIN_RATE, TAXES.MAX_RATE);
   if (rate <= TAXES.MID_BAND_MAX) return 0;
   const span = TAXES.HIGH_BAND_MAX - TAXES.MID_BAND_MAX;
-  return TAXES.HIGH_BAND_MAX_PRODUCTIVITY_PENALTY * clamp((rate - TAXES.MID_BAND_MAX) / span, 0, 1);
+  const base = TAXES.HIGH_BAND_MAX_PRODUCTIVITY_PENALTY * clamp((rate - TAXES.MID_BAND_MAX) / span, 0, 1);
+  return base * (1 - clamp(taxToleranceReduction, 0, 1));
 }
 
 /** [COMPLEMENTO D-49] Penalización diaria de felicidad por impuestos: −0,1 por punto porcentual por encima del 10 %. */
-export function taxHappinessPenaltyPerDay(taxRate: number): number {
+export function taxHappinessPenaltyPerDay(taxRate: number, taxToleranceReduction: number = 0): number {
   const rate = clamp(taxRate, TAXES.MIN_RATE, TAXES.MAX_RATE);
   if (rate <= TAXES.LOW_BAND_MAX) return 0;
   const pointsAboveLow = (rate - TAXES.LOW_BAND_MAX) * 100;
-  return TAXES.MID_BAND_HAPPINESS_PER_POINT * pointsAboveLow;
+  const base = TAXES.MID_BAND_HAPPINESS_PER_POINT * pointsAboveLow;
+  return base * (1 - clamp(taxToleranceReduction, 0, 1));
 }
 
 /** [COMPLEMENTO D-49] Penalización de moral militar por impuestos extremos (61–100 %), lineal hasta el máximo. */
-export function taxMoralePenalty(taxRate: number): number {
+export function taxMoralePenalty(taxRate: number, taxToleranceReduction: number = 0): number {
   const rate = clamp(taxRate, TAXES.MIN_RATE, TAXES.MAX_RATE);
   if (rate <= TAXES.HIGH_BAND_MAX) return 0;
   const span = TAXES.MAX_RATE - TAXES.HIGH_BAND_MAX;
-  return TAXES.EXTREME_BAND_MAX_MORALE_PENALTY * clamp((rate - TAXES.HIGH_BAND_MAX) / span, 0, 1);
+  const base = TAXES.EXTREME_BAND_MAX_MORALE_PENALTY * clamp((rate - TAXES.HIGH_BAND_MAX) / span, 0, 1);
+  return base * (1 - clamp(taxToleranceReduction, 0, 1));
 }
 
-export function productivityMultiplier(taxRate: number, phase: 0 | 1 | 2 | 3, restPolicy: RestPolicy = "normal"): number {
+export function productivityMultiplier(taxRate: number, phase: 0 | 1 | 2 | 3, restPolicy: RestPolicy = "normal", taxToleranceReduction: number = 0): number {
   const starvationPenalty = phase >= 2 ? STARVATION.CIVIL_PRODUCTIVITY_PENALTY : 0;
   const rest = REST_POLICIES[restPolicy]?.productionMultiplier ?? 1;
-  return (1 - taxProductivityPenalty(taxRate)) * (1 - starvationPenalty) * rest;
+  return (1 - taxProductivityPenalty(taxRate, taxToleranceReduction)) * (1 - starvationPenalty) * rest;
 }
 
 /** [M-01 opción A] +1 punto de moral por cada 10 de gloria, máximo +10. */
@@ -192,6 +195,7 @@ export function computeMorale(input: {
   moraleEffects?: ReadonlyArray<MoraleEffect>;
   now: number;
   glory?: number;
+  taxToleranceReduction?: number;
 }): number {
   const foodBonus = (MORALE.FOOD_TIER_BONUS as Record<string, number>)[input.foodTier] ?? 0;
   const battleEffects = (input.moraleEffects ?? [])
@@ -203,7 +207,7 @@ export function computeMorale(input: {
     + foodBonus
     + battleEffects
     + gloryMoraleBonus(input.glory ?? 0)
-    - taxMoralePenalty(input.taxRate)
+    - taxMoralePenalty(input.taxRate, input.taxToleranceReduction ?? 0)
     - starvationPenalty;
   return clamp(Math.round(morale * 100) / 100, WELLBEING.MIN, WELLBEING.MAX);
 }
@@ -315,7 +319,8 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   const starvationBefore = Number.isFinite(input.starvationSeconds) && input.starvationSeconds > 0 ? input.starvationSeconds : 0;
   const phaseBefore = starvationPhase(starvationBefore);
   const bonusProduction = Number.isFinite(input.bonusProductionMultiplier) && (input.bonusProductionMultiplier as number) > 0 ? (input.bonusProductionMultiplier as number) : 1;
-  const productivity = productivityMultiplier(taxRate, phaseBefore, restPolicy) * bonusProduction;
+  const taxTolerance = input.technologyModifiers.taxToleranceReduction ?? 0;
+  const productivity = productivityMultiplier(taxRate, phaseBefore, restPolicy, taxTolerance) * bonusProduction;
   const terrain = input.terrainBonuses ?? {};
   const civPassive = getCivilizationPassive(input.civilization);
   const professions = computeProfessionEffects(state.jobCounts, input.buildingLevels, PROFESSION_BUILDING_CAPACITY);
@@ -484,7 +489,7 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   dailyDelta += (input.buildingLevels.circo ?? 0) > 0 ? WELLBEING.ENTERTAINMENT_BONUS_WITH_CIRCUS : 0;
   dailyDelta += professions.happinessPerDay;
   dailyDelta += rest.happinessPerDay;
-  dailyDelta -= taxHappinessPenaltyPerDay(taxRate);
+  dailyDelta -= taxHappinessPenaltyPerDay(taxRate, taxTolerance);
   dailyDelta -= phaseAfter >= 1 && secondsThisInterval > 0 ? STARVATION.HAPPINESS_PENALTY_PER_DAY : 0;
   // [DERIVADO R-03] Las tecnologías de felicidad elevan el nivel de equilibrio: recuperan 1 punto/día hasta alcanzarlo.
   if (dailyDelta === 0 && happinessBefore < equilibrium && input.technologyModifiers.happinessBase > 0) dailyDelta += 1;
@@ -505,6 +510,7 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
     moraleEffects: input.moraleEffects,
     now: input.now,
     glory: gloryAfter,
+    taxToleranceReduction: taxTolerance,
   });
 
   return {

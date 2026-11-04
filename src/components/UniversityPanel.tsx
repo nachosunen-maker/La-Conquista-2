@@ -45,6 +45,10 @@ interface TechnologiesState {
     stoneProductionBonus?: number;
     ironProductionBonus?: number;
     goldProductionBonus?: number;
+    researchDuration?: number;
+    constructionCost?: number;
+    housingCapacityBonus?: number;
+    taxToleranceReduction?: number;
   };
   researching: Array<{ _id: string; technologyId: string; name: string; startedAt?: number; durationMs?: number; costs?: Record<string, number>; progressPercent: number | null; completesAt: number | null }>;
   catalog: Array<{
@@ -141,6 +145,10 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
   if (m.stoneProductionBonus && m.stoneProductionBonus > 0) activeEffects.push(`piedra +${Math.round(m.stoneProductionBonus * 100)} %`);
   if (m.ironProductionBonus && m.ironProductionBonus > 0) activeEffects.push(`hierro +${Math.round(m.ironProductionBonus * 100)} %`);
   if (m.goldProductionBonus && m.goldProductionBonus > 0) activeEffects.push(`oro +${Math.round(m.goldProductionBonus * 100)} %`);
+  if (m.researchDuration && m.researchDuration !== 1) activeEffects.push(`duración investigación ×${m.researchDuration.toFixed(2)}`);
+  if (m.constructionCost && m.constructionCost !== 1) activeEffects.push(`coste construcción ×${m.constructionCost.toFixed(2)}`);
+  if (m.housingCapacityBonus && m.housingCapacityBonus > 0) activeEffects.push(`capacidad residencial +${Math.round(m.housingCapacityBonus * 100)} %`);
+  if (m.taxToleranceReduction && m.taxToleranceReduction > 0) activeEffects.push(`tolerancia fiscal +${Math.round(m.taxToleranceReduction * 100)} %`);
   if (m.unlockedWeapons.length) activeEffects.push(`armas: ${m.unlockedWeapons.join(', ')}`);
   if (m.unlockedArmors.length) activeEffects.push(`armaduras: ${m.unlockedArmors.join(', ')}`);
 

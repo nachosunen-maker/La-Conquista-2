@@ -77,6 +77,10 @@ export interface TechnologyModifiers {
   stoneProductionBonus: number; // bonificación específica de piedra (+0,10 = +10 %, máx +0,30)
   ironProductionBonus: number; // bonificación específica de hierro (+0,10 = +10 %, máx +0,30)
   goldProductionBonus: number; // bonificación específica de oro (+0,06 = +6 %, máx +0,60)
+  researchDuration: number; // multiplicador de duración de investigación (mín 0,60)
+  constructionCost: number; // multiplicador de coste de construcción (mín 0,75)
+  housingCapacityBonus: number; // bonificación de capacidad residencial (máx 0,30)
+  taxToleranceReduction: number; // reducción de penalización fiscal (máx 0,50)
 }
 
 export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>): TechnologyModifiers {
@@ -97,6 +101,10 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
   let sumStoneProd = 0;
   let sumIronProd = 0;
   let sumGoldProd = 0;
+  let sumResearchDuration = 0;
+  let sumConstructionCost = 0;
+  let sumHousingCapacity = 0;
+  let sumTaxTolerance = 0;
   const unlockedWeapons: string[] = [];
   const unlockedArmors: string[] = [];
 
@@ -129,6 +137,10 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
       case "stoneProduction": sumStoneProd += value; break;
       case "ironProduction": sumIronProd += value; break;
       case "goldProduction": sumGoldProd += value; break;
+      case "researchDuration": sumResearchDuration += value; break; // Convención: valor negativo e.g. -0.08
+      case "constructionCost": sumConstructionCost += value; break; // Convención: valor negativo e.g. -0.06
+      case "housingCapacity": sumHousingCapacity += value; break;
+      case "taxTolerance": sumTaxTolerance += Math.abs(value); break; // Convención: e.g. -0.50 -> 0.50
     }
   }
 
@@ -152,6 +164,10 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     stoneProductionBonus: Math.min(TECH_EFFECT_CAPS.stoneProduction, Math.max(0, sumStoneProd)),
     ironProductionBonus: Math.min(TECH_EFFECT_CAPS.ironProduction, Math.max(0, sumIronProd)),
     goldProductionBonus: Math.min(TECH_EFFECT_CAPS.goldProduction, Math.max(0, sumGoldProd)),
+    researchDuration: Math.max(1 - TECH_EFFECT_CAPS.researchDuration, 1 + sumResearchDuration),
+    constructionCost: Math.max(1 - TECH_EFFECT_CAPS.constructionCost, 1 + sumConstructionCost),
+    housingCapacityBonus: Math.min(TECH_EFFECT_CAPS.housingCapacity, Math.max(0, sumHousingCapacity)),
+    taxToleranceReduction: Math.min(TECH_EFFECT_CAPS.taxTolerance, Math.max(0, sumTaxTolerance)),
   };
 }
 
@@ -262,9 +278,9 @@ export function createResearchPlan(input: {
     }
   }
 
-  // Bonificación pasiva de civilización sobre la duración de investigación (p. ej. Griegos −10 %)
+  const techModifiers = computeTechnologyModifiers(input.completedIds);
   const civPassive = getCivilizationPassive(input.kingdomCivilization);
-  const durationMs = Math.ceil(technology.durationSeconds * 1000 * civPassive.researchDurationMultiplier);
+  const durationMs = Math.ceil(technology.durationSeconds * 1000 * techModifiers.researchDuration * civPassive.researchDurationMultiplier);
 
   return {
     success: true,
