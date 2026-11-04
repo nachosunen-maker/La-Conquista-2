@@ -119,9 +119,8 @@ export function runEconomicValidationTests(): TestResult[] {
     const sim = simulateEconomicProgress(baseKingdom, futureTime);
 
     const expectedFraction = 43200 / 86400; // 0.5
-    // Producción: 1100 * 2 = 2200; Consumo: 2000 * 1 = 2000. Superávit diario = +200.
-    // Medio día = +100 comida.
-    const expectedFood = baseKingdom.resources.food + 100;
+    const expectedDailyNet = (1100 * BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY) - 2000;
+    const expectedFood = baseKingdom.resources.food + (expectedDailyNet * 0.5);
 
     const passed =
       Math.abs(sim.timeFractionOfDay - expectedFraction) < 1e-6 &&
@@ -153,12 +152,15 @@ export function runEconomicValidationTests(): TestResult[] {
     const consumption = sim.dailyFoodConsumption;
     const surplus = sim.dailyFoodNetSurplus;
     const marginPercent = (surplus / consumption) * 100;
+    const expectedProd = 1100 * BASE_AGRICULTURE_PRODUCTIVITY_PER_DAY;
+    const expectedSurplus = expectedProd - 2000;
+    const expectedMargin = (expectedSurplus / 2000) * 100;
 
     const passed =
-      production === 2200 &&
+      production === expectedProd &&
       consumption === 2000 &&
-      surplus === 200 &&
-      Math.abs(marginPercent - 10.0) < 1e-4;
+      surplus === expectedSurplus &&
+      Math.abs(marginPercent - expectedMargin) < 1e-4;
 
     results.push({
       category: "MATEMÁTICA / LÓGICA PURA",
@@ -725,16 +727,16 @@ export function runEconomicValidationTests(): TestResult[] {
       callerUserId: "guest_g9ai8cz",
     });
 
-    // Producción: 600 * 2 = 1200/d
+    // Producción: 600 * 6 = 3600/d
     // Consumo: Civiles 900 * 1.0 + Soldados 100 * 1.05 = 1005/d
-    // Superávit diario: +195 comida. Medio día = +97.5 comida.
-    const expectedFood = 2500 + 97.5;
+    // Superávit diario: +2595 comida. Medio día = +1297.5 comida.
+    const expectedFood = 2500 + 1297.5;
 
     const passed =
       res.success === true &&
       res.elapsedSeconds === 43200 &&
       Math.abs((res.simulatedResources?.food ?? 0) - expectedFood) < 1e-4 &&
-      res.productionAndConsumption?.dailyFoodNetSurplus === 195 &&
+      res.productionAndConsumption?.dailyFoodNetSurplus === 2595 &&
       res.exhaustionMetrics?.secondsToExhaustion === null &&
       res.exhaustionMetrics?.starvationSeconds === 0;
 
@@ -1034,10 +1036,10 @@ export function runEconomicValidationTests(): TestResult[] {
   // --------------------------------------------------------------------------
   {
     const expectedFoodBalances: Record<string, number> = {
-      minima: 5446.25,
-      normal: 5195,
-      abundante: 5094.5,
-      excelente: 4994,
+      minima: 7846.25,
+      normal: 7595,
+      abundante: 7494.5,
+      excelente: 7394,
     };
     const foodBalances = Object.entries(expectedFoodBalances).map(([foodTier]) => {
       const settlement = calculateSettlementProgress({
@@ -1143,8 +1145,8 @@ export function runEconomicValidationTests(): TestResult[] {
     const passed =
       res.success === true &&
       res.elapsedSeconds === 43200 &&
-      Math.abs((res.updatedFood ?? 0) - 2050) < 1e-4 &&
-      Math.abs((res.foodDelta ?? 0) - 50) < 1e-4 &&
+      Math.abs((res.updatedFood ?? 0) - 3150) < 1e-4 &&
+      Math.abs((res.foodDelta ?? 0) - 1150) < 1e-4 &&
       res.isStarving === false &&
       res.appliedFoodTier === "normal";
 
@@ -1152,7 +1154,7 @@ export function runEconomicValidationTests(): TestResult[] {
       category: "INTEGRACIÓN CONVEX",
       test: "23. Liquidación persistente: cálculo autoritativo con régimen alimentario normal y actualización atómica",
       passed,
-      details: `Éxito: ${res.success}; Segundos: ${res.elapsedSeconds}; Comida inicial: 2000; Comida liquidada: ${res.updatedFood} (esperada 2050); Delta: ${res.foodDelta}`,
+      details: `Éxito: ${res.success}; Segundos: ${res.elapsedSeconds}; Comida inicial: 2000; Comida liquidada: ${res.updatedFood} (esperada 3150); Delta: ${res.foodDelta}`,
     });
   }
 
@@ -1199,13 +1201,13 @@ export function runEconomicValidationTests(): TestResult[] {
       res.cappedInterval === false &&
       res.elapsedSeconds === 864000 &&
       res.effectiveTimeMs === now &&
-      Math.abs((res.updatedFood ?? 0) - 5000) < 1e-4;
+      Math.abs((res.updatedFood ?? 0) - 29000) < 1e-4;
 
     results.push({
       category: "LÍMITES Y ROBUSTEZ",
       test: "24. Liquidación persistente: procesa diez días offline completos sin tope artificial",
       passed,
-      details: `Intervalo limitado: ${res.cappedInterval}; Segundos: ${res.elapsedSeconds} (esperados 864000); Comida final: ${res.updatedFood} (esperada 5000); Timestamp efectivo: ${res.effectiveTimeMs}`,
+      details: `Intervalo limitado: ${res.cappedInterval}; Segundos: ${res.elapsedSeconds} (esperados 864000); Comida final: ${res.updatedFood} (esperada 29000); Timestamp efectivo: ${res.effectiveTimeMs}`,
     });
   }
 
@@ -1414,21 +1416,21 @@ export function runEconomicValidationTests(): TestResult[] {
       options: { callerUserId: "test_user_28" },
     });
 
-    // En el intervalo transcurrido rigió "normal", superávit = 200 * 0.5 = +100
+    // En el intervalo transcurrido rigió "normal", superávit = 2600 * 0.5 = +1300
     const passed =
       transition.success === true &&
       transition.previousFoodTier === "normal" &&
       transition.newFoodTier === "excelente" &&
       transition.elapsedSeconds === 43200 &&
-      Math.abs((transition.settledFood ?? 0) - 2100) < 1e-4 &&
-      Math.abs((transition.foodDelta ?? 0) - 100) < 1e-4 &&
+      Math.abs((transition.settledFood ?? 0) - 3300) < 1e-4 &&
+      Math.abs((transition.foodDelta ?? 0) - 1300) < 1e-4 &&
       transition.timestamp === now;
 
     results.push({
       category: "INTEGRACIÓN CONVEX",
       test: "28. Transición atómica de régimen: liquida con el régimen previo antes de activar el nuevo",
       passed,
-      details: `Previo: ${transition.previousFoodTier}, Nuevo: ${transition.newFoodTier}, Comida liquidada: ${transition.settledFood} (esperada 2100 con factor normal), Delta: ${transition.foodDelta}`,
+      details: `Previo: ${transition.previousFoodTier}, Nuevo: ${transition.newFoodTier}, Comida liquidada: ${transition.settledFood} (esperada 3300 con factor normal), Delta: ${transition.foodDelta}`,
     });
   }
 
@@ -1457,8 +1459,8 @@ export function runEconomicValidationTests(): TestResult[] {
       total: 1000,
       available: 0,
     };
-    // 600 agricultores -> 1200 producción/día
-    // Consumo normal: 1000/día -> Superávit neto = +200/día
+    // 600 agricultores -> 3600 producción/día
+    // Consumo normal: 1000/día -> Superávit neto = +2600/día
     const populationJobs = [
       { kingdomId: "test_k_29", jobType: "agriculture", assignedCount: 600 },
       { kingdomId: "test_k_29", jobType: "mining", assignedCount: 400 },
@@ -1478,19 +1480,19 @@ export function runEconomicValidationTests(): TestResult[] {
     });
     const perfTimeMs = Date.now() - startPerf;
 
-    // Producción esperada: 2000 inicial + 30 días * 200 comida/día = 8000
+    // Producción esperada: 2000 inicial + 30 días * 2600 comida/día = 80000
     const passed =
       res.success === true &&
       res.elapsedSeconds === elapsedSecondsExpected &&
       res.cappedInterval === false &&
-      Math.abs((res.updatedFood ?? 0) - 8000) < 1e-4 &&
+      Math.abs((res.updatedFood ?? 0) - 80000) < 1e-4 &&
       perfTimeMs < 50;
 
     results.push({
       category: "MATEMÁTICA / LÓGICA PURA",
       test: "29. Periodos prolongados (30 días reales / 2.592.000s): cálculo analítico exacto en O(1) sin bucles",
       passed,
-      details: `Tiempo cálculo: ${perfTimeMs}ms (O(1)); Segundos: ${res.elapsedSeconds}; Comida resultante: ${res.updatedFood} (esperada 8000); Capped: ${res.cappedInterval}`,
+      details: `Tiempo cálculo: ${perfTimeMs}ms (O(1)); Segundos: ${res.elapsedSeconds}; Comida resultante: ${res.updatedFood} (esperada 80000); Capped: ${res.cappedInterval}`,
     });
   }
 
@@ -1910,13 +1912,13 @@ export function runEconomicValidationTests(): TestResult[] {
     // se muestra claramente como proyección no persistida en el bloque estimado
     const passed =
       persistedFood === 2500 &&
-      projectedFood === 2600 &&
-      delta === 100 &&
+      projectedFood === 3800 &&
+      delta === 1300 &&
       simResult.originalResources?.food === 2500;
 
     results.push({
       category: "INTEGRACIÓN CONVEX",
-      test: "39. Integración UI: Segregación visual estricta entre reservas persistidas (2500) y delta estimado (+100)",
+      test: "39. Integración UI: Segregación visual estricta entre reservas persistidas (2500) y delta estimado (+1300)",
       passed,
       details: `Persistido en almacén: ${persistedFood}; Estimación en proyección: ${projectedFood} (delta +${delta}); Original intacto: ${simResult.originalResources?.food}`,
     });
@@ -2128,7 +2130,7 @@ export function runEconomicValidationTests(): TestResult[] {
     const passed =
       noFarmers.dailyFoodProduction === 0 &&
       adapted.success &&
-      staffed?.dailyFoodProduction === 200 &&
+      staffed?.dailyFoodProduction === 600 &&
       staffed.dailyFoodConsumption === 1005 &&
       adapted.kingdomState?.regularSoldiers === 100;
 
@@ -2184,8 +2186,8 @@ export function runEconomicValidationTests(): TestResult[] {
     });
     const passed =
       first.success &&
-      first.updatedFood === 1200 &&
-      first.foodDelta === 200 &&
+      first.updatedFood === 3600 &&
+      first.foodDelta === 2600 &&
       second.success &&
       second.elapsedSeconds === 0 &&
       second.foodDelta === 0 &&
@@ -2240,13 +2242,13 @@ export function runEconomicValidationTests(): TestResult[] {
       lastUpdated: 1_000_000,
     }, 1_000_000 + SECONDS_PER_GAME_YEAR * 1000);
 
-    // Granja nivel 1 = 100 agricultores de capacidad (D-03/D-47): 20 agricultores producen 40/día.
+    // Granja nivel 1 = 100 agricultores de capacidad (D-03/D-47): 20 agricultores producen 120/día.
     const passed =
       projected.success &&
       projected.foodProductionCapacityPending === false &&
-      projected.productionAndConsumption?.dailyFoodProduction === 40 &&
+      projected.productionAndConsumption?.dailyFoodProduction === 120 &&
       projected.productionAndConsumption.effectiveAgricultureWorkers === 20 &&
-      configuredCapacity.dailyFoodProduction === 10 &&
+      configuredCapacity.dailyFoodProduction === 30 &&
       configuredCapacity.effectiveAgricultureWorkers === 5 &&
       unstaffedBuilding.dailyFoodProduction === 0;
     results.push({

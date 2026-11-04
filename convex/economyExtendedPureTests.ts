@@ -53,7 +53,8 @@ export function runExtendedEconomyTests(): ExtendedEconomyTestResult[] {
   const expectedStone = 250 * PRODUCTION_PER_WORKER_PER_DAY.stone * RESOURCE_PRODUCTION_MULTIPLIERS.stone;
   const expectedIron = 100 * PRODUCTION_PER_WORKER_PER_DAY.iron * RESOURCE_PRODUCTION_MULTIPLIERS.iron;
   const expectedGoldMining = 50 * PRODUCTION_PER_WORKER_PER_DAY.gold * RESOURCE_PRODUCTION_MULTIPLIERS.gold;
-  const expectedTaxBase = 2200 + expectedWood + expectedStone + expectedIron;
+  const expectedFoodProd = 1100 * PRODUCTION_PER_WORKER_PER_DAY.agriculture;
+  const expectedTaxBase = expectedFoodProd + expectedWood + expectedStone + expectedIron;
 
   const capped = simulateExtendedEconomy(baseInput({ jobCapacities: { agriculture: 1100, wood: 100, stone: 0, iron: 120, gold: 50 } }));
   const withTechnology = simulateExtendedEconomy(baseInput({ technologyModifiers: computeTechnologyModifiers(["agri_1", "mining_1"]) }));
@@ -91,19 +92,19 @@ export function runExtendedEconomyTests(): ExtendedEconomyTestResult[] {
 
   return [
     {
-      test: "Producción por trabajador y día (D-46): madera 1, piedra 0,75, hierro 0,40, oro 0,20; alimentos intactos",
+      test: "Producción por trabajador y día (D-46): madera 3x, piedra 3x, hierro 3x, oro 2x, alimentos 3x",
       passed: Math.abs(oneDay.dailyProduction.wood - expectedWood) < 1e-9 &&
         Math.abs(oneDay.dailyProduction.stone - expectedStone) < 1e-9 &&
         Math.abs(oneDay.dailyProduction.iron - expectedIron) < 1e-9 &&
         Math.abs(oneDay.dailyProduction.gold - expectedGoldMining) < 1e-9 &&
-        Math.abs(oneDay.dailyProduction.food - 2200) < 1e-9 &&
+        Math.abs(oneDay.dailyProduction.food - expectedFoodProd) < 1e-9 &&
         Math.abs(oneDay.updatedResources.wood - (INITIAL_KINGDOM_CONFIG.resources.wood + expectedWood)) < 1e-6,
       details: `Madera ${oneDay.dailyProduction.wood}/día, piedra ${oneDay.dailyProduction.stone}, hierro ${oneDay.dailyProduction.iron}, oro ${oneDay.dailyProduction.gold}, alimentos ${oneDay.dailyProduction.food}`,
     },
     {
       test: "La capacidad de edificios limita a los trabajadores efectivos (D-47); tecnología y terreno multiplican",
       passed: capped.effectiveWorkers.wood === 100 && capped.effectiveWorkers.stone === 0 && capped.dailyProduction.stone === 0 &&
-        Math.abs(withTechnology.dailyProduction.food - 2200 * 1.05) < 1e-9 &&
+        Math.abs(withTechnology.dailyProduction.food - expectedFoodProd * 1.05) < 1e-9 &&
         Math.abs(withTechnology.dailyProduction.wood - expectedWood * 1.05) < 1e-9 &&
         Math.abs(withTechnology.dailyProduction.gold - expectedGoldMining) < 1e-9 &&
         Math.abs(withTerrain.dailyProduction.wood - expectedWood * 1.15) < 1e-9,

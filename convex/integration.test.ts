@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import { createTestBackend } from "./test.setup";
-import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT, RESOURCE_PRODUCTION_MULTIPLIERS } from "./balanceConfig";
+import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT, RESOURCE_PRODUCTION_MULTIPLIERS, PRODUCTION_PER_WORKER_PER_DAY } from "./balanceConfig";
 import { costsForTargetLevel, BUILDING_RULES } from "./buildingRules";
 import { DEMO_USER_ID } from "./kingdomAccess";
 import { ensureHomeTerritory } from "./territories";
@@ -297,8 +297,8 @@ describe("Liquidación económica (Bloque D)", () => {
     vi.setSystemTime(T0 + DAY);
     const settled = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
     expect(settled.resources.food).toBeGreaterThan(before!.resources.food);
-    expect(settled.resources.wood).toBeCloseTo(before!.resources.wood + 250 * RESOURCE_PRODUCTION_MULTIPLIERS.wood, 3);
-    expect(settled.resources.stone).toBeCloseTo(before!.resources.stone + 206.25 * RESOURCE_PRODUCTION_MULTIPLIERS.stone, 3);
+    expect(settled.resources.wood).toBeCloseTo(before!.resources.wood + 250 * PRODUCTION_PER_WORKER_PER_DAY.wood * RESOURCE_PRODUCTION_MULTIPLIERS.wood, 3);
+    expect(settled.resources.stone).toBeCloseTo(before!.resources.stone + 250 * PRODUCTION_PER_WORKER_PER_DAY.stone * 1.1 * RESOURCE_PRODUCTION_MULTIPLIERS.stone, 3);
     expect(settled.taxesCollected).toBeGreaterThan(0);
     expect(settled.population?.births).toBe(0);
     expect(settled.population?.growthCappedByHousing).toBe(true);
