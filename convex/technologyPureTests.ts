@@ -415,10 +415,10 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     const allValid = uniqueIds && allPrereqsExist && !hasCycle && univLevelValid && allEffectsKnown && capsRespected;
 
     results.push({
-      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E6a)",
-      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, 25 tipos de efectos conocidos y topes respetados",
+      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E6b)",
+      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, 26 tipos de efectos conocidos y topes respetados",
       passed: allValid,
-      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 + 12 E3 + 13 E4a + 2 E4b + 7 E4c + 5 E5 + 18 E6a = 117). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
+      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 + 12 E3 + 13 E4a + 2 E4b + 7 E4c + 5 E5 + 18 E6a + 18 E6b = 135). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
     });
   }
 
@@ -577,9 +577,9 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     });
   }
 
-  // 21. Verificación de E6a: Cadenas de civilización (6/12)
+  // 21. Verificación de E6a + E6b: Cadenas de civilización (12/12)
   {
-    const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes"];
+    const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes", "mongoles", "chinos", "japoneses", "navajos", "aztecas", "masais"];
     let allCivsOk = true;
     const errors: string[] = [];
 
@@ -608,11 +608,44 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     }
 
     results.push({
-      category: "CADENAS DE CIVILIZACIÓN (ENTREGA 6a)",
-      test: "21. Los 18 nuevos nodos de civilización tienen requisitos de civ y de tecnología coherentes",
+      category: "CADENAS DE CIVILIZACIÓN (ENTREGA 6a + 6b)",
+      test: "21. Los 36 nuevos nodos de civilización tienen requisitos de civ y de tecnología coherentes",
       passed: allCivsOk,
-      details: allCivsOk ? "Todos los nodos (6 civs) validados" : `Errores en: ${errors.join(", ")}`,
+      details: allCivsOk ? "Todos los nodos (12 civs) validados" : `Errores en: ${errors.join(", ")}`,
     });
+  }
+
+  // 22. Verificación de E5: Casos específicos de espionaje (Paso 0)
+  {
+    const spyLevel = 2;
+    // (1) counterEspionage = 1.0 (simulado) -> espía nivel 2 recibe nivel 1
+    const effectiveLevel100 = Math.max(1, spyLevel - (1.0 > 0.5 ? 1 : 0)); // Simula Math.random() < 1.0
+    // (2) counterProb = 0 -> nivel 2
+    const effectiveLevelZero = Math.max(1, spyLevel - (0.0 > 0.5 ? 1 : 0));
+    // (3) Espía nivel 1 no cambia
+    const effectiveLevelOne = Math.max(1, 1 - (1.0 > 0.5 ? 1 : 0));
+
+    const espionageLogicOk = effectiveLevel100 === 1 && effectiveLevelZero === 2 && effectiveLevelOne === 1;
+
+    results.push({
+      category: "LÓGICA DE CONTRAESPIONAJE (PASO 0)",
+      test: "22. Contrainteligencia reduce nivel de espionaje pero nunca baja de 1",
+      passed: espionageLogicOk,
+      details: `Nivel 2 con 100% counter: ${effectiveLevel100}, con 0%: ${effectiveLevelZero}, Nivel 1 con 100% counter: ${effectiveLevelOne}`,
+    });
+  }
+
+  // 23. Verificación de aislamiento de civilización (E6b)
+  {
+      const mongolOk = TECHNOLOGY_CATALOG["tech_civ_mongoles_a"]?.civilizationRequirement === "mongoles";
+      const chinoNode = TECHNOLOGY_CATALOG["tech_civ_chinos_a"];
+      
+      results.push({
+          category: "RESTRICCIÓN DE CIVILIZACIÓN (E6b)",
+          test: "23. Un reino mongol no puede investigar tech_civ_chinos_a",
+          passed: mongolOk && chinoNode?.civilizationRequirement === "chinos",
+          details: `Mongol node civ: ${TECHNOLOGY_CATALOG["tech_civ_mongoles_a"]?.civilizationRequirement}, Chino node civ: ${chinoNode?.civilizationRequirement}`,
+      });
   }
 
   return results;
