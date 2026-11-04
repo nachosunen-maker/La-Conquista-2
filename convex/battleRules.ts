@@ -60,6 +60,9 @@ export interface BattleSide {
   combatAttackBonus?: number;
   /** Bonificación defensiva tecnológica aditiva (+0,05 = +5 %). */
   combatDefenseBonus?: number;
+  unitEfficiencyInf?: number;
+  unitEfficiencyArc?: number;
+  unitEfficiencyCav?: number;
 }
 
 export interface SideFactors {
@@ -147,7 +150,7 @@ export function wallsDefenseBonus(wallsLevel: number): number {
 }
 
 /** [P37 + M-11] Fuerza ofensiva y defensiva ponderadas por tipo, con la matriz de contrapartidas. */
-function strengths(composition: Composition, enemyComposition: Composition, enemyWalls: number): { offensive: number; defensive: number } {
+function strengths(side: BattleSide, composition: Composition, enemyComposition: Composition, enemyWalls: number): { offensive: number; defensive: number } {
   const enemyLiving = UNIT_TYPES.reduce((sum, type) => sum + (UNITS[type]?.isLivingTroop ? Math.max(0, enemyComposition[type] ?? 0) : 0), 0);
   let offensive = 0;
   let defensive = 0;
@@ -156,6 +159,17 @@ function strengths(composition: Composition, enemyComposition: Composition, enem
     if (count === 0) continue;
     const unit = UNITS[type];
     let attack = !unit.isLivingTroop && enemyWalls <= 0 ? COMBAT.SIEGE_ATTACK_WITHOUT_WALLS : unit.attack;
+    let defense = unit.defense;
+    
+    // Aplicar eficiencia de unidad
+    let efficiency = 0;
+    if (type === "infanteria") efficiency = side.unitEfficiencyInf ?? 0;
+    else if (type === "arqueria") efficiency = side.unitEfficiencyArc ?? 0;
+    else if (type === "caballeria") efficiency = side.unitEfficiencyCav ?? 0;
+    
+    attack *= (1 + efficiency);
+    defense *= (1 + efficiency);
+
     if (unit.isLivingTroop && enemyLiving > 0) {
       const countered = (UNIT_COUNTERS as Record<string, string>)[type];
       if (countered && enemyComposition[countered as UnitType] !== undefined) {
@@ -164,7 +178,7 @@ function strengths(composition: Composition, enemyComposition: Composition, enem
       }
     }
     offensive += count * attack;
-    defensive += count * unit.defense;
+    defensive += count * defense;
   }
   return { offensive, defensive };
 }
@@ -208,7 +222,7 @@ export function foodFactor(foodTier: string): number {
 
 export function computeSideFactors(side: BattleSide, composition: Composition, enemy: BattleSide, enemyComposition?: Composition): SideFactors {
   const effectives = totalUnits(composition);
-  const rawStrengths = strengths(composition, enemyComposition ?? enemy.composition, enemy.wallsLevel);
+  const rawStrengths = strengths(side, composition, enemyComposition ?? enemy.composition, enemy.wallsLevel);
   const civPassive = getCivilizationPassive(side.civilization);
   const techAttack = 1 + Math.max(0, side.combatAttackBonus ?? 0);
   const techDefense = 1 + Math.max(0, side.combatDefenseBonus ?? 0);
@@ -221,7 +235,7 @@ export function computeSideFactors(side: BattleSide, composition: Composition, e
   const enemyTactical = tacticalFormationOf(enemy);
   const formationAttack = strategyFactor(side.strategy, enemy.strategy, "attack") * tacticalFormationFactor(ownTactical, enemyTactical, "attack");
   const formationDefense = strategyFactor(side.strategy, enemy.strategy, "defense") * tacticalFormationFactor(ownTactical, enemyTactical, "defense");
-  const morale = moraleFactor(side.morale);
+  const morale = moraleFactor(Math.min(100, side.morale + (side.moraleBase ?? 0)));
   const food = foodFactor(side.foodTier);
   const fatigue = fatigueMultiplier(side.fatigue);
   const E = COMBAT.EXPONENTS;

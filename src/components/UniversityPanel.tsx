@@ -49,6 +49,10 @@ interface TechnologiesState {
     constructionCost?: number;
     housingCapacityBonus?: number;
     taxToleranceReduction?: number;
+    moraleBase?: number;
+    unitEfficiencyInf?: number;
+    unitEfficiencyArc?: number;
+    unitEfficiencyCav?: number;
   };
   researching: Array<{ _id: string; technologyId: string; name: string; startedAt?: number; durationMs?: number; costs?: Record<string, number>; progressPercent: number | null; completesAt: number | null }>;
   catalog: Array<{
@@ -149,6 +153,10 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
   if (m.constructionCost && m.constructionCost !== 1) activeEffects.push(`coste construcción ×${m.constructionCost.toFixed(2)}`);
   if (m.housingCapacityBonus && m.housingCapacityBonus > 0) activeEffects.push(`capacidad residencial +${Math.round(m.housingCapacityBonus * 100)} %`);
   if (m.taxToleranceReduction && m.taxToleranceReduction > 0) activeEffects.push(`tolerancia fiscal +${Math.round(m.taxToleranceReduction * 100)} %`);
+  if (m.moraleBase && m.moraleBase > 0) activeEffects.push(`moral militar +${m.moraleBase} puntos`);
+  if (m.unitEfficiencyInf && m.unitEfficiencyInf > 0) activeEffects.push(`eficacia infantería +${Math.round(m.unitEfficiencyInf * 100)} %`);
+  if (m.unitEfficiencyArc && m.unitEfficiencyArc > 0) activeEffects.push(`eficacia arqueros +${Math.round(m.unitEfficiencyArc * 100)} %`);
+  if (m.unitEfficiencyCav && m.unitEfficiencyCav > 0) activeEffects.push(`eficacia caballería +${Math.round(m.unitEfficiencyCav * 100)} %`);
   if (m.unlockedWeapons.length) activeEffects.push(`armas: ${m.unlockedWeapons.join(', ')}`);
   if (m.unlockedArmors.length) activeEffects.push(`armaduras: ${m.unlockedArmors.join(', ')}`);
 

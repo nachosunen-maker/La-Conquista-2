@@ -886,7 +886,12 @@ export type TechnologyEffectKey =
   | "researchDuration"
   | "constructionCost"
   | "housingCapacity"
-  | "taxTolerance";
+  | "taxTolerance"
+  | "moraleBase"
+  | "unitEfficiencyInf"
+  | "unitEfficiencyArc"
+  | "unitEfficiencyCav"
+  | "unitEfficiencyAll";
 
 export interface TechnologyBalance {
   id: string;
@@ -904,7 +909,7 @@ export interface TechnologyBalance {
 
 export const RESEARCH_TIME_SCALE = 1.0;
 
-/** [ENTREGA 1, 2 y 3] Topes máximos para los efectos acumulados de tecnologías (suma aditiva con techo). */
+/** [ENTREGA 1, 2, 3, 4a] Topes máximos para los efectos acumulados de tecnologías (suma aditiva con techo). */
 export const TECH_EFFECT_CAPS = {
   agricultureProduction: 0.65,
   miningProduction: 0.50,
@@ -927,6 +932,8 @@ export const TECH_EFFECT_CAPS = {
   constructionCost: 0.25,
   housingCapacity: 0.30,
   taxTolerance: 0.50,
+  moraleBase: 15,
+  unitEfficiency: 0.20,
 } as const;
 
 const DAY = TIME.SECONDS_PER_GAME_YEAR;
@@ -1013,6 +1020,19 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   { id: "tech_civ_navajos", name: "Rastreadores del bosque", branch: "civilizacion", universityLevel: 2, costs: { gold: 150, wood: 250, stone: 100, iron: 30, food: 0 }, durationSeconds: 420, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "navajos", effect: { key: "marchFatigue", value: 0.20, description: "−20 % fatiga de marcha por sendas y bosques" } },
   { id: "tech_civ_aztecas", name: "Chinampas y sacerdotes guerreros", branch: "civilizacion", universityLevel: 2, costs: { gold: 200, wood: 200, stone: 150, iron: 30, food: 0 }, durationSeconds: 420, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "aztecas", effect: { key: "agricultureProduction", value: 0.08, description: "+8 % producción agrícola en huertos intensivos" } },
   { id: "tech_civ_masais", name: "Resistencia masái y sabana", branch: "civilizacion", universityLevel: 2, costs: { gold: 160, wood: 180, stone: 100, iron: 40, food: 0 }, durationSeconds: 420, buildingRequirements: { universidad: 2 }, technologyRequirements: [], civilizationRequirement: "masais", effect: { key: "marchFatigue", value: 0.25, description: "−25 % fatiga en expediciones de larga distancia" } },
+  { id: "happiness_3", name: "Capellanes de campaña y misas de leva", branch: "civil", universityLevel: 2, costs: { gold: 250, wood: 170, stone: 160, iron: 20, food: 0 }, durationSeconds: 240, buildingRequirements: { castillo: 2, iglesia: 2 }, technologyRequirements: ["happiness_1"], effect: { key: "moraleBase", value: 3, description: "Moral militar +3 puntos" } },
+  { id: "happiness_6", name: "Cofradías y fiestas patronales", branch: "civil", universityLevel: 4, costs: { gold: 650, wood: 330, stone: 390, iron: 70, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, iglesia: 4, circo: 4 }, technologyRequirements: ["happiness_3", "happiness_4"], effect: { key: "happinessBase", value: 4, description: "+4 felicidad base" } },
+  { id: "happiness_7", name: "Edad de oro del reino", branch: "civil", universityLevel: 5, costs: { gold: 1800, wood: 880, stone: 910, iron: 190, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8 }, technologyRequirements: ["happiness_2", "happiness_5", "happiness_6"], effect: { key: "happinessBase", value: 5, description: "+5 felicidad base" } },
+  { id: "training_4", name: "Disciplina y ordenanza de hierro", branch: "militar", universityLevel: 4, costs: { gold: 650, wood: 240, stone: 180, iron: 130, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, cuartel: 4 }, technologyRequirements: ["training_2"], effect: { key: "moraleBase", value: 3, description: "Moral militar +3 puntos" } },
+  { id: "training_5", name: "Academia militar", branch: "militar", universityLevel: 5, costs: { gold: 1100, wood: 400, stone: 270, iron: 220, food: 0 }, durationSeconds: 720, buildingRequirements: { castillo: 6, cuartel: 6 }, technologyRequirements: ["training_3", "training_4"], effect: { key: "trainingDuration", value: -0.08, description: "−8 % duración de entrenamiento militar" } },
+  { id: "logistics_4", name: "Estandartes, trompetas y banderas", branch: "militar", universityLevel: 4, costs: { gold: 650, wood: 240, stone: 180, iron: 130, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, cuartel: 4 }, technologyRequirements: ["training_4", "logistics_1"], effect: { key: "moraleBase", value: 3, description: "Moral militar +3 puntos" } },
+  { id: "tactics_inf_1", name: "Escuadras de lanceros y piqueros", branch: "militar", universityLevel: 2, costs: { gold: 250, wood: 120, stone: 70, iron: 40, food: 0 }, durationSeconds: 240, buildingRequirements: { castillo: 2, cuartel: 2 }, technologyRequirements: ["training_1"], effect: { key: "unitEfficiencyInf", value: 0.04, description: "Eficacia de infantería +4 %" } },
+  { id: "tactics_arc_1", name: "Compañías de arqueros y ballesteros", branch: "militar", universityLevel: 2, costs: { gold: 250, wood: 120, stone: 70, iron: 40, food: 0 }, durationSeconds: 240, buildingRequirements: { castillo: 2, cuartel: 2 }, technologyRequirements: ["training_1"], effect: { key: "unitEfficiencyArc", value: 0.04, description: "Eficacia de arqueros +4 %" } },
+  { id: "tactics_cav_1", name: "Monta y caballería pesada", branch: "militar", universityLevel: 2, costs: { gold: 250, wood: 120, stone: 70, iron: 40, food: 0 }, durationSeconds: 240, buildingRequirements: { castillo: 2, cuartel: 2 }, technologyRequirements: ["training_1"], effect: { key: "unitEfficiencyCav", value: 0.04, description: "Eficacia de caballería +4 %" } },
+  { id: "tactics_inf_2", name: "Infantería de línea", branch: "militar", universityLevel: 4, costs: { gold: 650, wood: 240, stone: 180, iron: 130, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, cuartel: 4 }, technologyRequirements: ["tactics_inf_1", "training_2"], effect: { key: "unitEfficiencyInf", value: 0.05, description: "Eficacia de infantería +5 %" } },
+  { id: "tactics_arc_2", name: "Salvas y tiro en masa", branch: "militar", universityLevel: 4, costs: { gold: 650, wood: 240, stone: 180, iron: 130, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, cuartel: 4 }, technologyRequirements: ["tactics_arc_1", "training_2"], effect: { key: "unitEfficiencyArc", value: 0.05, description: "Eficacia de arqueros +5 %" } },
+  { id: "tactics_cav_2", name: "Cargas de choque y maniobra", branch: "militar", universityLevel: 4, costs: { gold: 650, wood: 240, stone: 180, iron: 130, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, cuartel: 4 }, technologyRequirements: ["tactics_cav_1", "training_2"], effect: { key: "unitEfficiencyCav", value: 0.05, description: "Eficacia de caballería +5 %" } },
+  { id: "tactics_all", name: "Ejércitos de armas combinadas", branch: "militar", universityLevel: 5, costs: { gold: 1800, wood: 640, stone: 420, iron: 380, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8, cuartel: 7 }, technologyRequirements: ["tactics_inf_2", "tactics_arc_2", "tactics_cav_2"], effect: { key: "unitEfficiencyAll", value: 0.04, description: "Eficacia de las tres armas +4 %" } },
 ];
 
 export const RESEARCH = {

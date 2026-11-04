@@ -380,6 +380,7 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       "combatDefense", "marchSpeed", "marchFatigue",
       "foodConsumption", "woodProduction", "stoneProduction", "ironProduction", "goldProduction",
       "researchDuration", "constructionCost", "housingCapacity", "taxTolerance",
+      "moraleBase", "unitEfficiencyInf", "unitEfficiencyArc", "unitEfficiencyCav", "unitEfficiencyAll",
     ]);
     const allEffectsKnown = TECHNOLOGIES.every((t) => KNOWN_EFFECT_KEYS.has(t.effect.key));
 
@@ -459,6 +460,23 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       passed: noneOk && eduOk && conOk && taxOk && houCapOk,
       details: `Sin investigación: base correcta (1.0/0). Con investigación: researchDuration: ${modEdu.researchDuration}, constructionCost: ${modCon.constructionCost}, taxTolerance: ${modTax.taxToleranceReduction}, tope housingCapacity: ${TECH_EFFECT_CAPS.housingCapacity}`,
     });
+  }
+
+  // 15. Verificación de moraleBase y unitEfficiency (E4a)
+  {
+      const modHap3 = computeTechnologyModifiers(["happiness_3"]);
+      const modInf = computeTechnologyModifiers(["tactics_inf_1"]);
+      
+      const moraleOk = modHap3.moraleBase === 3;
+      const infOk = Math.abs(modInf.unitEfficiencyInf - 0.04) < 1e-9;
+      const cavOk = modInf.unitEfficiencyCav === 0;
+
+      results.push({
+          category: "NUEVOS EFECTOS DE MORAL Y EFICACIA (ENTREGA 4a)",
+          test: "15. moraleBase y unitEfficiency calculan modificadores y respetan topes",
+          passed: moraleOk && infOk && cavOk,
+          details: `MoralBase: ${modHap3.moraleBase}, InfEficacia: ${modInf.unitEfficiencyInf}, CavEficacia: ${modInf.unitEfficiencyCav}`,
+      });
   }
 
   return results;

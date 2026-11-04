@@ -81,6 +81,10 @@ export interface TechnologyModifiers {
   constructionCost: number; // multiplicador de coste de construcción (mín 0,75)
   housingCapacityBonus: number; // bonificación de capacidad residencial (máx 0,30)
   taxToleranceReduction: number; // reducción de penalización fiscal (máx 0,50)
+  moraleBase: number;
+  unitEfficiencyInf: number;
+  unitEfficiencyArc: number;
+  unitEfficiencyCav: number;
 }
 
 export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>): TechnologyModifiers {
@@ -105,6 +109,10 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
   let sumConstructionCost = 0;
   let sumHousingCapacity = 0;
   let sumTaxTolerance = 0;
+  let sumMorale = 0;
+  let sumEffInf = 0;
+  let sumEffArc = 0;
+  let sumEffCav = 0;
   const unlockedWeapons: string[] = [];
   const unlockedArmors: string[] = [];
 
@@ -141,6 +149,11 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
       case "constructionCost": sumConstructionCost += value; break; // Convención: valor negativo e.g. -0.06
       case "housingCapacity": sumHousingCapacity += value; break;
       case "taxTolerance": sumTaxTolerance += Math.abs(value); break; // Convención: e.g. -0.50 -> 0.50
+      case "moraleBase": sumMorale += value; break;
+      case "unitEfficiencyInf": sumEffInf += value; break;
+      case "unitEfficiencyArc": sumEffArc += value; break;
+      case "unitEfficiencyCav": sumEffCav += value; break;
+      case "unitEfficiencyAll": sumEffInf += value; sumEffArc += value; sumEffCav += value; break;
     }
   }
 
@@ -168,6 +181,10 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     constructionCost: Math.max(1 - TECH_EFFECT_CAPS.constructionCost, 1 + sumConstructionCost),
     housingCapacityBonus: Math.min(TECH_EFFECT_CAPS.housingCapacity, Math.max(0, sumHousingCapacity)),
     taxToleranceReduction: Math.min(TECH_EFFECT_CAPS.taxTolerance, Math.max(0, sumTaxTolerance)),
+    moraleBase: Math.min(TECH_EFFECT_CAPS.moraleBase, sumMorale),
+    unitEfficiencyInf: Math.min(TECH_EFFECT_CAPS.unitEfficiency, Math.max(0, sumEffInf)),
+    unitEfficiencyArc: Math.min(TECH_EFFECT_CAPS.unitEfficiency, Math.max(0, sumEffArc)),
+    unitEfficiencyCav: Math.min(TECH_EFFECT_CAPS.unitEfficiency, Math.max(0, sumEffCav)),
   };
 }
 
