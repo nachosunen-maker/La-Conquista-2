@@ -7,6 +7,7 @@ import {
   TECHNOLOGIES,
   RESEARCH,
   INITIAL_BUILDINGS,
+  TECH_EFFECT_CAPS,
   type ResourceCosts,
 } from "./balanceConfig";
 import {
@@ -285,26 +286,122 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     });
   }
 
-  // 11. [SEPARADA] Verificación de requisitos de edificios superiores a niveles iniciales de INITIAL_BUILDINGS
+  // 11. Verificación de requisitos de edificios superiores a niveles iniciales y coherencia con Castillo
   {
-    const warnings: string[] = [];
-    let newTechsHaveInvalidReqs = false;
+    const NEW_TECH_IDS = new Set([
+      "agri_4", "agri_6", "mining_3", "storage_2", "storage_3",
+      "construction_3", "happiness_4", "training_3", "forge_2", "forge_3",
+      "forge_4", "forge_5", "medicine_3", "logistics_1", "logistics_2", "spy_2",
+    ]);
+    const legacyWarnings: string[] = [];
+    let newNodesValid = true;
 
     for (const tech of TECHNOLOGIES) {
-      if (!tech.buildingRequirements) continue;
+      const isNew = NEW_TECH_IDS.has(tech.id);
+      const castleLevel = tech.buildingRequirements.castillo ?? 0;
       for (const [bldKey, reqLevel] of Object.entries(tech.buildingRequirements)) {
+        if (bldKey === "castillo" || bldKey === "universidad") continue;
         const initialLevel = INITIAL_BUILDINGS[bldKey] ?? 0;
-        if (initialLevel > 0 && reqLevel <= initialLevel) {
-          warnings.push(`${tech.id} (${bldKey} req ${reqLevel} vs inicial ${initialLevel})`);
+        if (isNew) {
+          if (castleLevel > 0 && reqLevel > castleLevel) {
+            newNodesValid = false;
+          }
+          if (initialLevel > 0 && reqLevel <= initialLevel) {
+            newNodesValid = false;
+          }
+        } else {
+          if (initialLevel > 0 && reqLevel <= initialLevel) {
+            legacyWarnings.push(`${tech.id} (${bldKey} req ${reqLevel} vs inicial ${initialLevel})`);
+          }
         }
       }
     }
 
     results.push({
-      category: "NIVELES INICIALES DE EDIFICIOS (NUEVA)",
-      test: "11. Requisitos de edificio comparados contra niveles iniciales de INITIAL_BUILDINGS",
-      passed: !newTechsHaveInvalidReqs,
-      details: `Nuevos nodos válidos: true; Avisos en 32 iniciales (${warnings.length}): ${warnings.join("; ")}`,
+      category: "NIVELES INICIALES Y EDIFICIOS EXTRA (E1)",
+      test: "11. Ningún edificio extra nuevo supera el Castillo del nodo ni pide <= nivel inicial de INITIAL_BUILDINGS",
+      passed: newNodesValid,
+      details: `16 nuevos nodos válidos: ${newNodesValid}; Avisos en 32 iniciales (${legacyWarnings.length}): ${legacyWarnings.join("; ")}`,
+    });
+  }
+
+  // 12. Validación integral del catálogo tecnológico (Entrega 1)
+  {
+    const ids = TECHNOLOGIES.map((t) => t.id);
+    const uniqueIds = ids.length === new Set(ids).size;
+
+    let allPrereqsExist = true;
+    for (const tech of TECHNOLOGIES) {
+      for (const req of tech.technologyRequirements) {
+        if (!TECHNOLOGY_CATALOG[req]) {
+          allPrereqsExist = false;
+        }
+      }
+    }
+
+    let hasCycle = false;
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    function dfs(id: string) {
+      visiting.add(id);
+      const tech = TECHNOLOGY_CATALOG[id];
+      if (tech) {
+        for (const req of tech.technologyRequirements) {
+          if (visiting.has(req)) {
+            hasCycle = true;
+            return;
+          }
+          if (!visited.has(req)) dfs(req);
+        }
+      }
+      visiting.delete(id);
+      visited.add(id);
+    }
+    for (const tech of TECHNOLOGIES) {
+      if (!visited.has(tech.id)) dfs(tech.id);
+    }
+
+    let univLevelValid = true;
+    for (const tech of TECHNOLOGIES) {
+      for (const req of tech.technologyRequirements) {
+        const parent = TECHNOLOGY_CATALOG[req];
+        if (parent && tech.universityLevel < parent.universityLevel) {
+          univLevelValid = false;
+        }
+      }
+    }
+
+    const KNOWN_EFFECT_KEYS = new Set([
+      "agricultureProduction", "miningProduction", "storageCapacity", "woundedRecovery",
+      "espionageAccuracy", "trainingDuration", "unlockWeaponSteel", "unlockArmorSteel",
+      "constructionDuration", "happinessBase", "unlockWeaponAdvancedSteel", "combatAttack",
+      "combatDefense", "marchSpeed", "marchFatigue",
+    ]);
+    const allEffectsKnown = TECHNOLOGIES.every((t) => KNOWN_EFFECT_KEYS.has(t.effect.key));
+
+    const allIds = TECHNOLOGIES.map((t) => t.id);
+    const maxModifiers = computeTechnologyModifiers(allIds);
+    const capsRespected =
+      maxModifiers.agricultureProduction <= 1 + TECH_EFFECT_CAPS.agricultureProduction + 1e-9 &&
+      maxModifiers.miningProduction <= 1 + TECH_EFFECT_CAPS.miningProduction + 1e-9 &&
+      maxModifiers.storageCapacity <= 1 + TECH_EFFECT_CAPS.storageCapacity + 1e-9 &&
+      maxModifiers.happinessBase <= TECH_EFFECT_CAPS.happinessBase &&
+      maxModifiers.combatAttackBonus <= TECH_EFFECT_CAPS.combatAttack + 1e-9 &&
+      maxModifiers.combatDefenseBonus <= TECH_EFFECT_CAPS.combatDefense + 1e-9 &&
+      maxModifiers.marchSpeedBonus <= TECH_EFFECT_CAPS.marchSpeed + 1e-9 &&
+      maxModifiers.marchFatigueReduction <= TECH_EFFECT_CAPS.marchFatigue + 1e-9 &&
+      maxModifiers.woundedRecoveryBonus <= TECH_EFFECT_CAPS.woundedRecovery + 1e-9 &&
+      maxModifiers.trainingDuration >= TECH_EFFECT_CAPS.trainingDurationFloor - 1e-9 &&
+      maxModifiers.constructionDuration >= TECH_EFFECT_CAPS.constructionDurationFloor - 1e-9 &&
+      maxModifiers.espionageLevel <= TECH_EFFECT_CAPS.espionageAccuracyMax;
+
+    const allValid = uniqueIds && allPrereqsExist && !hasCycle && univLevelValid && allEffectsKnown && capsRespected;
+
+    results.push({
+      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E1)",
+      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, efectos conocidos y topes respetados",
+      passed: allValid,
+      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 existentes + 16 nuevas). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
     });
   }
 

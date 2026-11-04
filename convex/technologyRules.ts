@@ -10,11 +10,13 @@ import {
   RESEARCH,
   RESEARCH_SLOTS_BY_UNIVERSITY,
   TECHNOLOGIES,
-  HOSPITAL_RECOVERY_CAP,
+  TECH_EFFECT_CAPS,
   resourceNameSpanish,
   type TechnologyBalance,
-  type TechnologyEffectKey, LEGACY_TECHNOLOGY_IDS } from "./balanceConfig";
-import { checkBuildingRequirements } from "./buildingRules";
+  type TechnologyEffectKey,
+  LEGACY_TECHNOLOGY_IDS,
+} from "./balanceConfig";
+import { BUILDING_RULES } from "./buildingRules";
 import {
   getCivilizationPassive,
   validateCivilizationTechAccess,
@@ -73,22 +75,21 @@ export interface TechnologyModifiers {
 }
 
 export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>): TechnologyModifiers {
-  const modifiers: TechnologyModifiers = {
-    agricultureProduction: 1,
-    miningProduction: 1,
-    storageCapacity: 1,
-    woundedRecoveryBonus: 0,
-    espionageLevel: 0,
-    trainingDuration: 1,
-    constructionDuration: 1,
-    happinessBase: 0,
-    unlockedWeapons: [],
-    unlockedArmors: [],
-    combatAttackBonus: 0,
-    combatDefenseBonus: 0,
-    marchSpeedBonus: 0,
-    marchFatigueReduction: 0,
-  };
+  let sumAgri = 0;
+  let sumMining = 0;
+  let sumStorage = 0;
+  let sumWounded = 0;
+  let maxEspionage = 0;
+  let sumTraining = 0;
+  let sumConstruction = 0;
+  let sumHappiness = 0;
+  let sumCombatAttack = 0;
+  let sumCombatDefense = 0;
+  let sumMarchSpeed = 0;
+  let sumMarchFatigue = 0;
+  const unlockedWeapons: string[] = [];
+  const unlockedArmors: string[] = [];
+
   const seen = new Set<string>();
   for (const rawId of completedIds) {
     const id = normalizeTechnologyId(rawId);
@@ -98,25 +99,40 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     if (!technology) continue;
     const { key, value } = technology.effect;
     switch (key as TechnologyEffectKey) {
-      case "agricultureProduction": modifiers.agricultureProduction *= 1 + value; break;
-      case "miningProduction": modifiers.miningProduction *= 1 + value; break;
-      case "storageCapacity": modifiers.storageCapacity *= 1 + value; break;
-      case "woundedRecovery": modifiers.woundedRecoveryBonus = Math.min(HOSPITAL_RECOVERY_CAP, modifiers.woundedRecoveryBonus + value); break;
-      case "espionageAccuracy": modifiers.espionageLevel = Math.max(modifiers.espionageLevel, value); break;
-      case "trainingDuration": modifiers.trainingDuration *= 1 + value; break;
-      case "constructionDuration": modifiers.constructionDuration *= 1 + value; break;
-      case "happinessBase": modifiers.happinessBase += value; break;
-      case "unlockWeaponSteel": modifiers.unlockedWeapons.push("acero"); break;
-      case "unlockWeaponAdvancedSteel": modifiers.unlockedWeapons.push("aceroAvanzado"); break;
-      case "unlockArmorSteel": modifiers.unlockedArmors.push("acero"); break;
-      case "combatAttack": modifiers.combatAttackBonus += value; break;
-      case "combatDefense": modifiers.combatDefenseBonus += value; break;
-      case "marchSpeed": modifiers.marchSpeedBonus += value; break;
-      case "marchFatigue": modifiers.marchFatigueReduction = Math.min(0.5, modifiers.marchFatigueReduction + value); break;
+      case "agricultureProduction": sumAgri += value; break;
+      case "miningProduction": sumMining += value; break;
+      case "storageCapacity": sumStorage += value; break;
+      case "woundedRecovery": sumWounded += value; break;
+      case "espionageAccuracy": maxEspionage = Math.max(maxEspionage, value); break;
+      case "trainingDuration": sumTraining += value; break; // Convención: valor negativo e.g. -0.05
+      case "constructionDuration": sumConstruction += value; break; // Convención: valor negativo e.g. -0.05
+      case "happinessBase": sumHappiness += value; break;
+      case "unlockWeaponSteel": unlockedWeapons.push("acero"); break;
+      case "unlockWeaponAdvancedSteel": unlockedWeapons.push("aceroAvanzado"); break;
+      case "unlockArmorSteel": unlockedArmors.push("acero"); break;
+      case "combatAttack": sumCombatAttack += value; break;
+      case "combatDefense": sumCombatDefense += value; break;
+      case "marchSpeed": sumMarchSpeed += value; break;
+      case "marchFatigue": sumMarchFatigue += Math.abs(value); break;
     }
   }
-  modifiers.constructionDuration = Math.max(RESEARCH.CONSTRUCTION_MIN_DURATION_RATIO, modifiers.constructionDuration);
-  return modifiers;
+
+  return {
+    agricultureProduction: 1 + Math.min(TECH_EFFECT_CAPS.agricultureProduction, Math.max(0, sumAgri)),
+    miningProduction: 1 + Math.min(TECH_EFFECT_CAPS.miningProduction, Math.max(0, sumMining)),
+    storageCapacity: 1 + Math.min(TECH_EFFECT_CAPS.storageCapacity, Math.max(0, sumStorage)),
+    woundedRecoveryBonus: Math.min(TECH_EFFECT_CAPS.woundedRecovery, Math.max(0, sumWounded)),
+    espionageLevel: Math.min(TECH_EFFECT_CAPS.espionageAccuracyMax, maxEspionage),
+    trainingDuration: Math.max(TECH_EFFECT_CAPS.trainingDurationFloor, 1 + sumTraining),
+    constructionDuration: Math.max(TECH_EFFECT_CAPS.constructionDurationFloor, 1 + sumConstruction),
+    happinessBase: Math.min(TECH_EFFECT_CAPS.happinessBase, sumHappiness),
+    unlockedWeapons,
+    unlockedArmors,
+    combatAttackBonus: Math.min(TECH_EFFECT_CAPS.combatAttack, sumCombatAttack),
+    combatDefenseBonus: Math.min(TECH_EFFECT_CAPS.combatDefense, sumCombatDefense),
+    marchSpeedBonus: Math.min(TECH_EFFECT_CAPS.marchSpeed, sumMarchSpeed),
+    marchFatigueReduction: Math.min(TECH_EFFECT_CAPS.marchFatigue, sumMarchFatigue),
+  };
 }
 
 export function getConstructionDurationModifier(completedIds: ReadonlyArray<string>): number {
@@ -147,8 +163,19 @@ export function evaluateTechnologyStatus(input: {
   if ((buildingLevels.universidad ?? 0) < technology.universityLevel) {
     blockers.push(`Universidad nivel ${technology.universityLevel}`);
   }
-  const requirementCheck = checkBuildingRequirements(technology.buildingRequirements, buildingLevels);
-  if (!requirementCheck.satisfied) blockers.push(requirementCheck.error);
+
+  // Comprobar requisitos de edificios (Castillo, y edificios extra)
+  for (const [buildingType, reqLevel] of Object.entries(technology.buildingRequirements)) {
+    if (buildingType === "universidad" && reqLevel <= technology.universityLevel) {
+      continue;
+    }
+    const current = buildingLevels[buildingType] ?? 0;
+    if (current < reqLevel) {
+      const label = BUILDING_RULES[buildingType]?.label ?? buildingType;
+      blockers.push(`${label} nivel ${reqLevel}`);
+    }
+  }
+
   for (const requiredId of technology.technologyRequirements) {
     if (!completedIds.has(requiredId)) {
       blockers.push(`Requiere ${TECHNOLOGY_CATALOG[requiredId]?.name ?? requiredId}`);

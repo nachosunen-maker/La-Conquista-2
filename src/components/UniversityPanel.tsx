@@ -36,6 +36,10 @@ interface TechnologiesState {
     happinessBase: number;
     unlockedWeapons: string[];
     unlockedArmors: string[];
+    combatAttackBonus?: number;
+    combatDefenseBonus?: number;
+    marchSpeedBonus?: number;
+    marchFatigueReduction?: number;
   };
   researching: Array<{ _id: string; technologyId: string; name: string; startedAt?: number; durationMs?: number; costs?: Record<string, number>; progressPercent: number | null; completesAt: number | null }>;
   catalog: Array<{
@@ -123,6 +127,10 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
   if (m.trainingDuration !== 1) activeEffects.push(`entrenamiento ×${m.trainingDuration.toFixed(2)}`);
   if (m.constructionDuration !== 1) activeEffects.push(`construcción ×${m.constructionDuration.toFixed(2)}`);
   if (m.happinessBase > 0) activeEffects.push(`felicidad base +${m.happinessBase}`);
+  if (m.combatAttackBonus && m.combatAttackBonus > 0) activeEffects.push(`ataque militar +${Math.round(m.combatAttackBonus * 100)} %`);
+  if (m.combatDefenseBonus && m.combatDefenseBonus > 0) activeEffects.push(`defensa militar +${Math.round(m.combatDefenseBonus * 100)} %`);
+  if (m.marchSpeedBonus && m.marchSpeedBonus > 0) activeEffects.push(`velocidad de marcha +${Math.round(m.marchSpeedBonus * 100)} %`);
+  if (m.marchFatigueReduction && m.marchFatigueReduction > 0) activeEffects.push(`reducción fatiga −${Math.round(m.marchFatigueReduction * 100)} %`);
   if (m.unlockedWeapons.length) activeEffects.push(`armas: ${m.unlockedWeapons.join(', ')}`);
   if (m.unlockedArmors.length) activeEffects.push(`armaduras: ${m.unlockedArmors.join(', ')}`);
 
@@ -170,14 +178,14 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
                   </span>
                 </div>
                 <p className="text-[#c7beac]"><strong className="text-[#e6ded0]">Efecto:</strong> {technology.effect.description}</p>
-                <p className="text-[#c7beac]"><strong className="text-[#e6ded0]">Coste:</strong> {formatCosts(technology.costs)} · <strong className="text-[#e6ded0]">duración:</strong> {formatSecondsDuration(technology.bonifiedDurationSeconds || technology.durationSeconds)}</p>
+                <p className="text-[#c7beac]"><strong className="text-[#e6ded0]">Coste:</strong> {formatCosts(technology.costs)} · <strong className="text-[#e6ded0]">Duración:</strong> {formatSecondsDuration(technology.bonifiedDurationSeconds || technology.durationSeconds)}</p>
                 <p className="text-[#8e816d]">
                   Universidad nivel {technology.universityLevel}
                   {Object.keys(technology.buildingRequirements).length ? ` · ${formatRequirements(technology.buildingRequirements, buildingLabels)}` : ''}
                   {technology.technologyRequirements.length ? ` · requiere ${technology.technologyRequirements.map(technologyName).join(', ')}` : ''}
                 </p>
                 {technology.status === 'locked' && technology.blockers.length > 0 && (
-                  <p className="text-amber-300/90">Bloqueada: {technology.blockers.join('; ')}</p>
+                  <p className="text-amber-300/90 font-medium"><strong className="text-amber-200">Falta para desbloquear:</strong> {technology.blockers.join('; ')}</p>
                 )}
                 {writable && technology.status === 'available' && (
                   <button
