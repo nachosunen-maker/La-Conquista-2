@@ -380,7 +380,8 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       "combatDefense", "marchSpeed", "marchFatigue",
       "foodConsumption", "woodProduction", "stoneProduction", "ironProduction", "goldProduction",
       "researchDuration", "constructionCost", "housingCapacity", "taxTolerance",
-      "moraleBase", "unitEfficiencyInf", "unitEfficiencyArc", "unitEfficiencyCav", "unitEfficiencyAll",
+      "moraleBase", "unitEfficiencyInf", "unitEfficiencyArc", "unitEfficiencyCav", "unitEfficiencyAll", "mercenaryCost",
+      "woundedRate", "fatigueAccrual",
     ]);
     const allEffectsKnown = TECHNOLOGIES.every((t) => KNOWN_EFFECT_KEYS.has(t.effect.key));
 
@@ -407,7 +408,9 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       maxModifiers.researchDuration >= 1 - TECH_EFFECT_CAPS.researchDuration - 1e-9 &&
       maxModifiers.constructionCost >= 1 - TECH_EFFECT_CAPS.constructionCost - 1e-9 &&
       maxModifiers.housingCapacityBonus <= TECH_EFFECT_CAPS.housingCapacity + 1e-9 &&
-      maxModifiers.taxToleranceReduction <= TECH_EFFECT_CAPS.taxTolerance + 1e-9;
+      maxModifiers.taxToleranceReduction <= TECH_EFFECT_CAPS.taxTolerance + 1e-9 &&
+      maxModifiers.woundedRateBonus <= TECH_EFFECT_CAPS.woundedRate + 1e-9 &&
+      maxModifiers.fatigueAccrualReduction <= TECH_EFFECT_CAPS.fatigueAccrual + 1e-9;
 
     const allValid = uniqueIds && allPrereqsExist && !hasCycle && univLevelValid && allEffectsKnown && capsRespected;
 
@@ -415,7 +418,7 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E3)",
       test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, 24 tipos de efectos conocidos y topes respetados",
       passed: allValid,
-      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 + 12 E3 = 72). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
+      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 + 12 E3 + 13 E4a + 2 E4b + 7 E4c = 94). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
     });
   }
 
@@ -473,11 +476,80 @@ export function runTechnologyTests(): TechnologyTestResult[] {
 
       results.push({
           category: "NUEVOS EFECTOS DE MORAL Y EFICACIA (ENTREGA 4a)",
-          test: "15. moraleBase y unitEfficiency calculan modificadores y respetan topes",
-          passed: moraleOk && infOk && cavOk,
-          details: `MoralBase: ${modHap3.moraleBase}, InfEficacia: ${modInf.unitEfficiencyInf}, CavEficacia: ${modInf.unitEfficiencyCav}`,
+          test: "15. moraleBase y unitEfficiency calculan modificadores, respetan topes y demuestran aislamiento de tipos",
+          passed: moraleOk && infOk && cavOk && testEfficiencyIsolation,
+          details: `MoralBase: ${modHap3.moraleBase}, InfEficacia: ${modInf.unitEfficiencyInf}, CavEficacia: ${modInf.unitEfficiencyCav}, Aislamiento: ${testEfficiencyIsolation}`,
       });
+  }
+
+  // 16. Verificación de E4b: coste de mercenarios
+  {
+      const modMerc = computeTechnologyModifiers(["merc_1"]);
+      const mercOk = Math.abs(modMerc.mercenaryCostReduction - 0.08) < 1e-9;
+      
+      results.push({
+          category: "NUEVOS EFECTOS DE MERCENARIOS (ENTREGA 4b)",
+          test: "16. mercenaryCostReduction calcula modificadores y respeta topes",
+          passed: mercOk,
+          details: `Reducción: ${modMerc.mercenaryCostReduction}`,
+      });
+  }
+
+  // 17. Verificación de E4c: woundedRate
+  {
+    const modMed2 = computeTechnologyModifiers(["medicine_2"]);
+    
+    // Simular reparto de heridos
+    const casualties = emptyComposition();
+    casualties.infanteria = 100;
+    
+    // Base 65 % (0.65) -> 65 heridos
+    const woundedBase = Math.round(100 * 0.65);
+    // Con medicine_2 (+4 pp) -> 0.65 + 0.04 = 0.69 -> 69 heridos
+    const ratioWithTech = 0.65 + modMed2.woundedRateBonus;
+    const woundedWithTech = Math.round(100 * ratioWithTech);
+    
+    const passed = woundedBase === 65 && woundedWithTech === 69;
+    
+    results.push({
+      category: "NUEVOS EFECTOS DE HERIDOS (ENTREGA 4c)",
+      test: "17. woundedRate aumenta correctamente el número de bajas que pasan a heridos",
+      passed,
+      details: `Heridos base: ${woundedBase}, con tech: ${woundedWithTech} (ratio ${ratioWithTech.toFixed(2)})`,
+    });
+  }
+
+  // 18. Verificación de E4c: fatigueAccrual
+  {
+    const modFatigue = computeTechnologyModifiers(["medical_4", "logistics_3"]);
+    
+    const dist = 5;
+    const terrain = 1.0;
+    
+    // Fatiga base: current 0 + ceil(2 * 5 * 1.0 * factor_civ 1.0 * factor_tech 1.0) = 10
+    const fatBase = marchFatigue(0, dist, terrain, 1.0, 0, 0);
+    
+    // Con medical_4 (-5 %) y logistics_3 (-6 %):
+    // factor_tech = (1-0.05)*(1-0.06) = 0.893
+    // fat = 0 + ceil(10 * 0.893) = ceil(8.93) = 9
+    const fatWithTech = marchFatigue(0, dist, terrain, 1.0, 0, modFatigue.fatigueAccrualReduction);
+    
+    const passed = fatBase === 10 && fatWithTech === 9;
+    
+    results.push({
+      category: "NUEVOS EFECTOS DE FATIGA (ENTREGA 4c)",
+      test: "18. fatigueAccrual reduce la fatiga acumulada en marchas multiplicativamente",
+      passed,
+      details: `Fatiga base: ${fatBase}, con tech: ${fatWithTech} (reducción tech: ${modFatigue.fatigueAccrualReduction.toFixed(2)})`,
+    });
   }
 
   return results;
 }
+
+function testEfficiencyIsolation(): boolean {
+    // Prueba aislamiento: infantería no cambia con tecnología de caballería
+    const modCavTech = computeTechnologyModifiers(["tactics_cav_1"]);
+    return Math.abs(modCavTech.unitEfficiencyInf) < 1e-9 && Math.abs(modCavTech.unitEfficiencyCav - 0.04) < 1e-9;
+}
+

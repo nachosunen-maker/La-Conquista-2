@@ -423,6 +423,7 @@ export function validateMercenaryHire(input: {
   tavernLevel: number;
   activeMercenaries: number;
   gold: number;
+  mercenaryCostReduction?: number;
 }): { success: true; type: MercenaryType; cost: number } | { success: false; error: string } {
   if (!Number.isInteger(input.count) || input.count < 1) return { success: false, error: "La cantidad debe ser un entero positivo." };
   if (input.tavernLevel < 1) return { success: false, error: "Se necesita una Taberna para contratar mercenarios (P13, P53)." };
@@ -435,7 +436,8 @@ export function validateMercenaryHire(input: {
   if (input.activeMercenaries + input.count > maxActive) {
     return { success: false, error: `La Taberna nivel ${input.tavernLevel} admite ${maxActive} mercenarios activos; hay ${input.activeMercenaries}.` };
   }
-  const cost = type.goldPerUnit * input.count;
+  const costBase = type.goldPerUnit * input.count;
+  const cost = Math.max(0, Math.floor(costBase * (1 - (input.mercenaryCostReduction ?? 0))));
   if (input.gold < cost) {
     return { success: false, error: `Oro insuficiente: ${input.count} ${type.label} cuestan ${cost} y hay ${Math.floor(input.gold)}.` };
   }

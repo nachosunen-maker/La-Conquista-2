@@ -891,7 +891,10 @@ export type TechnologyEffectKey =
   | "unitEfficiencyInf"
   | "unitEfficiencyArc"
   | "unitEfficiencyCav"
-  | "unitEfficiencyAll";
+  | "unitEfficiencyAll"
+  | "mercenaryCost"
+  | "woundedRate"
+  | "fatigueAccrual";
 
 export interface TechnologyBalance {
   id: string;
@@ -909,7 +912,7 @@ export interface TechnologyBalance {
 
 export const RESEARCH_TIME_SCALE = 1.0;
 
-/** [ENTREGA 1, 2, 3, 4a] Topes máximos para los efectos acumulados de tecnologías (suma aditiva con techo). */
+/** [ENTREGA 1, 2, 3, 4a, 4c] Topes máximos para los efectos acumulados de tecnologías (suma aditiva con techo). */
 export const TECH_EFFECT_CAPS = {
   agricultureProduction: 0.65,
   miningProduction: 0.50,
@@ -934,6 +937,9 @@ export const TECH_EFFECT_CAPS = {
   taxTolerance: 0.50,
   moraleBase: 15,
   unitEfficiency: 0.20,
+  mercenaryCost: 0.30,
+  woundedRate: 0.20,
+  fatigueAccrual: 0.30,
 } as const;
 
 const DAY = TIME.SECONDS_PER_GAME_YEAR;
@@ -1033,7 +1039,19 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   { id: "tactics_arc_2", name: "Salvas y tiro en masa", branch: "militar", universityLevel: 4, costs: { gold: 650, wood: 240, stone: 180, iron: 130, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, cuartel: 4 }, technologyRequirements: ["tactics_arc_1", "training_2"], effect: { key: "unitEfficiencyArc", value: 0.05, description: "Eficacia de arqueros +5 %" } },
   { id: "tactics_cav_2", name: "Cargas de choque y maniobra", branch: "militar", universityLevel: 4, costs: { gold: 650, wood: 240, stone: 180, iron: 130, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, cuartel: 4 }, technologyRequirements: ["tactics_cav_1", "training_2"], effect: { key: "unitEfficiencyCav", value: 0.05, description: "Eficacia de caballería +5 %" } },
   { id: "tactics_all", name: "Ejércitos de armas combinadas", branch: "militar", universityLevel: 5, costs: { gold: 1800, wood: 640, stone: 420, iron: 380, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8, cuartel: 7 }, technologyRequirements: ["tactics_inf_2", "tactics_arc_2", "tactics_cav_2"], effect: { key: "unitEfficiencyAll", value: 0.04, description: "Eficacia de las tres armas +4 %" } },
+  { id: "merc_1", name: "Contratas y capitanes de compañía", branch: "economica", universityLevel: 3, costs: { gold: 400, wood: 160, stone: 120, iron: 80, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3, taberna: 3 }, technologyRequirements: ["training_1"], effect: { key: "mercenaryCost", value: -0.08, description: "−8 % coste de mercenarios" } },
+  { id: "merc_2", name: "Compañías libres", branch: "economica", universityLevel: 5, costs: { gold: 1100, wood: 400, stone: 270, iron: 220, food: 0 }, durationSeconds: Math.round(720 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 6, universidad: 5, taberna: 5 }, technologyRequirements: ["merc_1", "trade_2"], effect: { key: "mercenaryCost", value: -0.10, description: "−10 % coste de mercenarios" } },
+  // --- ENTREGA 4c: HERIDOS, FATIGA Y LOGÍSTICA ---
+  { id: "medicine_2", name: "Ambulancias de carro y hospicio de campaña", branch: "militar", universityLevel: 3, costs: { gold: 400, wood: 160, stone: 200, iron: 50, food: 0 }, durationSeconds: 360, buildingRequirements: { castillo: 3, hospitalMilitar: 3 }, technologyRequirements: ["medicine_1"], effect: { key: "woundedRate", value: 0.04, description: "Bajas que pasan a heridos +4 %" } },
+  { id: "medical_3", name: "Cirugía de guerra y vino antiséptico", branch: "militar", universityLevel: 4, costs: { gold: 650, wood: 240, stone: 300, iron: 80, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, hospitalMilitar: 4 }, technologyRequirements: ["medical_2", "medicine_2"], effect: { key: "woundedRate", value: 0.05, description: "Bajas que pasan a heridos +5 %" } },
+  { id: "medical_4", name: "Letrinas, baños y aseo de campamento", branch: "militar", universityLevel: 4, costs: { gold: 650, wood: 240, stone: 300, iron: 80, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, hospitalMilitar: 3 }, technologyRequirements: ["medicine_3"], effect: { key: "fatigueAccrual", value: -0.05, description: "Fatiga acumulada −5 %" } },
+  { id: "medical_5", name: "Orden de caballeros hospitalarios", branch: "militar", universityLevel: 5, costs: { gold: 1800, wood: 640, stone: 700, iron: 230, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8, hospitalMilitar: 5 }, technologyRequirements: ["medical_3", "medical_4"], effect: { key: "woundedRate", value: 0.06, description: "Bajas que pasan a heridos +6 %" } },
+  { id: "logistics_3", name: "Campamentos fortificados", branch: "militar", universityLevel: 4, costs: { gold: 650, wood: 240, stone: 180, iron: 130, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4, cuartel: 4 }, technologyRequirements: ["logistics_1"], effect: { key: "fatigueAccrual", value: -0.06, description: "Fatiga acumulada −6 %" } },
+  { id: "logistics_5", name: "Marchas forzadas", branch: "militar", universityLevel: 5, costs: { gold: 1100, wood: 400, stone: 270, iron: 220, food: 0 }, durationSeconds: 720, buildingRequirements: { castillo: 6, cuartel: 6 }, technologyRequirements: ["logistics_2", "logistics_3"], effect: { key: "marchSpeed", value: 0.08, description: "+8 % velocidad de marcha" } },
+  { id: "logistics_6", name: "Estado mayor logístico", branch: "militar", universityLevel: 5, costs: { gold: 1800, wood: 640, stone: 420, iron: 380, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8 }, technologyRequirements: ["logistics_4", "logistics_5"], effect: { key: "marchFatigue", value: -0.10, description: "−10 % fatiga de marcha" } },
 ];
+// NOTA: form_1-7, forge_1, forge_6 aplazados y sin implementar (efectos formationEfficiency/equipmentWear inexistentes en el motor).
+
 
 export const RESEARCH = {
   /** [COMPLEMENTO §4, actualizado 03-11-2026] Una investigación activa por reino fijada a 1 por decisión. */

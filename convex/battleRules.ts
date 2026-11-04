@@ -63,6 +63,8 @@ export interface BattleSide {
   unitEfficiencyInf?: number;
   unitEfficiencyArc?: number;
   unitEfficiencyCav?: number;
+  /** Bonificación tecnológica a la proporción de heridos aditiva (+0,04 = +4 pp). */
+  woundedRateBonus?: number;
 }
 
 export interface SideFactors {
@@ -290,10 +292,11 @@ function diffComposition(initial: Composition, final: Composition): Composition 
   return result;
 }
 
-/** [MAESTRA P44] ≈65 % de las bajas se convierten en heridos, aplicado por tipo (sin doble conversión). */
-function splitWounded(casualties: Composition): Composition {
+/** [MAESTRA P44 + E4c] ≈65 % de las bajas se convierten en heridos, con bonificación tecnológica. */
+function splitWounded(casualties: Composition, techBonus: number = 0): Composition {
   const wounded = emptyComposition();
-  for (const type of UNIT_TYPES) wounded[type] = Math.round(casualties[type] * COMBAT.WOUNDED_RATIO);
+  const ratio = Math.max(0, Math.min(1, COMBAT.WOUNDED_RATIO + techBonus));
+  for (const type of UNIT_TYPES) wounded[type] = Math.round(casualties[type] * ratio);
   return wounded;
 }
 
@@ -508,8 +511,8 @@ export function simulateBattle(attacker: BattleSide, defender: BattleSide): Batt
   const loserKingdomId = outcome === "victoria" ? defender.kingdomId : outcome === "derrota" ? attacker.kingdomId : null;
   const rewards = battleRewards(outcome, crushingVictory);
 
-  const woundedA = splitWounded(casualtiesA);
-  const woundedD = splitWounded(casualtiesD);
+  const woundedA = splitWounded(casualtiesA, attacker.woundedRateBonus ?? 0);
+  const woundedD = splitWounded(casualtiesD, defender.woundedRateBonus ?? 0);
 
   const explanation: string[] = [];
   const stronger = lastFactorsA.offensivePower >= lastFactorsD.defensivePower ? "atacante" : "defensor";

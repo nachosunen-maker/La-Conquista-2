@@ -53,6 +53,9 @@ interface TechnologiesState {
     unitEfficiencyInf?: number;
     unitEfficiencyArc?: number;
     unitEfficiencyCav?: number;
+    mercenaryCostReduction?: number;
+    woundedRateBonus?: number;
+    fatigueAccrualReduction?: number;
   };
   researching: Array<{ _id: string; technologyId: string; name: string; startedAt?: number; durationMs?: number; costs?: Record<string, number>; progressPercent: number | null; completesAt: number | null }>;
   catalog: Array<{
@@ -157,6 +160,9 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
   if (m.unitEfficiencyInf && m.unitEfficiencyInf > 0) activeEffects.push(`eficacia infantería +${Math.round(m.unitEfficiencyInf * 100)} %`);
   if (m.unitEfficiencyArc && m.unitEfficiencyArc > 0) activeEffects.push(`eficacia arqueros +${Math.round(m.unitEfficiencyArc * 100)} %`);
   if (m.unitEfficiencyCav && m.unitEfficiencyCav > 0) activeEffects.push(`eficacia caballería +${Math.round(m.unitEfficiencyCav * 100)} %`);
+  if (m.mercenaryCostReduction && m.mercenaryCostReduction > 0) activeEffects.push(`coste mercenarios −${Math.round(m.mercenaryCostReduction * 100)} %`);
+  if (m.woundedRateBonus && m.woundedRateBonus > 0) activeEffects.push(`bajas que pasan a heridos +${Math.round(m.woundedRateBonus * 100)} %`);
+  if (m.fatigueAccrualReduction && m.fatigueAccrualReduction > 0) activeEffects.push(`fatiga acumulada −${Math.round(m.fatigueAccrualReduction * 100)} %`);
   if (m.unlockedWeapons.length) activeEffects.push(`armas: ${m.unlockedWeapons.join(', ')}`);
   if (m.unlockedArmors.length) activeEffects.push(`armaduras: ${m.unlockedArmors.join(', ')}`);
 

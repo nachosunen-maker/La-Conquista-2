@@ -476,12 +476,15 @@ export const hireMercenaries = mutation({
     const tavernLevel = collection.levels.taberna ?? 0;
     const units = await readArmyUnitsWithMigration(ctx, args.kingdomId);
     const active = units.filter((doc) => doc.isMercenary).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
+    const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
+    const modifiers = computeTechnologyModifiers(completedTechnologies);
     const hire = validateMercenaryHire({
       typeId: args.typeId,
       count: args.count,
       tavernLevel,
       activeMercenaries: active,
       gold: settled.settledResources.gold,
+      mercenaryCostReduction: modifiers.mercenaryCostReduction,
     });
     if (!hire.success) throw new ConvexError(hire.error);
     await ctx.db.patch(settled.resources._id, { ...settled.settledResources, gold: settled.settledResources.gold - hire.cost });
@@ -699,11 +702,14 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
 
   const currentFatigue = typeof attackerKingdom.armyFatigue === "number" ? attackerKingdom.armyFatigue : 0;
   const attackerCiv = getCivilizationPassive(attackerKingdom.civilization);
+  const attackerTech = computeTechnologyModifiers(await readCompletedTechnologyIds(ctx, march.kingdomId));
   const newFatigue = marchFatigue(
     currentFatigue,
     march.distance,
     typeof march.terrainMultiplier === "number" ? march.terrainMultiplier : 1,
-    attackerCiv?.fatigueAccrualMultiplier ?? 1.0
+    attackerCiv?.fatigueAccrualMultiplier ?? 1.0,
+    attackerTech.marchFatigueReduction,
+    attackerTech.fatigueAccrualReduction
   );
   await ctx.db.patch(march.kingdomId, { armyFatigue: newFatigue });
 
@@ -743,6 +749,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   const defCollection = validateBuildingCollection(defenderBuildings);
   const defLevels = defCollection.success ? defCollection.levels : {};
 
+  const attackerTech = computeTechnologyModifiers(await readCompletedTechnologyIds(ctx, march.kingdomId));
   const attackerSide: BattleSide = {
     kingdomId: march.kingdomId,
     name: attackerKingdom.name,
@@ -758,8 +765,10 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     wallsLevel: 0,
     terrainDefenseBonus: 0,
     civilization: attackerKingdom.civilization,
+    woundedRateBonus: attackerTech.woundedRateBonus,
   };
 
+  const defenderTech = computeTechnologyModifiers(await readCompletedTechnologyIds(ctx, defenderKingdomId));
   const terrainDefBonus = (TERRAINS as any)[targetCell.terrain]?.defense ?? 0;
   const defenderSide: BattleSide = {
     kingdomId: defenderKingdomId,
@@ -776,6 +785,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     wallsLevel: defLevels.murallas ?? 0,
     terrainDefenseBonus: terrainDefBonus,
     civilization: defenderKingdom.civilization,
+    woundedRateBonus: defenderTech.woundedRateBonus,
   };
 
   const report = simulateBattle(attackerSide, defenderSide);

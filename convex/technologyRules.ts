@@ -85,6 +85,9 @@ export interface TechnologyModifiers {
   unitEfficiencyInf: number;
   unitEfficiencyArc: number;
   unitEfficiencyCav: number;
+  mercenaryCost: number; // reducción de coste (e.g. 0.08 = -8 %, máx 0.30)
+  woundedRateBonus: number; // puntos porcentuales adicionales (0,05 = +5 pp)
+  fatigueAccrualReduction: number; // reducción de fatiga acumulada (0,05 = −5 %)
 }
 
 export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>): TechnologyModifiers {
@@ -113,6 +116,9 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
   let sumEffInf = 0;
   let sumEffArc = 0;
   let sumEffCav = 0;
+  let sumMercCost = 0;
+  let sumWoundedRate = 0;
+  let sumFatigueAccrual = 0;
   const unlockedWeapons: string[] = [];
   const unlockedArmors: string[] = [];
 
@@ -154,6 +160,9 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
       case "unitEfficiencyArc": sumEffArc += value; break;
       case "unitEfficiencyCav": sumEffCav += value; break;
       case "unitEfficiencyAll": sumEffInf += value; sumEffArc += value; sumEffCav += value; break;
+      case "mercenaryCost": sumMercCost += Math.abs(value); break;
+      case "woundedRate": sumWoundedRate += value; break;
+      case "fatigueAccrual": sumFatigueAccrual += Math.abs(value); break;
     }
   }
 
@@ -185,6 +194,9 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     unitEfficiencyInf: Math.min(TECH_EFFECT_CAPS.unitEfficiency, Math.max(0, sumEffInf)),
     unitEfficiencyArc: Math.min(TECH_EFFECT_CAPS.unitEfficiency, Math.max(0, sumEffArc)),
     unitEfficiencyCav: Math.min(TECH_EFFECT_CAPS.unitEfficiency, Math.max(0, sumEffCav)),
+    mercenaryCostReduction: Math.min(TECH_EFFECT_CAPS.mercenaryCost, Math.max(0, sumMercCost)),
+    woundedRateBonus: Math.min(TECH_EFFECT_CAPS.woundedRate, Math.max(0, sumWoundedRate)),
+    fatigueAccrualReduction: Math.min(TECH_EFFECT_CAPS.fatigueAccrual, Math.max(0, sumFatigueAccrual)),
   };
 }
 
