@@ -85,7 +85,7 @@ export interface TechnologyModifiers {
   unitEfficiencyInf: number;
   unitEfficiencyArc: number;
   unitEfficiencyCav: number;
-  mercenaryCost: number; // reducción de coste (e.g. 0.08 = -8 %, máx 0.30)
+  mercenaryCostReduction: number; // reducción de coste (e.g. 0.08 = -8 %, máx 0.30)
   woundedRateBonus: number; // puntos porcentuales adicionales (0,05 = +5 pp)
   fatigueAccrualReduction: number; // reducción de fatiga acumulada (0,05 = −5 %)
   counterEspionage: number; // probabilidad de contrainteligencia (e.g. 0.10 = 10 %, máx 0.60)

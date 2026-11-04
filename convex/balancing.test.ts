@@ -6,8 +6,8 @@ import { civilizationTrainingDurationMultiplier, civilizationTrainingCostMultipl
 import { durationForTargetLevel, BUILDING_RULES } from "./buildingRules";
 
 describe("Equilibrio Definitivo: Catálogo y Tiempos de Investigación", () => {
-  it("contiene exactamente 32 tecnologías (20 universales + 12 de civilización) y todas tienen duración positiva", () => {
-    expect(TECHNOLOGIES.length).toBe(32);
+  it("contiene todas las tecnologías del catálogo (135) y todas tienen duración positiva", () => {
+    expect(TECHNOLOGIES.length).toBe(135);
     for (const tech of TECHNOLOGIES) {
       expect(tech.durationSeconds).toBeGreaterThan(0);
       expect(Number.isFinite(tech.durationSeconds)).toBe(true);

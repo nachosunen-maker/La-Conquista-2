@@ -60,6 +60,7 @@ export interface BattleSide {
   combatAttackBonus?: number;
   /** Bonificación defensiva tecnológica aditiva (+0,05 = +5 %). */
   combatDefenseBonus?: number;
+  moraleBase?: number;
   unitEfficiencyInf?: number;
   unitEfficiencyArc?: number;
   unitEfficiencyCav?: number;
@@ -655,7 +656,10 @@ export function calculateHospitalRecovery(input: {
 export function applyFormation(composition: Composition, formation: Partial<Record<UnitType, number>> | undefined | null): Composition {
   const result = emptyComposition();
   for (const type of UNIT_TYPES) {
-    const raw = formation?.[type];
+    let raw = formation?.[type];
+    if (raw === undefined && !UNITS[type].isLivingTroop) {
+      raw = formation?.asedio;
+    }
     const fraction = typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 1;
     result[type] = Math.round(Math.max(0, composition[type] ?? 0) * fraction);
   }

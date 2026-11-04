@@ -49,6 +49,13 @@ export function createBotBattleSide(bot: BotDefinition): BattleSide {
     wallsLevel: bot.army.wallsLevel,
     terrainDefenseBonus: 0,
     civilization: bot.civilization,
+    combatAttackBonus: 0,
+    combatDefenseBonus: 0,
+    moraleBase: 0,
+    unitEfficiencyInf: 0,
+    unitEfficiencyArc: 0,
+    unitEfficiencyCav: 0,
+    woundedRateBonus: 0,
   };
 }
 

@@ -749,7 +749,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   const defCollection = validateBuildingCollection(defenderBuildings);
   const defLevels = defCollection.success ? defCollection.levels : {};
 
-  const attackerTech = computeTechnologyModifiers(await readCompletedTechnologyIds(ctx, march.kingdomId));
+
   const attackerSide: BattleSide = {
     kingdomId: march.kingdomId,
     name: attackerKingdom.name,
@@ -765,6 +765,12 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     wallsLevel: 0,
     terrainDefenseBonus: 0,
     civilization: attackerKingdom.civilization,
+    combatAttackBonus: attackerTech.combatAttackBonus,
+    combatDefenseBonus: attackerTech.combatDefenseBonus,
+    moraleBase: attackerTech.moraleBase,
+    unitEfficiencyInf: attackerTech.unitEfficiencyInf,
+    unitEfficiencyArc: attackerTech.unitEfficiencyArc,
+    unitEfficiencyCav: attackerTech.unitEfficiencyCav,
     woundedRateBonus: attackerTech.woundedRateBonus,
   };
 
@@ -785,6 +791,12 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     wallsLevel: defLevels.murallas ?? 0,
     terrainDefenseBonus: terrainDefBonus,
     civilization: defenderKingdom.civilization,
+    combatAttackBonus: defenderTech.combatAttackBonus,
+    combatDefenseBonus: defenderTech.combatDefenseBonus,
+    moraleBase: defenderTech.moraleBase,
+    unitEfficiencyInf: defenderTech.unitEfficiencyInf,
+    unitEfficiencyArc: defenderTech.unitEfficiencyArc,
+    unitEfficiencyCav: defenderTech.unitEfficiencyCav,
     woundedRateBonus: defenderTech.woundedRateBonus,
   };
 

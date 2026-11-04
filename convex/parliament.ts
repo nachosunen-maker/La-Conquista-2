@@ -419,6 +419,10 @@ export async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, 
     terrainDefenseBonus: role === "defender" ? terrainDefenseBonus : 0,
     combatAttackBonus: techModifiers.combatAttackBonus,
     combatDefenseBonus: techModifiers.combatDefenseBonus,
+    moraleBase: techModifiers.moraleBase,
+    unitEfficiencyInf: techModifiers.unitEfficiencyInf,
+    unitEfficiencyArc: techModifiers.unitEfficiencyArc,
+    unitEfficiencyCav: techModifiers.unitEfficiencyCav,
     woundedRateBonus: techModifiers.woundedRateBonus,
   };
 }
