@@ -877,7 +877,12 @@ export type TechnologyEffectKey =
   | "combatAttack"
   | "combatDefense"
   | "marchSpeed"
-  | "marchFatigue";
+  | "marchFatigue"
+  | "foodConsumption"
+  | "woodProduction"
+  | "stoneProduction"
+  | "ironProduction"
+  | "goldProduction";
 
 export interface TechnologyBalance {
   id: string;
@@ -895,7 +900,7 @@ export interface TechnologyBalance {
 
 export const RESEARCH_TIME_SCALE = 1.0;
 
-/** [ENTREGA 1] Topes máximos para los efectos acumulados de tecnologías (suma aditiva con techo). */
+/** [ENTREGA 1 y 2] Topes máximos para los efectos acumulados de tecnologías (suma aditiva con techo). */
 export const TECH_EFFECT_CAPS = {
   agricultureProduction: 0.65,
   miningProduction: 0.50,
@@ -909,24 +914,41 @@ export const TECH_EFFECT_CAPS = {
   trainingDurationFloor: 0.60,
   constructionDurationFloor: 0.60,
   espionageAccuracyMax: 2,
+  foodConsumption: 0.15,
+  woodProduction: 0.30,
+  stoneProduction: 0.30,
+  ironProduction: 0.30,
+  goldProduction: 0.60,
 } as const;
 
 const DAY = TIME.SECONDS_PER_GAME_YEAR;
-/** [COMPLEMENTO §4, P62, ENTREGA 1] Catálogo tecnológico oficial con ramas universales y tecnologías únicas de civilización. */
+/** [COMPLEMENTO §4, P62, ENTREGA 1 + 2] Catálogo tecnológico oficial con ramas universales y tecnologías únicas de civilización. */
 export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   // --- RAMA ECONÓMICA Y AGRÍCOLA ---
   { id: "agri_1", name: "Rotación de cultivos", branch: "economica", universityLevel: 1, costs: { gold: 100, wood: 100, stone: 50, iron: 0, food: 0 }, durationSeconds: 30, buildingRequirements: {}, technologyRequirements: [], effect: { key: "agricultureProduction", value: 0.05, description: "+5 % producción agrícola" } },
   { id: "agri_2", name: "Arado de vertedera de hierro", branch: "economica", universityLevel: 2, costs: { gold: 200, wood: 150, stone: 100, iron: 50, food: 0 }, durationSeconds: 180, buildingRequirements: { granja: 2 }, technologyRequirements: ["agri_1"], effect: { key: "agricultureProduction", value: 0.08, description: "+8 % producción agrícola por labranza profunda" } },
   { id: "agri_3", name: "Acequias y molinos hidráulicos", branch: "economica", universityLevel: 3, costs: { gold: 400, wood: 250, stone: 200, iron: 80, food: 0 }, durationSeconds: 360, buildingRequirements: { granja: 4, cantera: 2 }, technologyRequirements: ["agri_2"], effect: { key: "agricultureProduction", value: 0.12, description: "+12 % rendimiento en molienda y riego" } },
   { id: "agri_4", name: "Barbecho trienal y abonado", branch: "economica", universityLevel: 4, costs: { gold: 650, wood: 390, stone: 240, iron: 50, food: 0 }, durationSeconds: Math.round(480 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 4, universidad: 4 }, technologyRequirements: ["agri_3"], effect: { key: "agricultureProduction", value: 0.06, description: "+6 % producción agrícola" } },
+  { id: "agri_5", name: "Molinos de viento y hornos comunales", branch: "economica", universityLevel: 4, costs: { gold: 650, wood: 390, stone: 240, iron: 50, food: 0 }, durationSeconds: Math.round(480 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 4, universidad: 4 }, technologyRequirements: ["agri_3"], effect: { key: "foodConsumption", value: -0.04, description: "Consumo de alimentos −4 %" } },
   { id: "agri_6", name: "Pósitos y graneros comunales", branch: "economica", universityLevel: 4, costs: { gold: 650, wood: 390, stone: 240, iron: 50, food: 0 }, durationSeconds: Math.round(480 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 4, universidad: 4 }, technologyRequirements: ["agri_3", "storage_1"], effect: { key: "storageCapacity", value: 0.08, description: "+8 % capacidad de almacenamiento" } },
+  { id: "agri_7", name: "Rotación de cuatro hojas", branch: "economica", universityLevel: 5, costs: { gold: 1100, wood: 500, stone: 360, iron: 90, food: 0 }, durationSeconds: Math.round(720 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 6, universidad: 5 }, technologyRequirements: ["agri_4", "agri_5"], effect: { key: "agricultureProduction", value: 0.08, description: "+8 % producción agrícola" } },
+  { id: "agri_8", name: "Tratado de agronomía", branch: "economica", universityLevel: 5, costs: { gold: 1800, wood: 1040, stone: 560, iron: 150, food: 0 }, durationSeconds: Math.round(1080 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 8, universidad: 5 }, technologyRequirements: ["agri_7", "agri_6"], effect: { key: "agricultureProduction", value: 0.10, description: "+10 % producción agrícola" } },
   { id: "mining_1", name: "Herramientas mineras de hierro", branch: "economica", universityLevel: 1, costs: { gold: 100, wood: 80, stone: 80, iron: 10, food: 0 }, durationSeconds: 30, buildingRequirements: {}, technologyRequirements: [], effect: { key: "miningProduction", value: 0.05, description: "+5 % madera, piedra y hierro" } },
   { id: "mining_2", name: "Lavaderos de mineral y desmonte", branch: "economica", universityLevel: 2, costs: { gold: 250, wood: 150, stone: 150, iron: 60, food: 0 }, durationSeconds: 240, buildingRequirements: { minaHierro: 2 }, technologyRequirements: ["mining_1"], effect: { key: "miningProduction", value: 0.08, description: "+8 % extracción de materiales y mineral" } },
   { id: "mining_3", name: "Entibado de galerías", branch: "economica", universityLevel: 3, costs: { gold: 400, wood: 180, stone: 240, iron: 60, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3, minaHierro: 3 }, technologyRequirements: ["mining_2"], effect: { key: "miningProduction", value: 0.05, description: "+5 % madera, piedra y hierro" } },
+  { id: "mining_4", name: "Aserraderos de sierra hidráulica", branch: "economica", universityLevel: 3, costs: { gold: 400, wood: 180, stone: 240, iron: 60, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 5, universidad: 3, aserradero: 5 }, technologyRequirements: ["mining_1"], effect: { key: "woodProduction", value: 0.10, description: "+10 % producción de madera" } },
+  { id: "mining_5", name: "Canteras de cuña y talla", branch: "economica", universityLevel: 3, costs: { gold: 400, wood: 180, stone: 240, iron: 60, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 5, universidad: 3, cantera: 5 }, technologyRequirements: ["mining_1"], effect: { key: "stoneProduction", value: 0.10, description: "+10 % producción de piedra" } },
+  { id: "mining_6", name: "Altos hornos de fundición", branch: "economica", universityLevel: 4, costs: { gold: 650, wood: 270, stone: 360, iron: 100, food: 0 }, durationSeconds: Math.round(480 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 5, universidad: 4, minaHierro: 5, herreria: 3 }, technologyRequirements: ["mining_2"], effect: { key: "ironProduction", value: 0.10, description: "+10 % producción de hierro" } },
+  { id: "mining_7", name: "Filones de oro y lavado aurífero", branch: "economica", universityLevel: 4, costs: { gold: 650, wood: 270, stone: 360, iron: 100, food: 0 }, durationSeconds: Math.round(480 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 4, universidad: 4, minaOro: 4 }, technologyRequirements: ["mining_3"], effect: { key: "goldProduction", value: 0.06, description: "+6 % producción total de oro" } },
+  { id: "mining_8", name: "Gremios de mineros y canteros", branch: "economica", universityLevel: 5, costs: { gold: 1100, wood: 450, stone: 540, iron: 180, food: 0 }, durationSeconds: Math.round(720 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 6, universidad: 5 }, technologyRequirements: ["mining_4", "mining_5", "mining_6"], effect: { key: "miningProduction", value: 0.08, description: "+8 % extracción de madera, piedra y hierro" } },
+  { id: "mining_9", name: "Cecas y orfebrería real", branch: "economica", universityLevel: 5, costs: { gold: 1100, wood: 450, stone: 540, iron: 180, food: 0 }, durationSeconds: Math.round(720 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 6, universidad: 5, minaOro: 6 }, technologyRequirements: ["mining_7", "trade_2"], effect: { key: "goldProduction", value: 0.06, description: "+6 % producción total de oro" } },
   { id: "storage_1", name: "Almacenes reforzados", branch: "economica", universityLevel: 1, costs: { gold: 100, wood: 150, stone: 100, iron: 0, food: 0 }, durationSeconds: 45, buildingRequirements: {}, technologyRequirements: [], effect: { key: "storageCapacity", value: 0.10, description: "+10 % capacidad de almacenamiento" } },
   { id: "storage_2", name: "Silos y bodegas subterráneas", branch: "economica", universityLevel: 3, costs: { gold: 400, wood: 180, stone: 240, iron: 60, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3 }, technologyRequirements: ["storage_1"], effect: { key: "storageCapacity", value: 0.10, description: "+10 % capacidad de almacenamiento" } },
   { id: "storage_3", name: "Reservas de guerra", branch: "economica", universityLevel: 5, costs: { gold: 1100, wood: 450, stone: 540, iron: 180, food: 0 }, durationSeconds: Math.round(720 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 6, universidad: 5 }, technologyRequirements: ["storage_2", "trade_1"], effect: { key: "storageCapacity", value: 0.12, description: "+12 % capacidad de almacenamiento" } },
   { id: "trade_1", name: "Estándar real de pesos y medidas", branch: "economica", universityLevel: 2, costs: { gold: 200, wood: 150, stone: 150, iron: 20, food: 0 }, durationSeconds: 180, buildingRequirements: { mercado: 1 }, technologyRequirements: ["storage_1"], effect: { key: "storageCapacity", value: 0.15, description: "+15 % capacidad de gestión comercial y logística" } },
+  { id: "trade_2", name: "Ferias y caravanas regulares", branch: "economica", universityLevel: 3, costs: { gold: 520, wood: 160, stone: 160, iron: 40, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3, mercado: 3 }, technologyRequirements: ["trade_1"], effect: { key: "goldProduction", value: 0.06, description: "+6 % producción total de oro" } },
+  { id: "trade_3", name: "Lonjas y letras de cambio", branch: "economica", universityLevel: 4, costs: { gold: 850, wood: 240, stone: 240, iron: 70, food: 0 }, durationSeconds: Math.round(480 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 5, universidad: 4, mercado: 5 }, technologyRequirements: ["trade_2"], effect: { key: "goldProduction", value: 0.08, description: "+8 % producción total de oro" } },
+  { id: "trade_4", name: "Banca de los gremios", branch: "economica", universityLevel: 5, costs: { gold: 1430, wood: 400, stone: 360, iron: 110, food: 0 }, durationSeconds: Math.round(720 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 6, universidad: 5, mercado: 5 }, technologyRequirements: ["trade_3", "mining_7"], effect: { key: "goldProduction", value: 0.10, description: "+10 % producción total de oro" } },
 
   // --- RAMA CONSTRUCCIÓN Y CIVIL ---
   { id: "construction_1", name: "Cantería de sillería", branch: "civil", universityLevel: 1, costs: { gold: 100, wood: 100, stone: 150, iron: 10, food: 0 }, durationSeconds: 45, buildingRequirements: {}, technologyRequirements: [], effect: { key: "constructionDuration", value: -0.05, description: "−5 % duración de construcción" } },

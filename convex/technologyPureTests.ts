@@ -289,7 +289,9 @@ export function runTechnologyTests(): TechnologyTestResult[] {
   // 11. Verificación de requisitos de edificios superiores a niveles iniciales y coherencia con Castillo
   {
     const NEW_TECH_IDS = new Set([
-      "agri_4", "agri_6", "mining_3", "storage_2", "storage_3",
+      "agri_4", "agri_5", "agri_6", "agri_7", "agri_8",
+      "mining_3", "mining_4", "mining_5", "mining_6", "mining_7", "mining_8", "mining_9",
+      "storage_2", "storage_3", "trade_2", "trade_3", "trade_4",
       "construction_3", "happiness_4", "training_3", "forge_2", "forge_3",
       "forge_4", "forge_5", "medicine_3", "logistics_1", "logistics_2", "spy_2",
     ]);
@@ -318,14 +320,14 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     }
 
     results.push({
-      category: "NIVELES INICIALES Y EDIFICIOS EXTRA (E1)",
+      category: "NIVELES INICIALES Y EDIFICIOS EXTRA (E1 + E2)",
       test: "11. Ningún edificio extra nuevo supera el Castillo del nodo ni pide <= nivel inicial de INITIAL_BUILDINGS",
       passed: newNodesValid,
-      details: `16 nuevos nodos válidos: ${newNodesValid}; Avisos en 32 iniciales (${legacyWarnings.length}): ${legacyWarnings.join("; ")}`,
+      details: `28 nuevos nodos válidos: ${newNodesValid}; Avisos en 32 iniciales (${legacyWarnings.length}): ${legacyWarnings.join("; ")}`,
     });
   }
 
-  // 12. Validación integral del catálogo tecnológico (Entrega 1)
+  // 12. Validación integral del catálogo tecnológico (Entrega 1 + Entrega 2)
   {
     const ids = TECHNOLOGIES.map((t) => t.id);
     const uniqueIds = ids.length === new Set(ids).size;
@@ -376,6 +378,7 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       "espionageAccuracy", "trainingDuration", "unlockWeaponSteel", "unlockArmorSteel",
       "constructionDuration", "happinessBase", "unlockWeaponAdvancedSteel", "combatAttack",
       "combatDefense", "marchSpeed", "marchFatigue",
+      "foodConsumption", "woodProduction", "stoneProduction", "ironProduction", "goldProduction",
     ]);
     const allEffectsKnown = TECHNOLOGIES.every((t) => KNOWN_EFFECT_KEYS.has(t.effect.key));
 
@@ -393,15 +396,42 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       maxModifiers.woundedRecoveryBonus <= TECH_EFFECT_CAPS.woundedRecovery + 1e-9 &&
       maxModifiers.trainingDuration >= TECH_EFFECT_CAPS.trainingDurationFloor - 1e-9 &&
       maxModifiers.constructionDuration >= TECH_EFFECT_CAPS.constructionDurationFloor - 1e-9 &&
-      maxModifiers.espionageLevel <= TECH_EFFECT_CAPS.espionageAccuracyMax;
+      maxModifiers.espionageLevel <= TECH_EFFECT_CAPS.espionageAccuracyMax &&
+      maxModifiers.foodConsumptionReduction <= TECH_EFFECT_CAPS.foodConsumption + 1e-9 &&
+      maxModifiers.woodProductionBonus <= TECH_EFFECT_CAPS.woodProduction + 1e-9 &&
+      maxModifiers.stoneProductionBonus <= TECH_EFFECT_CAPS.stoneProduction + 1e-9 &&
+      maxModifiers.ironProductionBonus <= TECH_EFFECT_CAPS.ironProduction + 1e-9 &&
+      maxModifiers.goldProductionBonus <= TECH_EFFECT_CAPS.goldProduction + 1e-9;
 
     const allValid = uniqueIds && allPrereqsExist && !hasCycle && univLevelValid && allEffectsKnown && capsRespected;
 
     results.push({
-      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E1)",
-      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, efectos conocidos y topes respetados",
+      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E2)",
+      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, 20 tipos de efectos conocidos y topes respetados",
       passed: allValid,
-      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 existentes + 16 nuevas). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
+      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 = 60). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
+    });
+  }
+
+  // 13. Verificación de los 3 nuevos efectos de la Entrega 2 (foodConsumption, resourceProduction, goldProduction)
+  {
+    const modFood = computeTechnologyModifiers(["agri_5"]);
+    const modWood = computeTechnologyModifiers(["mining_4"]);
+    const modStone = computeTechnologyModifiers(["mining_5"]);
+    const modIron = computeTechnologyModifiers(["mining_6"]);
+    const modGold = computeTechnologyModifiers(["mining_7", "trade_2"]);
+
+    const foodOk = Math.abs(modFood.foodConsumptionReduction - 0.04) < 1e-9;
+    const woodOk = Math.abs(modWood.woodProductionBonus - 0.10) < 1e-9;
+    const stoneOk = Math.abs(modStone.stoneProductionBonus - 0.10) < 1e-9;
+    const ironOk = Math.abs(modIron.ironProductionBonus - 0.10) < 1e-9;
+    const goldOk = Math.abs(modGold.goldProductionBonus - 0.12) < 1e-9;
+
+    results.push({
+      category: "NUEVOS EFECTOS DE ECONOMÍA (ENTREGA 2)",
+      test: "13. foodConsumption, resourceProduction (madera, piedra, hierro) y goldProduction calculan modificadores y respetan topes",
+      passed: foodOk && woodOk && stoneOk && ironOk && goldOk,
+      details: `Comprobados: foodCons: ${modFood.foodConsumptionReduction}, wood: ${modWood.woodProductionBonus}, stone: ${modStone.stoneProductionBonus}, iron: ${modIron.ironProductionBonus}, gold: ${modGold.goldProductionBonus}`,
     });
   }
 

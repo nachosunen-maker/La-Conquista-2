@@ -72,6 +72,11 @@ export interface TechnologyModifiers {
   combatDefenseBonus: number; // bonificación defensiva aditiva (+0,05 = +5 %)
   marchSpeedBonus: number; // bonificación de velocidad de marcha (+0,15 = +15 %)
   marchFatigueReduction: number; // reducción de fatiga acumulada (0,20 = −20 %)
+  foodConsumptionReduction: number; // reducción de consumo de alimentos de población (0,04 = −4 %, máx 0,15)
+  woodProductionBonus: number; // bonificación específica de madera (+0,10 = +10 %, máx +0,30)
+  stoneProductionBonus: number; // bonificación específica de piedra (+0,10 = +10 %, máx +0,30)
+  ironProductionBonus: number; // bonificación específica de hierro (+0,10 = +10 %, máx +0,30)
+  goldProductionBonus: number; // bonificación específica de oro (+0,06 = +6 %, máx +0,60)
 }
 
 export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>): TechnologyModifiers {
@@ -87,6 +92,11 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
   let sumCombatDefense = 0;
   let sumMarchSpeed = 0;
   let sumMarchFatigue = 0;
+  let sumFoodCons = 0;
+  let sumWoodProd = 0;
+  let sumStoneProd = 0;
+  let sumIronProd = 0;
+  let sumGoldProd = 0;
   const unlockedWeapons: string[] = [];
   const unlockedArmors: string[] = [];
 
@@ -114,6 +124,11 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
       case "combatDefense": sumCombatDefense += value; break;
       case "marchSpeed": sumMarchSpeed += value; break;
       case "marchFatigue": sumMarchFatigue += Math.abs(value); break;
+      case "foodConsumption": sumFoodCons += Math.abs(value); break; // Convención: e.g. -0.04 -> 0.04
+      case "woodProduction": sumWoodProd += value; break;
+      case "stoneProduction": sumStoneProd += value; break;
+      case "ironProduction": sumIronProd += value; break;
+      case "goldProduction": sumGoldProd += value; break;
     }
   }
 
@@ -132,6 +147,11 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     combatDefenseBonus: Math.min(TECH_EFFECT_CAPS.combatDefense, sumCombatDefense),
     marchSpeedBonus: Math.min(TECH_EFFECT_CAPS.marchSpeed, sumMarchSpeed),
     marchFatigueReduction: Math.min(TECH_EFFECT_CAPS.marchFatigue, sumMarchFatigue),
+    foodConsumptionReduction: Math.min(TECH_EFFECT_CAPS.foodConsumption, Math.max(0, sumFoodCons)),
+    woodProductionBonus: Math.min(TECH_EFFECT_CAPS.woodProduction, Math.max(0, sumWoodProd)),
+    stoneProductionBonus: Math.min(TECH_EFFECT_CAPS.stoneProduction, Math.max(0, sumStoneProd)),
+    ironProductionBonus: Math.min(TECH_EFFECT_CAPS.ironProduction, Math.max(0, sumIronProd)),
+    goldProductionBonus: Math.min(TECH_EFFECT_CAPS.goldProduction, Math.max(0, sumGoldProd)),
   };
 }
 

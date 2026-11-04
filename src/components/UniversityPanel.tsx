@@ -40,6 +40,11 @@ interface TechnologiesState {
     combatDefenseBonus?: number;
     marchSpeedBonus?: number;
     marchFatigueReduction?: number;
+    foodConsumptionReduction?: number;
+    woodProductionBonus?: number;
+    stoneProductionBonus?: number;
+    ironProductionBonus?: number;
+    goldProductionBonus?: number;
   };
   researching: Array<{ _id: string; technologyId: string; name: string; startedAt?: number; durationMs?: number; costs?: Record<string, number>; progressPercent: number | null; completesAt: number | null }>;
   catalog: Array<{
@@ -131,6 +136,11 @@ export function UniversityPanel(props: { kingdomId: string; isOwner: boolean; bu
   if (m.combatDefenseBonus && m.combatDefenseBonus > 0) activeEffects.push(`defensa militar +${Math.round(m.combatDefenseBonus * 100)} %`);
   if (m.marchSpeedBonus && m.marchSpeedBonus > 0) activeEffects.push(`velocidad de marcha +${Math.round(m.marchSpeedBonus * 100)} %`);
   if (m.marchFatigueReduction && m.marchFatigueReduction > 0) activeEffects.push(`reducción fatiga −${Math.round(m.marchFatigueReduction * 100)} %`);
+  if (m.foodConsumptionReduction && m.foodConsumptionReduction > 0) activeEffects.push(`consumo alimentos −${Math.round(m.foodConsumptionReduction * 100)} %`);
+  if (m.woodProductionBonus && m.woodProductionBonus > 0) activeEffects.push(`madera +${Math.round(m.woodProductionBonus * 100)} %`);
+  if (m.stoneProductionBonus && m.stoneProductionBonus > 0) activeEffects.push(`piedra +${Math.round(m.stoneProductionBonus * 100)} %`);
+  if (m.ironProductionBonus && m.ironProductionBonus > 0) activeEffects.push(`hierro +${Math.round(m.ironProductionBonus * 100)} %`);
+  if (m.goldProductionBonus && m.goldProductionBonus > 0) activeEffects.push(`oro +${Math.round(m.goldProductionBonus * 100)} %`);
   if (m.unlockedWeapons.length) activeEffects.push(`armas: ${m.unlockedWeapons.join(', ')}`);
   if (m.unlockedArmors.length) activeEffects.push(`armaduras: ${m.unlockedArmors.join(', ')}`);
 

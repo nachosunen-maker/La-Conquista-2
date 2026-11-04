@@ -34,6 +34,7 @@ import {
   STORAGE,
   TAXES,
   WELLBEING,
+  TECH_EFFECT_CAPS,
   type ProductiveJob,
   type RestPolicy,
 } from "./balanceConfig";
@@ -320,11 +321,13 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   const professions = computeProfessionEffects(state.jobCounts, input.buildingLevels, PROFESSION_BUILDING_CAPACITY);
   const mercenaryCount = Number.isInteger(input.mercenaryCount) && (input.mercenaryCount as number) > 0 ? (input.mercenaryCount as number) : 0;
 
-  // 1. Alimentos: motor aprobado con multiplicador agrícola (multiplicador beta × tecnología × terreno × civilización × productividad) y consumo (panadería).
+  // 1. Alimentos: motor aprobado con multiplicador agrícola y consumo (panadería × tecnologías de consumo).
   const civAgriBonus = civPassive.production.agriculture ?? 0;
   const betaAgriMultiplier = RESOURCE_PRODUCTION_MULTIPLIERS.agriculture ?? 1.0;
   const agricultureMultiplier = betaAgriMultiplier * input.technologyModifiers.agricultureProduction * (1 + (terrain.agriculture ?? 0)) * (1 + civAgriBonus) * productivity;
-  const foodSim = simulateEconomicProgress(state, input.now, agricultureMultiplier, professions.foodConsumptionMultiplier);
+  const foodTechConsumptionMultiplier = 1 - Math.min(TECH_EFFECT_CAPS.foodConsumption, Math.max(0, input.technologyModifiers.foodConsumptionReduction ?? 0));
+  const combinedFoodConsumptionMultiplier = professions.foodConsumptionMultiplier * foodTechConsumptionMultiplier;
+  const foodSim = simulateEconomicProgress(state, input.now, agricultureMultiplier, combinedFoodConsumptionMultiplier);
 
   // 2. Resto de recursos (D-46/D-47): tasa × multiplicador beta × min(asignados, capacidad) × modificadores.
   const effectiveWorkers: Record<ProductiveJob, number> = {
@@ -335,12 +338,22 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
     gold: 0,
   };
   const dailyProduction: KingdomResources = { gold: 0, wood: 0, stone: 0, iron: 0, food: foodSim.dailyFoodProduction };
+  const goldTechMultiplier = 1 + Math.min(TECH_EFFECT_CAPS.goldProduction, Math.max(0, input.technologyModifiers.goldProductionBonus ?? 0));
   for (const job of ["wood", "stone", "iron", "gold"] as const) {
     const assigned = state.workers[job];
     const capacity = input.jobCapacities ? input.jobCapacities[job] : 0;
     const effective = Math.max(0, Math.min(assigned, capacity));
     effectiveWorkers[job] = effective;
-    const technologyMultiplier = job === "gold" ? 1 : input.technologyModifiers.miningProduction;
+    
+    let resourceSpecificBonus = 0;
+    if (job === "wood") resourceSpecificBonus = Math.min(TECH_EFFECT_CAPS.woodProduction, Math.max(0, input.technologyModifiers.woodProductionBonus ?? 0));
+    if (job === "stone") resourceSpecificBonus = Math.min(TECH_EFFECT_CAPS.stoneProduction, Math.max(0, input.technologyModifiers.stoneProductionBonus ?? 0));
+    if (job === "iron") resourceSpecificBonus = Math.min(TECH_EFFECT_CAPS.ironProduction, Math.max(0, input.technologyModifiers.ironProductionBonus ?? 0));
+
+    const technologyMultiplier = job === "gold"
+      ? goldTechMultiplier
+      : input.technologyModifiers.miningProduction * (1 + resourceSpecificBonus);
+      
     const civJobBonus = civPassive.production[job] ?? 0;
     const betaJobMultiplier = RESOURCE_PRODUCTION_MULTIPLIERS[job] ?? 1.0;
     const rate = PRODUCTION_PER_WORKER_PER_DAY[job] * betaJobMultiplier * technologyMultiplier * (1 + (terrain[job] ?? 0)) * (1 + civJobBonus) * productivity;
@@ -348,8 +361,9 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   }
 
   // 3. Impuestos (P27, D-49): [DERIVADO R-02] base imponible = unidades producidas de alimentos, madera, piedra y hierro.
+  // goldProduction tecnología aumenta el oro generado por impuestos y minería.
   const taxableDailyBase = dailyProduction.food + dailyProduction.wood + dailyProduction.stone + dailyProduction.iron;
-  const dailyTaxIncome = taxableDailyBase * taxRate;
+  const dailyTaxIncome = taxableDailyBase * taxRate * goldTechMultiplier;
   const taxesCollected = dailyTaxIncome * elapsedDays;
 
   // 3b. [DECISIÓN 21-10-2026] Sin salarios diarios para mercenarios: se pagan íntegros al contratar.
