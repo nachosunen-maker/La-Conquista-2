@@ -312,6 +312,10 @@ describe("Liquidación económica (Bloque D)", () => {
   test("el bonus diario se concede una vez cada 24 horas (P59)", async () => {
     const t = createTestBackend();
     const { asUser, kingdomId } = await foundKingdom(t, "user-a", "Reino A");
+    await t.run(async (ctx) => {
+      const res = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).first();
+      if (res) await ctx.db.patch(res._id, { gold: 1000 });
+    });
     const first = await asUser.mutation(api.kingdoms.claimDailyBonus, { kingdomId });
     expect(first.honor).toBe(DAILY_BONUS.HONOR);
     await expect(asUser.mutation(api.kingdoms.claimDailyBonus, { kingdomId })).rejects.toThrow(/ya fue reclamado/);
@@ -585,6 +589,10 @@ describe("Parlamento y batalla (Bloques E y F)", () => {
     const a = await foundKingdom(t, "user-a", "Reino A");
     const b = await foundKingdom(t, "user-b", "Reino B");
     for (const k of [a, b]) await setBuildingLevel(t, k.kingdomId, "parlamento", 1);
+    await t.run(async (ctx) => {
+      const res = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", b.kingdomId)).first();
+      if (res) await ctx.db.patch(res._id, { gold: 300, food: 2500 });
+    });
     const created = await a.asUser.mutation(api.parliament.createChallenge, { challengerKingdomId: a.kingdomId, targetKingdomId: b.kingdomId, challengeType: "batalla" });
     const before = await b.asUser.query(api.kingdoms.getKingdomFull, { userId: "user-b" });
     const rejected = await b.asUser.mutation(api.parliament.rejectChallenge, { kingdomId: b.kingdomId, challengeId: created.challengeId });

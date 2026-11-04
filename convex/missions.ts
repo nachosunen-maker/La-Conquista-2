@@ -150,11 +150,30 @@ async function grantReward(ctx: MutationCtx, kingdomId: Id<"kingdoms">, reward: 
  * Evalúa y concede las misiones cumplidas de un reino (modo retrocompatible / automático si se requiere).
  */
 export async function evaluateKingdomMissions(ctx: MutationCtx, kingdomId: Id<"kingdoms">, now: number = Date.now()): Promise<string[]> {
-  // Las misiones ya no se completan automáticamente para permitir el flujo manual:
-  // In Progress -> Ready to Finish (Button) -> Pending Claim (Button) -> Claimed.
-  // Esta función ahora solo podría usarse para tareas de mantenimiento si fuera necesario,
-  // pero los eventos ya actualizan los contadores que lee la consulta getMissions.
-  return [];
+  const built = await buildSnapshot(ctx, kingdomId, now);
+  if (!built) return [];
+  const progress = await readProgress(ctx, kingdomId);
+  const completedIds = new Set(progress.map((doc) => doc.progressId));
+  const completions = evaluateMissions(built.snapshot, completedIds, built.dayKey);
+  if (completions.length === 0) return [];
+
+  const grantedIds: string[] = [];
+  for (const c of completions) {
+    await grantReward(ctx, kingdomId, c.reward, now);
+    await ctx.db.insert("missionProgress", {
+      kingdomId,
+      progressId: c.progressId,
+      missionId: c.mission.id,
+      kind: c.kind,
+      stage: c.stage,
+      title: c.mission.title,
+      rewardSummary: describeReward(c.reward),
+      completedAt: now,
+      rewardGranted: true,
+    });
+    grantedIds.push(c.progressId);
+  }
+  return grantedIds;
 }
 
 async function assertReadable(ctx: Ctx, kingdomId: Id<"kingdoms">) {
@@ -356,14 +375,12 @@ export const getMissions = query({
         missions: selectDailyMissions(built.dayKey).map((m) => describe(m, dailyMissionProgressId(m.id, built.dayKey))),
       },
       secrets: {
-        discovered: secrets.filter((m) => finishedIds.has(m.id) || isConditionMet(m.condition, built.snapshot)).map((m) => {
+        discovered: secrets.filter((m) => finishedIds.has(m.id)).map((m) => {
           const doc = progressMap.get(m.id);
           const rewardGranted = doc?.rewardGranted ?? false;
           let status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed' = 'in_progress';
           if (doc) {
             status = rewardGranted ? 'claimed' : 'pending_claim';
-          } else if (isConditionMet(m.condition, built.snapshot)) {
-            status = 'ready_to_finish';
           }
           return {
             id: m.id,
@@ -377,7 +394,7 @@ export const getMissions = query({
             completedAt: doc?.completedAt ?? null,
           };
         }),
-        remaining: secrets.filter((m) => !finishedIds.has(m.id) && !isConditionMet(m.condition, built.snapshot)).length,
+        remaining: secrets.filter((m) => !finishedIds.has(m.id)).length,
       },
       history: progress
         .filter((doc) => doc.rewardGranted)

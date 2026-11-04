@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { TECHNOLOGIES, UNITS, UNIT_TYPES, BUILDINGS, type UnitType } from "./balanceConfig";
 import { createResearchPlan, TECHNOLOGY_CATALOG } from "./technologyRules";
-import { trainingDurationMs, createTrainingPlan, isSiegeUnit } from "./armyRules";
+import { trainingDurationMs, createTrainingPlan, isSiegeUnit, getUnitCategory } from "./armyRules";
 import { civilizationTrainingDurationMultiplier, civilizationTrainingCostMultiplier, applyCivilizationTrainingDuration } from "./civilizationRules";
 import { durationForTargetLevel, BUILDING_RULES } from "./buildingRules";
+import { applyFormation, emptyComposition } from "./battleRules";
 
 describe("Equilibrio Definitivo: Catálogo y Tiempos de Investigación", () => {
   it("contiene todas las tecnologías del catálogo (135) y todas tienen duración positiva", () => {
@@ -44,11 +45,15 @@ describe("Equilibrio Definitivo: Catálogo y Tiempos de Investigación", () => {
       expect(tech!.durationSeconds).toBeLessThanOrEqual(480);
     }
 
-    // Tecnologías de civilización: exactamente 420 segundos (12 civilizaciones)
-    expect(civs.length).toBe(12);
+    // Tecnologías de civilización: 12 base (420 s) + 36 de fases 6a/6b (480 s / 900 s) = 48 en total
+    expect(civs.length).toBe(48);
     for (const tech of civs) {
-      expect(tech.durationSeconds).toBe(420);
       expect(tech.civilizationRequirement).toBeDefined();
+      if (tech.id.endsWith("_a") || tech.id.endsWith("_b") || tech.id.endsWith("_c")) {
+        expect([480, 900]).toContain(tech.durationSeconds);
+      } else {
+        expect(tech.durationSeconds).toBe(420);
+      }
     }
   });
 
@@ -215,6 +220,58 @@ describe("Equilibrio Definitivo: Catálogo y Tiempos de Reclutamiento Militar", 
       expect(plan.plan.completesAt).toBe(1_000_000 + 150_000);
       expect(plan.plan.populationReserved).toBe(15);
     }
+  });
+
+  it("comprueba que las cuatro unidades/familias de asedio (Ariete, Catapulta, Fundíbulo y Maquinaria Pesada) están en la categoría 'asedio', reciben 'formation.asedio' y Maquinaria Pesada respeta los controles de formación", () => {
+    // Unidades representativas de las 4 familias de asedio:
+    // - Ariete: ariete_movil
+    // - Catapulta: onagro_campana (y mangonel_tactico)
+    // - Fundíbulo: fustibalo_campo (y trabuchet_traccion)
+    // - Maquinaria Pesada: torres_asalto (y asedio genérico / carros_artillados)
+    const ariete: UnitType = "ariete_movil";
+    const catapulta: UnitType = "onagro_campana";
+    const fundibulo: UnitType = "fustibalo_campo";
+    const maquinariaPesada: UnitType = "torres_asalto";
+
+    const fourSiegeUnits = [ariete, catapulta, fundibulo, maquinariaPesada];
+
+    // 1. Inclusión estricta en la categoría de asedio y naturaleza mecánica
+    for (const u of fourSiegeUnits) {
+      expect(getUnitCategory(u)).toBe("asedio");
+      expect(isSiegeUnit(u)).toBe(true);
+      expect(UNITS[u].isLivingTroop).toBe(false);
+    }
+
+    // 2. Composición de prueba combinada
+    const comp = {
+      ...emptyComposition(),
+      ariete_movil: 10,
+      onagro_campana: 20,
+      fustibalo_campo: 30,
+      torres_asalto: 40,
+    };
+
+    // 3. Aplicación correcta del factor genérico "formation.asedio" (50%)
+    const formedDefault = applyFormation(comp, { asedio: 0.5 });
+    expect(formedDefault.ariete_movil).toBe(5);
+    expect(formedDefault.onagro_campana).toBe(10);
+    expect(formedDefault.fustibalo_campo).toBe(15);
+    expect(formedDefault.torres_asalto).toBe(20);
+
+    // 4. Prueba específica para Maquinaria Pesada respetando controles de formación individuales:
+    // Asedio general al 25%, pero Maquinaria Pesada (torres_asalto) configurada individualmente al 100%
+    const formedCustom = applyFormation(comp, { asedio: 0.25, torres_asalto: 1.0 });
+    expect(formedCustom.ariete_movil).toBe(3);   // round(10 * 0.25) = 3
+    expect(formedCustom.onagro_campana).toBe(5);  // round(20 * 0.25) = 5
+    expect(formedCustom.fustibalo_campo).toBe(8); // round(30 * 0.25) = 8
+    expect(formedCustom.torres_asalto).toBe(40);  // round(40 * 1.0) = 40 (respeta control específico)
+
+    // Maquinaria Pesada excluida selectivamente (0%) mientras el resto de asedio participa al 100%
+    const formedExcluded = applyFormation(comp, { asedio: 1.0, torres_asalto: 0 });
+    expect(formedExcluded.torres_asalto).toBe(0);
+    expect(formedExcluded.ariete_movil).toBe(10);
+    expect(formedExcluded.onagro_campana).toBe(20);
+    expect(formedExcluded.fustibalo_campo).toBe(30);
   });
 });
 

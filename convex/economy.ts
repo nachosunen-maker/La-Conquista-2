@@ -350,7 +350,9 @@ export async function settleRelationalKingdomEconomy(
   }
 
   // [Misiones, decisión 2026-10-21] El servidor detecta y premia las misiones cumplidas en la misma transacción.
-  await evaluateKingdomMissions(ctx, kingdom._id, now);
+  if (!isFirstInitialization) {
+    await evaluateKingdomMissions(ctx, kingdom._id, now);
+  }
 
   return { ...state, settlement, settledResources, extended };
 }

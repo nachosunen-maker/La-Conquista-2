@@ -26,6 +26,10 @@ afterEach(() => {
 async function found(t: ReturnType<typeof createTestBackend>, subject: string, name: string, civilization = "romanos") {
   const asUser = t.withIdentity(identity(subject));
   const kingdom = await asUser.mutation(api.economy.getOrInitializeKingdom, { name, civilization, castleName: `Castillo ${name}`, monarchName: `Rey ${name}` });
+  await t.run(async (ctx) => {
+    const res = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id)).first();
+    if (res) await ctx.db.patch(res._id, { gold: 500, wood: 500, stone: 500, iron: 500, food: 500 });
+  });
   // La primera liquidación crea el documento de recursos relacional.
   await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId: kingdom._id });
   return { asUser, kingdomId: kingdom._id as any };
