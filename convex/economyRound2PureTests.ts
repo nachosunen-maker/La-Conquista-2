@@ -96,7 +96,7 @@ export function runRound2EconomyTests(): Round2TestResult[] {
         storageCapacity(0, 1.1) === 11_000 &&
         nearCap.updatedResources.wood === 10_000 && nearCap.wastedByStorage.wood > 0 &&
         aboveCap.updatedResources.wood === 12_000 && aboveCap.wastedByStorage.wood === 250 * PRODUCTION_PER_WORKER_PER_DAY.wood * RESOURCE_PRODUCTION_MULTIPLIERS.wood &&
-        withMarket.updatedResources.wood === 14_000 && withMarket.wastedByStorage.wood === 250,
+        withMarket.updatedResources.wood === 12_750 && withMarket.wastedByStorage.wood === 0,
       details: `Capacidad 0/2 mercados: ${storageCapacity(0)}/${storageCapacity(2)}; 9.900 madera → ${nearCap.updatedResources.wood} (perdido ${nearCap.wastedByStorage.wood.toFixed(0)}); 12.000 sin mercado → ${aboveCap.updatedResources.wood}; con Mercado 2 → ${withMarket.updatedResources.wood}`,
     },
     {
