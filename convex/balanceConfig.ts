@@ -59,11 +59,11 @@ export const FOOD = {
  * Agricultura es valor aprobado; el resto es propuesta de balance aprobada.
  */
 export const PRODUCTION_PER_WORKER_PER_DAY = {
-  agriculture: 6.0, // Multiplicador ×3 (anterior 2.0)
-  wood: 3.0,        // Multiplicador ×3 (anterior 1.0)
-  stone: 2.25,      // Multiplicador ×3 (anterior 0.75)
-  iron: 1.2,        // Multiplicador ×3 (anterior 0.4)
-  gold: 0.4,        // Multiplicador ×2 (anterior 0.2)
+  agriculture: 6.0,
+  wood: 6.0,
+  stone: 6.0,
+  iron: 6.0,
+  gold: 3.0,
 } as const;
 export type ProductiveJob = keyof typeof PRODUCTION_PER_WORKER_PER_DAY;
 
