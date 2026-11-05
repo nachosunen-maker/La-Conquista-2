@@ -147,33 +147,18 @@ async function grantReward(ctx: MutationCtx, kingdomId: Id<"kingdoms">, reward: 
 }
 
 /**
- * Evalúa y concede las misiones cumplidas de un reino (modo retrocompatible / automático si se requiere).
+ * Evalúa las misiones cumplidas de un reino para verificar progreso y objetivos.
+ * NO concede recompensas automáticamente: la única mutación autorizada para entregar premios es claimMissionReward.
  */
 export async function evaluateKingdomMissions(ctx: MutationCtx, kingdomId: Id<"kingdoms">, now: number = Date.now()): Promise<string[]> {
   const built = await buildSnapshot(ctx, kingdomId, now);
   if (!built) return [];
   const progress = await readProgress(ctx, kingdomId);
-  const completedIds = new Set(progress.map((doc) => doc.progressId));
-  const completions = evaluateMissions(built.snapshot, completedIds, built.dayKey);
-  if (completions.length === 0) return [];
-
-  const grantedIds: string[] = [];
-  for (const c of completions) {
-    await grantReward(ctx, kingdomId, c.reward, now);
-    await ctx.db.insert("missionProgress", {
-      kingdomId,
-      progressId: c.progressId,
-      missionId: c.mission.id,
-      kind: c.kind,
-      stage: c.stage,
-      title: c.mission.title,
-      rewardSummary: describeReward(c.reward),
-      completedAt: now,
-      rewardGranted: true,
-    });
-    grantedIds.push(c.progressId);
-  }
-  return grantedIds;
+  const finishedIds = new Set(progress.map((doc) => doc.progressId));
+  const completions = evaluateMissions(built.snapshot, finishedIds, built.dayKey);
+  // Detecta y devuelve identificadores de misiones con objetivos cumplidos listas para finalizar,
+  // sin otorgar recompensas ni crear registros con rewardGranted: true.
+  return completions.map((c) => c.progressId);
 }
 
 async function assertReadable(ctx: Ctx, kingdomId: Id<"kingdoms">) {
@@ -200,7 +185,12 @@ export const finishMission = mutation({
       .query("missionProgress")
       .withIndex("by_kingdom_and_progress", (q) => q.eq("kingdomId", args.kingdomId).eq("progressId", args.progressId))
       .first();
-    if (existing) throw new Error("La misión ya ha sido finalizada.");
+    if (existing) {
+      if (existing.rewardGranted) {
+        throw new Error("La misión ya ha sido cobrada.");
+      }
+      throw new Error("La misión ya ha sido finalizada y está pendiente de cobro.");
+    }
 
     const details = findMissionDetails(args.progressId, built.dayKey, built.snapshot.civilization);
     if (!details) throw new Error("Misión no encontrada.");
@@ -210,8 +200,8 @@ export const finishMission = mutation({
       const stageNum = details.stage!;
       const stage = MISSIONS.STAGES.find((s) => s.stage === stageNum);
       const progress = await readProgress(ctx, args.kingdomId);
-      const completedIds = new Set(progress.map((doc) => doc.progressId));
-      met = stage ? stage.missions.every((m) => completedIds.has(m.id)) : false;
+      const finishedIds = new Set(progress.map((doc) => doc.progressId));
+      met = stage ? stage.missions.every((m) => finishedIds.has(m.id)) : false;
     } else if (args.progressId.startsWith("daily:")) {
       const parts = args.progressId.split(":");
       const missionId = parts[1];
@@ -235,7 +225,7 @@ export const finishMission = mutation({
     await ctx.db.insert("missionProgress", {
       kingdomId: args.kingdomId,
       progressId: args.progressId,
-      missionId: args.progressId,
+      missionId: args.progressId.startsWith("daily:") ? args.progressId.split(":")[1] : args.progressId,
       kind: details.kind,
       stage: details.stage,
       title: details.title,
@@ -303,7 +293,7 @@ export const getMissions = query({
     const completedIds = new Set(progress.filter((doc) => doc.rewardGranted).map((doc) => doc.progressId));
     const finishedIds = new Set(progress.map((doc) => doc.progressId));
     const completedAt = new Map(progress.map((doc) => [doc.progressId, doc.completedAt]));
-    const stage = currentStage(finishedIds);
+    const stage = MISSIONS.STAGES.find((s) => !s.missions.every((m) => finishedIds.has(m.id)) || !finishedIds.has(stageProgressId(s.stage))) ?? null;
     const completedStages = MISSIONS.STAGES.filter((s) => finishedIds.has(stageProgressId(s.stage))).map((s) => ({ stage: s.stage, title: s.title, rewardSummary: describeReward(s.reward) }));
     const secrets = allSecretMissions().filter((m) => !m.civilization || m.civilization === built.snapshot.civilization);
 
@@ -375,12 +365,14 @@ export const getMissions = query({
         missions: selectDailyMissions(built.dayKey).map((m) => describe(m, dailyMissionProgressId(m.id, built.dayKey))),
       },
       secrets: {
-        discovered: secrets.filter((m) => finishedIds.has(m.id)).map((m) => {
+        discovered: secrets.filter((m) => finishedIds.has(m.id) || isConditionMet(m.condition, built.snapshot)).map((m) => {
           const doc = progressMap.get(m.id);
-          const rewardGranted = doc?.rewardGranted ?? false;
+          const canFinish = isConditionMet(m.condition, built.snapshot);
           let status: 'in_progress' | 'ready_to_finish' | 'pending_claim' | 'claimed' = 'in_progress';
           if (doc) {
-            status = rewardGranted ? 'claimed' : 'pending_claim';
+            status = doc.rewardGranted ? 'claimed' : 'pending_claim';
+          } else if (canFinish) {
+            status = 'ready_to_finish';
           }
           return {
             id: m.id,
@@ -389,12 +381,12 @@ export const getMissions = query({
             description: m.description,
             rewardSummary: describeReward(m.reward),
             status,
-            rewardGranted,
+            rewardGranted: doc?.rewardGranted ?? false,
             completed: !!doc,
             completedAt: doc?.completedAt ?? null,
           };
         }),
-        remaining: secrets.filter((m) => !finishedIds.has(m.id)).length,
+        remaining: secrets.filter((m) => !finishedIds.has(m.id) && !isConditionMet(m.condition, built.snapshot)).length,
       },
       history: progress
         .filter((doc) => doc.rewardGranted)
