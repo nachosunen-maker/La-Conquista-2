@@ -22,7 +22,7 @@ import {
   getMarketFee,
   calculateExchange,
   type MarketResourceType,
-} from '../../convex/market';
+} from '../../convex/marketRules';
 
 const getMarketInfoQuery = makeFunctionReference<'query'>('market:getMarketInfo');
 const executeExchangeMutation = makeFunctionReference<'mutation'>('market:executeResourceExchange');
