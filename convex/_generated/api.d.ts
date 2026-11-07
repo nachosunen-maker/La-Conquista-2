@@ -46,6 +46,7 @@ import type * as http from "../http.js";
 import type * as kingdomAccess from "../kingdomAccess.js";
 import type * as kingdomReadModel from "../kingdomReadModel.js";
 import type * as kingdoms from "../kingdoms.js";
+import type * as market from "../market.js";
 import type * as military from "../military.js";
 import type * as militaryPureTests from "../militaryPureTests.js";
 import type * as militaryRules from "../militaryRules.js";
@@ -105,6 +106,7 @@ declare const fullApi: ApiFromModules<{
   kingdomAccess: typeof kingdomAccess;
   kingdomReadModel: typeof kingdomReadModel;
   kingdoms: typeof kingdoms;
+  market: typeof market;
   military: typeof military;
   militaryPureTests: typeof militaryPureTests;
   militaryRules: typeof militaryRules;

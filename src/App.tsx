@@ -56,6 +56,7 @@ import { UniversityPanel } from './components/UniversityPanel';
 import { ParliamentPanel } from './components/ParliamentPanel';
 import { MapPanel } from './components/MapPanel';
 import { MissionsPanel, MissionCelebrations } from './components/MissionsPanel';
+import { MarketPanel } from './components/MarketPanel';
 import { formatCosts, formatRequirements, normalizeErrorMessage, StatusMessages } from './components/shared';
 
 
@@ -1911,6 +1912,23 @@ function KingdomOverviewContent() {
           </span>
         </div>
       </section>
+
+      {/* ====================================================================
+          2.C. SECCIÓN MERCADO — INTERCAMBIO DE RECURSOS DEL REINO
+          ==================================================================== */}
+      <MarketPanel
+        kingdomId={kingdom._id}
+        isOwner={isOwner}
+        resources={resources ? {
+          gold: resources.gold,
+          wood: resources.wood,
+          stone: resources.stone,
+          iron: resources.iron,
+          food: resources.food,
+        } : undefined}
+        storageCapacity={lastSettlement?.storageCapacity ?? null}
+        buildingLevels={constructionState?.buildingLevels}
+      />
 
       {/* ====================================================================
           3. PANELES CENTRALES: DEMOGRAFÍA & EJÉRCITO (RESPONSIVE 2 COLUMNAS)

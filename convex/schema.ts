@@ -121,6 +121,19 @@ export default defineSchema({
       .index("by_idempotency_key", ["idempotencyKey"])
       .index("by_kingdom_and_key", ["kingdomId", "idempotencyKey"]),
 
+    // Tabla para registro atómico e historial de intercambios de recursos en el Mercado
+    marketTrades: defineTable({
+      kingdomId: v.id("kingdoms"),
+      idempotencyKey: v.string(),
+      fromResource: v.string(),
+      fromAmount: v.number(),
+      toResource: v.string(),
+      toAmount: v.number(),
+      createdAt: v.number(),
+    })
+      .index("by_kingdom", ["kingdomId"])
+      .index("by_kingdom_and_key", ["kingdomId", "idempotencyKey"]),
+
     // Building documents already exist relationally; the observed contract is type + level.
     buildings: defineTable({
       kingdomId: v.id("kingdoms"),
