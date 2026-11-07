@@ -2397,7 +2397,7 @@ function KingdomOverviewContent() {
                   const effect = entry
                     ? entry.residentialCapacityPerLevel > 0
                       ? `+${entry.residentialCapacityPerLevel} plazas de vivienda por nivel`
-                      : entry.workerCapacityPerLevel > 0
+                      : type !== 'mercado' && entry.workerCapacityPerLevel > 0 && (entry.jobType || professionJob)
                         ? `+${entry.workerCapacityPerLevel} trabajadores por nivel${entry.jobType ? ` (${jobNames[entry.jobType] ?? entry.jobType})` : professionJob ? ` (${professionNames[professionJob] ?? professionJob})` : ''}`
                         : entry.role
                     : staticConfig?.role ?? 'Edificio del reino';
