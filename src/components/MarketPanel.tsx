@@ -19,6 +19,7 @@ import {
   UNLOCK_MERCADO_MIN_LEVEL,
   VALID_MARKET_RESOURCES,
   getExchangeBatchInfo,
+  getMarketFee,
   calculateExchange,
   type MarketResourceType,
 } from '../../convex/market';
@@ -53,6 +54,7 @@ export function MarketPanel({
   // Nivel de mercado: preferir el devuelto por la consulta o del registro de edificios
   const mercadoLevel = marketData?.mercadoLevel ?? buildingLevels?.mercado ?? 0;
   const isUnlocked = mercadoLevel >= UNLOCK_MERCADO_MIN_LEVEL;
+  const feeInfo = getMarketFee(mercadoLevel);
 
   // Estados de intercambio
   const [fromResource, setFromResource] = useState<MarketResourceType>('gold');
@@ -61,10 +63,10 @@ export function MarketPanel({
   const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // Información de lote y cálculo
+  // Información de lote y cálculo con comisión por nivel del edificio
   const batchInfo = getExchangeBatchInfo(fromResource, toResource);
   const inputAmount = parseInt(amountStr, 10) || 0;
-  const exchangeCalc = calculateExchange(fromResource, toResource, inputAmount);
+  const exchangeCalc = calculateExchange(fromResource, toResource, inputAmount, mercadoLevel);
 
   // Saldos y almacén
   const currentFrom = resources ? resources[fromResource] : 0;
@@ -222,6 +224,28 @@ export function MarketPanel({
       ) : (
         /* INTERFAZ ACTIVA DE INTERCAMBIO */
         <div className="space-y-5">
+          {/* Banner informativo de comisión progresiva según nivel */}
+          <div className="bg-[#12100c] border border-[#2c2215] rounded-lg p-3.5 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <span className="font-serif font-bold text-[#f5efe1] flex items-center gap-1.5">
+                <Scale className="w-4 h-4 text-[#d4af37]" />
+                <span>Condiciones de Intercambio — Mercado Nivel {mercadoLevel}</span>
+              </span>
+              <div className="flex items-center gap-2 text-[11px] font-mono">
+                <span className="bg-[#1e1710] border border-[#3d2e1c] px-2 py-0.5 rounded text-amber-300">
+                  Comisión: <strong>{feeInfo.feePercent.toFixed(2)} %</strong>
+                </span>
+                <span className="bg-[#142314] border border-emerald-900/60 px-2 py-0.5 rounded text-emerald-300">
+                  Conservas: <strong>{feeInfo.retentionPercent.toFixed(2)} %</strong>
+                </span>
+              </div>
+            </div>
+            <p className="text-[11px] text-[#8e816d] leading-relaxed">
+              💡 <strong>Ventaja por nivel:</strong> Cada mejora del Mercado reduce progresivamente la comisión comercial 
+              (<span className="font-mono text-[#d4af37]">comisión = 1 / (nivel + 6)</span>). Cuanto mayor sea el nivel del Mercado, más recursos recibirás por cada intercambio.
+            </p>
+          </div>
+
           {/* Fila 1: Selección de recursos (Entregar vs Recibir) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Recurso que se entrega */}
@@ -403,7 +427,7 @@ export function MarketPanel({
               <span>Resumen de la Transacción Comercial</span>
             </h4>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
               <div className="bg-[#15110d] p-2 rounded border border-[#261f15]">
                 <span className="text-[10px] text-[#8e816d] block">Entregas:</span>
                 <span className="font-mono font-bold text-red-400">
@@ -415,7 +439,27 @@ export function MarketPanel({
               </div>
 
               <div className="bg-[#15110d] p-2 rounded border border-[#261f15]">
-                <span className="text-[10px] text-[#8e816d] block">Recibes:</span>
+                <span className="text-[10px] text-[#8e816d] block">Equivalencia bruta:</span>
+                <span className="font-mono font-bold text-[#e6ded0]">
+                  +{exchangeCalc.grossAmount} {MARKET_RESOURCE_NAMES[toResource]}
+                </span>
+                <span className="text-[9px] text-[#736754] block mt-0.5 font-mono">
+                  Sin comisión
+                </span>
+              </div>
+
+              <div className="bg-[#15110d] p-2 rounded border border-[#261f15]">
+                <span className="text-[10px] text-[#8e816d] block">Comisión Nv.{mercadoLevel} ({exchangeCalc.feePercent.toFixed(2)}%):</span>
+                <span className="font-mono font-bold text-amber-400">
+                  -{exchangeCalc.feeAmount} {MARKET_RESOURCE_NAMES[toResource]}
+                </span>
+                <span className="text-[9px] text-[#736754] block mt-0.5 font-mono">
+                  Coste de canje
+                </span>
+              </div>
+
+              <div className="bg-[#15110d] p-2 rounded border border-[#261f15]">
+                <span className="text-[10px] text-[#8e816d] block">Recibes neto:</span>
                 <span className="font-mono font-bold text-emerald-400">
                   +{exchangeCalc.toAmount} {MARKET_RESOURCE_NAMES[toResource]}
                 </span>
@@ -424,8 +468,8 @@ export function MarketPanel({
                 </span>
               </div>
 
-              <div className="bg-[#15110d] p-2 rounded border border-[#261f15]">
-                <span className="text-[10px] text-[#8e816d] block">Almacén destino tras cambio:</span>
+              <div className="bg-[#15110d] p-2 rounded border border-[#261f15] col-span-2 sm:col-span-1">
+                <span className="text-[10px] text-[#8e816d] block">Almacén destino:</span>
                 <span
                   className={`font-mono font-bold ${
                     willExceedStorage ? 'text-red-400' : 'text-[#d4af37]'
@@ -434,19 +478,18 @@ export function MarketPanel({
                   {(currentTo + exchangeCalc.toAmount).toLocaleString('es-ES')} / {effectiveCapacity.toLocaleString('es-ES')}
                 </span>
                 <span className="text-[9px] text-[#736754] block mt-0.5">
-                  {willExceedStorage ? '¡Desborda almacén!' : `Libre: ${(spaceAvailable - exchangeCalc.toAmount).toLocaleString('es-ES')}`}
+                  {willExceedStorage ? '¡Desborda!' : `Libre: ${(spaceAvailable - exchangeCalc.toAmount).toLocaleString('es-ES')}`}
                 </span>
               </div>
+            </div>
 
-              <div className="bg-[#15110d] p-2 rounded border border-[#261f15]">
-                <span className="text-[10px] text-[#8e816d] block">Valor económico:</span>
-                <span className="font-mono font-bold text-[#f5efe1]">
-                  {exchangeCalc.valueDelivered} = {exchangeCalc.valueReceived} pts
-                </span>
-                <span className="text-[9px] text-emerald-400 block mt-0.5">
-                  100% conservado
-                </span>
-              </div>
+            <div className="text-[11px] text-[#8e816d] bg-[#14100c] p-2 rounded border border-[#241c13] flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 font-mono">
+              <span>
+                Valor económico: <strong>{exchangeCalc.valueDelivered} pts</strong> entregados ➔ <strong>{exchangeCalc.valueReceivedNet} pts</strong> recibidos
+              </span>
+              <span className="text-emerald-400">
+                Retención de valor: <strong>{exchangeCalc.retentionPercent.toFixed(2)} %</strong>
+              </span>
             </div>
 
             {/* Mensajes de validación o retroalimentación */}

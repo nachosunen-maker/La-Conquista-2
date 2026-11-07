@@ -93,26 +93,65 @@ export function getExchangeBatchInfo(from: MarketResourceType, to: MarketResourc
 }
 
 /**
- * Calcula la conversión conservando estrictamente el valor económico en puntos.
+ * Comisión del Mercado según el nivel del edificio (desbloqueado desde nivel 4):
+ * - comision = 1 / (nivel_mercado + 6)
+ * - comision_porcentaje = 100 / (nivel_mercado + 6)
+ * - factor_recibido = (nivel_mercado + 5) / (nivel_mercado + 6)
+ * - cantidad_recibida = floor(cantidad_bruta_recibida * factor_recibido)
+ */
+export function getMarketFee(mercadoLevel: number) {
+  const level = Math.max(1, Math.floor(mercadoLevel));
+  const denominator = level + 6;
+  const numerator = level + 5;
+  const feeRate = 1 / denominator;
+  const feePercent = 100 / denominator;
+  const retentionFactor = numerator / denominator;
+  const retentionPercent = (numerator * 100) / denominator;
+
+  return {
+    level,
+    denominator,
+    numerator,
+    feeRate,
+    feePercent,
+    retentionFactor,
+    retentionPercent,
+  };
+}
+
+/**
+ * Calcula la conversión aplicando la comisión oficial progresiva según el nivel del Mercado.
+ * Conserva estrictamente los lotes mínimos y redondea hacia abajo al entero más próximo.
  */
 export function calculateExchange(
   from: MarketResourceType,
   to: MarketResourceType,
-  fromAmount: number
+  fromAmount: number,
+  mercadoLevel: number = UNLOCK_MERCADO_MIN_LEVEL
 ): {
   valid: boolean;
+  grossAmount: number;
   toAmount: number;
+  feeAmount: number;
+  feePercent: number;
+  retentionPercent: number;
   valueDelivered: number;
-  valueReceived: number;
+  valueReceivedGross: number;
+  valueReceivedNet: number;
   minFromBatch: number;
   error?: string;
 } {
   if (from === to) {
     return {
       valid: false,
+      grossAmount: 0,
       toAmount: 0,
+      feeAmount: 0,
+      feePercent: 0,
+      retentionPercent: 0,
       valueDelivered: 0,
-      valueReceived: 0,
+      valueReceivedGross: 0,
+      valueReceivedNet: 0,
       minFromBatch: 1,
       error: "Los recursos de origen y destino deben ser diferentes.",
     };
@@ -121,9 +160,14 @@ export function calculateExchange(
   if (!Number.isInteger(fromAmount) || fromAmount <= 0) {
     return {
       valid: false,
+      grossAmount: 0,
       toAmount: 0,
+      feeAmount: 0,
+      feePercent: 0,
+      retentionPercent: 0,
       valueDelivered: 0,
-      valueReceived: 0,
+      valueReceivedGross: 0,
+      valueReceivedNet: 0,
       minFromBatch: 1,
       error: "La cantidad entregada debe ser un número entero positivo.",
     };
@@ -134,24 +178,58 @@ export function calculateExchange(
   if (fromAmount % info.minFromBatch !== 0) {
     return {
       valid: false,
+      grossAmount: 0,
       toAmount: 0,
+      feeAmount: 0,
+      feePercent: 0,
+      retentionPercent: 0,
       valueDelivered: fromAmount * info.vFrom,
-      valueReceived: 0,
+      valueReceivedGross: 0,
+      valueReceivedNet: 0,
       minFromBatch: info.minFromBatch,
       error: `La cantidad de ${MARKET_RESOURCE_NAMES[from]} debe ser múltiplo de ${info.minFromBatch} para garantizar una conversión entera y sin pérdida de valor económico.`,
     };
   }
 
   const batches = fromAmount / info.minFromBatch;
-  const toAmount = batches * info.minToBatch;
+  const grossAmount = batches * info.minToBatch;
+  const feeInfo = getMarketFee(mercadoLevel);
+
+  // Fórmula oficial: cantidad_recibida = floor(cantidad_bruta_recibida * factor_recibido)
+  // En aritmética entera: floor((grossAmount * (level + 5)) / (level + 6))
+  const toAmount = Math.floor((grossAmount * feeInfo.numerator) / feeInfo.denominator);
+  const feeAmount = grossAmount - toAmount;
+
+  if (toAmount <= 0) {
+    return {
+      valid: false,
+      grossAmount,
+      toAmount: 0,
+      feeAmount: grossAmount,
+      feePercent: feeInfo.feePercent,
+      retentionPercent: feeInfo.retentionPercent,
+      valueDelivered: fromAmount * info.vFrom,
+      valueReceivedGross: grossAmount * info.vTo,
+      valueReceivedNet: 0,
+      minFromBatch: info.minFromBatch,
+      error: "La cantidad a recibir tras descontar la comisión del mercado resultaría en 0. Aumenta la cantidad a entregar.",
+    };
+  }
+
   const valueDelivered = fromAmount * info.vFrom;
-  const valueReceived = toAmount * info.vTo;
+  const valueReceivedGross = grossAmount * info.vTo;
+  const valueReceivedNet = toAmount * info.vTo;
 
   return {
     valid: true,
+    grossAmount,
     toAmount,
+    feeAmount,
+    feePercent: feeInfo.feePercent,
+    retentionPercent: feeInfo.retentionPercent,
     valueDelivered,
-    valueReceived,
+    valueReceivedGross,
+    valueReceivedNet,
     minFromBatch: info.minFromBatch,
   };
 }
@@ -196,11 +274,14 @@ export const getMarketInfo = query({
       .order("desc")
       .take(15);
 
+    const feeInfo = isUnlocked ? getMarketFee(mercadoLevel) : null;
+
     return {
       mercadoLevel,
       isUnlocked,
       requiredLevel: UNLOCK_MERCADO_MIN_LEVEL,
       recentTrades,
+      feeInfo,
     };
   },
 });
@@ -292,8 +373,8 @@ export const executeResourceExchange = mutation({
     const fromRes = args.fromResource as MarketResourceType;
     const toRes = args.toResource as MarketResourceType;
 
-    // 4. Validación matemática y cálculo de conversión exacta
-    const exchange = calculateExchange(fromRes, toRes, args.fromAmount);
+    // 4. Validación matemática y cálculo de conversión con comisión progresiva según nivel
+    const exchange = calculateExchange(fromRes, toRes, args.fromAmount, mercadoLevel);
     if (!exchange.valid) {
       throw new ConvexError(exchange.error ?? "Cálculo de intercambio inválido.");
     }
@@ -359,11 +440,14 @@ export const executeResourceExchange = mutation({
       fromResource: fromRes,
       fromAmount: args.fromAmount,
       toResource: toRes,
+      grossAmount: exchange.grossAmount,
       toAmount: exchange.toAmount,
+      feeAmount: exchange.feeAmount,
+      feePercent: exchange.feePercent,
       remainingFrom: currentResources[fromRes],
       newTo: currentResources[toRes],
       storageCapacity: storageCap,
-      message: `Intercambio realizado con éxito: entregados ${args.fromAmount} de ${MARKET_RESOURCE_NAMES[fromRes]}, recibidos ${exchange.toAmount} de ${MARKET_RESOURCE_NAMES[toRes]}.`,
+      message: `Intercambio realizado con éxito: entregados ${args.fromAmount} de ${MARKET_RESOURCE_NAMES[fromRes]}, recibidos ${exchange.toAmount} de ${MARKET_RESOURCE_NAMES[toRes]} (bruto: ${exchange.grossAmount}, comisión nivel ${mercadoLevel}: ${exchange.feeAmount}).`,
     };
   },
 });
