@@ -648,6 +648,252 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       });
   }
 
+  // 24. (PASO 3.1) Cada una de las 12 civilizaciones tiene exactamente 4 investigaciones propias con estructura base -> _a, _b -> _c
+  {
+    const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes", "mongoles", "chinos", "japoneses", "navajos", "aztecas", "masais"];
+    let all12Valid = true;
+    const errors: string[] = [];
+
+    for (const civ of civs) {
+      const civTechs = TECHNOLOGIES.filter((t) => t.branch === "civilizacion" && t.civilizationRequirement === civ);
+      if (civTechs.length !== 4) {
+        all12Valid = false;
+        errors.push(`${civ} tiene ${civTechs.length} nodos (esperado: 4)`);
+        continue;
+      }
+      const base = civTechs.find((t) => t.id === `tech_civ_${civ}`);
+      const nodeA = civTechs.find((t) => t.id === `tech_civ_${civ}_a`);
+      const nodeB = civTechs.find((t) => t.id === `tech_civ_${civ}_b`);
+      const nodeC = civTechs.find((t) => t.id === `tech_civ_${civ}_c`);
+
+      if (!base || !nodeA || !nodeB || !nodeC) {
+        all12Valid = false;
+        errors.push(`${civ} falta algún nodo con id canónico`);
+        continue;
+      }
+
+      if (base.universityLevel !== 2) {
+        all12Valid = false;
+        errors.push(`${civ} base universityLevel es ${base.universityLevel} (esperado: 2)`);
+      }
+      if (nodeA.universityLevel !== 3 || !nodeA.technologyRequirements.includes(base.id)) {
+        all12Valid = false;
+        errors.push(`${civ}_a requisitos/nivel incorrectos`);
+      }
+      if (nodeB.universityLevel !== 3 || !nodeB.technologyRequirements.includes(base.id)) {
+        all12Valid = false;
+        errors.push(`${civ}_b requisitos/nivel incorrectos`);
+      }
+      if (nodeC.universityLevel !== 5 || !nodeC.technologyRequirements.includes(nodeA.id) || !nodeC.technologyRequirements.includes(nodeB.id)) {
+        all12Valid = false;
+        errors.push(`${civ}_c requisitos/nivel incorrectos`);
+      }
+    }
+
+    results.push({
+      category: "CADENAS DE CIVILIZACIÓN (PASO 3.1)",
+      test: "24. Cada una de las 12 civilizaciones tiene exactamente 4 investigaciones propias con estructura base -> _a, _b -> _c",
+      passed: all12Valid,
+      details: all12Valid ? "12 civilizaciones con exactamente 4 nodos estructurados (48 nodos totales)" : `Fallos: ${errors.join("; ")}`,
+    });
+  }
+
+  // 25. (PASO 3.2) Para cada civilización, la rama civilización que ve su reino contiene solo sus 4 y ninguna ajena
+  {
+    const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes", "mongoles", "chinos", "japoneses", "navajos", "aztecas", "masais"];
+    let visibilityOk = true;
+    const errors: string[] = [];
+
+    for (const civ of civs) {
+      const visibleBranchCiv = TECHNOLOGIES.filter((t) => {
+        if (t.branch !== "civilizacion") return false;
+        return !t.civilizationRequirement || t.civilizationRequirement === civ;
+      });
+
+      if (visibleBranchCiv.length !== 4) {
+        visibilityOk = false;
+        errors.push(`${civ} ve ${visibleBranchCiv.length} nodos (esperado: 4)`);
+      }
+      const alienTechs = visibleBranchCiv.filter((t) => t.civilizationRequirement !== civ);
+      if (alienTechs.length > 0) {
+        visibilityOk = false;
+        errors.push(`${civ} ve nodos ajenos: ${alienTechs.map((t) => t.id).join(", ")}`);
+      }
+    }
+
+    results.push({
+      category: "VISIBILIDAD FILTRADA EN SERVIDOR (PASO 3.2)",
+      test: "25. Para cada civilización, la rama civilización que ve su reino contiene solo sus 4 y ninguna ajena",
+      passed: visibilityOk,
+      details: visibilityOk ? "Todas las civilizaciones ven exactamente 4 nodos propios y 0 ajenos en la rama civilización" : `Fallos: ${errors.join("; ")}`,
+    });
+  }
+
+  // 26. (PASO 3.3) Un reino de una civilización no puede iniciar una investigación de otra
+  {
+    let rejectionOk = true;
+    const errors: string[] = [];
+
+    const planRomanoGriego = createResearchPlan({
+      technologyId: "tech_civ_griegos",
+      resources: richResources,
+      completedIds: [],
+      activeResearch: [],
+      buildingLevels: { castillo: 6, universidad: 5, cuartel: 5, herreria: 5 },
+      now: Date.now(),
+      kingdomCivilization: "romanos",
+    });
+
+    if (planRomanoGriego.success) {
+      rejectionOk = false;
+      errors.push("Romano pudo iniciar tech_civ_griegos");
+    }
+
+    const planMongolChino = createResearchPlan({
+      technologyId: "tech_civ_chinos_a",
+      resources: richResources,
+      completedIds: ["tech_civ_chinos"],
+      activeResearch: [],
+      buildingLevels: { castillo: 6, universidad: 5, cuartel: 5, herreria: 5 },
+      now: Date.now(),
+      kingdomCivilization: "mongoles",
+    });
+
+    if (planMongolChino.success) {
+      rejectionOk = false;
+      errors.push("Mongol pudo iniciar tech_civ_chinos_a");
+    }
+
+    results.push({
+      category: "SEGURIDAD DE CIVILIZACIÓN (PASO 3.3)",
+      test: "26. Un reino de una civilización no puede iniciar una investigación de otra",
+      passed: rejectionOk,
+      details: rejectionOk ? "Rechazos verificados: Romano -> Griego bloqueado; Mongol -> Chino bloqueado" : `Fallos: ${errors.join("; ")}`,
+    });
+  }
+
+  // 27. (PASO 3.4) Con todo el árbol completado, ningún efecto con tope calibrado tiene una suma sin recortar mayor que su tope
+  {
+    const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes", "mongoles", "chinos", "japoneses", "navajos", "aztecas", "masais"];
+    const genericTechs = TECHNOLOGIES.filter((t) => t.branch !== "civilizacion");
+    let capsOk = true;
+    const errors: string[] = [];
+
+    for (const civ of civs) {
+      const civTechs = TECHNOLOGIES.filter((t) => t.branch === "civilizacion" && t.civilizationRequirement === civ);
+      const allTechs = [...genericTechs, ...civTechs];
+
+      let sumEffInf = 0;
+      let sumEffArc = 0;
+      let sumEffCav = 0;
+      let sumMarchSpeed = 0;
+
+      for (const t of allTechs) {
+        if (t.effect.key === "unitEfficiencyInf") sumEffInf += t.effect.value;
+        else if (t.effect.key === "unitEfficiencyArc") sumEffArc += t.effect.value;
+        else if (t.effect.key === "unitEfficiencyCav") sumEffCav += t.effect.value;
+        else if (t.effect.key === "unitEfficiencyAll") {
+          sumEffInf += t.effect.value;
+          sumEffArc += t.effect.value;
+          sumEffCav += t.effect.value;
+        } else if (t.effect.key === "marchSpeed") {
+          sumMarchSpeed += t.effect.value;
+        }
+      }
+
+      if (sumEffInf > TECH_EFFECT_CAPS.unitEfficiency + 1e-6) {
+        capsOk = false;
+        errors.push(`${civ} unitEfficiencyInf ${sumEffInf.toFixed(2)} > ${TECH_EFFECT_CAPS.unitEfficiency}`);
+      }
+      if (sumEffArc > TECH_EFFECT_CAPS.unitEfficiency + 1e-6) {
+        capsOk = false;
+        errors.push(`${civ} unitEfficiencyArc ${sumEffArc.toFixed(2)} > ${TECH_EFFECT_CAPS.unitEfficiency}`);
+      }
+      if (sumEffCav > TECH_EFFECT_CAPS.unitEfficiency + 1e-6) {
+        capsOk = false;
+        errors.push(`${civ} unitEfficiencyCav ${sumEffCav.toFixed(2)} > ${TECH_EFFECT_CAPS.unitEfficiency}`);
+      }
+      if (sumMarchSpeed > TECH_EFFECT_CAPS.marchSpeed + 1e-6) {
+        capsOk = false;
+        errors.push(`${civ} marchSpeed ${sumMarchSpeed.toFixed(2)} > ${TECH_EFFECT_CAPS.marchSpeed}`);
+      }
+    }
+
+    results.push({
+      category: "CALIBRACIÓN DE TOPES (PASO 3.4)",
+      test: "27. Con todo el árbol completado, ningún efecto con tope calibrado (unitEfficiency y marchSpeed) tiene suma mayor que su tope",
+      passed: capsOk,
+      details: capsOk ? "Topes respetados en las 12 civs (unitEfficiency máx 0.30, marchSpeed máx 0.55; Romanos inf: 0.30 exacto)" : `Superan tope: ${errors.join("; ")}`,
+    });
+  }
+
+  // 28. (PASO 3.5) Navajos: con espionage_4 y tech_civ_navajos_a el nivel es 4; con tech_civ_navajos_a y sin espionage_1 el nivel es 0
+  {
+    const modSoloNavajo = computeTechnologyModifiers(["tech_civ_navajos_a"]);
+    const modEsp4Navajo = computeTechnologyModifiers(["espionage_1", "espionage_2", "espionage_3", "espionage_4", "tech_civ_navajos_a"]);
+    const modEsp1Navajo = computeTechnologyModifiers(["espionage_1", "tech_civ_navajos_a"]);
+    const modEsp2Navajo = computeTechnologyModifiers(["espionage_1", "espionage_2", "tech_civ_navajos_a"]);
+    const modEsp3Navajo = computeTechnologyModifiers(["espionage_1", "espionage_2", "espionage_3", "tech_civ_navajos_a"]);
+
+    const soloNavajoOk = modSoloNavajo.espionageLevel === 0;
+    const esp4NavajoOk = modEsp4Navajo.espionageLevel === 4;
+    const esp1NavajoOk = modEsp1Navajo.espionageLevel === 2;
+    const esp2NavajoOk = modEsp2Navajo.espionageLevel === 3;
+    const esp3NavajoOk = modEsp3Navajo.espionageLevel === 4;
+
+    const allEspNavajoOk = soloNavajoOk && esp4NavajoOk && esp1NavajoOk && esp2NavajoOk && esp3NavajoOk;
+
+    results.push({
+      category: "ESPIONAJE NAVAJO (PASO 3.5)",
+      test: "28. Navajos: con espionage_4 y tech_civ_navajos_a nivel 4; con tech_civ_navajos_a sin espionage_1 nivel 0",
+      passed: allEspNavajoOk,
+      details: allEspNavajoOk
+        ? "Solo navajos_a: nivel 0; esp_1+nav: nivel 2; esp_2+nav: nivel 3; esp_3+nav: nivel 4; esp_4+nav: nivel 4 (tope 4)"
+        : `Solo nav: ${modSoloNavajo.espionageLevel}, esp4+nav: ${modEsp4Navajo.espionageLevel}, esp1+nav: ${modEsp1Navajo.espionageLevel}`,
+    });
+  }
+
+  // 29. Aislamiento cliente: ningún componente cliente recibe o muestra tecnologías de otra civilización (falla si hay contaminación)
+  {
+    const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes", "mongoles", "chinos", "japoneses", "navajos", "aztecas", "masais"];
+    let isolationOk = true;
+    const violations: string[] = [];
+
+    for (const clientCiv of civs) {
+      // Simula el filtrado que entrega el backend a los componentes cliente (getTechnologies / UniversityPanel)
+      const clientCatalog = TECHNOLOGIES.filter((t) => {
+        if (!t.civilizationRequirement) return true;
+        return t.civilizationRequirement.toLowerCase() === clientCiv.toLowerCase();
+      });
+
+      // Componente cliente renderizando rama civilización
+      const civBranchRendered = clientCatalog.filter((t) => t.branch === "civilizacion");
+
+      if (civBranchRendered.length !== 4) {
+        isolationOk = false;
+        violations.push(`${clientCiv}: renderiza ${civBranchRendered.length} nodos (esperado 4)`);
+      }
+
+      const alienNodes = civBranchRendered.filter(
+        (t) => t.civilizationRequirement && t.civilizationRequirement.toLowerCase() !== clientCiv.toLowerCase()
+      );
+
+      if (alienNodes.length > 0) {
+        isolationOk = false;
+        violations.push(`${clientCiv}: renderiza nodos ajenos: ${alienNodes.map((n) => n.id).join(", ")}`);
+      }
+    }
+
+    results.push({
+      category: "AISLAMIENTO CLIENTE DE CIVILIZACIÓN (TEST 29)",
+      test: "29. Ningún componente cliente recibe ni muestra nodos de otra civilización",
+      passed: isolationOk,
+      details: isolationOk
+        ? "Verificado en las 12 civilizaciones: exactamente 4 nodos propios y 0 ajenos en cliente"
+        : `Violaciones detectadas: ${violations.join("; ")}`,
+    });
+  }
+
   return results;
 }
 

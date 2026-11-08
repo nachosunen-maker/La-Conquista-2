@@ -22,7 +22,7 @@ import {
   researchSlots,
   type ResearchQueueEntry,
 } from "./technologyRules";
-import { getCivilizationPassive } from "./civilizationRules";
+import { getCivilizationPassive, normalizeCivilizationId } from "./civilizationRules";
 import { TECHNOLOGIES } from "./balanceConfig";
 import type { ResourceType } from "./economyCalculations";
 
@@ -70,7 +70,12 @@ export const getTechnologies = query({
           ? doc.startedAt + doc.durationMs
           : null,
       })),
-      catalog: TECHNOLOGIES.map((technology) => {
+      catalog: TECHNOLOGIES
+        .filter((technology) => {
+          if (technology.branch !== "civilizacion") return true;
+          return !technology.civilizationRequirement || normalizeCivilizationId(technology.civilizationRequirement) === normalizeCivilizationId(kingdom.civilization);
+        })
+        .map((technology) => {
         const evaluation = evaluateTechnologyStatus({
           technology,
           completedIds,

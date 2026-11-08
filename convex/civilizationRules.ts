@@ -48,11 +48,11 @@ export const CIVILIZATION_MAP: Readonly<Record<CivilizationId, CivilizationBalan
 ) as Record<CivilizationId, CivilizationBalance>;
 
 /** Obtiene la definición completa de una civilización o null si no existe. */
-/** Traduce identificadores antiguos (indiosAmericanos, keniatas…) al vigente; devuelve el mismo id si ya es actual. */
 export function normalizeCivilizationId(id: string | null | undefined): string | null {
   if (!id || typeof id !== "string") return null;
   const trimmed = id.trim();
-  return LEGACY_CIVILIZATION_IDS[trimmed] ?? trimmed;
+  const lower = trimmed.toLowerCase();
+  return LEGACY_CIVILIZATION_IDS[trimmed] ?? LEGACY_CIVILIZATION_IDS[lower] ?? lower;
 }
 
 export function getCivilization(id: string | null | undefined): CivilizationBalance | null {

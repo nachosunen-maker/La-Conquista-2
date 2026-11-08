@@ -918,7 +918,7 @@ export const TECH_EFFECT_CAPS = {
   happinessBase: 30,
   combatAttack: 0.25,
   combatDefense: 0.25,
-  marchSpeed: 0.50,
+  marchSpeed: 0.55,
   marchFatigue: 0.50,
   woundedRecovery: 0.60,
   trainingDurationFloor: 0.60,
@@ -934,7 +934,7 @@ export const TECH_EFFECT_CAPS = {
   housingCapacity: 0.30,
   taxTolerance: 0.50,
   moraleBase: 15,
-  unitEfficiency: 0.20,
+  unitEfficiency: 0.30,
   mercenaryCost: 0.30,
   woundedRate: 0.20,
   fatigueAccrual: 0.30,
@@ -1059,13 +1059,13 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   { id: "tech_civ_ingleses_b", name: "Rotación de cultivos avanzada", branch: "civilizacion", universityLevel: 3, costs: { gold: 500, wood: 200, stone: 200, iron: 0, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_ingleses"], civilizationRequirement: "ingleses", effect: { key: "agricultureProduction", value: 0.10, description: "+10 % producción agrícola" } },
   { id: "tech_civ_ingleses_c", name: "Dominio del Canal", branch: "civilizacion", universityLevel: 5, costs: { gold: 1200, wood: 800, stone: 400, iron: 300, food: 0 }, durationSeconds: 900, buildingRequirements: { castillo: 6 }, technologyRequirements: ["tech_civ_ingleses_a", "tech_civ_ingleses_b"], civilizationRequirement: "ingleses", effect: { key: "combatAttack", value: 0.12, description: "+12 % ataque militar total" } },
   // Romanos
-  { id: "tech_civ_romanos_a", name: "Formación de Testudo", branch: "civilizacion", universityLevel: 3, costs: { gold: 400, wood: 200, stone: 400, iron: 400, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_romanos"], civilizationRequirement: "romanos", effect: { key: "unitEfficiencyInf", value: 0.10, description: "Eficacia de infantería +10 %" } },
+  { id: "tech_civ_romanos_a", name: "Formación de Testudo", branch: "civilizacion", universityLevel: 3, costs: { gold: 400, wood: 200, stone: 400, iron: 400, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_romanos"], civilizationRequirement: "romanos", effect: { key: "unitEfficiencyInf", value: 0.08, description: "Eficacia de infantería +8 %" } },
   { id: "tech_civ_romanos_b", name: "Acueductos y calzadas", branch: "civilizacion", universityLevel: 3, costs: { gold: 400, wood: 0, stone: 800, iron: 200, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_romanos"], civilizationRequirement: "romanos", effect: { key: "constructionDuration", value: -0.06, description: "−6 % duración de construcción" } },
-  { id: "tech_civ_romanos_c", name: "Legado de la Legión", branch: "civilizacion", universityLevel: 5, costs: { gold: 1500, wood: 300, stone: 600, iron: 800, food: 0 }, durationSeconds: 900, buildingRequirements: { castillo: 6 }, technologyRequirements: ["tech_civ_romanos_a", "tech_civ_romanos_b"], civilizationRequirement: "romanos", effect: { key: "unitEfficiencyInf", value: 0.12, description: "Eficacia de infantería +12 %" } },
+  { id: "tech_civ_romanos_c", name: "Legado de la Legión", branch: "civilizacion", universityLevel: 5, costs: { gold: 1500, wood: 300, stone: 600, iron: 800, food: 0 }, durationSeconds: 900, buildingRequirements: { castillo: 6 }, technologyRequirements: ["tech_civ_romanos_a", "tech_civ_romanos_b"], civilizationRequirement: "romanos", effect: { key: "unitEfficiencyInf", value: 0.09, description: "Eficacia de infantería +9 %" } },
   // Griegos
   { id: "tech_civ_griegos_a", name: "Falange hoplita", branch: "civilizacion", universityLevel: 3, costs: { gold: 500, wood: 300, stone: 200, iron: 400, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_griegos"], civilizationRequirement: "griegos", effect: { key: "unitEfficiencyInf", value: 0.08, description: "Eficacia de infantería +8 %" } },
   { id: "tech_civ_griegos_b", name: "Academias de filosofía", branch: "civilizacion", universityLevel: 3, costs: { gold: 800, wood: 200, stone: 200, iron: 100, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_griegos"], civilizationRequirement: "griegos", effect: { key: "researchDuration", value: -0.05, description: "−5 % duración de investigaciones" } },
-  { id: "tech_civ_griegos_c", name: "Fuego griego", branch: "civilizacion", universityLevel: 5, costs: { gold: 1400, wood: 400, stone: 560, iron: 900, food: 0 }, durationSeconds: 900, buildingRequirements: { castillo: 6 }, technologyRequirements: ["tech_civ_griegos_a", "tech_civ_griegos_b"], civilizationRequirement: "griegos", effect: { key: "unitEfficiencyArc", value: 0.15, description: "Eficacia de arqueros +15 %" } },
+  { id: "tech_civ_griegos_c", name: "Arqueros cretenses", branch: "civilizacion", universityLevel: 5, costs: { gold: 1400, wood: 400, stone: 560, iron: 900, food: 0 }, durationSeconds: 900, buildingRequirements: { castillo: 6 }, technologyRequirements: ["tech_civ_griegos_a", "tech_civ_griegos_b"], civilizationRequirement: "griegos", effect: { key: "unitEfficiencyArc", value: 0.15, description: "Eficacia de arqueros +15 %" } },
   // Vikingos
   { id: "tech_civ_vikingos_a", name: "Navegación estelar", branch: "civilizacion", universityLevel: 3, costs: { gold: 700, wood: 600, stone: 0, iron: 0, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_vikingos"], civilizationRequirement: "vikingos", effect: { key: "goldProduction", value: 0.08, description: "+8 % producción de oro" } },
   { id: "tech_civ_vikingos_b", name: "Forja de acero nórdico", branch: "civilizacion", universityLevel: 3, costs: { gold: 400, wood: 100, stone: 0, iron: 800, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_vikingos"], civilizationRequirement: "vikingos", effect: { key: "unitEfficiencyInf", value: 0.08, description: "Eficacia de infantería +8 %" } },
@@ -1092,7 +1092,7 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   { id: "tech_civ_japoneses_b", name: "Maestros forjadores", branch: "civilizacion", universityLevel: 3, costs: { gold: 400, wood: 100, stone: 100, iron: 600, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3, herreria: 3 }, technologyRequirements: ["tech_civ_japoneses"], civilizationRequirement: "japoneses", effect: { key: "unitEfficiencyInf", value: 0.08, description: "Eficacia de infantería +8 %" } },
   { id: "tech_civ_japoneses_c", name: "Shogunato", branch: "civilizacion", universityLevel: 5, costs: { gold: 2000, wood: 500, stone: 500, iron: 800, food: 0 }, durationSeconds: 900, buildingRequirements: { castillo: 6 }, technologyRequirements: ["tech_civ_japoneses_a", "tech_civ_japoneses_b"], civilizationRequirement: "japoneses", effect: { key: "combatAttack", value: 0.10, description: "+10 % ataque militar" } },
   // Navajos
-  { id: "tech_civ_navajos_a", name: "Sabiduría del coyote", branch: "civilizacion", universityLevel: 3, costs: { gold: 400, wood: 200, stone: 100, iron: 50, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_navajos"], civilizationRequirement: "navajos", effect: { key: "espionageAccuracy", value: 1, description: "Mejora del espionaje" } },
+  { id: "tech_civ_navajos_a", name: "Sabiduría del coyote", branch: "civilizacion", universityLevel: 3, costs: { gold: 400, wood: 200, stone: 100, iron: 50, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_navajos"], civilizationRequirement: "navajos", effect: { key: "espionageAccuracy", value: 1, description: "+1 nivel de espionaje (requiere espionaje activo, máx nivel 4)" } },
   { id: "tech_civ_navajos_b", name: "Tejedores de sueños", branch: "civilizacion", universityLevel: 3, costs: { gold: 400, wood: 400, stone: 100, iron: 20, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 3 }, technologyRequirements: ["tech_civ_navajos"], civilizationRequirement: "navajos", effect: { key: "happinessBase", value: 4, description: "+4 felicidad base" } },
   { id: "tech_civ_navajos_c", name: "El Gran Camino del Bosque", branch: "civilizacion", universityLevel: 5, costs: { gold: 1400, wood: 900, stone: 400, iron: 100, food: 0 }, durationSeconds: 900, buildingRequirements: { castillo: 6 }, technologyRequirements: ["tech_civ_navajos_a", "tech_civ_navajos_b"], civilizationRequirement: "navajos", effect: { key: "marchSpeed", value: 0.12, description: "+12 % velocidad de marcha" } },
   // Aztecas

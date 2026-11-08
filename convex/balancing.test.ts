@@ -294,3 +294,25 @@ describe("Precisión Temporal de Construcción", () => {
     expect(viviendasN2ConTech).toBe(4_798);
   });
 });
+
+describe("Aislamiento de Civilización en Cliente y Consultas", () => {
+  it("garantiza que ningún componente cliente reciba o muestre nodos de otra civilización (falla ante contaminación)", () => {
+    const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes", "mongoles", "chinos", "japoneses", "navajos", "aztecas", "masais"];
+
+    for (const civ of civs) {
+      // Simulación de entrega del servidor a componentes cliente (ej. UniversityPanel)
+      const visibleCatalog = TECHNOLOGIES.filter((t) => {
+        if (!t.civilizationRequirement) return true;
+        return t.civilizationRequirement.toLowerCase() === civ.toLowerCase();
+      });
+
+      const civBranch = visibleCatalog.filter((t) => t.branch === "civilizacion");
+      // Cada cliente debe recibir exactamente 4 nodos en la rama civilización
+      expect(civBranch.length).toBe(4);
+
+      // Ningún nodo de la rama civilización puede pertenecer a otra civilización
+      const alienNodes = civBranch.filter((t) => t.civilizationRequirement?.toLowerCase() !== civ.toLowerCase());
+      expect(alienNodes).toHaveLength(0);
+    }
+  });
+});

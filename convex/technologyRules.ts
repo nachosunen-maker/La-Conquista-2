@@ -96,7 +96,8 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
   let sumMining = 0;
   let sumStorage = 0;
   let sumWounded = 0;
-  let maxEspionage = 0;
+  let baseEspionage = 0;
+  let navajoEspionageBonus = 0;
   let sumTraining = 0;
   let sumConstruction = 0;
   let sumHappiness = 0;
@@ -137,7 +138,13 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
       case "miningProduction": sumMining += value; break;
       case "storageCapacity": sumStorage += value; break;
       case "woundedRecovery": sumWounded += value; break;
-      case "espionageAccuracy": maxEspionage = Math.max(maxEspionage, value); break;
+      case "espionageAccuracy":
+        if (id === "tech_civ_navajos_a") {
+          navajoEspionageBonus += value;
+        } else {
+          baseEspionage = Math.max(baseEspionage, value);
+        }
+        break;
       case "trainingDuration": sumTraining += value; break; // Convención: valor negativo e.g. -0.05
       case "constructionDuration": sumConstruction += value; break; // Convención: valor negativo e.g. -0.05
       case "happinessBase": sumHappiness += value; break;
@@ -174,7 +181,9 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     miningProduction: 1 + Math.min(TECH_EFFECT_CAPS.miningProduction, Math.max(0, sumMining)),
     storageCapacity: 1 + Math.min(TECH_EFFECT_CAPS.storageCapacity, Math.max(0, sumStorage)),
     woundedRecoveryBonus: Math.min(TECH_EFFECT_CAPS.woundedRecovery, Math.max(0, sumWounded)),
-    espionageLevel: Math.min(TECH_EFFECT_CAPS.espionageAccuracyMax, maxEspionage),
+    espionageLevel: baseEspionage > 0
+      ? Math.min(TECH_EFFECT_CAPS.espionageAccuracyMax, baseEspionage + navajoEspionageBonus)
+      : 0,
     trainingDuration: Math.max(TECH_EFFECT_CAPS.trainingDurationFloor, 1 + sumTraining),
     constructionDuration: Math.max(TECH_EFFECT_CAPS.constructionDurationFloor, 1 + sumConstruction),
     happinessBase: Math.min(TECH_EFFECT_CAPS.happinessBase, sumHappiness),
