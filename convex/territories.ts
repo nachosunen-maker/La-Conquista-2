@@ -544,13 +544,6 @@ export const getWorldMap = query({
       ...exploredRecords.map((r) => String(r.cellId)),
     ]);
 
-    // Visión automática de fronteras: cada territorio propio revela sus 6 vecinos
-    for (const coord of ownedCoords) {
-      const neighbors = hexNeighbors(coord, MAP.RADIUS);
-      for (const n of neighbors) {
-        knownIds.add(cellId(n.q, n.r));
-      }
-    }
 
     const activeExpeditionMap = new Map<string, typeof activeQueue[0]>();
     const now = Date.now();
