@@ -11,7 +11,7 @@ import { v } from "convex/values";
 import { isKingdomOwner } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
 import { settleRelationalKingdomEconomy } from "./economy";
-import { readArmyUnitDocs, readArmyUnitsWithMigration } from "./army";
+import { readArmyUnitDocs, readArmyUnitsWithMigration, addUnits } from "./army";
 import { normalizeUnitType, summarizeArmy, unitLevelOf } from "./armyRules";
 import { validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
@@ -327,7 +327,11 @@ export const sendPredefinedMessage = mutation({
 
 /** [COMPLEMENTO D-39] Informe de espionaje pagado en oro según el nivel tecnológico. */
 export const requestEspionageReport = mutation({
-  args: { kingdomId: v.id("kingdoms"), targetKingdomId: v.id("kingdoms") },
+  args: { 
+    kingdomId: v.id("kingdoms"), 
+    targetKingdomId: v.id("kingdoms"),
+    spiesCount: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
     if (args.kingdomId === args.targetKingdomId) throw new Error("No puedes espiar a tu propio reino.");
@@ -337,56 +341,76 @@ export const requestEspionageReport = mutation({
     const spyLevel = modifiers.espionageLevel;
     if (spyLevel < 1) throw new Error("Se necesita la tecnología Espionaje I para solicitar informes (P42).");
 
-    const targetTech = await readCompletedTechnologyIds(ctx, args.targetKingdomId);
-    const targetModifiers = computeTechnologyModifiers(targetTech);
-    const counterProb = targetModifiers.counterEspionage;
+    const spiesCount = Math.max(1, args.spiesCount ?? 1);
+    const armyUnits = await readArmyUnitDocs(ctx, args.kingdomId);
+    const totalSpies = armyUnits.filter(u => u.isSpy || u.unitType === "espia").reduce((sum, u) => sum + Math.max(0, u.count ?? 0), 0);
+    if (totalSpies < spiesCount) throw new Error(`No tienes suficientes espías disponibles para la misión (solicitados: ${spiesCount}, disponibles: ${totalSpies}).`);
 
-    let effectiveLevel = spyLevel;
-    if (Math.random() < counterProb) {
-      effectiveLevel = Math.max(1, spyLevel - 1);
-    }
-
-    const cost = PARLIAMENT.ESPIONAGE.costByLevel[spyLevel] ?? PARLIAMENT.ESPIONAGE.costByLevel[1];
-    const now = Date.now();
-    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
-    if (settled.settledResources.gold < cost) throw new Error(`Oro insuficiente: el informe cuesta ${cost} y hay ${Math.floor(settled.settledResources.gold)}.`);
-    await ctx.db.patch(settled.resources._id, { ...settled.settledResources, gold: settled.settledResources.gold - cost });
-    const units = await readArmyUnitDocs(ctx, args.targetKingdomId);
-    const composition = activeComposition(units);
-    const estimated: Record<string, { min: number; max: number }> = {};
-    for (const type of UNIT_TYPES) estimated[type] = approximateEstimate(composition[type], effectiveLevel);
-    const total = approximateEstimate(Object.values(composition).reduce((a, b) => a + b, 0), effectiveLevel);
-    const reportId = await ctx.db.insert("espionageReports", {
-      kingdomId: args.kingdomId,
-      targetKingdomId: args.targetKingdomId,
-      level: effectiveLevel,
-      createdAt: now,
-      expiresAt: now + PARLIAMENT.ESPIONAGE.reportTtlMs,
-      estimate: { min: total.min, max: total.max },
-      composition: estimated,
-    });
-
-    // Los espías también son exploradores: registrar los territorios del reino objetivo en 'exploredTerritories'
-    const targetTerritories = await ctx.db
-      .query("territories")
-      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", args.targetKingdomId))
-      .collect();
-    for (const cell of targetTerritories) {
-      const existing = await ctx.db
-        .query("exploredTerritories")
-        .withIndex("by_kingdom_and_cell", (q) => q.eq("kingdomId", args.kingdomId).eq("cellId", cell.cellId))
-        .first();
-      if (!existing) {
-        await ctx.db.insert("exploredTerritories", {
-          kingdomId: args.kingdomId,
-          cellId: cell.cellId,
-          discoveredAt: now,
-          discoveryNote: `Territorio de ${target.name} descubierto por la red de espionaje.`,
-        });
+    // Descontar espías temporalmente
+    let remainingToDeduct = spiesCount;
+    for (const u of armyUnits) {
+      if ((u.isSpy || u.unitType === "espia") && (u.count ?? 0) > 0 && remainingToDeduct > 0) {
+        const take = Math.min(u.count, remainingToDeduct);
+        await ctx.db.patch(u._id, { count: u.count - take });
+        remainingToDeduct -= take;
       }
     }
 
-    return { success: true, reportId, cost, level: effectiveLevel, originalLevel: spyLevel, estimate: total, composition: estimated, expiresAt: now + PARLIAMENT.ESPIONAGE.reportTtlMs };
+    try {
+      const targetTech = await readCompletedTechnologyIds(ctx, args.targetKingdomId);
+      const targetModifiers = computeTechnologyModifiers(targetTech);
+      const counterProb = Math.max(0, targetModifiers.counterEspionage - 0.05 * (spiesCount - 1));
+
+      let effectiveLevel = Math.min(4, spyLevel + Math.floor((spiesCount - 1) / 2));
+      if (Math.random() < counterProb) {
+        effectiveLevel = Math.max(1, effectiveLevel - 1);
+      }
+
+      const cost = PARLIAMENT.ESPIONAGE.costByLevel[spyLevel] ?? PARLIAMENT.ESPIONAGE.costByLevel[1];
+      const now = Date.now();
+      const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
+      if (settled.settledResources.gold < cost) throw new Error(`Oro insuficiente: el informe cuesta ${cost} y hay ${Math.floor(settled.settledResources.gold)}.`);
+      await ctx.db.patch(settled.resources._id, { ...settled.settledResources, gold: settled.settledResources.gold - cost });
+      const units = await readArmyUnitDocs(ctx, args.targetKingdomId);
+      const composition = activeComposition(units);
+      const estimated: Record<string, { min: number; max: number }> = {};
+      for (const type of UNIT_TYPES) estimated[type] = approximateEstimate(composition[type], effectiveLevel);
+      const total = approximateEstimate(Object.values(composition).reduce((a, b) => a + b, 0), effectiveLevel);
+      const reportId = await ctx.db.insert("espionageReports", {
+        kingdomId: args.kingdomId,
+        targetKingdomId: args.targetKingdomId,
+        level: effectiveLevel,
+        createdAt: now,
+        expiresAt: now + PARLIAMENT.ESPIONAGE.reportTtlMs,
+        estimate: { min: total.min, max: total.max },
+        composition: estimated,
+      });
+
+      // Los espías también son exploradores: registrar los territorios del reino objetivo en 'exploredTerritories'
+      const targetTerritories = await ctx.db
+        .query("territories")
+        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", args.targetKingdomId))
+        .collect();
+      for (const cell of targetTerritories) {
+        const existing = await ctx.db
+          .query("exploredTerritories")
+          .withIndex("by_kingdom_and_cell", (q) => q.eq("kingdomId", args.kingdomId).eq("cellId", cell.cellId))
+          .first();
+        if (!existing) {
+          await ctx.db.insert("exploredTerritories", {
+            kingdomId: args.kingdomId,
+            cellId: cell.cellId,
+            discoveredAt: now,
+            discoveryNote: `Territorio de ${target.name} descubierto por la red de espionaje.`,
+          });
+        }
+      }
+
+      return { success: true, reportId, cost, level: effectiveLevel, originalLevel: spyLevel, estimate: total, composition: estimated, expiresAt: now + PARLIAMENT.ESPIONAGE.reportTtlMs };
+    } finally {
+      // Devolver espías al ejército
+      await addUnits(ctx, args.kingdomId, "espia", 1, spiesCount);
+    }
   },
 });
 

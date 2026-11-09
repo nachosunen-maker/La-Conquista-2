@@ -375,7 +375,7 @@ export async function completeExpedition(ctx: MutationCtx, expeditionId: Id<"exp
 
   // 4. Devolver al ciudadano explorador a la reserva de población civil libre (o devolver espía)
   if (expedition.isSpyMission) {
-    await addUnits(ctx, expedition.kingdomId, "espia", 1, 1);
+    await addUnits(ctx, expedition.kingdomId, "espia", 1, expedition.scoutsCount || 1);
   } else {
     const population = await ctx.db
       .query("population")
@@ -846,6 +846,7 @@ export const startSpyExploration = mutation({
   args: {
     kingdomId: v.id("kingdoms"),
     cellId: v.string(),
+    spiesCount: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const { kingdom } = await requireOwner(ctx, args.kingdomId);
@@ -859,14 +860,18 @@ export const startSpyExploration = mutation({
 
     if (!target) throw new Error("La celda indicada no existe.");
 
-    // 3. Comprobar disponibilidad de espía
+    const spiesCount = Math.max(1, args.spiesCount ?? 1);
+
+    // 3. Comprobar disponibilidad de espías
     const units = await ctx.db
       .query("armyUnits")
       .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
       .collect();
     
-    const spyDoc = units.find(u => u.unitType === "espia" && (u.count ?? 0) > 0);
-    if (!spyDoc) throw new Error("No tienes espías disponibles en tu reino.");
+    const totalSpiesAvailable = units.filter(u => u.isSpy || u.unitType === "espia").reduce((sum, u) => sum + Math.max(0, u.count ?? 0), 0);
+    if (totalSpiesAvailable < spiesCount) {
+      throw new Error(`No tienes suficientes espías disponibles (solicitados: ${spiesCount}, disponibles: ${totalSpiesAvailable}).`);
+    }
 
     // 4. Recopilar celdas conocidas
     const ownedDocs = await ctx.db
@@ -904,13 +909,26 @@ export const startSpyExploration = mutation({
       distance = Math.max(1, Math.min(...ownedDocs.map((c) => hexDistance(c, { q: target.q, r: target.r }))));
     }
 
-    // 7. Duración (Placeholder: 600s/hex)
-    const durationSeconds = 600 * distance;
-    const durationMs = durationSeconds * 1000;
+    // 7. Duración con colaboración multi-espía y tecnología spy_2
+    const baseDurationSeconds = 1800 * distance;
+    const baseDurationMs = baseDurationSeconds * 1000;
+    const completedTech = await readCompletedTechnologyIds(ctx, args.kingdomId);
+    const hasSpy2Tech = completedTech.includes("spy_2");
+    const techMultiplier = hasSpy2Tech ? 0.90 : 1.0;
+    const collaborationFactor = 1 / Math.sqrt(spiesCount);
+    const durationMs = Math.ceil(baseDurationMs * techMultiplier * collaborationFactor);
+    const durationSeconds = Math.ceil(durationMs / 1000);
     const completesAt = now + durationMs;
 
-    // 8. Descontar espía
-    await ctx.db.patch(spyDoc._id, { count: spyDoc.count - 1 });
+    // 8. Descontar espías
+    let remainingToDeduct = spiesCount;
+    for (const u of units) {
+      if ((u.isSpy || u.unitType === "espia") && (u.count ?? 0) > 0 && remainingToDeduct > 0) {
+        const take = Math.min(u.count, remainingToDeduct);
+        await ctx.db.patch(u._id, { count: u.count - take });
+        remainingToDeduct -= take;
+      }
+    }
 
     // 9. Crear misión
     const expeditionId = await ctx.db.insert("explorationQueue", {
@@ -922,7 +940,7 @@ export const startSpyExploration = mutation({
       startedAt: now,
       durationMs,
       completesAt,
-      scoutsCount: 0,
+      scoutsCount: spiesCount,
       costs: { gold: 0, food: 0 },
       isSpyMission: true,
     });

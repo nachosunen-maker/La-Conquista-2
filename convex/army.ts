@@ -162,6 +162,15 @@ export const getArmyState = query({
     const nextArmyLevelInfo = MILITARY_LEVELS.find((l) => l.level === nextArmyLevel) ?? null;
     const nextArmyLevelReqs = nextArmyLevelInfo ? checkBuildingRequirements(nextArmyLevelInfo.requirements, buildingLevels) : null;
 
+
+    const explorationExpeditions = await ctx.db
+      .query("explorationQueue")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
+      .collect();
+    const busySpies = explorationExpeditions
+      .filter((exp) => exp.isSpyMission)
+      .reduce((sum, exp) => sum + (exp.scoutsCount ?? 1), 0);
+
     return {
       serverTimeMs,
       writable: isKingdomOwner(kingdom.userId, identity?.subject),
@@ -234,7 +243,6 @@ export const getArmyState = query({
         fatigue: typeof kingdomAny.armyFatigue === "number" ? kingdomAny.armyFatigue : 0,
         availableWeapons: availableWeaponTiers(buildingLevels, modifiers.unlockedWeapons),
         availableArmors: availableArmorTiers(buildingLevels, modifiers.unlockedArmors),
-        // [Decisión 21-10-2026] Nombres propios de la civilización; multiplicadores iguales para todas (P30, P31).
         weaponCatalog: Object.fromEntries(Object.entries(WEAPONS).map(([tier, info]) => [tier, { ...info, label: civilizationWeaponLabel(kingdom.civilization, tier as WeaponTier) }])),
         armorCatalog: Object.fromEntries(Object.entries(ARMORS).map(([tier, info]) => [tier, { ...info, label: civilizationArmorLabel(kingdom.civilization, tier as ArmorTier) }])),
         civilization: kingdom.civilization ?? null,
@@ -246,6 +254,7 @@ export const getArmyState = query({
       },
       spies: {
         active: units.filter((doc) => doc.isSpy).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0),
+        busy: busySpies,
         inQueue: queue.filter((doc) => doc.unitType === "espia").reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0),
         capacity: Math.floor((buildingLevels.cuartel ?? 0) / 2),
         cuartelLevel: buildingLevels.cuartel ?? 0,
