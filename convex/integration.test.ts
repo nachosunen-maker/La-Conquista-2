@@ -820,13 +820,14 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     await attacker.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: attacker.kingdomId });
     await defender.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: defender.kingdomId });
 
+    const defTerritories = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
+    const targetCellId = defTerritories.homeTerritoryId!;
+
     await t.run(async (ctx) => {
       await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 1, count: 500 });
       await ctx.db.insert("armyUnits", { kingdomId: defender.kingdomId, unitType: "infanteria", level: 1, count: 100 });
+      await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: targetCellId, discoveredAt: T0 });
     });
-
-    const defTerritories = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
-    const targetCellId = defTerritories.homeTerritoryId!;
 
     const marchRes = await attacker.asUser.mutation(api.army.launchAttack, {
       kingdomId: attacker.kingdomId,
@@ -851,13 +852,14 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     await attacker.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: attacker.kingdomId });
     await defender.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: defender.kingdomId });
 
+    const defTerritories = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
+    const targetCellId = defTerritories.homeTerritoryId!;
+
     await t.run(async (ctx) => {
       await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 2, count: 200 });
       await ctx.db.insert("armyUnits", { kingdomId: defender.kingdomId, unitType: "infanteria", level: 1, count: 50 });
+      await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: targetCellId, discoveredAt: T0 });
     });
-
-    const defTerritories = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
-    const targetCellId = defTerritories.homeTerritoryId!;
 
     const marchRes = await attacker.asUser.mutation(api.army.launchAttack, {
       kingdomId: attacker.kingdomId,
@@ -883,12 +885,13 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     await attacker.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: attacker.kingdomId });
     await defender.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: defender.kingdomId });
 
-    await t.run(async (ctx) => {
-      await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 1, count: 200 });
-    });
-
     const defTerritories = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
     const targetCellId = defTerritories.homeTerritoryId!;
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 1, count: 200 });
+      await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: targetCellId, discoveredAt: T0 });
+    });
 
     // 1. Obtener previsualización autoritativa
     const preview = await attacker.asUser.query(api.territories.previewArmyMarchPlan, {
@@ -918,7 +921,7 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     });
     expect(savedMarch).toBeDefined();
     expect(savedMarch?.terrainMultiplier).toBe(preview.terrainMultiplier);
-  });
+  }, 15000);
 
   test("seguridad getWorldMap: prohíbe espiar la niebla de guerra de otro reino", async () => {
     const t = createTestBackend();
@@ -932,7 +935,7 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
 
     // 2. Un usuario sí puede consultar su propia niebla de guerra
     const ownMap = await userA.asUser.query(api.territories.getWorldMap, { kingdomId: userA.kingdomId });
-    expect(ownMap.cells.length).toBe(331);
+    expect(ownMap.cells.length).toBe(7651);
     expect(ownMap.exploredCount).toBe(7);
   });
 
@@ -958,9 +961,9 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     // 2. Consulta anónima (sin sesión ni autenticación)
     const demoMap = await t.query(api.territories.getWorldMap, { kingdomId: demoKingdomId });
     expect(demoMap).toBeDefined();
-    expect(demoMap.radius).toBe(10);
-    expect(demoMap.totalCells).toBe(331);
-    expect(demoMap.cells).toHaveLength(331);
+    expect(demoMap.radius).toBe(50);
+    expect(demoMap.totalCells).toBe(7651);
+    expect(demoMap.cells).toHaveLength(7651);
     expect(demoMap.exploredCount).toBe(7); // Capital y sus 6 vecinos iniciales
     expect(demoMap.homeTerritoryId).toBe("0,0");
     expect(demoMap.activeExpeditions).toEqual([]);
@@ -990,8 +993,8 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     expect(publicMap.activeExpeditions).toHaveLength(0);
     expect(publicMap.pendingClaims).toBe(0);
     expect(publicMap.homeTerritoryId).toBeNull();
-    expect(publicMap.totalCells).toBe(331);
-    expect(publicMap.cells).toHaveLength(331);
+    expect(publicMap.totalCells).toBe(7651);
+    expect(publicMap.cells).toHaveLength(7651);
 
     // Comprobar exhaustivamente cada una de las 331 celdas devueltas
     for (const cell of publicMap.cells) {

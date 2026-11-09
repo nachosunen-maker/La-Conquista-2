@@ -139,8 +139,8 @@ export function applyCivilizationExploration(
   const passive = getCivilizationPassive(civId);
   return {
     costs: {
-      gold: Math.ceil(baseCosts.gold * passive.explorationCostMultiplier),
-      food: Math.ceil(baseCosts.food * passive.explorationCostMultiplier),
+      gold: Math.floor(baseCosts.gold * passive.explorationCostMultiplier),
+      food: Math.floor(baseCosts.food * passive.explorationCostMultiplier),
     },
     durationMs: Math.ceil(baseDurationMs * passive.explorationDurationMultiplier),
   };

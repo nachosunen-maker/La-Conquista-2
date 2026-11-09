@@ -1,0 +1,1172 @@
+LA CONQUISTA — AUDITORÍA TÉCNICA FINAL DE CIERRE
+
+Especificación matemática, arquitectura definitiva, integridad de datos y validación de todos los sistemas del nuevo mundo
+
+DESTINO: Google AI Studio
+PROYECTO: La Conquista
+TIPO DE TRABAJO: Auditoría técnica correctiva, análisis matemático y especificación definitiva.
+MODO OBLIGATORIO: EXCLUSIVAMENTE LECTURA.
+AUTORIZACIÓN DE IMPLEMENTACIÓN: NO CONCEDIDA.
+
+---
+
+0. OBJETIVO Y AUTORIDAD DE ESTA AUDITORÍA
+
+Debes realizar una última auditoría técnica integral del proyecto La Conquista, utilizando como fuentes principales el código real, los esquemas de Convex, las funciones backend, las reglas matemáticas existentes y los informes de las dos auditorías anteriores.
+
+El objetivo es cerrar definitivamente los ocho puntos técnicos que todavía presentan problemas:
+
+1. Migración geográfica y conservación íntegra de los jugadores.
+2. Generación dinámica del mapa e indexación espacial.
+3. Movimiento colectivo y tiempos de desplazamiento de espías.
+4. Fórmula matemática completa del espionaje.
+5. Recompensas territoriales y prevención de exploits.
+6. Conquista militar y transferencia de territorios preservando conectividad.
+7. Alianzas grupales y ciclo de vida seguro de las guarniciones.
+8. Producción decimal en tiempo real.
+
+No quiero propuestas genéricas ni explicaciones teóricas sin relación con el proyecto.
+
+Necesito soluciones compatibles con el código real, las limitaciones de Convex y las mecánicas existentes.
+
+REGLA FUNDAMENTAL:
+
+No inventes funciones, índices, tablas, fórmulas actuales ni garantías técnicas.
+
+Primero inspecciona lo que existe. Después determina qué hay que conservar, qué debe cambiar conceptualmente y cómo debe funcionar la solución definitiva.
+
+Si una propuesta de esta especificación entra en conflicto con el código real o con una limitación técnica demostrable, identifícalo, explica el problema y presenta una alternativa que conserve la intención funcional.
+
+No elimines requisitos para simplificar el trabajo.
+
+---
+
+1. PROHIBICIONES ABSOLUTAS
+
+Durante esta auditoría:
+
+- No modificar archivos.
+- No modificar código.
+- No modificar esquemas.
+- No crear tablas.
+- No crear funciones.
+- No ejecutar mutaciones.
+- No escribir en Convex.
+- No modificar datos.
+- No migrar jugadores.
+- No generar nuevos territorios persistentes.
+- No cambiar configuraciones.
+- No ejecutar despliegues.
+- No instalar dependencias.
+- No alterar producción.
+- No aplicar ninguna corrección.
+
+Puedes realizar análisis estático, cálculos, simulaciones independientes y pruebas conceptuales que no alteren el proyecto.
+
+Si necesitas ejecutar pruebas, deberán ser exclusivamente aisladas y sin conexión de escritura a la base de datos real.
+
+Al finalizar, entrega el informe y espera autorización expresa.
+
+---
+
+2. MIGRACIÓN GEOGRÁFICA: CONSERVACIÓN DEL 100 % DE LOS DATOS
+
+Esta decisión es definitiva.
+
+Se agruparán geográficamente los reinos pertenecientes a una misma civilización.
+
+Sin embargo, únicamente cambiará la posición geográfica de los reinos y sus territorios.
+
+Se debe conservar absolutamente todo:
+
+- ID del usuario.
+- ID del reino.
+- Nombre del reino.
+- Monarca.
+- Civilización.
+- Edificios y niveles.
+- Recursos y cantidades.
+- Almacenes.
+- Producción.
+- Tropas.
+- Regimientos.
+- Aldeanos.
+- Censo.
+- Oficios.
+- Investigaciones.
+- Tecnologías.
+- Honor.
+- Gloria.
+- Misiones.
+- Logros.
+- Clasificaciones y progreso.
+- Relaciones.
+- Referencias entre tablas.
+- Cualquier otro dato existente.
+
+No eliminar ni recrear ningún reino.
+
+No reiniciar jugadores.
+
+No regenerar edificios, recursos, tropas ni progreso.
+
+2.1. Conservación de terrenos
+
+El generador determinista actual puede producir terrenos diferentes al trasladar coordenadas.
+
+La solución propuesta es disponer de persistencia de excepciones territoriales propias mediante "kingdomTerritoryOverrides" o una arquitectura equivalente compatible con el esquema real.
+
+Cada territorio propio trasladado conservará:
+
+- Su tipo de terreno histórico.
+- Sus modificadores históricos.
+- Sus bonificaciones económicas.
+- Su identidad territorial.
+- Su relación con el reino propietario.
+
+Los datos históricos de terreno no podrán cambiar como consecuencia de la migración.
+
+Los territorios neutrales y las celdas nuevas seguirán utilizando el generador determinista general.
+
+Determina si es necesario guardar también una versión del generador o del conjunto de reglas económicas para garantizar que futuros cambios de código no alteren silenciosamente los modificadores históricos.
+
+2.2. Distribución por civilizaciones
+
+Detectar dinámicamente las civilizaciones realmente existentes en "kingdoms.civilization".
+
+No codificar un número fijo de civilizaciones.
+
+Diseñar sectores angulares mediante:
+
+[
+\theta_i=\frac{2\pi i}{C}
+]
+
+Donde C es el número de civilizaciones activas.
+
+Utilizar coordenadas cartesianas derivadas de las coordenadas axiales para calcular sectores y posiciones.
+
+Para coordenadas axiales pointy-top:
+
+[
+x=\sqrt{3}\left(q+\frac r2\right)
+]
+
+[
+y=\frac32r
+]
+
+La asignación deberá ser determinista.
+
+Dentro de cada sector, distribuir las capitales en anillos concéntricos y posiciones alternativas.
+
+Utilizar una separación mínima de cuatro hexágonos entre capitales como condición inicial, pero no asumir que esa separación garantiza espacio suficiente para la expansión.
+
+Calcular también:
+
+- Superficie territorial inicial.
+- Distancia entre capitales.
+- Espacio disponible para expansión.
+- Posibles solapamientos.
+- Número de reinos por civilización.
+- Sectores con densidad elevada.
+- Casos con muchas civilizaciones o pocos reinos.
+
+La colocación final debe validar el conjunto completo de territorios de cada reino, no solamente la posición de su capital.
+
+2.3. Algoritmo de migración
+
+Diseñar un algoritmo que:
+
+1. Obtenga una instantánea consistente de los datos.
+2. Calcule las nuevas posiciones.
+3. Compruebe colisiones entre territorios.
+4. Compruebe colisiones entre capitales.
+5. Preserve los terrenos históricos.
+6. Preserve las referencias entre tablas.
+7. Reubique correctamente los territorios propios.
+8. Preserve los registros de exploración.
+9. Mantenga la separación entre propiedad, exploración y visibilidad.
+10. Valide todos los resultados antes de activar la nueva distribución.
+
+Debe existir una estrategia explícita para los registros de "exploredTerritories".
+
+No trasladar un territorio enemigo a una coordenada que deje de corresponder con el reino enemigo después de la migración.
+
+Los registros de exploración neutrales deben conservar el progreso de descubrimiento sin crear propiedades ni alterar el mundo compartido.
+
+Si dos jugadores han descubierto una misma región desde posiciones antiguas distintas, explicar cómo se conserva su conocimiento sin producir contradicciones geográficas.
+
+2.4. Seguridad de la migración
+
+No asumir que una migración completa puede realizarse dentro de una sola mutación de Convex.
+
+Diseñar una migración por fases y lotes con:
+
+- Identificador de migración.
+- Estado de ejecución.
+- Versión del esquema.
+- Instantánea de origen.
+- Registro de operaciones.
+- Control de lotes.
+- Comprobación de integridad.
+- Reanudación después de interrupciones.
+- Protección contra doble ejecución.
+- Estrategia de rollback.
+
+Determinar cómo impedir que acciones de juego concurrentes modifiquen los datos durante la migración.
+
+Si es necesario, diseñar una ventana de mantenimiento o un bloqueo lógico de operaciones territoriales y económicas.
+
+La migración no se considerará válida hasta superar las comprobaciones de conservación.
+
+Pruebas obligatorias
+
+Para cada reino, comparar antes y después:
+
+- Identificadores.
+- Edificios.
+- Niveles.
+- Recursos.
+- Tropas.
+- Población.
+- Oficios.
+- Tecnologías.
+- Honor.
+- Gloria.
+- Misiones.
+- Relaciones.
+- Cantidades y referencias.
+
+El resultado esperado es cero pérdidas y cero duplicaciones.
+
+---
+
+3. MAPA HEXAGONAL DINÁMICO Y GENERACIÓN BAJO DEMANDA
+
+Eliminar conceptualmente la dependencia de un mapa limitado por "MAP.RADIUS = 10" y las 331 celdas estáticas actuales.
+
+El mundo debe crecer conforme se explora.
+
+3.1. Generación determinista
+
+La misma coordenada debe generar siempre el mismo terreno para todos los jugadores, utilizando la semilla global.
+
+[
+Terrain(q,r)=f(q,r,WORLD_SEED)
+]
+
+Una celda no podrá tener terrenos diferentes según el jugador que la descubra.
+
+Los overrides históricos de territorios propios serán la excepción controlada.
+
+3.2. Arquitectura de sectores
+
+Diseñar chunks o sectores hexagonales.
+
+Cada sector tendrá:
+
+- Identificador determinista.
+- Coordenadas.
+- Estado de generación.
+- Límites.
+- Referencias a las celdas.
+- Estado de persistencia.
+
+No cargar el mundo completo para responder a una consulta de mapa.
+
+Generar únicamente las regiones necesarias para la exploración, la marcha o la visualización.
+
+3.3. Convex e integridad
+
+Inspeccionar las capacidades reales de índices y transacciones de Convex.
+
+No confundir un índice con una restricción UNIQUE.
+
+Un índice "by_cell" no debe presentarse como garantía automática de unicidad.
+
+Diseñar un mecanismo de creación de celdas que sea:
+
+- Idempotente.
+- Seguro ante concurrencia.
+- Reanudable.
+- Determinista.
+- Compatible con los límites de Convex.
+
+Una operación que intente generar una celda ya existente deberá recuperar la celda canónica en lugar de crear otra.
+
+Estudiar el uso de lecturas previas dentro de mutaciones transaccionales y los conflictos de concurrencia que Convex realmente garantiza.
+
+No utilizar un "upsert" ficticio si no existe como operación nativa en el contexto correspondiente.
+
+3.4. Consultas espaciales
+
+Sustituir la carga global de:
+
+"ctx.db.query("territories").collect()"
+
+por consultas limitadas.
+
+Diseñar índices compatibles con las consultas reales.
+
+Estudiar "by_q_r" o una estructura por chunks.
+
+Explicar:
+
+- Orden de los campos.
+- Límites de consulta.
+- Ventanas geométricas.
+- Recuperación de celdas vecinas.
+- Consulta de territorios propios.
+- Consulta de celdas exploradas.
+- Consulta de celdas visibles.
+
+La métrica de distancia seguirá siendo la métrica axial hexagonal:
+
+[
+d(a,b)=\frac{|q_1-q_2|+|r_1-r_2|+|(q_1+r_1)-(q_2+r_2)|}{2}
+]
+
+No sustituirla por distancia euclídea para las reglas del juego.
+
+---
+
+4. MOVIMIENTO DE ESPÍAS: FÓRMULA MATEMÁTICA DEFINITIVA
+
+Los espías serán unidades reclutadas en el Cuartel.
+
+La capacidad máxima será:
+
+[
+N_{\max}=\left\lfloor\frac{NivelCuartel}{2}\right\rfloor
+]
+
+Un espía podrá realizar una misión individual mientras otros realizan misiones distintas.
+
+Varios espías enviados al mismo destino formarán un grupo y se desplazarán más rápidamente.
+
+4.1. Corrección matemática de la fórmula colectiva
+
+La propuesta de partida será:
+
+[
+T_i(n)=\max\left(300,\frac{1800}{\sqrt n}\right)\cdot M_i
+]
+
+Donde:
+
+- (T_i(n)): tiempo de desplazamiento del hexágono i.
+- (n): número de espías que viajan juntos.
+- 1800: tiempo base de 30 minutos por hexágono en terreno llano.
+- 300: tiempo mínimo de 5 minutos por hexágono.
+- (M_i): multiplicador del terreno del hexágono correspondiente.
+
+El tiempo total será:
+
+[
+T_{\text{total}}=\sum_{i=1}^{D}T_i(n)
+]
+
+Donde D es la distancia en hexágonos.
+
+La fórmula impone un mínimo de cinco minutos por hexágono en terreno llano. Los terrenos más difíciles pueden aumentar el tiempo.
+
+IMPORTANTE: el mínimo se aplica por hexágono, no al viaje completo.
+
+Esta precisión corrige la inconsistencia matemática de la tabla anterior.
+
+4.2. Integración con el motor militar
+
+Inspeccionar:
+
+- "marchTimeSeconds".
+- "pathTerrainMultiplier".
+- "marchFatigue".
+- "hexDistance".
+- "hexLine".
+- "MAP.MARCH_SECONDS_PER_HEX".
+
+No duplicar innecesariamente las reglas de terreno.
+
+Reutilizar los componentes compatibles del motor militar, pero no aplicar directamente un tiempo total militar si su fórmula no es compatible con el movimiento de espías.
+
+La fórmula de espías tendrá su propia regla de velocidad colectiva y deberá respetar los multiplicadores de terreno existentes.
+
+Explicar exactamente cómo se resuelven:
+
+- Distancia.
+- Terreno.
+- Número de espías.
+- Tiempo mínimo.
+- Ida y vuelta.
+- Fatiga, si corresponde.
+
+4.3. Simulaciones obligatorias
+
+Calcular todos los resultados para:
+
+Espías: 1, 2, 3, 4, 5, 9, 10, 20 y 50.
+
+Distancias: 1, 5, 10, 20 y 50 hexágonos.
+
+Presentar una tabla completa de tiempos en minutos.
+
+Incluir escenarios de terreno llano, bosque, colina y montaña.
+
+Comprobar que la fórmula no permite teletransportación ni aceleraciones ilimitadas.
+
+---
+
+5. ESPIONAJE: EFICACIA, PRECISIÓN Y DETECCIÓN
+
+El espionaje será una operación física.
+
+Los espías viajarán hasta la capital enemiga, realizarán la observación y regresarán.
+
+No se generarán informes instantáneos mediante un simple pago de oro.
+
+Se estudiará una tabla de misiones "espionageMarches" o una estructura equivalente compatible con el proyecto.
+
+El informe se entregará cuando los espías completen el regreso.
+
+5.1. Fórmula de eficacia
+
+Utilizar como fórmula de partida:
+
+[
+E=
+\frac{
+\sqrt n\cdot(1+0,10T_a)
+}{
+(1+D/10)\cdot(1+0,10C_d)
+}
+]
+
+Donde:
+
+- E: eficacia de espionaje.
+- n: número de espías.
+- D: distancia al objetivo en hexágonos.
+- (T_a): nivel de tecnología de espionaje del atacante.
+- (C_d): nivel de contrainteligencia del defensor.
+
+Todos los niveles tecnológicos deberán estar normalizados a valores enteros no negativos.
+
+La fórmula deberá utilizar los niveles reales del proyecto o una equivalencia documentada. No inventar tecnologías que no existan.
+
+Si las tecnologías actuales no tienen equivalencia directa, proponer la correspondencia y dejarla identificada como decisión pendiente.
+
+5.2. Niveles de información
+
+Aplicar estos umbrales:
+
+Nivel 1:
+
+[
+E<1
+]
+
+- Información desconocida o estimación gruesa.
+- Error máximo de estimación de tropas: ±35 %.
+- Sin desglose por familias de unidades.
+
+Nivel 2:
+
+[
+1\leq E<3
+]
+
+- Estimación táctica.
+- Error máximo de estimación: ±15 %.
+- Desglose aproximado de infantería, arquería, caballería y asedio.
+
+Nivel 3:
+
+[
+E\geq3
+]
+
+- Información confirmada.
+- Número exacto de unidades vivas.
+- Número exacto de unidades heridas.
+- Niveles de armas.
+- Niveles de armaduras.
+
+El Nivel 3 se considerará una fotografía exacta tomada durante la observación, no información permanentemente actualizada.
+
+5.3. Detección del espionaje
+
+Utilizar como propuesta inicial:
+
+[
+P_d=
+clamp\left(
+0,05+
+0,25\frac{D}{D+20}+
+\frac{0,30C_d}{(C_d+5)\sqrt n(1+0,10T_a)},
+0,05,
+0,85
+\right)
+]
+
+Donde:
+
+- (P_d): probabilidad de detección.
+- D: distancia.
+- n: espías enviados.
+- (T_a): tecnología del atacante.
+- (C_d): contrainteligencia del defensor.
+- "clamp": limita el resultado al intervalo indicado.
+
+La probabilidad deberá convertirse en un resultado reproducible para cada misión, sin permitir al jugador repetir una consulta para obtener un resultado más favorable.
+
+Estudiar una semilla determinista por misión y la persistencia de la resolución.
+
+5.4. Consecuencias
+
+Definir los resultados posibles:
+
+- Misión exitosa sin detección.
+- Misión exitosa con detección.
+- Misión fallida.
+- Espías capturados.
+- Espías eliminados.
+- Información parcial.
+- Regreso interrumpido.
+
+Los espías no podrán aparecer duplicados ni volver a estar disponibles mientras permanezcan desplegados.
+
+5.5. Momento de captura de la información
+
+La información se captura en el momento de observación de la capital enemiga.
+
+El informe se entrega al regresar.
+
+No se debe actualizar automáticamente con datos que hayan cambiado después de la observación.
+
+---
+
+6. RECOMPENSAS TERRITORIALES Y PREVENCIÓN DE EXPLOITS
+
+Cada hexágono neutral conquistado correctamente genera:
+
+- +1 % de producción global.
+- +1 honor.
+- +1 gloria.
+
+6.1. Producción
+
+La fórmula será:
+
+[
+P_r=P_{0,r}\cdot(1+0,01H)
+]
+
+Donde:
+
+- (P_r): producción final del recurso r.
+- (P_{0,r}): producción base del recurso.
+- H: número de hexágonos neutrales actualmente controlados.
+
+Aplicar sobre los cinco recursos:
+
+- Oro.
+- Madera.
+- Piedra.
+- Hierro.
+- Alimentos.
+
+La bonificación es aditiva y no compuesta.
+
+Ejemplos:
+
+Hexágonos neutrales| Bonificación
+1| 1 %
+10| 10 %
+20| 20 %
+50| 50 %
+100| 100 %
+
+Cuando un reino pierde un territorio neutral conquistado, H disminuye y su bonificación desaparece.
+
+La bonificación se calculará una sola vez en la cadena económica.
+
+No multiplicar dos veces la producción por aplicar el modificador en varios niveles de "simulateExtendedEconomy".
+
+6.2. Honor y gloria permanentes
+
+Honor y gloria serán recompensas históricas acumulativas.
+
+No desaparecerán cuando se pierda un territorio.
+
+Para evitar farming por transferencias circulares, diseñar un registro persistente de recompensas.
+
+Utilizar una clave lógica única por celda para impedir que se cobre repetidamente por el mismo hecho histórico de conquista.
+
+Como regla de seguridad inicial:
+
+Cada celda neutral podrá generar una única recompensa histórica de conquista en toda la partida.
+
+El primer reino que realice correctamente la conquista recibe +1 honor y +1 gloria.
+
+Las transferencias posteriores, reconquistas y cambios de propietario no vuelven a generar esa recompensa.
+
+Separar claramente:
+
+- Propiedad actual.
+- Bonificación económica activa.
+- Historial de conquistas.
+- Recompensa histórica ya concedida.
+
+No utilizar únicamente "claimedAt" como mecanismo anti-exploit si ese campo puede modificarse o sobrescribirse.
+
+6.3. Validación
+
+Comprobar la recompensa dentro de la misma operación transaccional que confirma la conquista.
+
+No permitir que dos operaciones concurrentes cobren la recompensa de una misma celda.
+
+---
+
+7. CONQUISTA MILITAR Y TRANSFERENCIA DE TERRITORIOS
+
+7.1. Conquista neutral
+
+La operación será:
+
+1. Descubrimiento previo.
+2. Selección de objetivo.
+3. Preparación del ejército.
+4. Marcha militar.
+5. Llegada al destino.
+6. Validación autoritativa de la propiedad.
+7. Validación de adyacencia.
+8. Conquista y actualización económica.
+
+La condición geométrica será:
+
+[
+\min_{c\in TerritoriosPropios}d(c,objetivo)\leq1
+]
+
+La condición debe comprobarse en el momento de resolver la operación, no únicamente cuando se envía el ejército.
+
+El hexágono debe seguir libre en el momento de la conquista.
+
+Si otro jugador llega primero, resolver el conflicto según las reglas vigentes.
+
+No permitir que una misma celda sea conquistada simultáneamente por dos reinos.
+
+7.2. Victoria aplastante
+
+Mantener el criterio actual:
+
+[
+loserLoss>0,75
+]
+
+La capital nunca podrá transferirse.
+
+El vencedor podrá obtener un territorio anexionado del perdedor, pero únicamente si se conserva la conectividad.
+
+7.3. Algoritmo de conectividad
+
+Modelar los territorios del reino como un grafo:
+
+- Cada hexágono propio es un nodo.
+- Existe una arista entre dos nodos si sus celdas son adyacentes.
+- La capital es el nodo raíz.
+
+Antes de transferir una celda:
+
+1. Obtener el grafo territorial del perdedor.
+2. Excluir la capital de los candidatos.
+3. Seleccionar candidatos periféricos válidos, preferentemente próximos a la frontera del vencedor.
+4. Simular la eliminación de cada candidato.
+5. Comprobar mediante BFS/DFS que todos los territorios restantes siguen conectados con la capital.
+6. Descartar cualquier candidato que produzca un enclave desconectado.
+7. Transferir únicamente un candidato válido.
+
+Se puede utilizar un algoritmo de puntos de articulación para optimizar la búsqueda, siempre que la comprobación final garantice la conectividad.
+
+No basta con elegir la celda más cercana al vencedor.
+
+Si el perdedor solo conserva su capital o no tiene ningún territorio transferible sin romper la conectividad, utilizar:
+
+"pendingTerritoryClaims + 1"
+
+No perder la capital ni destruir territorios arbitrariamente.
+
+7.4. Concurrencia
+
+La transferencia debe comprobar de nuevo:
+
+- Propietario actual.
+- Estado del combate.
+- Existencia del candidato.
+- Conectividad.
+- Reclamaciones pendientes.
+- Otras transferencias ya ejecutadas.
+
+La actualización deberá ser atómica.
+
+Evitar que dos batallas transfieran el mismo territorio.
+
+---
+
+8. ALIANZAS GRUPALES Y GUARNICIONES DE APOYO
+
+Las alianzas tendrán tamaño variable y no estarán limitadas a parejas.
+
+Podrán tener 2, 3, 5, 10 o N integrantes.
+
+No establecer un máximo fijo de miembros como regla del juego.
+
+Las limitaciones técnicas de paginación, lotes y rendimiento no se consideran límites de integrantes.
+
+8.1. Arquitectura
+
+Estudiar estas entidades:
+
+"alliances"
+
+- _id.
+- name.
+- founderKingdomId.
+- createdAt.
+- status.
+
+"allianceMembers"
+
+- allianceId.
+- kingdomId.
+- joinedAt.
+- role.
+- status.
+
+"allianceInvitations"
+
+- allianceId.
+- targetKingdomId.
+- invitedByKingdomId.
+- status.
+- createdAt.
+- expiresAt.
+
+"garrisonReinforcements"
+
+- ownerKingdomId.
+- hostKingdomId.
+- units.
+- status.
+- marchId.
+- createdAt.
+
+Ajustar los nombres y tipos al estándar real del proyecto.
+
+El fundador necesita Parlamento nivel 15 para crear la alianza.
+
+Los oficiales podrán invitar si tienen permisos.
+
+No imponer requisitos de nivel a los invitados salvo que exista una regla del proyecto que lo exija.
+
+Se permitirá pertenecer a varias alianzas simultáneamente, siempre que no exista una incompatibilidad demostrable con reglas actuales. Diseñar la relación de pertenencia sin asumir una única alianza por reino.
+
+8.2. Roles y permisos
+
+Definir con precisión:
+
+- Fundador.
+- Oficial.
+- Miembro.
+
+El fundador tendrá control de la alianza.
+
+Los oficiales solo podrán realizar las acciones que sus permisos permitan.
+
+Los miembros podrán consultar la información privada de su alianza.
+
+No permitir que un miembro modifique la composición de tropas o los recursos de otro reino sin autorización.
+
+8.3. Propiedad de tropas
+
+Las tropas de apoyo nunca cambian de propietario.
+
+El propietario original seguirá siendo responsable de:
+
+- Titularidad.
+- Bajas.
+- Inventario.
+- Disponibilidad.
+- Recuperación.
+
+El reino anfitrión únicamente recibe la capacidad de contar con esas unidades en su defensa según las reglas de combate.
+
+No duplicar tropas en los inventarios de ambos reinos.
+
+Las tropas desplegadas deben estar reservadas y no podrán enviarse simultáneamente a otra marcha o batalla.
+
+8.4. Máquina de estados de guarniciones
+
+Diseñar una máquina de estados que contemple como mínimo:
+
+- Preparando despliegue.
+- En tránsito.
+- Desplegada.
+- En combate.
+- Retirada solicitada.
+- En repatriación.
+- Reintegrada.
+- Perdida o anulada por una causa válida.
+
+Definir las transiciones permitidas y prohibir las transiciones contradictorias.
+
+Las bajas se aplicarán al propietario original mediante una operación transaccional.
+
+8.5. Abandono y expulsión
+
+Cuando un miembro abandone o sea expulsado:
+
+1. Cambiar su estado de pertenencia a salida pendiente.
+2. Impedir nuevas guarniciones y nuevas operaciones de apoyo.
+3. Conservar las tropas que ya están combatiendo hasta resolver el combate.
+4. Programar la repatriación.
+5. Ejecutar el desplazamiento de vuelta conforme al motor militar.
+6. Reintegrar las tropas al propietario original.
+7. Finalizar la salida.
+
+No utilizar repatriación instantánea.
+
+No eliminar tropas de una guarnición mediante una simple modificación de estado.
+
+8.6. Disolución
+
+Una alianza no podrá desaparecer mientras existan guarniciones pendientes de resolver.
+
+Al iniciar la disolución:
+
+- Bloquear nuevas invitaciones.
+- Bloquear nuevas incorporaciones.
+- Bloquear nuevos despliegues.
+- Solicitar la retirada de todas las guarniciones.
+- Mantener los registros necesarios.
+- Procesar retornos por lotes.
+- Marcar la alianza como disuelta cuando no existan operaciones pendientes.
+
+No asumir que todos los retornos pueden ejecutarse en una sola transacción.
+
+Diseñar un proceso reanudable y seguro para alianzas de tamaño elevado.
+
+8.7. Privacidad
+
+Las alianzas serán secretas.
+
+Únicamente los miembros autorizados podrán consultar:
+
+- Nombre.
+- Integrantes.
+- Invitaciones.
+- Acuerdos.
+- Recursos intercambiados.
+- Guarniciones.
+- Información interna.
+
+Comprobar todas las consultas públicas y privadas.
+
+Revisar:
+
+- "getWorldMap".
+- "getLeaderboard".
+- "listRivals".
+- Informes de espionaje.
+- Informes de combate.
+- Movimientos militares.
+- Mensajes.
+- Historiales.
+
+No exponer la existencia de alianzas mediante campos indirectos o respuestas del backend.
+
+La privacidad debe estar implementada en servidor.
+
+No obstante, no ocultar artificialmente hechos militares que deban ser visibles según las reglas normales del juego.
+
+---
+
+9. PRODUCCIÓN DECIMAL EN TIEMPO REAL
+
+El servidor seguirá siendo la autoridad económica.
+
+La tabla "resources" conservará los valores oficiales y su marca temporal "lastUpdated".
+
+El frontend podrá representar el crecimiento decimal de los cinco recursos sin escribir en Convex continuamente.
+
+9.1. Fórmula de interpolación
+
+Para cada recurso r:
+
+[
+V_r(t)=\min\left(
+Cap_r,,
+\max\left(0,S_r+R_r\frac{t-t_0}{86400}\right)
+\right)
+]
+
+Donde:
+
+- (V_r(t)): cantidad visualizada.
+- (S_r): saldo oficial liquidado.
+- (R_r): producción neta diaria.
+- (t): tiempo actual.
+- (t_0): "lastUpdated".
+- (Cap_r): capacidad efectiva del almacén.
+- 86400: segundos de un día.
+
+La tasa neta será:
+
+[
+R_r=Produccion_r-Consumo_r
+]
+
+Si existen tasas o liquidaciones con varias fases, utilizar el modelo real del backend y no una simplificación que produzca saldos incorrectos.
+
+9.2. Sincronización
+
+Cada operación económica deberá liquidar el saldo anterior antes de modificar:
+
+- Producción.
+- Consumo.
+- Trabajadores.
+- Edificios.
+- Tecnologías.
+- Territorios.
+- Impuestos.
+- Bonificaciones.
+
+El frontend deberá reiniciar su referencia temporal cuando reciba nuevos datos oficiales.
+
+La interpolación no podrá continuar utilizando una tasa antigua después de un cambio económico.
+
+9.3. Seguridad
+
+El cliente nunca será autoridad para gastar recursos.
+
+Una compra o construcción deberá liquidar primero la economía real en el servidor y comprobar el saldo oficial.
+
+Los decimales visuales no podrán permitir gastos sobre recursos todavía no disponibles.
+
+Comprobar también:
+
+- Capacidad máxima.
+- Producción negativa.
+- Consumo.
+- Reconexión.
+- Pérdida temporal de conexión.
+- Cambios de hora del dispositivo.
+- Desfase del reloj del cliente.
+- Redondeo y precisión numérica.
+
+No generar escrituras por frame ni consultas constantes a Convex.
+
+---
+
+10. VALIDACIÓN MATEMÁTICA Y TÉCNICA CRUZADA
+
+Antes de declarar cerrada la auditoría, comprobar que todos los sistemas funcionan conjuntamente.
+
+No analizar cada sistema de manera aislada.
+
+Simular como mínimo los siguientes escenarios:
+
+Escenario A: migración
+
+Un reino con capital, 10 territorios, edificios, tropas, recursos, tecnologías y misiones cambia de posición.
+
+Demostrar que conserva todos los datos y modificadores.
+
+Escenario B: exploración simultánea
+
+Dos jugadores intentan descubrir la misma celda.
+
+Debe existir una única celda canónica y dos estados de exploración independientes.
+
+Escenario C: expedición colectiva
+
+Comparar grupos de 1, 2, 5, 10, 20 y 50 espías en distancias de 1, 5, 10, 20 y 50 hexágonos.
+
+Verificar el mínimo por hexágono y los multiplicadores del terreno.
+
+Escenario D: espionaje
+
+Simular diferentes combinaciones de distancia, número de espías, tecnología y contrainteligencia.
+
+Demostrar que los niveles de información y las probabilidades de detección son coherentes.
+
+Escenario E: conquista y recompensas
+
+Dos jugadores llegan simultáneamente a una celda neutral.
+
+Solo uno puede conquistarla.
+
+Solo puede existir una recompensa histórica por esa celda.
+
+Escenario F: victoria aplastante
+
+El perdedor tiene un territorio con forma irregular y varias conexiones.
+
+Demostrar que la celda transferida no desconecta el resto del reino.
+
+Escenario G: alianza de tamaño elevado
+
+Crear una alianza conceptual con un número elevado de miembros, invitaciones y guarniciones.
+
+Simular salida de varios miembros, combates pendientes y disolución.
+
+Demostrar que no se duplican ni desaparecen tropas.
+
+Escenario H: economía
+
+Simular producción, consumo, conquista, pérdida territorial, cambio de trabajadores, gasto de recursos y almacenamiento lleno.
+
+Demostrar que el saldo visual coincide con el saldo liquidado cuando se realiza una nueva liquidación oficial.
+
+---
+
+11. PRUEBAS DE ACEPTACIÓN OBLIGATORIAS
+
+Preparar pruebas de aceptación que puedan utilizarse posteriormente durante la implementación.
+
+Cada prueba debe indicar:
+
+- Identificador.
+- Sistema.
+- Estado inicial.
+- Operación.
+- Resultado esperado.
+- Condición de error.
+- Comprobación de integridad.
+
+Como mínimo, demostrar:
+
+1. Cero pérdida de datos tras migración.
+2. Cero reinos duplicados.
+3. Cero celdas duplicadas.
+4. Cero terrenos históricos alterados.
+5. Cero recompensas duplicadas.
+6. Cero transferencias territoriales que rompan conectividad.
+7. Cero tropas duplicadas.
+8. Cero tropas sin propietario.
+9. Cero accesos públicos a datos secretos de alianzas.
+10. Cero gastos basados exclusivamente en saldos visuales.
+11. Cero misiones de espionaje instantáneas.
+12. Cero expediciones duplicadas.
+13. Cero inconsistencias de producción.
+14. Cero operaciones territoriales resueltas dos veces.
+
+No declarar que estas pruebas han sido ejecutadas si únicamente se han diseñado.
+
+Diferenciar las pruebas propuestas de las pruebas realmente ejecutadas.
+
+---
+
+12. INFORME FINAL OBLIGATORIO
+
+La entrega deberá contener:
+
+A. Diagnóstico del código real
+
+Archivos, tablas, índices, funciones y dependencias afectadas.
+
+B. Especificación matemática definitiva
+
+Todas las fórmulas con variables, unidades, límites, ejemplos y simulaciones.
+
+C. Arquitectura definitiva
+
+Cómo se conectan los sistemas en frontend y backend.
+
+D. Modelo de datos
+
+Tablas nuevas o modificadas propuestas, campos, índices, relaciones y estados.
+
+No modificar los esquemas: únicamente documentar la propuesta.
+
+E. Algoritmos
+
+Pseudocódigo suficientemente preciso para que la implementación posterior no dependa de interpretaciones subjetivas.
+
+F. Concurrencia
+
+Explicar cómo se garantiza la integridad ante operaciones simultáneas en Convex.
+
+G. Migración
+
+Plan de ejecución por fases, lotes, comprobaciones, bloqueo lógico y rollback.
+
+H. Pruebas
+
+Simulaciones matemáticas y pruebas de aceptación.
+
+I. Riesgos residuales
+
+Identificar cualquier problema que no tenga todavía una solución demostrada.
+
+J. Orden definitivo de implementación
+
+Presentar las dependencias entre sistemas y el orden correcto de desarrollo.
+
+No establecer un orden únicamente por facilidad. Priorizar integridad de datos, dependencias y estabilidad.
+
+---
+
+13. CRITERIOS PARA CONSIDERAR CERRADA LA AUDITORÍA
+
+La auditoría solo podrá considerarse cerrada si:
+
+- La migración conserva íntegramente los datos.
+- La distribución geográfica evita colisiones.
+- El mapa dinámico dispone de generación determinista y concurrencia segura.
+- Las fórmulas de desplazamiento son dimensionalmente coherentes.
+- La fórmula de espionaje está completamente definida.
+- Los informes reflejan una observación temporal concreta.
+- Las recompensas no pueden duplicarse.
+- Las conquistas son transaccionales.
+- La transferencia de territorios conserva la conectividad.
+- Las alianzas admiten N integrantes.
+- Las guarniciones conservan su titularidad.
+- Las retiradas y disoluciones son reanudables.
+- La privacidad se aplica en el backend.
+- La producción decimal respeta los saldos oficiales.
+- Todas las dependencias están identificadas.
+- No quedan decisiones críticas ocultas.
+
+Si un punto no puede resolverse con la información o el código disponible, identificarlo expresamente. No inventar una respuesta para aparentar que está cerrado.
+
+---
+
+14. INSTRUCCIÓN FINAL
+
+Quiero una solución técnicamente viable, matemáticamente coherente y compatible con el proyecto real.
+
+No quiero que simplifiques las mecánicas.
+
+No quiero que sustituyas funcionalidades por aproximaciones más fáciles.
+
+No quiero que modifiques sistemas que no están relacionados.
+
+No quiero que inventes garantías de Convex.
+
+No quiero que declares implementado lo que únicamente está diseñado.
+
+Tu responsabilidad en esta fase es entregar una especificación definitiva, sin contradicciones y preparada para una futura implementación controlada.
+
+ESTADO FINAL OBLIGATORIO:
+
+AUDITORÍA DE SOLO LECTURA.
+
+NINGÚN CAMBIO APLICADO.
+
+NINGÚN DATO MODIFICADO.
+
+NINGÚN DESPLIEGUE REALIZADO.
+
+Entregar el informe completo y esperar autorización expresa antes de iniciar cualquier implementación.

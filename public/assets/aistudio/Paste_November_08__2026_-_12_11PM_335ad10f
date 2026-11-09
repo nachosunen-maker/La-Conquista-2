@@ -1,0 +1,1230 @@
+LA CONQUISTA — PROMPT MAESTRO DE CIERRE MATEMÁTICO, ECONÓMICO Y ALGORÍTMICO
+
+1. OBJETIVO GENERAL
+
+Debes realizar el trabajo matemático y algorítmico definitivo de los sistemas especificados para el videojuego LA CONQUISTA.
+
+No quiero otra auditoría descriptiva, otro resumen de funcionalidades ni una lista de recomendaciones pendientes.
+
+Quiero que completes la ingeniería matemática de todos los sistemas, con fórmulas explícitas, parámetros numéricos, algoritmos deterministas, tablas de resultados, simulaciones, comprobaciones de límites y reglas de interacción entre sistemas.
+
+El resultado debe ser una especificación técnica y matemática completa, coherente y preparada para una futura implementación.
+
+IMPORTANTE: TODO EL TRABAJO ES EXCLUSIVAMENTE TEÓRICO Y DE SOLO LECTURA.
+
+Está absolutamente prohibido:
+
+- Modificar archivos.
+- Crear archivos.
+- Modificar código.
+- Modificar tablas de Convex.
+- Ejecutar migraciones.
+- Desplegar aplicaciones.
+- Modificar reinos.
+- Alterar coordenadas o territorios.
+- Modificar edificios, recursos, tecnologías, tropas, población, honor, gloria, misiones o alianzas.
+- Ejecutar operaciones que produzcan cambios en producción.
+
+Puedes leer e inspeccionar el código fuente y los datos disponibles para obtener los valores reales, pero no puedes escribir ni alterar nada.
+
+No debes interpretar una especificación teórica como una funcionalidad implementada.
+
+---
+
+2. REGLAS INMUTABLES DEL MUNDO ACTUAL
+
+Estas condiciones prevalecen sobre cualquier decisión matemática posterior.
+
+2.1. Reinos existentes
+
+Todos los reinos actuales deben conservar íntegramente:
+
+- Coordenadas.
+- Capitales.
+- Territorios.
+- Recursos.
+- Edificios.
+- Población.
+- Trabajadores.
+- Ejércitos.
+- Tecnologías.
+- Honor.
+- Gloria.
+- Misiones.
+- Relaciones diplomáticas.
+- Alianzas.
+- Cualquier otro dato histórico.
+
+No se permite migrar, desplazar, redistribuir, reiniciar ni reconstruir los reinos existentes.
+
+Sus identificadores y relaciones históricas deben permanecer intactos.
+
+2.2. Mapa
+
+El mapa se ampliará hacia el exterior.
+
+Las nuevas celdas se generarán bajo demanda.
+
+Los nuevos reinos aparecerán exclusivamente en regiones periféricas que dispongan de espacio suficiente para su expansión.
+
+No se debe alterar el mapa central existente ni regenerar sus terrenos.
+
+2.3. Separación entre realidad y diseño
+
+Cada resultado deberá clasificarse como:
+
+- VERIFICADO EN CÓDIGO: existe y se ha comprobado directamente.
+- CALCULADO: resultado matemático derivado de una fórmula definida.
+- DISEÑO TEÓRICO: regla o sistema propuesto para una futura implementación.
+- PENDIENTE DE DECISIÓN: falta información o existe una decisión de diseño que no se puede deducir matemáticamente.
+
+No conviertas una propuesta en un hecho.
+
+No declares que una fórmula existe en el código si solamente aparece en este documento o en una especificación anterior.
+
+---
+
+3. METODOLOGÍA OBLIGATORIA DE TRABAJO
+
+Antes de calcular:
+
+1. Inspecciona los archivos relevantes del proyecto.
+2. Recupera los valores reales de configuración.
+3. Identifica las unidades de cada variable.
+4. Separa parámetros existentes de parámetros propuestos.
+5. Comprueba que las fórmulas no se contradigan.
+6. Calcula los resultados con precisión suficiente.
+7. Realiza pruebas de casos normales, extremos y adversos.
+8. Comprueba los límites de cada sistema.
+9. Comprueba la interacción entre sistemas.
+
+No inventes valores del código.
+
+Cuando falte un parámetro que sea necesario para cerrar un diseño teórico, debes proponer un valor concreto, justificarlo y marcarlo como parámetro de diseño propuesto.
+
+No dejes fórmulas en blanco.
+
+No escribas expresiones como «depende del código», «se debe calcular», «pendiente de ajustar» o «según configuración» cuando puedas definir matemáticamente una solución.
+
+Si existe una decisión que no puede resolverse sin conocer una regla de diseño, presenta una propuesta completa y señala exactamente qué decisión requiere autorización.
+
+La obligación es entregar una solución matemática concreta, no limitarse a enumerar problemas.
+
+---
+
+4. SISTEMA DE MAPA HEXAGONAL DINÁMICO
+
+4.1. Coordenadas
+
+Utiliza coordenadas axiales (q,r).
+
+Distancia entre dos celdas:
+
+d = (|q1-q2| + |r1-r2| + |(q1+r1)-(q2+r2)|) / 2
+
+Vecinos:
+
+(1,0), (1,-1), (0,-1), (-1,0), (-1,1), (0,1).
+
+Comprueba que la distancia siempre sea un entero no negativo para coordenadas enteras.
+
+4.2. Generación determinista del terreno
+
+Evalúa la función hash de 32 bits definida en la especificación anterior.
+
+Comprueba:
+
+- Distribución estadística.
+- Repetibilidad.
+- Coordenadas negativas.
+- Coordenadas positivas.
+- Valores extremos.
+- Colisiones.
+- Comportamiento al superar el rango de 32 bits.
+- Riesgo de reutilización de patrones.
+
+Si la conversión q >>> 0 y r >>> 0 no es apropiada para el rango espacial requerido, define una alternativa determinista que admita coordenadas enteras de mayor amplitud.
+
+La solución debe ser compatible con JavaScript/TypeScript y no depender de cálculos de coma flotante imprecisos para el hash.
+
+Define expresamente el rango admitido o el método que permita ampliarlo.
+
+4.3. Distribución del terreno
+
+Distribución interior:
+
+- Llanura: 30%.
+- Bosque: 25%.
+- Colina: 20%.
+- Montaña: 15%.
+- Río: 10%.
+
+La generación de costa debe estar separada de la distribución interior.
+
+Define matemáticamente:
+
+- Qué se considera perímetro costero.
+- Cómo se identifican los cuerpos de agua principales.
+- Qué determina que una celda sea costa.
+- Cómo se evita que una modificación futura de la generación cambie celdas ya persistidas.
+- Cómo se versiona el generador.
+
+Las celdas históricas y persistidas siempre prevalecen sobre cualquier cálculo posterior.
+
+4.4. Chunks
+
+Dimensiones:
+
+CHUNK_Q = 8
+CHUNK_R = 8
+
+64 posiciones axiales por sector.
+
+Identificadores:
+
+cx = floor(q / 8)
+cy = floor(r / 8)
+chunkId = cx + "," + cy
+
+Comprueba expresamente los límites negativos:
+
+q = -1, -8, -9
+r = -1, -8, -9
+
+La división debe utilizar floor y no truncamiento hacia cero.
+
+Define:
+
+- Cálculo de chunks que intersectan un viewport.
+- Margen de precarga.
+- Número máximo de chunks por solicitud.
+- Límite máximo de celdas generadas por operación.
+- Paginación.
+- Caché.
+- Consultas indexadas.
+- Persistencia.
+- Reintentos.
+- Idempotencia.
+- Concurrencia.
+
+No presupongas que un índice secundario garantiza unicidad.
+
+Explica cómo se garantiza que dos solicitudes simultáneas no creen dos documentos para la misma celda, considerando el comportamiento transaccional real de Convex.
+
+Si hace falta una estrategia de reserva, identifica su clave canónica y su comportamiento ante conflictos.
+
+4.5. Escenarios
+
+Simula:
+
+- Un viewport pequeño.
+- Un viewport mediano.
+- Un viewport grande.
+- Una región periférica.
+- Una consulta repetida.
+- Dos consultas simultáneas.
+- Una solicitud interrumpida.
+- Coordenadas negativas.
+
+Entrega tablas con cantidades de chunks, celdas y operaciones estimadas.
+
+---
+
+5. COLOCACIÓN MATEMÁTICA DE NUEVOS REINOS
+
+Esta sección debe quedar completamente definida.
+
+5.1. Protección de los reinos existentes
+
+Ninguna capital ni territorio existente puede moverse.
+
+Para cada candidato x, calcula su distancia a todos los territorios ocupados.
+
+Define:
+
+Dmin(x) = min distancia entre x y cualquier territorio ocupado.
+
+La condición de seguridad debe garantizar que el nuevo reino tenga una zona inicial de expansión libre.
+
+Utiliza como propuesta de partida:
+
+Radio de expansión protegido Rexp = 10 hexágonos.
+
+Un candidato solamente será válido si su zona de expansión no invade territorios ocupados ni reservas protegidas.
+
+Define matemáticamente el conjunto de celdas comprendidas en el radio de expansión.
+
+Para un radio hexagonal R, el número de celdas es:
+
+N(R) = 1 + 3R(R+1).
+
+Para R = 10, calcula el total.
+
+5.2. Separación entre nuevos reinos
+
+Utiliza como propuesta:
+
+Margen de seguridad B = 5.
+
+Distancia mínima entre capitales nuevas:
+
+Dcapital = 2Rexp + B.
+
+Calcula el resultado y justifica si esta separación garantiza que ambas zonas protegidas sean disjuntas.
+
+Ten en cuenta también las reservas de expansión de reinos nuevos anteriores.
+
+5.3. Puntuación de candidatos
+
+Define una función normalizada con valores comprendidos entre 0 y 1.
+
+Utiliza:
+
+Dnorm = distancia normalizada a la capital existente más cercana.
+
+Lnorm = proporción de celdas libres en la zona protegida del candidato.
+
+Propuesta:
+
+Score(x) = 0.50 × Dnorm + 0.50 × Lnorm.
+
+Define cómo se normaliza Dnorm, evitando que el valor dependa arbitrariamente de la extensión actual del mapa.
+
+Lnorm = celdas libres / total de celdas del radio protegido.
+
+Los candidatos que no cumplan todas las condiciones de seguridad quedan descartados, independientemente de su puntuación.
+
+5.4. Desempates
+
+Define un orden determinista:
+
+1. Mayor Score.
+2. Mayor Dnorm.
+3. Mayor Lnorm.
+4. Menor ángulo polar normalizado.
+5. Menor q.
+6. Menor r.
+
+Explica cómo calcular el ángulo y cómo normalizarlo.
+
+5.5. Reserva
+
+Define un algoritmo determinista para reservar la capital y su zona de expansión.
+
+Debe impedir que dos altas simultáneas ocupen la misma región.
+
+Explica qué ocurre si dos solicitudes compiten por el mismo candidato.
+
+No modifiques los reinos existentes.
+
+5.6. Simulación
+
+Simula al menos 10 colocaciones sucesivas de reinos nuevos en una periferia artificial.
+
+Comprueba:
+
+- Separación.
+- Zona libre.
+- Ausencia de invasiones.
+- Desempates.
+- Reservas.
+- Rechazo de candidatos inválidos.
+
+---
+
+6. MOVIMIENTO COLECTIVO DE ESPÍAS
+
+6.1. Capacidad
+
+Capacidad máxima:
+
+Plazas de espías = floor(nivelCuartel / 2).
+
+Comprueba los niveles de cuartel del 1 al 20.
+
+6.2. Velocidad
+
+Fórmula:
+
+T(n) = max(300, 1800 / sqrt(n))
+
+Tiempo expresado en segundos por hexágono llano.
+
+n es el número de espías que viajan juntos.
+
+Multiplicadores:
+
+- Llanura: 1.00.
+- Río: 1.10.
+- Costa: 1.10.
+- Bosque: 1.20.
+- Colina: 1.25.
+- Montaña: 1.50.
+
+Tiempo por celda:
+
+Tterreno(n) = T(n) × Mterreno.
+
+Tiempo total:
+
+Ttotal = suma de los tiempos de cada celda atravesada.
+
+El mínimo de 300 segundos se aplica antes del multiplicador de terreno.
+
+6.3. Tabla obligatoria
+
+Calcula el tiempo por hexágono y para recorridos de 1, 5, 10, 20 y 50 hexágonos.
+
+Número de espías:
+
+1, 2, 3, 4, 5, 9, 10, 20, 25, 36 y 50.
+
+Utiliza dos decimales.
+
+6.4. Ejemplos de ruta
+
+Calcula rutas con:
+
+- Llanura.
+- Bosque.
+- Montaña.
+- Río.
+- Ruta mixta.
+
+Comprueba que la suma de tiempos coincide con el resultado final.
+
+6.5. Grupos simultáneos
+
+Define la diferencia entre:
+
+- Un grupo de 10 espías.
+- Dos grupos independientes de 5 espías.
+- Cinco grupos independientes de 2 espías.
+
+Cada grupo debe disponer de su propia misión, ruta, estado y tiempo.
+
+No se permite sumar automáticamente grupos independientes para aplicar una velocidad colectiva que no tienen.
+
+---
+
+7. SISTEMA COMPLETO DE ESPIONAJE
+
+Esta sección debe quedar cerrada matemáticamente.
+
+7.1. Eficacia
+
+Utiliza la fórmula:
+
+E = [sqrt(n) × (1 + 0.10 × Ta)] / [(1 + D/10) × (1 + 0.10 × Cd)]
+
+Donde:
+
+n = espías enviados.
+Ta = tecnología ofensiva efectiva.
+D = defensa o detección defensiva efectiva.
+Cd = contrainteligencia defensiva efectiva.
+
+Si D y Cd representan conceptos distintos, mantén ambos separados y explica su función.
+
+No confundas niveles tecnológicos con valores porcentuales.
+
+Define cómo se calcula el nivel tecnológico efectivo y cómo se aplican los topes.
+
+7.2. Umbrales
+
+Nivel 1:
+
+E < 1.
+
+Nivel 2:
+
+1 ≤ E < 3.
+
+Nivel 3:
+
+E ≥ 3.
+
+Nivel 1:
+
+- Estimación global.
+- Error máximo ±35%.
+- Sin desglose por familias.
+
+Nivel 2:
+
+- Desglose por familias.
+- Error máximo ±15% por familia.
+
+Nivel 3:
+
+- Fotografía exacta de tropas vivas.
+- Heridas.
+- Equipamiento.
+- Niveles de equipamiento.
+- Estado en el instante de observación.
+
+La información nunca debe actualizarse retroactivamente.
+
+7.3. Probabilidad de detección
+
+Utiliza:
+
+Pd = clamp(
+0.05
+
++ 0.25 × D/(D+20)
++ [0.30 × Cd / ((Cd+5) × sqrt(n) × (1+0.10×Ta))],
+  0.05,
+  0.85
+  )
+
+Comprueba los límites matemáticos.
+
+Define cómo se gestionan D = 0, Cd = 0 y valores tecnológicos máximos.
+
+La probabilidad debe permanecer entre 5% y 85%.
+
+7.4. Exposición durante el viaje
+
+No basta con decir que un viaje largo incrementa el riesgo.
+
+Define una fórmula concreta que integre:
+
+- Duración de ida.
+- Duración de observación.
+- Duración de regreso.
+- Probabilidad base de detección.
+- Número de espías.
+- Tecnología.
+- Terreno.
+- Contrainteligencia.
+
+Evita sumar probabilidades independientes de manera incorrecta.
+
+Si la probabilidad instantánea por unidad de tiempo es h, utiliza un modelo acumulativo coherente:
+
+Ptotal = 1 - exp(-integral de h(t) dt).
+
+Si utilizas un modelo discreto, define exactamente la probabilidad por intervalo y su acumulación.
+
+La fórmula final debe ser implementable y no producir probabilidades fuera de rango.
+
+7.5. Generación determinista de informes
+
+Define una semilla por misión:
+
+MissionSeed = hash(missionId, kingdomId, targetId, observationTimestamp, secretServerSeed).
+
+La semilla privada del servidor no debe revelarse al cliente.
+
+Define subsemillas independientes para:
+
+- Estimación total.
+- Infantería.
+- Arquería.
+- Caballería.
+- Asedio.
+- Equipamiento.
+
+El error debe ser reproducible para la misma misión, pero distinto para misiones diferentes.
+
+Define cómo se redondean las estimaciones y cómo se impiden valores negativos.
+
+Una estimación nunca puede superar los límites lógicos del sistema.
+
+7.6. Máquina de estados
+
+Define estados y transiciones:
+
+1. preparación.
+2. salida.
+3. desplazamiento de ida.
+4. llegada.
+5. observación.
+6. cálculo de detección.
+7. generación del informe.
+8. regreso.
+9. completada.
+
+Estados de fallo:
+
+- Cancelada antes de salir.
+- Interceptada.
+- Capturada.
+- Eliminada.
+- Retorno interrumpido.
+- Fallo recuperable del proceso.
+
+Define qué sucede si el servidor interrumpe una operación.
+
+Todas las transiciones deben ser idempotentes.
+
+La captura o eliminación debe impedir la entrega de un informe que no corresponda a la resolución real de la misión.
+
+---
+
+8. ECONOMÍA Y PRODUCCIÓN DECIMAL
+
+8.1. Escala fija
+
+Utiliza:
+
+S = 1000.
+
+Todos los saldos se almacenan en milésimas de unidad.
+
+La producción diaria se expresa en milésimas por día.
+
+8.2. Fórmula
+
+RateMilliPerDay = tasa neta diaria en milésimas.
+
+Numerator = RateMilliPerDay × DeltaSeconds + TimeRemainder.
+
+GainMilli = floor(Numerator / 86400).
+
+NewTimeRemainder = Numerator mod 86400.
+
+SaldoNuevo = min(CapacidadMilli, SaldoAnterior + GainMilli).
+
+Utiliza aritmética entera segura.
+
+Comprueba el límite de Number.MAX_SAFE_INTEGER y define cuándo sería necesario utilizar BigInt.
+
+No mezcles milésimas con unidades completas en operaciones internas.
+
+8.3. Casos especiales
+
+Define el tratamiento matemático de:
+
+- Almacén lleno.
+- Producción negativa.
+- Consumo.
+- Cambio de trabajadores.
+- Cambio de edificios.
+- Pérdida de territorio.
+- Ganancia de territorio.
+- Cambio tecnológico.
+- Modificación de tasas.
+- Cambio de capacidad.
+- Reinicio del servidor.
+- Diferentes intervalos de liquidación.
+
+La liquidación debe realizarse antes de cualquier modificación de la tasa o capacidad.
+
+Cuando el almacén está lleno, el excedente se pierde y no se acumula como producción pendiente.
+
+Explica cómo se conserva la fracción temporal sin generar recursos fantasma.
+
+8.4. Independencia del intervalo
+
+Comprueba que liquidar cada segundo, cada minuto, cada hora o cada día produzca el mismo saldo, salvo el efecto explícito de alcanzar la capacidad.
+
+Demuestra matemáticamente esta propiedad.
+
+---
+
+9. BONIFICACIÓN DE TERRITORIOS NEUTRALES
+
+Cada hexágono neutral conquistado y poseído aporta:
+
++1% de producción global a cada uno de los cinco recursos.
+
+Fórmula:
+
+M(N) = 1 + 0.01 × N.
+
+Producción final:
+
+Pfinal = Pbase × M(N).
+
+N representa exclusivamente el número real de celdas neutrales válidamente poseídas.
+
+Define:
+
+- Qué cuenta como territorio neutral.
+- Qué ocurre al perderlo.
+- Qué ocurre al reconquistarlo.
+- Cómo se evita contar dos veces.
+- Cómo se actualiza el multiplicador.
+- Cómo interactúa con tecnologías y edificios.
+- Orden de aplicación de multiplicadores.
+
+Simula:
+
+N = 0, 1, 5, 10, 20, 50 y 100.
+
+Calcula los multiplicadores y la producción de los cinco recursos del reino inicial.
+
+Comprueba si la progresión económica genera inflación excesiva.
+
+No cambies la regla del 1%: si detectas problemas de balance, cuantifícalos y presenta alternativas separadas, sin sustituir la regla principal.
+
+---
+
+10. EDIFICIOS Y PROGRESIÓN
+
+10.1. Costes
+
+Utiliza la progresión geométrica real que se encuentre en balanceConfig.ts.
+
+Si se confirma un crecimiento del 15%:
+
+Coste(L) = CosteBase × 1.15^(L-1).
+
+Comprueba que el nivel 1 corresponde al coste base.
+
+Calcula los costes acumulados de niveles 1 a 10, 20, 50 y 100.
+
+10.2. Duración
+
+Recupera la fórmula real del código.
+
+Si el crecimiento es geométrico:
+
+Tiempo(L) = TiempoBase × (1+p)^(L-1).
+
+No inventes p si existe en configuración.
+
+Si no existe, propone un valor teórico razonable y explica su efecto.
+
+Calcula tiempos acumulados de construcción y verifica que los niveles iniciales no resulten desproporcionados.
+
+10.3. Capacidades
+
+Audita todos los edificios.
+
+Para cada uno entrega:
+
+- Nivel.
+- Capacidad.
+- Producción.
+- Coste.
+- Tiempo.
+- Límite.
+- Dependencias.
+- Efectos indirectos.
+
+No te limites a Viviendas, Granjas y Almacenes.
+
+10.4. Balance de nivel 1 a 100
+
+Calcula la evolución de edificios representativos.
+
+Detecta:
+
+- Costes explosivos.
+- Tiempos excesivos.
+- Capacidad insuficiente.
+- Edificios dominantes.
+- Edificios inútiles.
+- Cuellos de botella.
+
+Propón ajustes teóricos únicamente si los cálculos demuestran que son necesarios.
+
+---
+
+11. INVESTIGACIONES
+
+Audita los 135 nodos tecnológicos.
+
+Topes conocidos:
+
+- unitEfficiency: 0.30.
+- marchSpeed: 0.55.
+- researchDuration: 0.40.
+- constructionCost: 0.25.
+- housingCapacity: 0.30.
+
+Para cada familia:
+
+1. Recupera efectos reales.
+2. Identifica si son aditivos o multiplicativos.
+3. Determina el orden de aplicación.
+4. Comprueba el tope.
+5. Comprueba que no se aplica dos veces.
+6. Evalúa interacciones con edificios, mercado, ejército y economía.
+
+Define matemáticamente:
+
+- Coste de investigación.
+- Tiempo.
+- Desbloqueos.
+- Dependencias.
+- Acumulación.
+- Redondeos.
+- Límites.
+
+Construye escenarios con tecnologías bajas, medias y máximas.
+
+No supongas que todos los nodos tienen el mismo efecto.
+
+---
+
+12. MERCADO Y COMISIONES
+
+Fórmula teórica:
+
+Comision(L) = max(0.02, 0.10 × 0.95^(L-1)).
+
+Suelo del 2%.
+
+Comprueba:
+
+Niveles 1, 2, 3, 5, 10, 15, 20, 30, 32, 40 y 50.
+
+Entrega tabla con:
+
+- Comisión matemática.
+- Comisión aplicada.
+- Diferencia frente al nivel anterior.
+- Ahorro acumulado respecto al nivel 1.
+
+12.1. Operación de intercambio
+
+Define la fórmula exacta del coste.
+
+Ejemplo conceptual:
+
+CosteComision = Cantidad × Comision.
+
+Pero debes definir:
+
+- Si se cobra al vendedor, al comprador o a ambos.
+- Si se descuenta de la cantidad entregada o del saldo.
+- Cómo se redondea.
+- Qué ocurre con cantidades pequeñas.
+- Cómo se impide que una operación genere recursos negativos.
+- Cómo se calcula el resultado neto.
+- Cómo se comprueba que la comisión nunca es negativa.
+
+No cambies las reglas actuales de intercambio si ya están definidas en código: documenta el comportamiento real y separa cualquier propuesta.
+
+12.2. Rentabilidad de mejorar el mercado
+
+Calcula el ahorro acumulado por subir el mercado.
+
+Simula intercambios de:
+
+- 100 unidades.
+- 1.000 unidades.
+- 10.000 unidades.
+- 50.000 unidades.
+
+Determina cuántas operaciones hacen falta para recuperar el coste de construcción o mejora de cada nivel.
+
+Incluye la capacidad de almacenamiento en la rentabilidad global.
+
+---
+
+13. POBLACIÓN Y ASIGNACIÓN LABORAL
+
+Utiliza el escenario inicial confirmado:
+
+Población: 2.000.
+
+Distribución:
+
+- Agricultura: 1.100.
+- Madera: 250.
+- Piedra: 250.
+- Hierro: 100.
+- Oro: 50.
+- Civiles libres: 250.
+
+Comprueba:
+
+1100 + 250 + 250 + 100 + 50 + 250 = 2000.
+
+Tasas base diarias conocidas:
+
+- Alimentos: 2 por trabajador.
+- Madera: 3 por trabajador.
+- Piedra: 1.5 por trabajador.
+- Hierro: 1.2 por trabajador.
+- Oro: 0.2 por trabajador.
+
+Calcula:
+
+- Producción diaria.
+- Consumo diario.
+- Superávit o déficit.
+- Producción por habitante.
+- Producción con tecnologías.
+- Producción con bonificación territorial.
+- Producción con capacidad máxima de almacenamiento.
+
+Define reglas de reasignación laboral.
+
+Un trabajador no puede producir simultáneamente en dos edificios.
+
+Ninguna asignación puede superar la población disponible.
+
+Comprueba qué ocurre cuando se supera la capacidad laboral de un edificio.
+
+---
+
+14. CONQUISTA MILITAR DE TERRITORIOS
+
+Define el algoritmo completo.
+
+14.1. Adyacencia
+
+La conquista de una celda neutral debe cumplir la condición de adyacencia definida para los territorios del atacante.
+
+La condición debe volver a comprobarse al llegar la marcha, no solamente al salir.
+
+14.2. Movimiento y ocupación
+
+Define:
+
+- Inicio.
+- Coste.
+- Tiempo.
+- Marcha.
+- Llegada.
+- Revalidación.
+- Conflicto con otra marcha.
+- Ocupación.
+- Cancelación.
+- Derrota.
+- Retorno.
+
+No permitas dos conquistas simultáneas incompatibles de la misma celda.
+
+14.3. Recompensa histórica
+
+La primera conquista mundial de cada celda otorga:
+
++1 honor.
++1 gloria.
+
+Identificador histórico:
+
+MilestoneKey = CellId.
+
+Una reconquista posterior no vuelve a otorgar honor ni gloria.
+
+Define la operación transaccional que evita recompensas duplicadas.
+
+14.4. Victoria aplastante
+
+Condición:
+
+loserLoss > 0.75.
+
+Debes definir rigurosamente el denominador.
+
+Compara las alternativas:
+
+- Pérdidas respecto a tropas iniciales.
+- Pérdidas respecto a tropas desplegadas.
+- Pérdidas respecto a tropas participantes.
+
+Selecciona una definición teórica y justifica por qué es la más coherente.
+
+Calcula:
+
+loserLoss = pérdidas válidas / tropas de referencia.
+
+Define cómo se cuentan muertos, heridos, capturados y retirados.
+
+14.5. Conectividad
+
+La transferencia de una celda no puede romper la conectividad territorial del perdedor.
+
+Define el grafo:
+
+- Nodos: territorios del perdedor.
+- Aristas: adyacencia hexagonal.
+- Nodo raíz: capital.
+
+Simula retirar una celda candidata y ejecutar BFS.
+
+Solo se transfiere si todos los territorios restantes siguen conectados con la capital.
+
+La capital nunca puede ser candidata.
+
+Si no existe una celda segura, se genera pendingTerritoryClaims +1.
+
+Define un orden determinista de selección de candidatos.
+
+---
+
+15. ALIANZAS Y GUARNICIONES
+
+Este apartado debe quedar matemáticamente diseñado aunque no exista implementación.
+
+Parlamento nivel 15 para fundar.
+
+Define:
+
+- Tamaño mínimo.
+- Tamaño máximo.
+- Límites de miembros.
+- Reglas de invitación.
+- Entrada.
+- Salida.
+- Expulsión.
+- Disolución.
+- Liderazgo.
+- Sucesión.
+- Límites de guarnición.
+- Refuerzos.
+- Bajas.
+- Retornos.
+
+Las guarniciones conservan siempre la propiedad de su reino emisor.
+
+Las bajas se descuentan al propietario original.
+
+La disolución no puede duplicar tropas ni eliminar tropas sin resolución.
+
+Diseña retornos por lotes idempotentes y reanudables.
+
+Define un identificador único de cada operación y su transición de estados.
+
+---
+
+16. BALANCE INTEGRADO Y SIMULACIONES
+
+Esta sección es obligatoria.
+
+No basta con verificar cada fórmula por separado.
+
+Debes construir escenarios integrados que permitan detectar efectos secundarios.
+
+Escenario A: reino inicial
+
+2.000 habitantes y distribución laboral especificada.
+
+Calcula los cinco recursos, consumo, superávit, almacenamiento y tiempos de construcción.
+
+Escenario B: crecimiento
+
+Simula evolución de población, trabajadores, edificios y producción.
+
+Escenario C: expansión territorial
+
+Simula 1, 5, 10, 20, 50 y 100 territorios neutrales.
+
+Comprueba el crecimiento de producción y almacenamiento.
+
+Escenario D: mercado
+
+Simula mejoras sucesivas del mercado y operaciones de diferentes tamaños.
+
+Escenario E: espionaje
+
+Simula 1, 2, 5, 10, 20 y 50 espías con diferentes tecnologías y defensas.
+
+Calcula eficacia, nivel de informe, detección y tiempo de viaje.
+
+Escenario F: mapa
+
+Simula generación progresiva de chunks y creación de nuevos reinos.
+
+Escenario G: guerra
+
+Simula conquistas neutrales, batallas, victoria aplastante y comprobación de conectividad.
+
+Escenario H: alianza
+
+Simula creación, refuerzo, bajas, expulsión y disolución.
+
+Escenario I: explotación y abuso
+
+Prueba:
+
+- Solicitudes concurrentes.
+- Repetición de mutaciones.
+- Doble recompensa.
+- Doble conquista.
+- Doble asignación de trabajadores.
+- Duplicación de tropas.
+- Producción fantasma.
+- Saldo negativo.
+- Pérdida de conectividad.
+- Reutilización de identificadores.
+- Manipulación de tiempos.
+- Repetición de informes de espionaje.
+
+Para cada escenario entrega entradas, fórmula, operaciones, resultado y conclusión.
+
+---
+
+17. ORDEN MATEMÁTICO GLOBAL
+
+Debes definir un orden único para aplicar los modificadores.
+
+Como mínimo analiza:
+
+1. Producción base.
+2. Número de trabajadores.
+3. Eficiencia del edificio.
+4. Bonificación tecnológica.
+5. Bonificación por territorio neutral.
+6. Otros modificadores globales.
+7. Redondeo a milésimas.
+8. Límite de almacenamiento.
+
+No apliques dos veces el mismo efecto.
+
+Si el código existente utiliza otro orden, documenta la diferencia y ofrece un orden teórico coherente sin afirmar que ya está implementado.
+
+Haz lo mismo para:
+
+- Costes de construcción.
+- Duraciones.
+- Marchas.
+- Investigación.
+- Comisiones.
+- Capacidad de almacenamiento.
+
+---
+
+18. CONTROL DE CALIDAD MATEMÁTICO
+
+Antes de concluir, realiza una comprobación formal.
+
+Comprueba:
+
+- Unidades dimensionales.
+- Rangos.
+- Límites.
+- Valores negativos.
+- División entre cero.
+- Redondeos.
+- Precisión.
+- Monotonicidad.
+- Idempotencia.
+- Determinismo.
+- Concurrencia.
+- Escalabilidad.
+- Reversibilidad cuando corresponda.
+
+Para cada fórmula incluye:
+
+1. Nombre.
+2. Expresión matemática.
+3. Variables.
+4. Unidades.
+5. Dominio.
+6. Rango de salida.
+7. Casos límite.
+8. Ejemplo numérico.
+9. Resultado esperado.
+10. Riesgos.
+
+Si una fórmula falla una prueba, corrígela antes de presentar el resultado definitivo.
+
+No ocultes contradicciones.
+
+---
+
+19. FORMATO DE ENTREGA OBLIGATORIO
+
+Entrega un documento técnico estructurado con:
+
+A. Dictamen ejecutivo
+
+Qué está cerrado, qué se ha corregido y qué continúa siendo una propuesta.
+
+B. Especificación matemática definitiva
+
+Todas las fórmulas completas, sin huecos.
+
+C. Parámetros maestros
+
+Una tabla única con todos los parámetros y sus valores.
+
+Columnas:
+
+- Parámetro.
+- Valor.
+- Unidad.
+- Sistema.
+- Procedencia.
+- Estado.
+
+D. Tablas de simulación
+
+Incluye todos los resultados numéricos relevantes.
+
+E. Algoritmos
+
+Pseudocódigo preciso para cada proceso importante.
+
+F. Reglas de interacción
+
+Explica cómo se relacionan economía, edificios, tecnologías, mercado, territorio, espionaje y ejército.
+
+G. Pruebas de consistencia
+
+Presenta casos normales, extremos, límites y abuso.
+
+H. Decisiones pendientes
+
+Incluye únicamente decisiones que no puedan cerrarse matemáticamente sin autorización.
+
+Para cada decisión pendiente proporciona:
+
+- Problema exacto.
+- Alternativa recomendada.
+- Valor propuesto.
+- Consecuencia de aceptarlo.
+- Consecuencia de rechazarlo.
+
+I. Clasificación final
+
+Cada sistema debe recibir uno de estos estados:
+
+- CERRADO MATEMÁTICAMENTE.
+- CERRADO CON PARÁMETROS PROPUESTOS.
+- PENDIENTE DE DECISIÓN.
+- VERIFICADO EN CÓDIGO.
+- NO IMPLEMENTADO.
+
+No confundas estos estados.
+
+---
+
+20. CRITERIO DE FINALIZACIÓN
+
+El trabajo solo puede considerarse completo cuando:
+
+- Todas las fórmulas están escritas.
+- Todos los parámetros tienen valor o una decisión explícita.
+- Todas las unidades están definidas.
+- Todas las tablas solicitadas están calculadas.
+- Las simulaciones son reproducibles.
+- No existen divisiones por cero sin tratamiento.
+- No existen contradicciones entre fórmulas.
+- No hay doble aplicación de multiplicadores.
+- Los sistemas son coherentes entre sí.
+- Las reglas de concurrencia e idempotencia están definidas.
+- Los casos límite están resueltos.
+- Los reinos actuales permanecen absolutamente intactos.
+- El mapa se expande exclusivamente hacia el exterior.
+- Ninguna funcionalidad teórica se declara implementada.
+
+Si no puedes completar algún apartado, debes explicar exactamente qué dato falta y ofrecer una solución matemática propuesta. No lo rellenes con una afirmación genérica.
+
+NO DECLARES LA AUDITORÍA CERRADA POR HABER DESCRITO TODOS LOS SISTEMAS. SOLO PUEDES CERRARLA SI HAS COMPLETADO LOS CÁLCULOS, TABLAS, ALGORITMOS Y PRUEBAS.
+
+---
+
+21. CONFIRMACIÓN FINAL OBLIGATORIA
+
+Termina con una declaración explícita:
+
+- No se ha modificado ningún archivo.
+- No se ha escrito en ninguna tabla.
+- No se ha ejecutado ninguna migración.
+- No se ha desplegado nada.
+- No se ha modificado ningún reino.
+- Los reinos existentes conservan todas sus coordenadas y progreso.
+- El trabajo es exclusivamente teórico.
+- Ningún sistema se considera implementado por haber sido especificado.
+
+El objetivo final es disponer de una especificación matemática maestra, rigurosa, completa, reproducible y coherente, que sirva como referencia única para una futura implementación autorizada de LA CONQUISTA.

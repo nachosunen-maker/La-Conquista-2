@@ -365,6 +365,27 @@ export const requestEspionageReport = mutation({
       estimate: { min: total.min, max: total.max },
       composition: estimated,
     });
+
+    // Los espías también son exploradores: registrar los territorios del reino objetivo en 'exploredTerritories'
+    const targetTerritories = await ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", args.targetKingdomId))
+      .collect();
+    for (const cell of targetTerritories) {
+      const existing = await ctx.db
+        .query("exploredTerritories")
+        .withIndex("by_kingdom_and_cell", (q) => q.eq("kingdomId", args.kingdomId).eq("cellId", cell.cellId))
+        .first();
+      if (!existing) {
+        await ctx.db.insert("exploredTerritories", {
+          kingdomId: args.kingdomId,
+          cellId: cell.cellId,
+          discoveredAt: now,
+          discoveryNote: `Territorio de ${target.name} descubierto por la red de espionaje.`,
+        });
+      }
+    }
+
     return { success: true, reportId, cost, level: effectiveLevel, originalLevel: spyLevel, estimate: total, composition: estimated, expiresAt: now + PARLIAMENT.ESPIONAGE.reportTtlMs };
   },
 });

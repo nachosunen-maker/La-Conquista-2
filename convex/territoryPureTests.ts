@@ -29,7 +29,17 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
   const ids = new Set(world.map((cell) => cell.cellId));
   const terrainCounts: Record<string, number> = {};
   for (const cell of world) terrainCounts[cell.terrain] = (terrainCounts[cell.terrain] ?? 0) + 1;
-  const coastOnlyAtEdge = world.every((cell) => cell.terrain !== "costa" || hexDistance(cell, { q: 0, r: 0 }) === MAP.RADIUS);
+  const coastOnlyAtValidLocations = world.every(
+    (cell) =>
+      cell.terrain !== "costa" ||
+      hexDistance(cell, { q: 0, r: 0 }) === MAP.RADIUS ||
+      hexDistance(cell, { q: 0, r: 0 }) === MAP.HISTORICAL_RADIUS
+  );
+  const historicalWorld = generateWorldCells(MAP.HISTORICAL_RADIUS, MAP.WORLD_SEED);
+  const historicalPreserved = historicalWorld.length === 331 && historicalWorld.every((cell) => {
+    const exp = world.find((c) => c.cellId === cell.cellId);
+    return exp && exp.terrain === cell.terrain && exp.q === cell.q && exp.r === cell.r;
+  });
 
   const d1 = hexDistance({ q: 0, r: 0 }, { q: 3, r: -1 });
   const d2 = hexDistance({ q: -2, r: 5 }, { q: 4, r: -3 });
@@ -187,11 +197,11 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
       details: `Línea (0,0)→(3,-1): ${line.map((c) => `${c.q},${c.r}`).join(" ")}; media ponderada mixta: ${mixedAverage} (esperado ${expectedAverage}); distancia 0: ${zero}`,
     },
     {
-      test: "Mundo hexagonal de radio 10 con 331 celdas únicas y terreno reproducible por semilla (D-23, D-25)",
-      passed: world.length === 331 && ids.size === 331 && world.every((cell, index) => cell.terrain === worldAgain[index].terrain) &&
-        terrainForCell(3, -2) === terrainForCell(3, -2) && coastOnlyAtEdge && Object.keys(terrainCounts).length >= 5 &&
+      test: "Mundo hexagonal ampliado a radio 50 con 7.651 celdas únicas, fórmula N=1+3r(r+1) y conservación de las 331 originales (D-23, D-25)",
+      passed: world.length === 7651 && ids.size === 7651 && world.every((cell, index) => cell.terrain === worldAgain[index].terrain) &&
+        terrainForCell(3, -2) === terrainForCell(3, -2) && coastOnlyAtValidLocations && historicalPreserved && Object.keys(terrainCounts).length >= 5 &&
         parseCellId("-3,7")?.q === -3 && parseCellId("x") === null,
-      details: `Celdas ${world.length}; terrenos: ${Object.entries(terrainCounts).map(([k, n]) => `${k}=${n}`).join(", ")}`,
+      details: `Celdas ${world.length}; 331 originales intactas: ${historicalPreserved}; terrenos: ${Object.entries(terrainCounts).map(([k, n]) => `${k}=${n}`).join(", ")}`,
     },
     {
       test: "Distancia axial (D-26) y vecindad: 6 vecinos en el interior, menos en el borde",

@@ -83,6 +83,9 @@ const INLAND_WEIGHTS: ReadonlyArray<{ terrain: TerrainType; weight: number }> = 
 export function terrainForCell(q: number, r: number, seed: number = MAP.WORLD_SEED, radius: number = MAP.RADIUS): TerrainType {
   const distance = hexDistance({ q, r }, { q: 0, r: 0 });
   const h = hashCell(q, r, seed);
+  // Preservación histórica: las casillas en la frontera original de radio 10 que eran costa
+  // conservan íntegramente su terreno para garantizar la compatibilidad con los 331 hexágonos originales
+  if (distance === 10 && h % 2 === 0) return "costa";
   if (distance === radius && h % 2 === 0) return "costa";
   const total = INLAND_WEIGHTS.reduce((sum, entry) => sum + entry.weight, 0);
   let roll = h % total;

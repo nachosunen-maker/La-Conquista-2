@@ -15,11 +15,12 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { recordMissionEvent } from "./missions";
 import { isKingdomOwner, DEMO_USER_ID } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
+import { addUnits } from "./army";
 import { EXPLORATION, MAP, TERRAINS, type TerrainType } from "./balanceConfig";
 import {
   canClaimTerritory,
@@ -34,9 +35,12 @@ import {
   hexLine,
   pathTerrainMultiplier,
   calculateArmyMarchPlan,
+  isInsideWorld,
+  terrainForCell,
 } from "./territoryRules";
 import type { UnitType } from "./balanceConfig";
 import { getCivilizationPassive } from "./civilizationRules";
+import { readCompletedTechnologyIds } from "./technologyRules";
 import {
   canStartExploration,
   calculateExplorationRefund,
@@ -47,20 +51,134 @@ import {
 } from "./explorationRules";
 import { settleRelationalKingdomEconomy } from "./economy";
 
-async function readWorld(ctx: QueryCtx | MutationCtx) {
-  return ctx.db.query("territories").collect();
+export async function readWorld(ctx: QueryCtx | MutationCtx) {
+  const existing = await ctx.db.query("territories").collect();
+  if (existing.length >= MAP.MAX_CELLS) {
+    return existing;
+  }
+  const existingMap = new Map<string, typeof existing[0]>();
+  for (const t of existing) existingMap.set(t.cellId, t);
+
+  const targetCells = generateWorldCells(MAP.RADIUS, MAP.WORLD_SEED);
+  return targetCells.map((genCell) => {
+    const dbCell = existingMap.get(genCell.cellId);
+    if (dbCell) return dbCell;
+    return {
+      cellId: genCell.cellId,
+      q: genCell.q,
+      r: genCell.r,
+      terrain: genCell.terrain,
+      ownerKingdomId: undefined,
+      isHome: false,
+    };
+  });
 }
 
-/** Genera el mundo si todavía no existe (idempotente). */
-export async function ensureWorld(ctx: MutationCtx): Promise<number> {
-  const existing = await ctx.db.query("territories").first();
-  if (existing) return 0;
-  const cells = generateWorldCells(MAP.RADIUS, MAP.WORLD_SEED);
-  for (const cell of cells) {
-    await ctx.db.insert("territories", { cellId: cell.cellId, q: cell.q, r: cell.r, terrain: cell.terrain });
+export async function readTerritoryCell(ctx: QueryCtx | MutationCtx, cellIdStr: string) {
+  const target = await ctx.db
+    .query("territories")
+    .withIndex("by_cell", (q) => q.eq("cellId", cellIdStr))
+    .first();
+
+  if (target) return target;
+
+  const coord = parseCellId(cellIdStr);
+  if (coord && isInsideWorld(coord, MAP.RADIUS)) {
+    const terrain = terrainForCell(coord.q, coord.r, MAP.WORLD_SEED, MAP.RADIUS);
+    return {
+      cellId: cellIdStr,
+      q: coord.q,
+      r: coord.r,
+      terrain,
+      ownerKingdomId: undefined,
+      isHome: false,
+    };
   }
-  return cells.length;
+  return null;
 }
+
+export async function getOrCreateTerritoryCell(ctx: MutationCtx, cellIdStr: string) {
+  let target = await ctx.db
+    .query("territories")
+    .withIndex("by_cell", (q) => q.eq("cellId", cellIdStr))
+    .first();
+
+  if (!target) {
+    const coord = parseCellId(cellIdStr);
+    if (coord && isInsideWorld(coord, MAP.RADIUS)) {
+      const terrain = terrainForCell(coord.q, coord.r, MAP.WORLD_SEED, MAP.RADIUS);
+      const id = await ctx.db.insert("territories", {
+        cellId: cellIdStr,
+        q: coord.q,
+        r: coord.r,
+        terrain,
+      });
+      target = await ctx.db.get(id);
+    }
+  }
+  return target;
+}
+
+/**
+ * Helper para actualizar una celda de territorio, asegurando que existe en la DB primero.
+ */
+export async function patchTerritoryCell(ctx: MutationCtx, cellIdStr: string, updates: Partial<Doc<"territories">>) {
+  const cell = await getOrCreateTerritoryCell(ctx, cellIdStr);
+  if (cell) {
+    await ctx.db.patch(cell._id, updates);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Asegura la existencia de las 7.651 celdas del mundo hexagonal (radio 50).
+ * Si el mundo ya contiene celdas (p. ej. las 331 originales o un conjunto parcial),
+ * CONSERVA ÍNTEGRAMENTE todos los registros existentes (sin modificar terrenos,
+ * propietarios, capitales ni fechas de reclamación) e inserta únicamente las celdas
+ * faltantes hasta completar exactamente las 7.651 celdas.
+ * Es estrictamente idempotente.
+ */
+export async function ensureWorld(ctx: MutationCtx): Promise<number> {
+  const existing = await ctx.db.query("territories").collect();
+  if (existing.length >= MAP.MAX_CELLS) return 0;
+
+  const existingIds = new Set(existing.map((cell) => cell.cellId));
+  const targetCells = generateWorldCells(MAP.RADIUS, MAP.WORLD_SEED);
+  let added = 0;
+
+  for (const cell of targetCells) {
+    if (!existingIds.has(cell.cellId)) {
+      await ctx.db.insert("territories", {
+        cellId: cell.cellId,
+        q: cell.q,
+        r: cell.r,
+        terrain: cell.terrain,
+      });
+      existingIds.add(cell.cellId);
+      added++;
+    }
+  }
+
+  return added;
+}
+
+/**
+ * Mutación para ampliar el mundo de forma idempotente a radio 50 (7.651 celdas).
+ */
+export const expandWorld = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const added = await ensureWorld(ctx);
+    const count = (await ctx.db.query("territories").collect()).length;
+    return {
+      success: true,
+      added,
+      totalCells: count,
+      radius: MAP.RADIUS,
+    };
+  },
+});
 
 /** Asigna el territorio principal de un reino si aún no lo tiene (idempotente). */
 export async function ensureHomeTerritory(ctx: MutationCtx, kingdomId: Id<"kingdoms">): Promise<string | null> {
@@ -78,7 +196,7 @@ export async function ensureHomeTerritory(ctx: MutationCtx, kingdomId: Id<"kingd
   const homes: HexCoord[] = world.filter((cell) => cell.isHome).map((cell) => ({ q: cell.q, r: cell.r }));
   const choice = chooseHomeCell(world as WorldCell[], occupied, homes);
   if (!choice) return null;
-  const doc = world.find((cell) => cell.cellId === choice.cellId);
+  const doc = await getOrCreateTerritoryCell(ctx, choice.cellId);
   if (!doc) return null;
   await ctx.db.patch(doc._id, { ownerKingdomId: kingdomId, isHome: true, claimedAt: Date.now() });
   await ctx.db.patch(kingdomId, { homeTerritoryId: doc.cellId });
@@ -138,11 +256,8 @@ export async function readKnownCellIds(
   const kingdom = await ctx.db.get(kingdomId);
   if (!kingdom) return new Set();
 
-  const [ownedCells, exploredRecords, activeQueue] = await Promise.all([
-    ctx.db
-      .query("territories")
-      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdomId))
-      .collect(),
+  const [world, exploredRecords, activeQueue] = await Promise.all([
+    readWorld(ctx),
     ctx.db
       .query("exploredTerritories")
       .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
@@ -153,14 +268,34 @@ export async function readKnownCellIds(
       .collect(),
   ]);
 
+  const ownedCells = world.filter(c => c.ownerKingdomId && String(c.ownerKingdomId) === String(kingdomId));
   const homeCoord = await readHomeCoord(ctx, kingdomId);
   const initialSight = getInitialSightCellIds(homeCoord, EXPLORATION.INITIAL_SIGHT_RADIUS, MAP.RADIUS);
 
+  const ownedIds = new Set<string>();
+  for (const c of ownedCells) ownedIds.add(String(c.cellId));
+  if (kingdom.homeTerritoryId) {
+    ownedIds.add(String(kingdom.homeTerritoryId));
+  }
+
   const knownIds = new Set<string>([
-    ...ownedCells.map((c) => c.cellId),
-    ...initialSight,
-    ...exploredRecords.map((r) => r.cellId),
+    ...Array.from(ownedIds),
+    ...Array.from(initialSight),
+    ...exploredRecords.map((r) => String(r.cellId)),
   ]);
+
+  // Visión automática de fronteras: los vecinos de cada territorio propio son conocidos
+  const coordsForVision: HexCoord[] = ownedCells.map((c) => ({ q: c.q, r: c.r }));
+  if (homeCoord && !coordsForVision.some((c) => c.q === homeCoord.q && c.r === homeCoord.r)) {
+    coordsForVision.push(homeCoord);
+  }
+
+  for (const coord of coordsForVision) {
+    const neighbors = hexNeighbors(coord, MAP.RADIUS);
+    for (const n of neighbors) {
+      knownIds.add(cellId(n.q, n.r));
+    }
+  }
 
   const now = Date.now();
   for (const exp of activeQueue) {
@@ -238,16 +373,20 @@ export async function completeExpedition(ctx: MutationCtx, expeditionId: Id<"exp
     });
   }
 
-  // 4. Devolver al ciudadano explorador a la reserva de población civil libre
-  const population = await ctx.db
-    .query("population")
-    .withIndex("by_kingdom", (q) => q.eq("kingdomId", expedition.kingdomId))
-    .first();
+  // 4. Devolver al ciudadano explorador a la reserva de población civil libre (o devolver espía)
+  if (expedition.isSpyMission) {
+    await addUnits(ctx, expedition.kingdomId, "espia", 1, 1);
+  } else {
+    const population = await ctx.db
+      .query("population")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", expedition.kingdomId))
+      .first();
 
-  if (population) {
-    await ctx.db.patch(population._id, {
-      available: (population.available ?? 0) + (expedition.scoutsCount ?? 1),
-    });
+    if (population) {
+      await ctx.db.patch(population._id, {
+        available: (population.available ?? 0) + (expedition.scoutsCount ?? 1),
+      });
+    }
   }
 
   // 5. Conceder recompensa de descubrimiento de recursos si aplica
@@ -307,7 +446,7 @@ export const getWorldMap = query({
     const ownerIds = [...new Set(world.map((cell) => cell.ownerKingdomId).filter((id): id is Id<"kingdoms"> => Boolean(id)))];
     const owners = await Promise.all(ownerIds.map((id) => ctx.db.get(id)));
     const names = new Map<string, string>();
-    for (const owner of owners) if (owner) names.set(owner._id, owner.name);
+    for (const owner of owners) if (owner) names.set(String(owner._id), owner.name);
 
     // Si no se especifica kingdomId (vista global pública/demo), se devuelve el mapa cartográfico sin niebla
     if (!args.kingdomId) {
@@ -326,7 +465,7 @@ export const getWorldMap = query({
           r: cell.r,
           terrain: cell.terrain,
           ownerKingdomId: cell.ownerKingdomId ?? null,
-          ownerName: cell.ownerKingdomId ? names.get(cell.ownerKingdomId) ?? null : null,
+          ownerName: cell.ownerKingdomId ? names.get(String(cell.ownerKingdomId)) ?? null : null,
           isHome: cell.isHome ?? false,
           state: (cell.ownerKingdomId ? "owned" : "explored") as CellExplorationState,
           canExplore: false,
@@ -349,11 +488,8 @@ export const getWorldMap = query({
 
     const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
 
-    const [ownedCells, exploredRecords, activeQueue] = await Promise.all([
-      ctx.db
-        .query("territories")
-        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdomId))
-        .collect(),
+    const ownedCells = world.filter((c) => c.ownerKingdomId && String(c.ownerKingdomId) === String(kingdomId));
+    const [exploredRecords, activeQueue, completedTech] = await Promise.all([
       ctx.db
         .query("exploredTerritories")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
@@ -362,17 +498,35 @@ export const getWorldMap = query({
         .query("explorationQueue")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
         .collect(),
+      readCompletedTechnologyIds(ctx, kingdomId),
     ]);
 
-    const ownedIds = new Set(ownedCells.map((c) => c.cellId));
+    const hasSpy2Tech = completedTech.includes("spy_2");
+    const ownedIds = new Set<string>();
+    for (const c of ownedCells) ownedIds.add(String(c.cellId));
+    if (kingdom.homeTerritoryId) {
+      ownedIds.add(String(kingdom.homeTerritoryId));
+    }
+    
     const ownedCoords: HexCoord[] = ownedCells.map((c) => ({ q: c.q, r: c.r }));
+    if (homeCoord && !ownedCoords.some(c => c.q === homeCoord.q && c.r === homeCoord.r)) {
+      ownedCoords.push(homeCoord);
+    }
 
-    // Celdas conocidas: territorio principal + visión inicial (radio 1) + exploradas guardadas
+    // Celdas conocidas: territorios propios + visión inicial + exploradas guardadas + vecinos de frontera
     const knownIds = new Set<string>([
-      ...ownedIds,
+      ...Array.from(ownedIds),
       ...getInitialSightCellIds(homeCoord, EXPLORATION.INITIAL_SIGHT_RADIUS, MAP.RADIUS),
-      ...exploredRecords.map((r) => r.cellId),
+      ...exploredRecords.map((r) => String(r.cellId)),
     ]);
+
+    // Visión automática de fronteras: cada territorio propio revela sus 6 vecinos
+    for (const coord of ownedCoords) {
+      const neighbors = hexNeighbors(coord, MAP.RADIUS);
+      for (const n of neighbors) {
+        knownIds.add(cellId(n.q, n.r));
+      }
+    }
 
     const activeExpeditionMap = new Map<string, typeof activeQueue[0]>();
     const now = Date.now();
@@ -413,16 +567,38 @@ export const getWorldMap = query({
         const bordersKnown = neighbors.some((n) => knownIds.has(cellId(n.q, n.r)));
         if (bordersKnown && canLaunchMore) {
           canExplore = true;
-          const distance = ownedCoords.length
-            ? Math.max(1, Math.min(...ownedCoords.map((c) => hexDistance(c, { q: cell.q, r: cell.r }))))
-            : 1;
-          const durationSeconds = Math.max(600, distance * EXPLORATION.SECONDS_PER_HEX);
-          explorationPlan = {
-            distance,
-            durationSeconds,
-            costs: { gold: EXPLORATION.BASE_COSTS.gold, food: EXPLORATION.BASE_COSTS.food },
-          };
+          const planRes = canStartExploration({
+            targetCoord: { q: cell.q, r: cell.r },
+            targetCellId: cell.cellId,
+            knownCellIds: knownIds,
+            activeCellIds: new Set(activeExpeditionMap.keys()),
+            ownedCoords,
+            availableCivil: 999,
+            currentResources: { gold: 999999, food: 999999 },
+            activeExpeditionsCount,
+            worldRadius: MAP.RADIUS,
+            civilization: kingdom.civilization,
+            hasSpy2Tech,
+          });
+          if (planRes.success) {
+            explorationPlan = {
+              distance: planRes.plan.distance,
+              durationSeconds: planRes.plan.durationSeconds,
+              costs: planRes.plan.costs,
+            };
+          }
         }
+      }
+
+      // Comprobar si puede ser conquistada (adyacente a territorio propio Y es conocida Y es neutral)
+      let canConquer = false;
+      if (state === "explored" && !cell.ownerKingdomId) {
+        const neighbors = hexNeighbors({ q: cell.q, r: cell.r }, MAP.RADIUS);
+        // Debe haber al menos un vecino que sea propiedad del reino (capital o conquistado)
+        canConquer = neighbors.some((n) => {
+          const nid = cellId(n.q, n.r);
+          return ownedIds.has(nid);
+        });
       }
 
       const activeExp = activeExpeditionMap.get(cell.cellId);
@@ -433,6 +609,7 @@ export const getWorldMap = query({
             completesAt: activeExp.completesAt,
             durationMs: activeExp.durationMs,
             distance: activeExp.distance,
+            isSpyMission: activeExp.isSpyMission ?? false,
           }
         : null;
 
@@ -443,10 +620,11 @@ export const getWorldMap = query({
         // Si está en niebla de guerra, el terreno real queda oculto al jugador
         terrain: state === "fog" ? "desconocido" : cell.terrain,
         ownerKingdomId: state === "fog" ? null : cell.ownerKingdomId ?? null,
-        ownerName: state === "fog" ? null : cell.ownerKingdomId ? names.get(cell.ownerKingdomId) ?? null : null,
+        ownerName: state === "fog" ? null : cell.ownerKingdomId ? names.get(String(cell.ownerKingdomId)) ?? null : null,
         isHome: state === "fog" ? false : cell.isHome ?? false,
         state,
         canExplore,
+        canConquer,
         explorationPlan,
         expedition,
       };
@@ -549,17 +727,14 @@ export const startExploration = mutation({
     await resolveExpiredExpeditions(ctx, args.kingdomId, now);
 
     // 2. Comprobar existencia de la celda
-    const target = await ctx.db
-      .query("territories")
-      .withIndex("by_cell", (q) => q.eq("cellId", args.cellId))
-      .first();
+    const target = await getOrCreateTerritoryCell(ctx, args.cellId);
 
     if (!target) {
       throw new Error("La celda indicada no existe en el mapa de La Conquista.");
     }
 
     // 3. Recopilar celdas conocidas, activas y poseídas
-    const [ownedDocs, exploredDocs, activeQueue, populationDoc] = await Promise.all([
+    const [ownedDocs, exploredDocs, activeQueue, populationDoc, completedTech] = await Promise.all([
       ctx.db
         .query("territories")
         .withIndex("by_owner", (q) => q.eq("ownerKingdomId", args.kingdomId))
@@ -576,7 +751,10 @@ export const startExploration = mutation({
         .query("population")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
         .first(),
+      readCompletedTechnologyIds(ctx, args.kingdomId),
     ]);
+
+    const hasSpy2Tech = completedTech.includes("spy_2");
 
     const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
     const initialSight = getInitialSightCellIds(homeCoord, EXPLORATION.INITIAL_SIGHT_RADIUS, MAP.RADIUS);
@@ -609,6 +787,7 @@ export const startExploration = mutation({
       activeExpeditionsCount: activeQueue.length,
       worldRadius: MAP.RADIUS,
       civilization: kingdom.civilization,
+      hasSpy2Tech,
     });
 
     if (!check.success) {
@@ -662,6 +841,98 @@ export const startExploration = mutation({
     };
   },
 });
+
+export const startSpyExploration = mutation({
+  args: {
+    kingdomId: v.id("kingdoms"),
+    cellId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { kingdom } = await requireOwner(ctx, args.kingdomId);
+    const now = Date.now();
+
+    // 1. Resolver expediciones previas
+    await resolveExpiredExpeditions(ctx, args.kingdomId, now);
+
+    // 2. Comprobar existencia de la celda
+    const target = await getOrCreateTerritoryCell(ctx, args.cellId);
+
+    if (!target) throw new Error("La celda indicada no existe.");
+
+    // 3. Comprobar disponibilidad de espía
+    const units = await ctx.db
+      .query("armyUnits")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
+      .collect();
+    
+    const spyDoc = units.find(u => u.unitType === "espia" && (u.count ?? 0) > 0);
+    if (!spyDoc) throw new Error("No tienes espías disponibles en tu reino.");
+
+    // 4. Recopilar celdas conocidas
+    const ownedDocs = await ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", args.kingdomId))
+      .collect();
+    const exploredDocs = await ctx.db
+      .query("exploredTerritories")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
+      .collect();
+    const activeQueue = await ctx.db
+      .query("explorationQueue")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
+      .collect();
+
+    const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
+    const initialSight = getInitialSightCellIds(homeCoord, EXPLORATION.INITIAL_SIGHT_RADIUS, MAP.RADIUS);
+    const knownSet = new Set<string>([
+      ...ownedDocs.map((c) => c.cellId),
+      ...initialSight,
+      ...exploredDocs.map((e) => e.cellId),
+    ]);
+
+    if (knownSet.has(args.cellId)) throw new Error("Este territorio ya es conocido.");
+    if (activeQueue.some(e => e.cellId === args.cellId)) throw new Error("Ya hay una misión hacia esta celda.");
+
+    // 5. Validar adyacencia
+    const neighbors = hexNeighbors({ q: target.q, r: target.r }, MAP.RADIUS);
+    const bordersKnown = neighbors.some((n) => knownSet.has(cellId(n.q, n.r)));
+    if (!bordersKnown) throw new Error("La celda debe limitar con un territorio ya conocido.");
+
+    // 6. Calcular distancia
+    let distance = 1;
+    if (ownedDocs.length > 0) {
+      distance = Math.max(1, Math.min(...ownedDocs.map((c) => hexDistance(c, { q: target.q, r: target.r }))));
+    }
+
+    // 7. Duración (Placeholder: 600s/hex)
+    const durationSeconds = 600 * distance;
+    const durationMs = durationSeconds * 1000;
+    const completesAt = now + durationMs;
+
+    // 8. Descontar espía
+    await ctx.db.patch(spyDoc._id, { count: spyDoc.count - 1 });
+
+    // 9. Crear misión
+    const expeditionId = await ctx.db.insert("explorationQueue", {
+      kingdomId: args.kingdomId,
+      cellId: args.cellId,
+      targetQ: target.q,
+      targetR: target.r,
+      distance,
+      startedAt: now,
+      durationMs,
+      completesAt,
+      scoutsCount: 0,
+      costs: { gold: 0, food: 0 },
+      isSpyMission: true,
+    });
+
+    await ctx.scheduler.runAt(completesAt, internal.territories.completeExplorationScheduled, { expeditionId });
+
+    return { success: true, expeditionId, cellId: args.cellId, completesAt, durationSeconds };
+  },
+});
+
 
 /**
  * Cancela una expedición de exploración en curso, reembolsando el 50 % de recursos y liberando al explorador.
@@ -740,10 +1011,7 @@ export const claimFreeTerritory = mutation({
   handler: async (ctx, args) => {
     const { kingdom } = await requireOwner(ctx, args.kingdomId);
     await ensureHomeTerritory(ctx, args.kingdomId);
-    const target = await ctx.db
-      .query("territories")
-      .withIndex("by_cell", (q) => q.eq("cellId", args.cellId))
-      .first();
+    const target = await getOrCreateTerritoryCell(ctx, args.cellId);
     if (!target) throw new Error("El territorio indicado no existe en el mapa.");
 
     const [owned, exploredDocs] = await Promise.all([
@@ -819,10 +1087,7 @@ export const previewArmyMarchPlan = query({
     const homeCoord = await readHomeCoord(ctx, args.kingdomId);
     if (!homeCoord) throw new Error("El reino no tiene territorio principal asignado.");
 
-    const target = await ctx.db
-      .query("territories")
-      .withIndex("by_cell", (q) => q.eq("cellId", args.targetCellId))
-      .first();
+    const target = await readTerritoryCell(ctx, args.targetCellId);
     if (!target) throw new Error("El territorio objetivo no existe.");
 
     const targetCoord = { q: target.q, r: target.r };

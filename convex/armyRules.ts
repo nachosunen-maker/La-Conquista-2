@@ -311,6 +311,7 @@ export function summarizeArmy(units: ReadonlyArray<ArmyUnitRecord>): ArmySummary
     carros_artillados: { active: 0, wounded: 0 },
     ariete_movil: { active: 0, wounded: 0 },
     torres_asalto: { active: 0, wounded: 0 },
+    espia: { active: 0, wounded: 0 },
   };
   let weighted = 0;
   let totalActive = 0;
@@ -320,6 +321,11 @@ export function summarizeArmy(units: ReadonlyArray<ArmyUnitRecord>): ArmySummary
     if (!type) continue;
     const active = Number.isInteger(unit.count) && unit.count > 0 ? unit.count : 0;
     const wounded = Number.isInteger(unit.wounded) && (unit.wounded as number) > 0 ? (unit.wounded as number) : 0;
+    if (type === "espia") {
+       byType[type].active += active;
+       byType[type].wounded += wounded;
+       continue;
+    }
     byType[type].active += active;
     byType[type].wounded += wounded;
     totalActive += active;

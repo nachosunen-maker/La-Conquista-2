@@ -62,6 +62,22 @@ export function getInitialSightCellIds(
 }
 
 /**
+ * [P22 / FASE 2] Fórmulas de costes progresivos de exploración según la distancia logística:
+ * - Distancias 1 a 5: 30 oro, 40 alimentos (constante base)
+ * - Distancias > 5: 5 × d + 5 oro, 10 × d - 10 alimentos
+ */
+export function calculateBaseExplorationCosts(distance: number): ExplorationCosts {
+  const d = Math.max(1, distance);
+  if (d <= 5) {
+    return { gold: 30, food: 40 };
+  }
+  return {
+    gold: 5 * d + 5,
+    food: 10 * d - 10,
+  };
+}
+
+/**
  * Valida si una celda puede ser explorada por el reino.
  * Exige:
  * 1. Estar dentro del mundo.
@@ -69,7 +85,7 @@ export function getInitialSightCellIds(
  * 3. No tener ya una expedición en camino.
  * 4. No exceder el límite de expediciones activas.
  * 5. Adyacencia: debe limitar con al menos una celda ya conocida/poseída (expansión de frontera).
- * 6. Disponer de población civil libre y recursos suficientes.
+ * 6. Disponer de población civil libre y recursos suficientes (costes progresivos según distancia logística).
  */
 export function canStartExploration(input: {
   targetCoord: HexCoord;
@@ -82,6 +98,7 @@ export function canStartExploration(input: {
   activeExpeditionsCount: number;
   worldRadius?: number;
   civilization?: string;
+  hasSpy2Tech?: boolean;
 }): { success: true; plan: ExplorationPlan } | { success: false; error: string } {
   const worldRadius = input.worldRadius ?? MAP.RADIUS;
 
@@ -120,17 +137,19 @@ export function canStartExploration(input: {
     distance = Math.max(1, Math.min(...input.ownedCoords.map((c) => hexDistance(c, input.targetCoord))));
   }
 
-  // Duración base de marcha (D-26 / Complemento §5) y costes base
-  const baseDurationSeconds = Math.max(600, distance * EXPLORATION.SECONDS_PER_HEX);
-  const baseDurationMs = baseDurationSeconds * 1000;
-  const baseCosts = {
-    gold: EXPLORATION.BASE_COSTS.gold,
-    food: EXPLORATION.BASE_COSTS.food,
-  };
+  // Costes base según la distancia logística (P22 / FASE 2)
+  const baseCosts = calculateBaseExplorationCosts(distance);
 
-  // Aplicar bonificaciones pasivas culturales (p. ej. Vikingos −15 % duración, Navajos −20 % costes)
+  // Duración base: 1.800 s/hex × distancia logística (30 min por hexágono)
+  const baseDurationSeconds = 1800 * distance;
+  const baseDurationMs = baseDurationSeconds * 1000;
+
+  // Aplicar bonificaciones pasivas culturales (Navajos: Math.floor(costeBase * 0.80), Vikingos: duration * 0.85)
   const civExploration = applyCivilizationExploration(baseCosts, baseDurationMs, input.civilization);
-  const durationMs = civExploration.durationMs;
+
+  // Aplicar bonificación tecnológica 'spy_2' (Exploradores y atalayas): -10 % duración (multiplicador 0.90)
+  const techDurationMultiplier = input.hasSpy2Tech ? 0.90 : 1.0;
+  const durationMs = Math.ceil(civExploration.durationMs * techDurationMultiplier);
   const durationSeconds = Math.ceil(durationMs / 1000);
   const costs: ExplorationCosts = civExploration.costs;
 

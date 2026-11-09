@@ -63,7 +63,7 @@ describe("Civilizaciones — Verificación de Reglas y Almacenes", () => {
     const attacker: BattleSide = {
       kingdomId: "k_aztecas",
       name: "Tenochtitlan",
-      composition: { infanteria: 50, arqueria: 30, caballeria: 20, asedio: 0, onagro_campana: 0, carrobalista: 0, espringarda_movil: 0, trabuchet_traccion: 0, arcuballista: 0, fustibalo_campo: 0, mangonel_tactico: 0, carros_artillados: 0, ariete_movil: 0, torres_asalto: 0 },
+      composition: { infanteria: 50, arqueria: 30, caballeria: 20, asedio: 0, onagro_campana: 0, carrobalista: 0, espringarda_movil: 0, trabuchet_traccion: 0, arcuballista: 0, fustibalo_campo: 0, mangonel_tactico: 0, carros_artillados: 0, ariete_movil: 0, torres_asalto: 0, espia: 0 },
       trainingMultiplier: 1.10,
       weaponTier: "espadaHierro",
       armorTier: "cueroReforzado",
@@ -80,7 +80,7 @@ describe("Civilizaciones — Verificación de Reglas y Almacenes", () => {
     const defender: BattleSide = {
       kingdomId: "k_defensivo",
       name: "Defensores",
-      composition: { infanteria: 60, arqueria: 40, caballeria: 0, asedio: 0, onagro_campana: 0, carrobalista: 0, espringarda_movil: 0, trabuchet_traccion: 0, arcuballista: 0, fustibalo_campo: 0, mangonel_tactico: 0, carros_artillados: 0, ariete_movil: 0, torres_asalto: 0 },
+      composition: { infanteria: 60, arqueria: 40, caballeria: 0, asedio: 0, onagro_campana: 0, carrobalista: 0, espringarda_movil: 0, trabuchet_traccion: 0, arcuballista: 0, fustibalo_campo: 0, mangonel_tactico: 0, carros_artillados: 0, ariete_movil: 0, torres_asalto: 0, espia: 0 },
       trainingMultiplier: 1.0,
       weaponTier: "palo",
       armorTier: "ninguna",

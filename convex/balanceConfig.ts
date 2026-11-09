@@ -254,7 +254,8 @@ export type UnitType =
   | "mangonel_tactico"
   | "carros_artillados"
   | "ariete_movil"
-  | "torres_asalto";
+  | "torres_asalto"
+  | "espia";
 
 export const UNIT_TYPES: readonly UnitType[] = [
   "infanteria",
@@ -271,6 +272,7 @@ export const UNIT_TYPES: readonly UnitType[] = [
   "carros_artillados",
   "ariete_movil",
   "torres_asalto",
+  "espia",
 ];
 
 export interface UnitBalance {
@@ -308,6 +310,7 @@ export const UNITS: Readonly<Record<UnitType, UnitBalance>> = {
   carros_artillados: { label: "Carros de combate artillados", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 75, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 0.90, defense: 0.75, speed: 0.24, marchMultiplier: 3.75 },
   ariete_movil: { label: "Ariete móvil de campo", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 60, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 1.44, defense: 0.50, speed: 0.30, marchMultiplier: 3.00 },
   torres_asalto: { label: "Torres de asalto ligeras", costs: { gold: 30, wood: 20, stone: 20, iron: 10, food: 0 }, trainingSecondsPerUnit: 90, populationPerUnit: 5, isLivingTroop: false, requirements: { cuartel: 3, herreria: 2 }, attack: 1.08, defense: 0.55, speed: 0.15, marchMultiplier: 6.00 },
+  espia: { label: "Espía", costs: { gold: 0, wood: 0, stone: 0, iron: 0, food: 0 }, trainingSecondsPerUnit: 30, populationPerUnit: 1, isLivingTroop: true, requirements: { cuartel: 2 }, attack: 0, defense: 0, speed: 1.0, marchMultiplier: 1.0 }, // [DISEÑO PENDIENTE]: Costes y tiempos de espías no definidos en especificación original.
 };
 
 export const TRAINING = {
@@ -615,6 +618,7 @@ export const UNIT_COUNTERS: Readonly<Record<Exclude<UnitType, "asedio">, Exclude
   carros_artillados: "carros_artillados",
   ariete_movil: "ariete_movil",
   torres_asalto: "torres_asalto",
+  espia: "espia",
 };
 
 /** [DECISIÓN 17-10-2026, M-01 opción A] Recompensas de honor y gloria por batalla (P50, P51). */
@@ -1013,7 +1017,7 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   { id: "espionage_3", name: "Informantes en la corte III", branch: "inteligencia", universityLevel: 4, costs: { gold: 800, wood: 320, stone: 300, iron: 90, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 5 }, technologyRequirements: ["espionage_2", "spy_2"], effect: { key: "espionageAccuracy", value: 3, description: "Informe militar detallado (±3 %)" } },
   { id: "espionage_4", name: "Maestros del espionaje IV", branch: "inteligencia", universityLevel: 5, costs: { gold: 2340, wood: 640, stone: 700, iron: 230, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8 }, technologyRequirements: ["espionage_3", "spy_3"], effect: { key: "espionageAccuracy", value: 4, description: "Informe militar exacto" } },
   { id: "spy_1", name: "Ojos y oídos en el reino", branch: "inteligencia", universityLevel: 2, costs: { gold: 250, wood: 150, stone: 100, iron: 40, food: 0 }, durationSeconds: 240, buildingRequirements: { castillo: 2 }, technologyRequirements: [], effect: { key: "counterEspionage", value: 0.10, description: "+10 % probabilidad de contrainteligencia" } },
-  { id: "spy_2", name: "Exploradores y atalayas", branch: "inteligencia", universityLevel: 3, costs: { gold: 480, wood: 160, stone: 160, iron: 60, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3 }, technologyRequirements: ["espionage_1"], effect: { key: "marchSpeed", value: 0.05, description: "+5 % velocidad de marcha" } },
+  { id: "spy_2", name: "Exploradores y atalayas", branch: "inteligencia", universityLevel: 3, costs: { gold: 480, wood: 160, stone: 160, iron: 60, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3 }, technologyRequirements: ["espionage_1"], effect: { key: "marchSpeed", value: 0.05, description: "+5 % velocidad de marcha y +10 % velocidad en expediciones de exploración" } },
   { id: "spy_3", name: "Guardia del silencio", branch: "inteligencia", universityLevel: 4, costs: { gold: 750, wood: 300, stone: 280, iron: 80, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4 }, technologyRequirements: ["spy_1", "spy_2"], effect: { key: "counterEspionage", value: 0.12, description: "+12 % probabilidad de contrainteligencia" } },
   { id: "spy_4", name: "Sombras del trono", branch: "inteligencia", universityLevel: 5, costs: { gold: 2100, wood: 600, stone: 700, iron: 220, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8 }, technologyRequirements: ["spy_3", "espionage_3"], effect: { key: "counterEspionage", value: 0.15, description: "+15 % probabilidad de contrainteligencia" } },
 
@@ -1140,9 +1144,12 @@ export const TERRAINS: Readonly<Record<TerrainType, TerrainBalance>> = {
 };
 
 export const MAP = {
-  /** [COMPLEMENTO D-23] Mapa hexagonal axial de radio 10 alrededor del centro: 331 celdas. */
-  RADIUS: 10,
-  MAX_CELLS: 331,
+  /** [AMPLIACIÓN MAPA MUNDIAL] Mapa hexagonal axial de radio 50 alrededor del centro: exactamente 7.651 celdas (N = 1 + 3r(r+1)). */
+  RADIUS: 50,
+  MAX_CELLS: 7_651,
+  /** [HISTÓRICO] Radio original y celdas antes de la ampliación. */
+  HISTORICAL_RADIUS: 10,
+  HISTORICAL_CELLS: 331,
   /** [COMPLEMENTO §5] Tiempo base de marcha por hexágono en segundos reales. */
   MARCH_SECONDS_PER_HEX: 1_800,
   /** [DERIVADO] Semilla de mundo reproducible para asignar terrenos (D-25). */
@@ -1698,6 +1705,8 @@ export const LEGACY_CIVILIZATION_IDS: Readonly<Record<string, string>> = {
   indiosAmericanos: "navajos",
   indios_americanos: "navajos",
   keniatas: "masais",
+  vikingo: "vikingos",
+  navajo: "navajos",
 };
 export const LEGACY_TECHNOLOGY_IDS: Readonly<Record<string, string>> = {
   tech_civ_indiosAmericanos: "tech_civ_navajos",

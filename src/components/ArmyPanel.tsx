@@ -20,7 +20,8 @@ import {
   Layers, 
   Award,
   TrendingUp,
-  Heart
+  Heart,
+  Compass
 } from 'lucide-react';
 import { UNIT_COUNTERS, COMBAT, TACTICAL_FORMATION_COUNTER_BONUS, TACTICAL_FORMATIONS } from '../../convex/balanceConfig';
 import {
@@ -48,6 +49,7 @@ const hireMercenariesMutation = makeFunctionReference<"mutation">("army:hireMerc
 const setFormationMutation = makeFunctionReference<"mutation">("army:setFormation");
 const setTacticalFormationMutation = makeFunctionReference<"mutation">("army:setTacticalFormation");
 const upgradeArmyLevelMutation = makeFunctionReference<"mutation">("army:upgradeArmyLevel");
+const recruitSpyMutation = makeFunctionReference<"mutation">("army:recruitSpy");
 
 interface ArmyState {
   serverTimeMs: number;
@@ -140,6 +142,12 @@ interface ArmyState {
     civilizationIdentity: { signatureUnit: { unitType: string; name: string; description: string }; uniqueBuilding: { buildingType: string; name: string } } | null;
     civilizationWeakness: string | null;
   };
+  spies: {
+    active: number;
+    inQueue: number;
+    capacity: number;
+    cuartelLevel: number;
+  };
 }
 
 type FilterCategory = 'todas' | 'infanteria' | 'arqueria' | 'caballeria' | 'asedio' | 'mercenarios';
@@ -154,12 +162,22 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
   const setFormation = useMutation(setFormationMutation);
   const setTacticalFormation = useMutation(setTacticalFormationMutation);
   const upgradeArmyLevel = useMutation(upgradeArmyLevelMutation);
+  const recruitSpy = useMutation(recruitSpyMutation);
   const serverNow = useServerClock(state?.serverTimeMs);
   const action = useActionState();
 
   // Estados locales para formularios y filtros
   const [unitType, setUnitType] = useState<string>('infanteria');
   const [count, setCount] = useState<number>(10);
+  const [spyCount, setSpyCount] = useState<number>(1);
+
+  const handleRecruitSpy = () => {
+    action.run('recruit-spy', async () => {
+        const result = await recruitSpy({ kingdomId, count: spyCount });
+        if (result && (result as any).success === false) return result;
+        return `Reclutamiento de ${spyCount} espía(s) iniciado.`;
+    });
+  };
   const [level, setLevel] = useState<number>(1);
   const [weaponTier, setWeaponTier] = useState<string | null>(null);
   const [armorTier, setArmorTier] = useState<string | null>(null);
@@ -220,8 +238,8 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
     mercenaryTypes.find((type) => type.id === mercenaryTypeId && type.available) ??
     [...mercenaryTypes].reverse().find((type) => type.available) ??
     mercenaryTypes[0];
-  const mercenaryCost = safeMercenaries * (selectedMercenaryType?.goldPerUnit ?? state.mercenaries.goldPerUnit);
-  const mercenaryRoom = Math.max(0, state.mercenaries.maxActive - state.mercenaries.active);
+  const mercenaryCost = safeMercenaries * (selectedMercenaryType?.goldPerUnit ?? state.mercenaries?.goldPerUnit ?? 0);
+  const mercenaryRoom = Math.max(0, (state.mercenaries?.maxActive ?? 0) - (state.mercenaries?.active ?? 0));
 
   const equipmentChanged =
     currentWeapon !== state.equipment?.weaponTier || currentArmor !== state.equipment?.armorTier || currentStrategy !== state.equipment?.strategy;
@@ -347,7 +365,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
             </div>
             <div className={cardClass}>
               <span className="text-[10px] text-[#8e816d] block uppercase tracking-wider">Fatiga</span>
-              <span className="text-base font-bold text-amber-400 font-serif block">{state.equipment.fatigue}%</span>
+              <span className="text-base font-bold text-amber-400 font-serif block">{state.equipment?.fatigue ?? 0}%</span>
               <span className="text-[10px] text-[#695d4c] truncate block">-10%/día ración normal</span>
             </div>
             <div className={cardClass}>
@@ -699,7 +717,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
               <span>B. Contratación de Mercenarios (Taberna)</span>
             </div>
             <span className="text-xs font-mono text-[#c7beac]">
-              {state.mercenaries.active}/{state.mercenaries.maxActive} activos · Taberna Nivel {state.mercenaries.tavernLevel}
+              {state.mercenaries?.active ?? 0}/{state.mercenaries?.maxActive ?? 0} activos · Taberna Nivel {state.mercenaries?.tavernLevel ?? 0}
             </span>
           </div>
 
@@ -708,8 +726,8 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
             <div className="space-y-3">
               <div className={`${cardClass} space-y-1.5 text-[11px] text-[#c7beac]`}>
                 <p><strong className="text-[#e6ded0]">Beneficio:</strong> Se integran de inmediato al censo y ejército sin requerir población civil libre.</p>
-                <p><strong className="text-[#e6ded0]">Contrato:</strong> Duración de {state.mercenaries.contractDays} días reales sin salario diario. Al caducar desaparecen.</p>
-                <p><strong className="text-[#e6ded0]">Capacidad:</strong> Máximo {state.mercenaries.maxActive} activos simultáneos con la Taberna actual (50 por nivel).</p>
+                <p><strong className="text-[#e6ded0]">Contrato:</strong> Duración de {state.mercenaries?.contractDays ?? 0} días reales sin salario diario. Al caducar desaparecen.</p>
+                <p><strong className="text-[#e6ded0]">Capacidad:</strong> Máximo {state.mercenaries?.maxActive ?? 0} activos simultáneos con la Taberna actual (50 por nivel).</p>
               </div>
 
               <div className="space-y-1.5">
@@ -747,7 +765,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
                       className={`${selectClass} w-full`}
                       value={selectedMercenaryType?.id ?? ''}
                       onChange={(e) => setMercenaryTypeId(e.target.value)}
-                      disabled={state.mercenaries.tavernLevel < 1}
+                      disabled={(state.mercenaries?.tavernLevel ?? 0) < 1}
                     >
                       {mercenaryTypes.map((type) => (
                         <option key={type.id} value={type.id} disabled={!type.available}>
@@ -767,7 +785,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
                       step={1}
                       value={mercenaryCount}
                       onChange={(e) => setMercenaryCount(Number(e.target.value))}
-                      disabled={state.mercenaries.tavernLevel < 1}
+                      disabled={(state.mercenaries?.tavernLevel ?? 0) < 1}
                     />
                   </label>
 
@@ -782,7 +800,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
                     </div>
                   </div>
 
-                  {state.mercenaries.tavernLevel < 1 ? (
+                  {(state.mercenaries?.tavernLevel ?? 0) < 1 ? (
                     <p className="text-amber-300 text-[11px]">🔒 Se necesita construir una Taberna para contratar mercenarios.</p>
                   ) : mercenaryRoom === 0 ? (
                     <p className="text-amber-300 text-[11px]">🔒 Capacidad máxima de la Taberna alcanzada.</p>
@@ -791,7 +809,7 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
                   <button
                     type="submit"
                     className={`${primaryButton} w-full font-bold py-1.5`}
-                    disabled={action.busy !== null || state.mercenaries.tavernLevel < 1 || safeMercenaries === 0 || safeMercenaries > mercenaryRoom}
+                    disabled={action.busy !== null || (state.mercenaries?.tavernLevel ?? 0) < 1 || safeMercenaries === 0 || safeMercenaries > mercenaryRoom}
                   >
                     {action.busy === 'hire' ? 'Contratando…' : 'Contratar Mercenarios'}
                   </button>
@@ -804,6 +822,89 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
         </div>
 
         <StatusMessages error={action.error} message={action.message} />
+      </section>
+      
+      {/* ====================================================================
+          SECCIÓN ESPÍAS
+          ==================================================================== */}
+      <section className="bg-[#14110d] border border-[#2b2419] rounded-xl p-4 sm:p-6 shadow-md space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#292218] pb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-[#211a12] border border-sky-500/40 rounded-lg text-sky-400">
+              <Compass className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-serif font-bold text-[#f7f2e4] uppercase tracking-wider">
+                Sección — Espionaje y Sabotaje
+              </h2>
+              <p className="text-xs text-[#8e816d]">Gestión de agentes infiltrados y descubrimiento de fronteras</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-mono text-sky-400">
+            <span className="bg-[#1d1710] px-2.5 py-1 rounded border border-sky-900/30">
+              {state.spies?.active ?? 0} agentes activos
+            </span>
+            <span className="bg-[#1d1710] px-2.5 py-1 rounded border border-sky-900/30">
+              {state.spies?.inQueue ?? 0} en instrucción
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+           <div className="space-y-3">
+              <div className={`${cardClass} space-y-2 text-[11px] text-[#c7beac]`}>
+                <p><strong className="text-[#e6ded0]">Capacidad Agentes:</strong> Limitada por el nivel del Cuartel (1 por cada 2 niveles).</p>
+                <div className="flex justify-between items-center bg-[#0c0a08] p-2 rounded border border-[#2b2419]">
+                  <span className="text-[#8e816d]">Nivel Cuartel:</span>
+                  <span className="text-amber-400 font-bold">{state.spies?.cuartelLevel ?? 0}</span>
+                </div>
+                <div className="flex justify-between items-center bg-[#0c0a08] p-2 rounded border border-[#2b2419]">
+                  <span className="text-[#8e816d]">Límite de Agentes:</span>
+                  <span className="text-sky-400 font-bold">{state.spies?.capacity ?? 0}</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-[#8e816d] italic">
+                * Los espías permiten descubrir territorios en el mapa sin mover al ejército y sin ocupar población civil permanentemente.
+              </p>
+           </div>
+
+           <div className="space-y-4">
+              <h4 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider">Instrucción de Agentes</h4>
+              {writable ? (
+                <div className={`${cardClass} space-y-3 text-xs`}>
+                   <div className="flex items-center gap-3">
+                    <label className="flex-1 space-y-1">
+                      <span className="text-[#a0937e] block text-[11px]">Cantidad</span>
+                      <input
+                        className={`${inputClass} w-full text-right`}
+                        type="number"
+                        min={1}
+                        max={Math.max(0, (state.spies?.capacity ?? 0) - ((state.spies?.active ?? 0) + (state.spies?.inQueue ?? 0)))}
+                        step={1}
+                        value={spyCount}
+                        onChange={(e) => setSpyCount(Number(e.target.value))}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className={`${primaryButton} self-end py-1.5 px-4 font-bold`}
+                      disabled={action.busy === 'recruit-spy' || ((state.spies?.active ?? 0) + (state.spies?.inQueue ?? 0) + spyCount) > (state.spies?.capacity ?? 0) || spyCount <= 0}
+                      onClick={handleRecruitSpy}
+                    >
+                      {action.busy === 'recruit-spy' ? 'Instruyendo…' : 'Instruir Agentes'}
+                    </button>
+                  </div>
+                  {((state.spies?.active ?? 0) + (state.spies?.inQueue ?? 0)) >= (state.spies?.capacity ?? 0) && (
+                    <p className="text-amber-300 text-[10px] bg-amber-950/20 p-2 rounded border border-amber-900/30">
+                      Capacidad máxima de espías alcanzada para tu nivel de Cuartel actual.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">{readOnlyNote}</p>
+              )}
+           </div>
+        </div>
       </section>
 
       {/* ====================================================================

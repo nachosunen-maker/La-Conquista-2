@@ -1,0 +1,902 @@
+ESPECIFICACIÓN TEÓRICA INTEGRAL — MAPA DINÁMICO, EXPLORACIÓN, ESPÍAS, CONQUISTA Y DIPLOMACIA
+
+Proyecto: La Conquista
+
+1. ORDEN DE TRABAJO Y RESTRICCIONES INNEGOCIABLES
+
+Desarrolla una especificación técnica, matemática y funcional completa para el nuevo sistema de mapa dinámico de La Conquista.
+
+MODO DE OPERACIÓN: EXCLUSIVAMENTE TEÓRICO Y DE SOLO LECTURA.
+
+Queda terminantemente prohibido:
+
+- Modificar, crear, eliminar o sobrescribir archivos.
+- Modificar código, funciones, configuraciones o constantes.
+- Ejecutar mutaciones en Convex.
+- Ejecutar migraciones, scripts o procesos de actualización.
+- Modificar datos de jugadores, territorios o civilizaciones.
+- Realizar despliegues.
+- Activar funcionalidades en producción o desarrollo.
+- Implementar parcialmente cualquiera de los sistemas descritos.
+
+El trabajo consiste exclusivamente en investigar el funcionamiento actual, contrastar las reglas existentes, realizar los cálculos matemáticos y elaborar el diseño completo.
+
+No generes código de implementación ni ejecutes cambios.
+
+1.1. Regla de rigor matemático
+
+No inventes constantes, tiempos, costes, porcentajes, multiplicadores, límites ni fórmulas.
+
+Debes distinguir siempre entre:
+
+1. Dato verificado: aparece en el código real o en una regla global documentada.
+2. Fórmula derivada: se obtiene matemáticamente a partir de datos verificados.
+3. Parámetro pendiente: no existe información suficiente para asignarle un valor exacto.
+4. Propuesta de diseño: regla nueva que necesita aprobación antes de implementarse.
+
+No presentes una propuesta como si fuera una regla vigente.
+
+Si no puedes verificar una constante o fórmula, no la sustituyas por una cifra aproximada. Identifica el archivo, función, constante o información necesaria para resolverla.
+
+El resultado debe estar completo desde el punto de vista del diseño matemático: no puede dejar operaciones sin definir, pero tampoco puede inventar los valores que falten. Cuando una fórmula dependa de un dato todavía no verificado, presenta su expresión exacta en función de ese dato y deja identificado el requisito para cerrarla.
+
+2. INVESTIGACIÓN PREVIA OBLIGATORIA
+
+Antes de diseñar los sistemas, realiza una auditoría de solo lectura del funcionamiento actual.
+
+Consulta las instrucciones globales del proyecto y los archivos reales relacionados con:
+
+- Configuración global de equilibrio.
+- Mapa y coordenadas hexagonales.
+- Generación y asignación de territorios.
+- Exploración actual.
+- Movimiento y duración de marchas.
+- Ejército, unidades y entrenamiento.
+- Cuartel y sus niveles.
+- Espionaje, si existe.
+- Combate y victorias aplastantes.
+- Conquista y propiedad territorial.
+- Economía y producción de recursos.
+- Almacenamiento y límites de recursos.
+- Honor y gloria.
+- Parlamento y diplomacia.
+- Alianzas, transferencias y refuerzos.
+- Misiones, tareas y sistemas que puedan verse afectados.
+
+Busca las fórmulas reales y sus dependencias. No te limites a localizar nombres de constantes: sigue el cálculo hasta la función que realmente determina el resultado.
+
+2.1. Comprobación crítica del movimiento
+
+Investiga expresamente:
+
+"MAP.MARCH_SECONDS_PER_HEX"
+
+Comprueba:
+
+- Dónde se define.
+- Su valor real.
+- Qué funciones lo utilizan.
+- Si existen modificadores de velocidad.
+- Si hay diferencias entre desplazamientos de tropas, unidades especiales y otros movimientos.
+- Cómo se calcula la distancia.
+- Cómo se redondea el tiempo.
+- Qué ocurre con distancias mínimas, destinos inválidos y movimientos interrumpidos.
+- Si el tiempo se calcula al iniciar la marcha o se vuelve a calcular durante ella.
+
+No supongas que el movimiento equivale a 1.800 segundos por hexágono. Ese valor no debe utilizarse salvo que se verifique expresamente en el código y se compruebe que corresponde al cálculo real.
+
+El resultado de esta investigación debe incluir una tabla con cada fórmula relevante, su ubicación exacta y su significado.
+
+3. MAPA DINÁMICO: 7.651 HEXÁGONOS INICIALES
+
+3.1. Tamaño y geometría
+
+El nuevo mapa inicial tendrá exactamente 7.651 casillas hexagonales.
+
+Se utilizará un hexágono regular de radio 50.
+
+La cantidad de casillas de un disco hexagonal completo de radio R es:
+
+H(R) = 1 + 3R(R + 1)
+
+Por tanto:
+
+H(50) = 1 + 3 × 50 × 51 = 7.651
+
+Esta cantidad queda fijada. No volver a proponer 7.600.
+
+El mapa debe utilizar coordenadas axiales (q,r), o la representación equivalente que mejor se integre con el sistema actual.
+
+La distancia hexagonal debe calcularse correctamente:
+
+D(A,B) = (|q₁-q₂| + |r₁-r₂| + |(q₁+r₁)-(q₂+r₂)|) / 2
+
+Verifica que el sistema actual utiliza coordenadas compatibles. Si utiliza otro sistema, explica la transformación matemática necesaria.
+
+3.2. Expansión del mundo
+
+Diseña una arquitectura que permita ampliar el mundo más allá de las 7.651 casillas iniciales sin tener que reconstruir todo el mapa.
+
+La expansión debe:
+
+- Mantener coordenadas estables.
+- Evitar duplicidades.
+- Evitar huecos accidentales.
+- Mantener la continuidad geométrica.
+- Permitir incorporar nuevas regiones.
+- Conservar la propiedad y los estados de las casillas ya existentes.
+- Ser determinista: una misma coordenada no debe generar terrenos diferentes por recalcularla.
+
+Diferencia claramente el tamaño inicial del mundo y su capacidad de expansión futura.
+
+3.3. Visibilidad y niebla de guerra
+
+Se mantiene la regla actual:
+
+Cada jugador solo puede visualizar las zonas que haya explorado. Todo lo demás permanece negro.
+
+No debe mostrarse el terreno, los recursos, los territorios ni la información de otros reinos si no se han descubierto, salvo que las reglas actuales autoricen expresamente algún dato.
+
+Diseña los estados de cada casilla:
+
+- Desconocida para el jugador.
+- Descubierta.
+- Territorio libre.
+- Territorio perteneciente a un reino.
+- Territorio propio.
+- Territorio anexionado.
+
+Diferencia el conocimiento global del estado real del mundo y la información que cada jugador tiene derecho a consultar.
+
+3.4. Navegación visual
+
+El mapa debe permitir:
+
+- Arrastrar el mapa en cualquier dirección, como Google Maps.
+- Zoom con rueda del ratón.
+- Zoom con pellizco táctil.
+- Mantener el punto geográfico bajo el cursor o entre los dedos durante el zoom.
+- Navegar por mapas grandes sin tener que cargar o dibujar todas las casillas simultáneamente.
+
+Desarrolla los requisitos matemáticos de transformación entre coordenadas del mundo y coordenadas de pantalla.
+
+No conviertas este apartado en una investigación interminable de interfaz. Define los requisitos funcionales y los principios geométricos necesarios.
+
+4. DISTRIBUCIÓN GEOGRÁFICA DE LAS CIVILIZACIONES
+
+La nueva distribución debe organizar a los jugadores por regiones geográficas.
+
+Objetivos:
+
+- Evitar que las civilizaciones aparezcan dispersas aleatoriamente por todo el mapa.
+- Crear agrupaciones geográficas razonables.
+- Dejar espacio suficiente para que cada jugador pueda expandirse.
+- Evitar que los jugadores aparezcan pegados unos a otros.
+- Mantener la distancia mínima actual que se utiliza para ubicar a nuevos jugadores.
+- Evitar que un jugador quede encerrado sin posibilidades razonables de expansión.
+
+Los jugadores actuales serán recolocados. Ya han sido avisados.
+
+Diseña una estrategia de distribución que preserve las distancias mínimas, el espacio de expansión y la continuidad de las regiones.
+
+No inventes una nueva distancia mínima. Localiza y utiliza la regla real vigente.
+
+Define matemáticamente:
+
+- La distancia mínima entre capitales.
+- El espacio territorial potencial alrededor de cada civilización.
+- La separación entre agrupaciones regionales.
+- Los criterios de selección de coordenadas.
+- Cómo evitar solapamientos.
+- Cómo resolver casos en los que no exista una posición válida.
+
+La recolocación deberá preservar íntegramente la identidad y el progreso de cada jugador.
+
+No debe perderse ningún recurso, edificio, nivel, investigación, población, unidad, misión, honor, gloria ni otro progreso.
+
+5. SISTEMA DE ESPÍAS
+
+5.1. Reclutamiento
+
+Los espías se reclutarán desde el apartado Ejército.
+
+El Cuartel determinará la capacidad máxima de espías.
+
+Regla:
+
+Emax = floor(Nivel_Cuartel / 2)
+
+Ejemplos:
+
+Nivel del Cuartel| Máximo de espías
+1| 0
+2| 1
+3| 1
+4| 2
+5| 2
+6| 3
+8| 4
+10| 5
+12| 6
+15| 7
+20| 10
+
+La fórmula, y no solo la tabla, es la regla principal.
+
+Investiga los costes y tiempos de entrenamiento que ya utiliza el juego para sus unidades.
+
+Diseña el reclutamiento de espías integrándolo con las reglas existentes de Ejército, recursos, colas de entrenamiento y disponibilidad.
+
+No inventes costes ni tiempos. Si no existe un coste definido para espías, presenta el modelo económico que habría que aprobar, sin asignar cantidades arbitrarias.
+
+5.2. Envío de varios espías a un mismo destino
+
+El jugador podrá enviar varios espías juntos a un destino.
+
+Cuando varios espías viajen en una misma expedición, cooperarán y se desplazarán más rápido.
+
+El objetivo es que enviar un grupo sea más eficiente que enviar un espía individual, pero sin que la velocidad crezca de forma ilimitada ni convierta los desplazamientos en instantáneos.
+
+El tiempo de movimiento debe partir exactamente de la fórmula real de marchas del juego.
+
+Define:
+
+T_base = función real vigente de marcha para una distancia D y los modificadores aplicables.
+
+La fórmula de cooperación propuesta es:
+
+T_grupo = T_base / √N
+
+Donde:
+
+- T_grupo es el tiempo del desplazamiento conjunto.
+- T_base es el tiempo que tardaría una expedición normal en realizar ese desplazamiento.
+- N es el número de espías que viajan juntos.
+
+Esta fórmula debe evaluarse como propuesta matemática, no como una regla ya implementada.
+
+Comprueba sus propiedades:
+
+- Para N = 1, el tiempo debe ser exactamente T_base.
+- Para N mayor que 1, el tiempo debe disminuir.
+- El beneficio marginal debe reducirse al aumentar el grupo.
+- No debe producir tiempos negativos ni desplazamientos instantáneos.
+- Debe respetar los límites temporales mínimos del sistema real, si existen.
+- Debe mantener una relación coherente entre distancia y duración.
+
+Demuestra matemáticamente su comportamiento y compara los resultados para varios tamaños de grupo.
+
+No inventes T_base ni sustituyas la fórmula real por una cifra ilustrativa presentada como dato del juego.
+
+Si la fórmula de raíz cuadrada no es compatible con el equilibrio existente, demuestra el problema y presenta una alternativa matemática fundamentada.
+
+5.3. Expediciones a destinos distintos
+
+Un jugador podrá enviar espías a destinos diferentes.
+
+Cada expedición se calculará de forma independiente.
+
+No se aplicará el beneficio de cooperación entre espías que viajan a destinos distintos.
+
+Ejemplo conceptual:
+
+- 4 espías al mismo destino: una expedición conjunta de 4.
+- 2 espías a un destino y 2 a otro: dos expediciones independientes de 2.
+- 4 espías a cuatro destinos: cuatro expediciones individuales.
+
+Define cómo se controla la disponibilidad de los espías para impedir que una misma unidad esté simultáneamente en dos expediciones.
+
+6. SISTEMA DE EXPLORACIÓN
+
+Eliminar el mecanismo actual que asigna aleatoriamente un aldeano para explorar una zona nueva.
+
+La exploración del mapa pasa a realizarse mediante espías.
+
+Los aldeanos continúan desempeñando sus funciones económicas y productivas. No deben desaparecer ni perder su utilidad.
+
+El proceso será:
+
+1. El jugador selecciona una zona desconocida.
+2. Envía uno o varios espías.
+3. Los espías se desplazan utilizando el cálculo de movimiento definido.
+4. Al llegar, revelan la información permitida de la zona.
+5. La zona pasa a formar parte del mapa explorado del jugador.
+6. Los espías quedan disponibles según las reglas de retorno y finalización de misión que se definan.
+
+Determina si la expedición debe regresar automáticamente o si el diseño actual del juego contempla otro comportamiento. Justifica la decisión y define el estado de los espías durante todo el proceso.
+
+La exploración debe ser persistente y no depender de que el jugador mantenga abierta la aplicación.
+
+Diseña los estados y transiciones de la misión.
+
+7. INFORMES DE ESPIONAJE SOBRE OTROS REINOS
+
+Cuando un espía o grupo de espías llegue a una zona perteneciente a otro reino, el jugador podrá obtener un informe de espionaje.
+
+La calidad del informe debe depender de:
+
+- Número de espías enviados.
+- Distancia al objetivo.
+- Información que el sistema autorice revelar.
+- Posibles límites de seguridad y privacidad del juego.
+
+Cuantos más espías se envíen, más completo y fiable será el informe.
+
+Cuanto mayor sea la distancia, más difícil deberá resultar obtener información de calidad.
+
+7.1. Modelo matemático
+
+Desarrolla una función de calidad:
+
+Q = f(N,D)
+
+Donde:
+
+- N es el número de espías.
+- D es la distancia al objetivo.
+- Q representa la calidad del informe.
+
+La función debe cumplir:
+
+- Q aumenta al aumentar N.
+- Q disminuye al aumentar D.
+- La mejora por añadir espías presenta rendimientos decrecientes.
+- La calidad queda acotada.
+- La distancia no produce resultados negativos.
+- La fórmula es determinista o incorpora una aleatoriedad controlada y verificable, si se justifica.
+
+Puedes estudiar una estructura como:
+
+Q(N,D) = Qmax × S(N) × P(D)
+
+Pero debes determinar S(N) y P(D) mediante datos reales, reglas de equilibrio o un procedimiento de calibración justificable.
+
+No asignes valores inventados a Qmax, K, λ ni a ningún otro parámetro.
+
+Si propones una función exponencial para la distancia, demuestra su comportamiento y explica cómo se calibraría con distancias reales del mapa.
+
+7.2. Categorías de informe
+
+Diseña niveles de calidad que se correspondan con información progresivamente más precisa.
+
+Por ejemplo:
+
+- Muy baja.
+- Baja.
+- Media.
+- Alta.
+- Muy alta.
+
+Establece qué información puede proporcionar cada nivel.
+
+Diferencia claramente:
+
+- Información confirmada.
+- Información aproximada.
+- Información desactualizada.
+- Información que no se ha podido obtener.
+
+No permitas que un informe de baja calidad revele datos que el sistema no debería mostrar.
+
+Define la vigencia temporal del informe y evita presentar información antigua como si fuera actual.
+
+8. EXPANSIÓN TERRITORIAL Y CONQUISTA
+
+La nueva regla de expansión será:
+
+Primero se explora con espías. Después se envían tropas para reclamar el territorio libre y adherirlo al Reino.
+
+No se debe conquistar una casilla desconocida sin haberla descubierto previamente.
+
+8.1. Requisitos de conquista
+
+Define las condiciones exactas que debe cumplir una casilla para poder ser reclamada.
+
+Como mínimo, estudia:
+
+- La casilla debe estar descubierta.
+- Debe estar libre de propietario.
+- Debe ser válida dentro del mapa.
+- Debe cumplir las reglas de adyacencia territorial.
+- El jugador debe disponer de tropas suficientes según las reglas existentes.
+- La expedición debe completar correctamente su desplazamiento.
+- El estado de la casilla debe volver a comprobarse al llegar.
+
+La expansión debe mantener la continuidad territorial: una nueva casilla debe poder adherirse al territorio propio conforme a la regla de adyacencia que se apruebe.
+
+Si las reglas actuales contienen excepciones, analízalas antes de proponer cambios.
+
+8.2. Resolución de conflictos
+
+Diseña qué sucede cuando dos jugadores intentan reclamar la misma casilla.
+
+Debe existir una única resolución autoritativa en el servidor.
+
+No puede haber dos propietarios simultáneos.
+
+La comprobación debe realizarse en el momento de completar la conquista, no únicamente cuando se inicia la marcha.
+
+Define qué ocurre si la casilla deja de estar libre durante el desplazamiento.
+
+Evita duplicidades, carreras y concesiones dobles de recompensas.
+
+9. BENEFICIOS ECONÓMICOS POR TERRENO ANEXIONADO
+
+Cada casilla anexionada aportará un beneficio económico según su tipo de terreno.
+
+Reglas propuestas:
+
+Tipo de terreno| Beneficio
+Bosque| +15% madera
+Montaña| +15% hierro
+Colina| +10% piedra
+Llanura| +10% alimentos
+Río| +10% alimentos
+
+Estos porcentajes son reglas expresamente fijadas para este diseño.
+
+9.1. Fórmulas económicas
+
+Define cómo se integran estos beneficios en el sistema de producción global.
+
+Para ello, investiga:
+
+- Producción base de cada recurso.
+- Bonificaciones actuales.
+- Edificios y niveles que afectan a la producción.
+- Investigaciones que afectan a la producción.
+- Modificadores de civilización.
+- Efectos temporales.
+- Límites de almacenamiento.
+- Orden de aplicación de modificadores.
+- Redondeos y precisión numérica.
+
+La fórmula debe integrarse con la economía existente sin duplicar bonificaciones.
+
+Estudia la siguiente estructura:
+
+Producción_final = Producción_base × (1 + B_territorial)
+
+Donde:
+
+B_madera = 0,15 × F
+
+B_hierro = 0,15 × M
+
+B_piedra = 0,10 × C
+
+B_alimentos = 0,10 × (P + R)
+
+F = número de casillas de bosque que aportan bonificación.
+
+M = número de casillas de montaña.
+
+C = número de casillas de colina.
+
+P = número de casillas de llanura.
+
+R = número de casillas de río.
+
+Esta estructura es una hipótesis de acumulación lineal que debe contrastarse con el equilibrio global.
+
+No la declares definitiva sin estudiar sus consecuencias.
+
+Compara matemáticamente:
+
+1. Acumulación aditiva por casilla.
+2. Bonificación porcentual aplicada una sola vez.
+3. Acumulación con rendimientos decrecientes.
+
+Determina cuál es compatible con el sistema económico real y con el equilibrio del juego.
+
+No introduzcas límites o topes arbitrarios. Si se considera necesario un límite, debe justificarse matemáticamente y señalarse como decisión pendiente.
+
+Evita que el cálculo de producción dependa de recorrer miles de casillas en cada actualización si puede mantenerse un recuento territorial coherente.
+
+10. HONOR Y GLORIA POR CONQUISTA
+
+Cada casilla que se anexe correctamente al Reino otorgará:
+
+- +1 honor.
+- +1 gloria.
+
+Estos valores quedan fijados.
+
+Define el momento exacto en el que se conceden.
+
+La recompensa debe concederse una sola vez por conquista válida.
+
+Evita que un jugador pueda obtener honor y gloria ilimitados mediante:
+
+- Abandonar una casilla.
+- Volver a conquistarla.
+- Repetir expediciones.
+- Reintentar una operación.
+- Provocar errores de concurrencia.
+- Reprocesar una misión ya completada.
+
+Define identificadores de operación, registros históricos y controles de idempotencia.
+
+Diferencia la primera anexión, la reconquista y la recuperación de un territorio perdido.
+
+No cambies las reglas globales de honor y gloria sin demostrar antes cómo se integran.
+
+11. ENCUENTRO CON OTRO REINO
+
+Cuando un jugador explore una zona y descubra otro Reino, deberá poder elegir:
+
+1. Desafiar.
+2. Espiar.
+3. Ignorar.
+
+Define el comportamiento de cada opción.
+
+Desafiar
+
+Conecta esta acción con el sistema de combate y desafíos vigente.
+
+No inventes un nuevo sistema de batalla.
+
+Espiar
+
+Permite iniciar una operación de espionaje con la fórmula de calidad y distancia definida anteriormente.
+
+Ignorar
+
+El jugador puede continuar explorando sin iniciar una acción diplomática o militar.
+
+Define si el descubrimiento queda registrado para ese jugador y cómo se evita que el evento aparezca repetidamente sin motivo.
+
+12. VICTORIA APLASTANTE Y PÉRDIDA TERRITORIAL
+
+Se mantiene la regla existente:
+
+Cuando uno de los dos jugadores consigue una victoria aplastante, el perdedor pierde un hexágono de su Reino, conforme a las normas vigentes.
+
+No alteres la definición de victoria aplastante ni los requisitos del combate.
+
+Investiga cómo se determina actualmente esa victoria y cómo se aplican sus consecuencias.
+
+Diseña la integración con el nuevo sistema territorial.
+
+Debe quedar definido:
+
+- Qué casillas pueden perderse.
+- Cómo se selecciona la casilla.
+- Cómo se determina quién la recibe o si queda libre, según las reglas existentes.
+- Qué ocurre con los beneficios económicos de esa casilla.
+- Qué ocurre con el honor y la gloria previamente obtenidos.
+- Qué ocurre si la pérdida deja territorios aislados.
+- Qué sucede cuando no existe una casilla elegible.
+- Cómo se registra el cambio.
+- Cómo se impide que la misma victoria se procese varias veces.
+
+Estudia la conectividad del territorio mediante el grafo de adyacencias hexagonales.
+
+La pérdida de una casilla no debe provocar estados territoriales contradictorios.
+
+Si las normas actuales no especifican alguno de estos supuestos, identifícalo como decisión pendiente. No inventes una regla y la presentes como existente.
+
+13. ALIANZAS SECRETAS ENTRE REINOS
+
+13.1. Requisito
+
+Un jugador que tenga el Parlamento en nivel 15 podrá ofrecer una alianza al Reino descubierto.
+
+El nivel 15 es el requisito establecido.
+
+13.2. Número de alianzas
+
+El jugador podrá:
+
+- No tener ninguna alianza.
+- Tener una alianza.
+- Tener varias alianzas.
+- Aliarse con cualquier número de jugadores, sin un límite adicional establecido en este diseño.
+
+No introduzcas un límite de alianzas sin una justificación y aprobación expresa.
+
+13.3. Formación de la alianza
+
+Diseña el procedimiento de propuesta y aceptación.
+
+Una alianza no se forma hasta que el otro jugador la acepta.
+
+Define los estados:
+
+- Sin propuesta.
+- Propuesta pendiente.
+- Aceptada.
+- Rechazada.
+- Cancelada.
+- Finalizada.
+
+Determina cómo se gestionan propuestas repetidas, invitaciones cruzadas y cambios de estado simultáneos.
+
+13.4. Confidencialidad
+
+Las alianzas serán secretas.
+
+Los demás jugadores no deben conocerlas mediante:
+
+- El mapa.
+- Los perfiles públicos.
+- Los informes normales.
+- Los indicadores públicos.
+- Las consultas de información que no tengan autorización.
+
+El servidor sí debe conocer la relación para validar las acciones permitidas.
+
+Diseña los controles de autorización para impedir que una consulta pública revele accidentalmente una alianza.
+
+13.5. Envío de recursos
+
+Los aliados podrán enviarse recursos.
+
+Investiga las reglas actuales de:
+
+- Transferencia de recursos.
+- Costes de intercambio.
+- Mercado.
+- Capacidad de almacenamiento.
+- Límites de envío.
+- Restricciones temporales.
+- Validaciones de saldo.
+
+La alianza no debe permitir eludir los límites económicos del juego.
+
+Determina cómo se contabiliza una transferencia y cómo se garantiza que una operación no duplique recursos ni los haga desaparecer.
+
+13.6. Envío de tropas
+
+Los aliados podrán enviarse tropas para colaborar.
+
+Diseña el sistema distinguiendo:
+
+- Propietario original de la unidad.
+- Reino receptor.
+- Ubicación actual.
+- Estado de la unidad.
+- Misión en curso.
+- Condiciones de retorno.
+
+Como criterio inicial, estudia el envío como refuerzo aliado, sin transferencia automática de propiedad de las tropas.
+
+No permitas que una unidad esté simultáneamente en dos ejércitos o misiones.
+
+Define cómo se gestionan las tropas cuando la alianza termina mientras están desplazándose, reforzando o participando en una operación.
+
+13.7. Ruptura de alianzas
+
+Diseña la ruptura unilateral o bilateral.
+
+Debe quedar definido:
+
+- Cuándo deja de estar permitido enviar nuevos recursos.
+- Qué sucede con transferencias ya completadas.
+- Qué sucede con las tropas desplegadas.
+- Cómo regresan las unidades.
+- Qué pasa con operaciones pendientes.
+- Cómo se registra el historial.
+
+La ruptura no debe generar pérdidas o duplicaciones de unidades.
+
+14. INTEGRIDAD GLOBAL Y SEGURIDAD
+
+Desarrolla un modelo de integridad que cubra todos los sistemas.
+
+Como mínimo:
+
+- Cada casilla tiene un único propietario real.
+- Cada jugador solo consulta la información que tiene autorizada.
+- Cada espía pertenece a un único propietario.
+- Un espía no puede participar en dos misiones simultáneas.
+- Las expediciones tienen estados coherentes.
+- Las conquistas se resuelven de forma autoritativa.
+- Las recompensas no se duplican.
+- Las transferencias son consistentes.
+- Las alianzas son confidenciales.
+- Los informes de espionaje respetan los permisos.
+- Las pérdidas territoriales se registran correctamente.
+- Los beneficios económicos se actualizan una sola vez.
+- Los procesos se pueden reanudar después de interrupciones.
+
+Diseña las operaciones como transacciones coherentes cuando corresponda.
+
+Identifica las condiciones de carrera posibles y explica cómo resolverlas.
+
+No propongas confiar en validaciones del cliente para operaciones que afectan a la propiedad, recursos, tropas, recompensas o diplomacia.
+
+15. FÓRMULAS Y SIMULACIONES OBLIGATORIAS
+
+No basta con describir los sistemas. Debes demostrar que funcionan matemáticamente.
+
+Prepara simulaciones teóricas con datos claramente identificados.
+
+15.1. Mapa
+
+Comprueba:
+
+- Número total de casillas.
+- Radio.
+- Coordenadas de los extremos.
+- Distancias entre puntos.
+- Adyacencia.
+- Continuidad de los anillos hexagonales.
+
+15.2. Distribución de jugadores
+
+Simula varias civilizaciones distribuidas en regiones.
+
+Comprueba distancias mínimas, espacio de expansión, colisiones y casos sin posición válida.
+
+Utiliza la distancia mínima real del juego.
+
+15.3. Espías y movimiento
+
+Compara expediciones de:
+
+- 1 espía.
+- 2 espías.
+- 3 espías.
+- 5 espías.
+- 10 espías.
+
+Calcula los tiempos utilizando la fórmula real de movimiento y los modificadores reales.
+
+Compara una expedición conjunta con varias expediciones separadas.
+
+No utilices valores de tiempo inventados.
+
+Si el dato real no está disponible, presenta los resultados algebraicamente en función de T_base e indica exactamente qué dato falta para obtener segundos.
+
+15.4. Espionaje
+
+Compara distintos números de espías y distancias.
+
+Demuestra que la calidad aumenta con el número de espías y disminuye con la distancia.
+
+Incluye una tabla de resultados numéricos únicamente cuando los parámetros estén verificados o debidamente calibrados.
+
+Si no se pueden calibrar, presenta la tabla de variables y el procedimiento necesario para obtener los valores.
+
+15.5. Producción
+
+Simula diferentes composiciones territoriales.
+
+Calcula los beneficios de bosques, montañas, colinas, llanuras y ríos.
+
+Compara el resultado con la producción global real, sin duplicar modificadores.
+
+15.6. Conquista
+
+Simula:
+
+- Primera conquista de una casilla libre.
+- Dos jugadores intentando conquistar la misma casilla.
+- Casilla que deja de estar libre durante la marcha.
+- Casilla que no cumple adyacencia.
+- Pérdida de un territorio por victoria aplastante.
+- Casilla cuya pérdida desconecta parte del Reino.
+
+15.7. Alianzas
+
+Simula:
+
+- Propuesta y aceptación.
+- Rechazo.
+- Varias alianzas simultáneas.
+- Transferencia de recursos.
+- Envío de refuerzos.
+- Ruptura con tropas desplegadas.
+- Intento de acceso a información secreta por parte de un tercero.
+
+16. IMPACTO SOBRE LOS SISTEMAS EXISTENTES
+
+Analiza cómo afectaría este diseño a todos los sistemas actuales.
+
+No te limites a los archivos que parezcan relacionados directamente con el mapa.
+
+Comprueba dependencias con:
+
+- Economía.
+- Ejército.
+- Edificios.
+- Cuartel.
+- Parlamento.
+- Investigaciones.
+- Misiones.
+- Honor.
+- Gloria.
+- Combate.
+- Mercado.
+- Almacenamiento.
+- Producción.
+- Jugadores nuevos.
+- Jugadores existentes.
+- Persistencia de datos.
+- Consultas del mapa.
+- Interfaz.
+
+Identifica incompatibilidades y dependencias.
+
+No propongas migraciones ni ejecutes ninguna. Describe únicamente qué tendría que estudiarse si en el futuro se aprobase la implementación.
+
+17. ENTREGABLE FINAL
+
+Entrega un documento técnico completo y estructurado con los siguientes apartados:
+
+1. Resumen del diseño.
+2. Auditoría del funcionamiento actual.
+3. Datos y fórmulas reales verificadas.
+4. Geometría del mapa de 7.651 casillas.
+5. Sistema de expansión futura.
+6. Distribución geográfica de civilizaciones.
+7. Navegación y visibilidad.
+8. Reclutamiento y capacidad de espías.
+9. Fórmula de movimiento y cooperación.
+10. Exploración.
+11. Espionaje y calidad de informes.
+12. Conquista territorial.
+13. Beneficios económicos por terreno.
+14. Honor y gloria.
+15. Encuentro con otros reinos.
+16. Victoria aplastante y pérdida territorial.
+17. Alianzas secretas.
+18. Integridad y seguridad.
+19. Simulaciones matemáticas.
+20. Impacto sobre sistemas existentes.
+21. Decisiones pendientes.
+22. Especificación consolidada de reglas definitivas y propuestas.
+
+17.1. Tabla de trazabilidad matemática
+
+Incluye una tabla con:
+
+Elemento| Fórmula| Datos de entrada| Fuente del dato| Estado
+Distancia hexagonal| Fórmula exacta| Coordenadas| Geometría del mapa| Verificada o pendiente
+Movimiento| Fórmula real| Distancia y modificadores| Código real| Verificada o pendiente
+Cooperación| Fórmula propuesta| Tiempo base y espías| Diseño| Propuesta
+Capacidad de espías| floor(nivel/2)| Nivel Cuartel| Regla del diseño| Fijada
+Calidad de espionaje| Función desarrollada| Número y distancia| Diseño y calibración| Propuesta o pendiente
+Producción territorial| Fórmula integrada| Producción y terrenos| Economía global| Verificada o pendiente
+Recompensas| +1 honor y +1 gloria| Casilla anexionada| Regla del diseño| Fijada
+
+Amplía esta tabla con todas las fórmulas relevantes.
+
+17.2. Reglas para cerrar el trabajo
+
+No declares el trabajo terminado si:
+
+- Hay fórmulas que no se han desarrollado.
+- Hay constantes inventadas.
+- Hay dependencias matemáticas sin identificar.
+- Se han utilizado cifras ilustrativas como si fueran datos reales.
+- Se ha ignorado alguna regla global.
+- Se han omitido escenarios de error.
+- Hay contradicciones entre sistemas.
+- No se ha comprobado la compatibilidad con el funcionamiento actual.
+
+Cuando falte información, explica exactamente qué falta, dónde debería encontrarse y qué cálculo no puede cerrarse sin ella.
+
+Distingue las decisiones ya fijadas de las propuestas que requieren aprobación.
+
+No cambies ninguna regla vigente por iniciativa propia.
+
+18. CONFIRMACIÓN FINAL DE SOLO LECTURA
+
+Al terminar, incluye una declaración expresa indicando:
+
+- Que el trabajo ha sido exclusivamente teórico.
+- Que no se han modificado archivos.
+- Que no se ha creado ni eliminado código.
+- Que no se han ejecutado mutaciones.
+- Que no se han realizado migraciones.
+- Que no se han modificado datos.
+- Que no se ha realizado ningún despliegue.
+
+RESULTADO ESPERADO:
+
+Una especificación matemática y funcional integral, coherente con las reglas reales de La Conquista, suficientemente desarrollada para que posteriormente se pueda implementar por fases sin tener que improvisar fórmulas ni descubrir contradicciones fundamentales durante la programación.
+
+No generes todavía un prompt de implementación. No implementes nada. El único entregable de esta tarea es el análisis y diseño teórico completo.

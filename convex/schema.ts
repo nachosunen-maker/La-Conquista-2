@@ -232,6 +232,7 @@ export default defineSchema({
         gold: v.number(),
         food: v.number(),
       }),
+      isSpyMission: v.optional(v.boolean()),
     })
       .index("by_kingdom", ["kingdomId"])
       .index("by_kingdom_and_cell", ["kingdomId", "cellId"]),
@@ -320,6 +321,7 @@ export default defineSchema({
       isMercenary: v.optional(v.boolean()), // [M-02] Contrato de mercenarios (P53)
       mercenaryTypeId: v.optional(v.string()), // [DECISIÓN 21-10-2026] Tipo contratado (MERCENARIES.TYPES)
       contractEndsAt: v.optional(v.number()),
+      isSpy: v.optional(v.boolean()),
     }).index("by_kingdom", ["kingdomId"]),
 
     // Misiones (sección 17 de CLAUDE.md, decisión 2026-10-21): cada misión concedida una sola vez.
