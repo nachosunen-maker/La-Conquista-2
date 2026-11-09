@@ -1144,9 +1144,9 @@ export const TERRAINS: Readonly<Record<TerrainType, TerrainBalance>> = {
 };
 
 export const MAP = {
-  /** [AMPLIACIÓN MAPA MUNDIAL] Mapa hexagonal axial de radio 50 alrededor del centro: exactamente 7.651 celdas (N = 1 + 3r(r+1)). */
-  RADIUS: 50,
-  MAX_CELLS: 7_651,
+  /** [MAPA REDUCIDO] Mapa hexagonal axial de radio 25 alrededor del centro: exactamente 1.951 celdas (N = 1 + 3r(r+1)). */
+  RADIUS: 25,
+  MAX_CELLS: 1_951,
   /** [HISTÓRICO] Radio original y celdas antes de la ampliación. */
   HISTORICAL_RADIUS: 10,
   HISTORICAL_CELLS: 331,

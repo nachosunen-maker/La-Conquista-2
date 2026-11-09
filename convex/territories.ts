@@ -1143,6 +1143,72 @@ export async function releaseTerritories(ctx: MutationCtx, kingdomId: Id<"kingdo
   }
 }
 
+export const auditMapReduction = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const territories = await ctx.db.query("territories").collect();
+    const toDelete = territories.filter(t => hexDistance({ q: t.q, r: t.r }, { q: 0, r: 0 }) > 25);
+    
+    // Group by owner to count lost territories per kingdom
+    const lostTerritories: Record<string, number> = {};
+    for (const t of toDelete) {
+        if (t.ownerKingdomId) {
+            const id = String(t.ownerKingdomId);
+            lostTerritories[id] = (lostTerritories[id] || 0) + 1;
+        }
+    }
+    
+    return {
+        totalCells: territories.length,
+        cellsToDelete: toDelete.length,
+        lostTerritoriesByKingdom: lostTerritories
+    };
+  },
+});
+
+export const auditMapReductionDeep = query({
+  args: {},
+  handler: async (ctx) => {
+    const radiusLimit = 25;
+    
+    // Read data
+    const territories = await ctx.db.query("territories").collect();
+    const explorations = await ctx.db.query("exploredTerritories").collect();
+    const expQueue = await ctx.db.query("explorationQueue").collect();
+    const armyMarches = await ctx.db.query("armyMarches").collect();
+
+    // Identify exterior elements
+    const exteriorTerritories = territories.filter(t => hexDistance({ q: t.q, r: t.r }, { q: 0, r: 0 }) > radiusLimit);
+    
+    // Explored territories: need to parse cellId
+    const exteriorExplorations = explorations.filter(e => {
+        const parts = e.cellId.split(',');
+        if (parts.length !== 2) return false;
+        const q = Number(parts[0]);
+        const r = Number(parts[1]);
+        return hexDistance({ q, r }, { q: 0, r: 0 }) > radiusLimit;
+    });
+
+    // Expeditions
+    const exteriorExpQueue = expQueue.filter(e => hexDistance({ q: e.targetQ, r: e.targetR }, { q: 0, r: 0 }) > radiusLimit);
+    
+    // Marches
+    const exteriorMarches = armyMarches.filter(m => hexDistance({ q: m.targetQ, r: m.targetR }, { q: 0, r: 0 }) > radiusLimit);
+
+    // Kingdoms affected
+    const affectedKingdomIds = new Set<string>();
+    exteriorTerritories.forEach(t => { if (t.ownerKingdomId) affectedKingdomIds.add(String(t.ownerKingdomId)); });
+    
+    return {
+        territoriesToDelete: exteriorTerritories.length,
+        exploredTerritoriesToDelete: exteriorExplorations.length,
+        expeditionsToCancel: exteriorExpQueue.length,
+        marchesToCancel: exteriorMarches.length,
+        affectedKingdomCount: affectedKingdomIds.size,
+    };
+  },
+});
+
 /**
  * [R-14/P41] Previsualización autoritativa del plan de marcha militar entre el territorio principal
  * y una celda objetivo, utilizando los mismos datos de terreno que el servidor almacena.
@@ -1192,6 +1258,88 @@ export const previewArmyMarchPlan = query({
       targetCoord,
       terrainMultiplier,
       plan,
+    };
+  },
+});
+
+export const executeMapReduction = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const radiusLimit = 25;
+    const now = Date.now();
+
+    // 1. Recover Units and Resources from Exterior Missions
+    const expQueue = await ctx.db.query("explorationQueue").collect();
+    for (const exp of expQueue) {
+        if (hexDistance({ q: exp.targetQ, r: exp.targetR }, { q: 0, r: 0 }) > radiusLimit) {
+            // Cancel Exploration
+            if (exp.isSpyMission) {
+                await addUnits(ctx, exp.kingdomId, "espia", 1, exp.scoutsCount || 1);
+            } else {
+                 const populationDoc = await ctx.db
+                    .query("population")
+                    .withIndex("by_kingdom", (q) => q.eq("kingdomId", exp.kingdomId))
+                    .first();
+                 if (populationDoc) {
+                    await ctx.db.patch(populationDoc._id, {
+                        available: (populationDoc.available ?? 0) + (exp.scoutsCount ?? 1),
+                    });
+                 }
+            }
+            // Refund resources
+            const kingdom = await ctx.db.get(exp.kingdomId);
+            if (kingdom) {
+                const settled = await settleRelationalKingdomEconomy(ctx, kingdom, kingdom.userId, now);
+                const refund = calculateExplorationRefund(exp.costs);
+                await ctx.db.patch(settled.resources._id, {
+                    gold: settled.settledResources.gold + refund.gold,
+                    food: settled.settledResources.food + refund.food,
+                });
+            }
+            await ctx.db.delete(exp._id);
+        }
+    }
+
+    const armyMarches = await ctx.db.query("armyMarches").collect();
+    for (const march of armyMarches) {
+        if (hexDistance({ q: march.targetQ, r: march.targetR }, { q: 0, r: 0 }) > radiusLimit) {
+            // Cancel March and return units
+            for (const unit of march.units) {
+                 await addUnits(ctx, march.kingdomId, unit.unitType as any, unit.level || 1, unit.count);
+            }
+            await ctx.db.delete(march._id);
+        }
+    }
+
+    // 2. Delete Exterior Territories and Explorations in batches
+    const territories = await ctx.db.query("territories").collect();
+    const exteriorTerritories = territories.filter(t => hexDistance({ q: t.q, r: t.r }, { q: 0, r: 0 }) > radiusLimit);
+    for (let i = 0; i < exteriorTerritories.length; i += 500) {
+        const batch = exteriorTerritories.slice(i, i + 500);
+        for (const t of batch) {
+            await ctx.db.delete(t._id);
+        }
+    }
+
+    const explorations = await ctx.db.query("exploredTerritories").collect();
+    const exteriorExplorations = explorations.filter(e => {
+        const parts = e.cellId.split(',');
+        const q = Number(parts[0]);
+        const r = Number(parts[1]);
+        return hexDistance({ q, r }, { q: 0, r: 0 }) > radiusLimit;
+    });
+    for (let i = 0; i < exteriorExplorations.length; i += 500) {
+        const batch = exteriorExplorations.slice(i, i + 500);
+        for (const e of batch) {
+            await ctx.db.delete(e._id);
+        }
+    }
+
+    return {
+        territoriesDeleted: exteriorTerritories.length,
+        explorationsDeleted: exteriorExplorations.length,
+        missionsCancelled: expQueue.length - (await ctx.db.query("explorationQueue").collect()).length,
+        marchesCancelled: armyMarches.length - (await ctx.db.query("armyMarches").collect()).length
     };
   },
 });
