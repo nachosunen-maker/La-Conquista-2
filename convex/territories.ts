@@ -20,6 +20,7 @@ import { v } from "convex/values";
 import { recordMissionEvent } from "./missions";
 import { isKingdomOwner, DEMO_USER_ID } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
+import { ensureAllKingdomsHaveColors } from "./kingdomColors";
 import { addUnits, readArmyUnitDocs } from "./army";
 import { EXPLORATION, MAP, TERRAINS, type TerrainType } from "./balanceConfig";
 import {
@@ -489,7 +490,7 @@ export const getWorldMap = query({
     const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
 
     const ownedCells = world.filter((c) => c.ownerKingdomId && String(c.ownerKingdomId) === String(kingdomId));
-    const [exploredRecords, activeQueue, completedTech] = await Promise.all([
+    const [exploredRecords, activeQueue, completedTech, activeMarchesDocs, allKingdomDocs] = await Promise.all([
       ctx.db
         .query("exploredTerritories")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
@@ -499,7 +500,30 @@ export const getWorldMap = query({
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
         .collect(),
       readCompletedTechnologyIds(ctx, kingdomId),
+      ctx.db
+        .query("armyMarches")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+        .collect(),
+      ctx.db.query("kingdoms").collect(),
     ]);
+
+    const colorsMap = new Map<string, string>();
+    const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
+
+    for (const k of allKingdomDocs) {
+      const ownedCount = world.filter((c) => c.ownerKingdomId && String(c.ownerKingdomId) === String(k._id)).length;
+      const kColor = k.color ?? "#d4af37";
+      colorsMap.set(String(k._id), kColor);
+      if (ownedCount > 0) {
+        legendList.push({
+          id: String(k._id),
+          name: k.name,
+          monarchName: k.monarchName,
+          color: kColor,
+          territoryCount: ownedCount,
+        });
+      }
+    }
 
     const hasSpy2Tech = completedTech.includes("spy_2");
     const ownedIds = new Set<string>();
@@ -613,6 +637,8 @@ export const getWorldMap = query({
           }
         : null;
 
+      const ownerColor = state === "fog" ? null : cell.ownerKingdomId ? (colorsMap.get(String(cell.ownerKingdomId)) ?? "#d4af37") : null;
+
       return {
         cellId: cell.cellId,
         q: cell.q,
@@ -621,6 +647,7 @@ export const getWorldMap = query({
         terrain: state === "fog" ? "desconocido" : cell.terrain,
         ownerKingdomId: state === "fog" ? null : cell.ownerKingdomId ?? null,
         ownerName: state === "fog" ? null : cell.ownerKingdomId ? names.get(String(cell.ownerKingdomId)) ?? null : null,
+        ownerColor,
         isHome: state === "fog" ? false : cell.isHome ?? false,
         state,
         canExplore,
@@ -642,7 +669,23 @@ export const getWorldMap = query({
         completesAt: exp.completesAt,
         durationMs: exp.durationMs,
         progressPercent: explorationProgress(exp.startedAt, exp.durationMs, now),
+        isSpyMission: exp.isSpyMission ?? false,
       })),
+      activeMarches: activeMarchesDocs
+        .filter((m) => m.status === "marchando")
+        .map((m) => ({
+          marchId: m._id,
+          cellId: m.targetCellId,
+          targetQ: m.targetQ,
+          targetR: m.targetR,
+          startedAt: m.startedAt,
+          durationMs: m.durationMs,
+          completesAt: m.completesAt,
+          progressPercent: m.durationMs > 0 ? Math.min(100, Math.floor(((now - m.startedAt) / m.durationMs) * 100)) : 100,
+          isConquest: m.isConquest ?? false,
+          units: m.units,
+        })),
+      kingdomLegend: legendList,
       pendingClaims: kingdom?.pendingTerritoryClaims ?? 0,
       homeTerritoryId: kingdom?.homeTerritoryId ?? null,
       cells: mappedCells,
@@ -691,7 +734,7 @@ export const getKingdomTerritories = query({
         terrain: cell.terrain,
         isHome: cell.isHome ?? false,
       })),
-      recentDiscoveries: explored.slice(-5).map((e) => ({
+      recentDiscoveries: explored.slice(-25).map((e) => ({
         cellId: e.cellId,
         discoveredAt: e.discoveredAt,
         note: e.discoveryNote ?? "Territorio cartografiado",
@@ -1073,7 +1116,13 @@ export const claimFreeTerritory = mutation({
 
     const now = Date.now();
     await ctx.db.patch(target._id, { ownerKingdomId: args.kingdomId, isHome: false, claimedAt: now });
-    await ctx.db.patch(args.kingdomId, { pendingTerritoryClaims: (kingdom.pendingTerritoryClaims ?? 0) - 1, updatedAt: now });
+    await ctx.db.patch(args.kingdomId, {
+      pendingTerritoryClaims: (kingdom.pendingTerritoryClaims ?? 0) - 1,
+      glory: (kingdom.glory ?? 0) + 1,
+      honor: (kingdom.honor ?? 0) + 1,
+      conquestRewardsGranted: (kingdom.conquestRewardsGranted ?? 0) + 1,
+      updatedAt: now,
+    });
 
     // Si aún no estaba en la tabla de explorados, registrarlo
     if (!exploredDocs.some((e) => e.cellId === target.cellId)) {

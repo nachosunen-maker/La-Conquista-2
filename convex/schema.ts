@@ -11,6 +11,7 @@ export default defineSchema({
       civilization: v.optional(v.string()),
       castleName: v.optional(v.string()),
       monarchName: v.optional(v.string()),
+      color: v.optional(v.string()), // [Bloque 6] Color exclusivo y persistente del reino
       taxPolicy: v.optional(v.string()),
       happiness: v.optional(v.number()),
       militaryMorale: v.optional(v.number()),
@@ -71,9 +72,10 @@ export default defineSchema({
       lastDailyBonusAt: v.optional(v.number()),
       moraleEffects: v.optional(v.array(v.object({ amount: v.number(), expiresAt: v.number() }))),
       temporaryBonuses: v.optional(v.array(v.object({ type: v.string(), multiplier: v.number(), expiresAt: v.number() }))), // Misiones: bonificaciones temporales
-      // Bloque G: territorio principal y reclamaciones pendientes (P47)
+      // Bloque G: territorio principal, reclamaciones pendientes (P47) y contador de recompensas de conquista
       homeTerritoryId: v.optional(v.string()),
       pendingTerritoryClaims: v.optional(v.number()),
+      conquestRewardsGranted: v.optional(v.number()),
     })
       .index("by_user_id", ["userId"])
       .index("by_user_id_and_name", ["userId", "name"])
@@ -255,6 +257,7 @@ export default defineSchema({
       completesAt: v.number(),
       status: v.union(v.literal("marchando"), v.literal("completada"), v.literal("cancelada")),
       battleResult: v.optional(v.any()),
+      isConquest: v.optional(v.boolean()),
     }).index("by_kingdom", ["kingdomId"]),
 
     // Desafíos del Parlamento (Bloque E): máquina de estados server-authoritative (BLOQUE 9).

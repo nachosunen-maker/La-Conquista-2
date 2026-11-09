@@ -25,6 +25,7 @@ interface WorldMapCell {
   terrain: string;
   ownerKingdomId: string | null;
   ownerName: string | null;
+  ownerColor: string | null;
   isHome: boolean;
   state: "owned" | "explored" | "exploring" | "fog";
   canExplore: boolean;
@@ -53,6 +54,25 @@ interface WorldMap {
     durationMs: number;
     progressPercent: number;
     isSpyMission: boolean;
+  }>;
+  activeMarches?: Array<{
+    marchId: string;
+    cellId: string;
+    targetQ: number;
+    targetR: number;
+    startedAt: number;
+    durationMs: number;
+    completesAt: number;
+    progressPercent: number;
+    isConquest: boolean;
+    units: Record<string, number>;
+  }>;
+  kingdomLegend?: Array<{
+    id: string;
+    name: string;
+    monarchName?: string;
+    color: string;
+    territoryCount: number;
   }>;
   pendingClaims: number;
   homeTerritoryId: string | null;
@@ -183,6 +203,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
         terrain: genCell.terrain,
         ownerKingdomId: null,
         ownerName: null,
+        ownerColor: null,
         isHome: false,
         state: "fog",
         canExplore: false,
@@ -293,12 +314,12 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
       let strokeDasharray: string | undefined = undefined;
 
       if (isSelected) { stroke = '#ffffff'; strokeWidth = 2.5; }
-      else if (isOwned) { stroke = '#d4af37'; strokeWidth = 1.8; }
+      else if (isOwned) { stroke = cell.ownerColor || '#d4af37'; strokeWidth = 1.8; }
       else if (isExploring) { stroke = '#f59e0b'; strokeWidth = 2; strokeDasharray = '3,2'; }
       else if (cell.canExplore) { stroke = '#0284c7'; strokeWidth = 1.4; }
       else if (cell.canConquer) { stroke = '#7dd3fc'; strokeWidth = 1.8; }
       else if (isExplored && !cell.ownerKingdomId && (mine?.pendingClaims ?? 0) > 0 && distanceToOwned !== null && distanceToOwned <= 2) { stroke = '#7dd3fc'; strokeWidth = 1.4; strokeDasharray = '2,1'; }
-      else if (cell.ownerKingdomId) { stroke = '#c05050'; strokeWidth = 1.4; }
+      else if (cell.ownerKingdomId) { stroke = cell.ownerColor || '#c05050'; strokeWidth = 1.8; }
 
       return (
         <g 
@@ -313,10 +334,14 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
           className="cursor-pointer transition-opacity"
         >
           <polygon points={hexPoints(x, y)} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={strokeDasharray}>
-            <title>{isFog ? `${cell.cellId} · Niebla de guerra (Tierra incógnita)` : `${cell.cellId} · ${effectiveWorld.terrains[cell.terrain]?.label ?? cell.terrain}`}</title>
+            <title>{isFog ? `${cell.cellId} · Niebla de guerra (Tierra incógnita)` : `${cell.cellId} · ${effectiveWorld.terrains[cell.terrain]?.label ?? cell.terrain}${cell.ownerName ? ` (${cell.ownerName})` : ''}`}</title>
           </polygon>
-          {isOwned && cell.isHome && <text x={x} y={y + 4} textAnchor="middle" fontSize={11} fill="#d4af37" pointerEvents="none">♜</text>}
-          {isOwned && !cell.isHome && <text x={x} y={y + 4} textAnchor="middle" fontSize={10} fill="#f0e8d4" pointerEvents="none">⚑</text>}
+          {cell.isHome && (
+            <text x={x} y={y + 4} textAnchor="middle" fontSize={11} fill={cell.ownerColor || '#d4af37'} fontWeight="bold" pointerEvents="none">♜</text>
+          )}
+          {(isOwned || cell.ownerKingdomId) && !cell.isHome && (
+            <text x={x} y={y + 4} textAnchor="middle" fontSize={10} fill={cell.ownerColor || '#f0e8d4'} pointerEvents="none">⚑</text>
+          )}
           {isExploring && <text x={x} y={y + 4} textAnchor="middle" fontSize={10} fill="#f59e0b" pointerEvents="none">🧭</text>}
           {isFog && cell.canExplore && <text x={x} y={y + 3.5} textAnchor="middle" fontSize={9} fill="#38bdf8" pointerEvents="none">🔭</text>}
         </g>
@@ -358,41 +383,105 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
           </div>
         )}
 
-        {/* Banner de expedición activa */}
-        {activeExpedition && (
-          <div className={`flex flex-col sm:flex-row items-center justify-between gap-3 text-xs border p-3 rounded-lg ${activeExpedition.isSpyMission ? 'bg-[#0f172a] border-sky-800/60' : 'bg-[#1a150e] border-amber-800/60'}`}>
-            <div className="flex items-center gap-2">
-              <Compass className={`w-4 h-4 animate-spin ${activeExpedition.isSpyMission ? 'text-sky-400' : 'text-amber-400'}`} style={{ animationDuration: '6s' }} />
-              <div>
-                <span className={`font-semibold ${activeExpedition.isSpyMission ? 'text-sky-300' : 'text-amber-300'}`}>
-                    {activeExpedition.isSpyMission ? 'Agente infiltrándose en' : 'Expedición en marcha hacia'} {activeExpedition.cellId}
-                </span>
-                <span className="text-[#a89b88] ml-2">
-                  ⏳ Restante: {formatRemainingSeconds(activeExpedition.completesAt)} ({activeExpedition.progressPercent} %)
-                </span>
-              </div>
+        {/* Panel de actividades y expediciones simultáneas en curso */}
+        {((effectiveWorld.activeExpeditions && effectiveWorld.activeExpeditions.length > 0) ||
+          (effectiveWorld.activeMarches && effectiveWorld.activeMarches.length > 0)) && (
+          <div className="space-y-2.5 bg-[#120f0c] p-3 rounded-lg border border-[#2b2419]">
+            <div className="flex items-center justify-between text-xs font-semibold text-[#e6ded0]">
+              <span className="flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-amber-400" />
+                Misiones y desplazamientos activos ({(effectiveWorld.activeExpeditions?.length ?? 0) + (effectiveWorld.activeMarches?.length ?? 0)})
+              </span>
             </div>
-            <div className="flex items-center gap-2">
-              {now >= activeExpedition.completesAt && (
-                <button
-                  type="button"
-                  className="px-2.5 py-1 text-xs bg-emerald-800 hover:bg-emerald-700 text-white rounded font-medium cursor-pointer"
-                  onClick={handleResolveCompleted}
-                  disabled={action.busy !== null}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {effectiveWorld.activeExpeditions?.map((exp) => (
+                <div
+                  key={exp.expeditionId}
+                  className={`flex flex-col justify-between gap-2 text-xs border p-2.5 rounded-md ${
+                    exp.isSpyMission ? 'bg-[#0f172a] border-sky-800/60' : 'bg-[#1a150e] border-amber-800/60'
+                  }`}
                 >
-                  Consolidar hallazgo
-                </button>
-              )}
-              {isOwner && now < activeExpedition.completesAt && !activeExpedition.isSpyMission && (
-                <button
-                  type="button"
-                  className="px-2.5 py-1 text-xs bg-[#331c17] hover:bg-[#4a241e] text-red-300 border border-red-900/40 rounded cursor-pointer"
-                  onClick={() => handleCancelExploration(activeExpedition.expeditionId)}
-                  disabled={action.busy !== null}
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold flex items-center gap-1.5">
+                      <Compass
+                        className={`w-3.5 h-3.5 animate-spin ${exp.isSpyMission ? 'text-sky-400' : 'text-amber-400'}`}
+                        style={{ animationDuration: '6s' }}
+                      />
+                      <span className={exp.isSpyMission ? 'text-sky-300' : 'text-amber-300'}>
+                        {exp.isSpyMission ? 'Espía infiltrándose en' : 'Expedición en marcha hacia'} {exp.cellId}
+                      </span>
+                    </span>
+                    <span className="text-[10px] font-mono text-[#a89b88]">
+                      ⏳ {formatRemainingSeconds(exp.completesAt)}
+                    </span>
+                  </div>
+
+                  <div className="w-full bg-[#0e0b08] h-1.5 rounded overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-500 ${exp.isSpyMission ? 'bg-sky-500' : 'bg-amber-500'}`}
+                      style={{ width: `${exp.progressPercent}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-[#a89b88]">Progreso: {exp.progressPercent} %</span>
+                    <div className="flex items-center gap-1.5">
+                      {now >= exp.completesAt && (
+                        <button
+                          type="button"
+                          className="px-2 py-0.5 text-[10px] bg-emerald-800 hover:bg-emerald-700 text-white rounded font-medium cursor-pointer"
+                          onClick={handleResolveCompleted}
+                          disabled={action.busy !== null}
+                        >
+                          Consolidar hallazgo
+                        </button>
+                      )}
+                      {isOwner && now < exp.completesAt && !exp.isSpyMission && (
+                        <button
+                          type="button"
+                          className="px-2 py-0.5 text-[10px] bg-[#331c17] hover:bg-[#4a241e] text-red-300 border border-red-900/40 rounded cursor-pointer"
+                          onClick={() => handleCancelExploration(exp.expeditionId)}
+                          disabled={action.busy !== null}
+                        >
+                          Cancelar (50 % reembolso)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {effectiveWorld.activeMarches?.map((march) => (
+                <div
+                  key={march.marchId}
+                  className={`flex flex-col justify-between gap-2 text-xs border p-2.5 rounded-md ${
+                    march.isConquest ? 'bg-[#142217] border-emerald-800/60' : 'bg-[#221414] border-red-800/60'
+                  }`}
                 >
-                  Cancelar (recupera 50 %)
-                </button>
-              )}
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold flex items-center gap-1.5">
+                      <span className={march.isConquest ? 'text-emerald-400' : 'text-red-400'}>
+                        {march.isConquest ? '🏰 Marcha de conquista' : '⚔️ Ataque militar'} en marcha a {march.cellId}
+                      </span>
+                    </span>
+                    <span className="text-[10px] font-mono text-[#a89b88]">
+                      ⏳ {formatRemainingSeconds(march.completesAt)}
+                    </span>
+                  </div>
+
+                  <div className="w-full bg-[#0e0b08] h-1.5 rounded overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-500 ${march.isConquest ? 'bg-emerald-500' : 'bg-red-500'}`}
+                      style={{ width: `${march.progressPercent}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-[#a89b88]">
+                    <span>Tropas: {Object.entries(march.units).map(([u, c]) => `${u}: ${c}`).join(', ')}</span>
+                    <span>{march.progressPercent} % completado</span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -762,7 +851,27 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                     </div>
                   )}
                   {showTroopSelector && targetCellId && (
-                    <TroopSelector availableUnits={armyState?.units ?? []} onConfirm={(comp) => handleStartMarch(targetCellId, comp)} onCancel={() => setShowTroopSelector(false)} />
+                    <TroopSelector
+                      availableUnits={armyState?.units ?? []}
+                      targetDetails={
+                        selectedCell
+                          ? {
+                              cellId: selectedCell.cellId,
+                              terrainLabel: effectiveWorld.terrains[selectedCell.terrain]?.label ?? selectedCell.terrain,
+                              distance: selectedDistance ?? undefined,
+                              terrainMultiplier: effectiveWorld.terrains[selectedCell.terrain]?.marchMultiplier,
+                              resourceBonusLabel: effectiveWorld.terrains[selectedCell.terrain]?.production
+                                ? Object.entries(effectiveWorld.terrains[selectedCell.terrain].production)
+                                    .map(([j, v]) => `+${Math.round(v * 100)}% ${JOB_LABELS[j] ?? j}`)
+                                    .join(', ')
+                                : undefined,
+                              isAttack: Boolean(selectedCell.ownerKingdomId && selectedCell.ownerKingdomId !== kingdomId),
+                            }
+                          : undefined
+                      }
+                      onConfirm={(comp) => handleStartMarch(targetCellId, comp)}
+                      onCancel={() => setShowTroopSelector(false)}
+                    />
                   )}
                 </div>
               ) : (
@@ -770,83 +879,138 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
               )}
             </div>
 
-            {/* Leyenda y clave de símbolos */}
-            <div className={`${cardClass} space-y-1`}>
-              <span className="font-semibold text-[#e6ded0] text-xs block">Leyenda cartográfica</span>
-              <div className="grid grid-cols-2 gap-1.5 pt-1 text-[10px]">
-                <div className="flex items-center gap-1.5 text-[#c7beac]">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-[#120f0c] border border-[#272017]" />
-                  <span>Niebla de guerra</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-sky-400">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-[#120f0c] border border-sky-500" />
-                  <span>Explorable (frontera)</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-amber-400">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-[#8a9a3a] border-2 border-amber-400" />
-                  <span>Reino propio</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-red-400">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-[#555] border border-red-500" />
-                  <span>Reino rival</span>
-                </div>
-              </div>
-              <p className="text-[#8e816d] text-[10px] pt-1">
-                Iconos: ♜ Castillo capital · ⚑ Provincia · 🧭 Expedición en camino · 🔭 Celda fronteriza.
-              </p>
-            </div>
-
-            {/* Descubrimientos recientes */}
-            {mine?.recentDiscoveries && mine.recentDiscoveries.length > 0 && (
+            {/* Leyenda política de reinos en el mapa */}
+            {effectiveWorld.kingdomLegend && effectiveWorld.kingdomLegend.length > 0 && (
               <div className={`${cardClass} space-y-1.5`}>
-                <span className="font-semibold text-[#e6ded0] text-xs flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Descubrimientos de exploración
+                <span className="font-semibold text-[#e6ded0] text-xs flex items-center justify-between">
+                  <span>Reinos del mundo ({effectiveWorld.kingdomLegend.length})</span>
+                  <span className="text-[10px] text-[#8e816d]">Identidad de color</span>
                 </span>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {mine.recentDiscoveries.slice(-5).reverse().map((disc, idx) => {
-                    const dateFormatted = disc.discoveredAt
-                      ? new Date(disc.discoveredAt).toLocaleDateString('es-ES', {
-                          day: '2-digit',
-                          month: '2-digit',
-                          year: 'numeric',
-                        })
-                      : null;
-                    return (
-                      <div key={idx} className="bg-[#120f0c] p-2 rounded border border-[#221c15] text-[10px] text-[#c7beac] space-y-0.5">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono text-amber-300 font-semibold">[{disc.cellId}]</span>
-                          {dateFormatted && (
-                            <span className="text-[9px] text-[#8e816d] font-mono">{dateFormatted}</span>
-                          )}
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {effectiveWorld.kingdomLegend.map((k) => (
+                    <div key={k.id} className="flex items-center justify-between text-[11px] bg-[#120f0c] p-1.5 rounded border border-[#221c15]">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <span className="w-3 h-3 rounded-full shrink-0 border border-[#000]/40 shadow-sm" style={{ backgroundColor: k.color }} />
+                        <div className="truncate">
+                          <span className="font-semibold text-[#e6ded0] truncate block">{k.name}</span>
+                          {k.monarchName && <span className="text-[9px] text-[#8e816d] block truncate">Rey {k.monarchName}</span>}
                         </div>
-                        <p className="text-[#a89b88]">{disc.note}</p>
                       </div>
-                    );
-                  })}
+                      <span className="text-[10px] font-mono text-[#d4af37] shrink-0 ml-2 font-medium">
+                        {k.territoryCount} {k.territoryCount === 1 ? 'provincia' : 'provincias'}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
 
-            {/* Lista de provincias propias */}
-            <div className={`${cardClass} space-y-1`}>
-              <span className="font-semibold text-[#e6ded0] text-xs flex items-center gap-1.5">
-                <Flag className="w-3.5 h-3.5 text-[#d4af37]" /> Provincias de la corona
+            {!isOwner && <p className="text-[#8e816d] italic">{readOnlyNote}</p>}
+          </div>
+        </div>
+
+        {/* SECCIÓN INFORMATIVA DEBAJO DEL MAPA — Historial de Exploración, Provincias y Leyenda */}
+        <div className="mt-6 space-y-4 pt-4 border-t border-[#2b2419]">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Historial Completo de Descubrimientos de Exploración */}
+            <div className={`${cardClass} space-y-2.5`}>
+              <span className="font-semibold text-[#e6ded0] text-xs flex items-center justify-between border-b border-[#221c15] pb-2">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  Descubrimientos de exploración ({mine?.recentDiscoveries?.length ?? 0})
+                </span>
+                <span className="text-[10px] text-[#8e816d] font-mono">Historial registrado</span>
               </span>
-              {mine?.territories.length ? (
-                <div className="space-y-1 max-h-36 overflow-y-auto">
-                  {mine.territories.map((t) => (
-                    <div key={t.cellId} className="flex justify-between items-center text-[#c7beac] bg-[#120f0c] p-1.5 rounded border border-[#221c15]">
-                      <span>{t.cellId} · {effectiveWorld.terrains[t.terrain]?.label ?? t.terrain}</span>
-                      <span className="text-[10px] text-amber-400 font-medium">{t.isHome ? '👑 Capital' : 'Provincia'}</span>
-                    </div>
-                  ))}
+
+              {mine?.recentDiscoveries && mine.recentDiscoveries.length > 0 ? (
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {mine.recentDiscoveries.slice().reverse().map((disc, idx) => {
+                    const dateObj = disc.discoveredAt ? new Date(disc.discoveredAt) : null;
+                    const dateFormatted = dateObj
+                      ? dateObj.toLocaleDateString('es-ES', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : 'Fecha no registrada';
+
+                    return (
+                      <div key={idx} className="bg-[#120f0c] p-2.5 rounded border border-[#221c15] text-[11px] text-[#c7beac] space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-amber-300 font-bold flex items-center gap-1">
+                            <span>🧭</span> [{disc.cellId}]
+                          </span>
+                          <span className="text-[10px] text-[#8e816d] font-mono">{dateFormatted}</span>
+                        </div>
+                        <p className="text-[#a89b88] text-[10px] leading-relaxed">{disc.note}</p>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
-                <p className="text-[#8e816d]">Sin territorios registrados.</p>
+                <p className="text-xs text-[#8e816d] italic p-3 text-center bg-[#120f0c] rounded border border-[#221c15]">
+                  No se han registrado descubrimientos de exploración en este reino.
+                </p>
               )}
             </div>
 
-            {!isOwner && <p className="text-[#8e816d] italic">{readOnlyNote}</p>}
+            {/* Provincias de la Corona y Clave Cartográfica */}
+            <div className="space-y-4">
+              {/* Provincias de la Corona */}
+              <div className={`${cardClass} space-y-2`}>
+                <span className="font-semibold text-[#e6ded0] text-xs flex items-center justify-between border-b border-[#221c15] pb-2">
+                  <span className="flex items-center gap-1.5">
+                    <Flag className="w-4 h-4 text-[#d4af37]" />
+                    Provincias de la corona ({mine?.territories?.length ?? 0})
+                  </span>
+                  <span className="text-[10px] text-[#d4af37]">Soberanía territorial</span>
+                </span>
+                {mine?.territories.length ? (
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                    {mine.territories.map((t) => (
+                      <div key={t.cellId} className="flex justify-between items-center text-[11px] text-[#c7beac] bg-[#120f0c] p-2 rounded border border-[#221c15]">
+                        <span className="font-mono">
+                          [{t.cellId}] · <span className="text-[#e6ded0]">{effectiveWorld.terrains[t.terrain]?.label ?? t.terrain}</span>
+                        </span>
+                        <span className="text-[10px] text-amber-400 font-medium">
+                          {t.isHome ? '👑 Capital' : '🏰 Provincia'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#8e816d] italic">Sin territorios anexionados.</p>
+                )}
+              </div>
+
+              {/* Clave cartográfica del mapa */}
+              <div className={`${cardClass} space-y-1.5`}>
+                <span className="font-semibold text-[#e6ded0] text-xs block">Clave cartográfica del mapa</span>
+                <div className="grid grid-cols-2 gap-2 text-[10px] pt-1">
+                  <div className="flex items-center gap-1.5 text-[#c7beac]">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-[#120f0c] border border-[#272017]" />
+                    <span>Niebla de guerra</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-sky-400">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-[#120f0c] border border-sky-500" />
+                    <span>Explorable (frontera)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-amber-400">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-[#8a9a3a] border-2 border-amber-400" />
+                    <span>Reino propio</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-red-400">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-[#555] border border-red-500" />
+                    <span>Reino rival</span>
+                  </div>
+                </div>
+                <p className="text-[#8e816d] text-[10px] pt-1 border-t border-[#221c15] mt-1">
+                  Símbolos: ♜ Castillo capital · ⚑ Provincia · 🧭 Expedición en curso · 🔭 Frontera explorable.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
         <StatusMessages error={action.error} message={action.message} />

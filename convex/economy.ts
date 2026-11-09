@@ -17,6 +17,7 @@ import { isCivilizationId } from "./civilizations";
 import { normalizeCivilizationId } from "./civilizationRules";
 import { CIVILIZATIONS } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
+import { pickRandomUniqueColor } from "./kingdomColors";
 import {
   simulateEconomicProgress,
   validatePopulationIntegrity,
@@ -553,12 +554,20 @@ export const getOrInitializeKingdom = mutation({
       throw new ConvexError(`Civilización desconocida: '${args.civilization}'. Opciones: ${CIVILIZATIONS.map((c) => c.id).join(", ")}.`);
     }
     const now = Date.now();
+    const existingKingdoms = await ctx.db.query("kingdoms").collect();
+    const usedColors = new Set<string>();
+    for (const k of existingKingdoms) {
+      if (k.color) usedColors.add(k.color.trim().toLowerCase());
+    }
+    const color = pickRandomUniqueColor(usedColors);
+
     const kingdomId = await ctx.db.insert("kingdoms", {
       userId: callerUserId,
       name,
       civilization: isCivilizationId(args.civilization) ? args.civilization : undefined,
       castleName: args.castleName?.trim() || undefined,
       monarchName: args.monarchName?.trim() || undefined,
+      color,
       foodTier: INITIAL_KINGDOM_CONFIG.foodTier,
       happiness: WELLBEING.INITIAL_HAPPINESS,
       militaryMorale: WELLBEING.INITIAL_MORALE,

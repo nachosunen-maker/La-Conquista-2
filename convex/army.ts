@@ -769,6 +769,8 @@ export const launchAttack = mutation({
     const durationMs = Math.round(durationSeconds * 1000);
     const completesAt = now + durationMs;
 
+    const isConquest = !target.ownerKingdomId;
+
     const marchId = await ctx.db.insert("armyMarches", {
       kingdomId: args.kingdomId,
       targetCellId: args.cellId,
@@ -781,6 +783,7 @@ export const launchAttack = mutation({
       durationMs,
       completesAt,
       status: "marchando",
+      isConquest,
     });
 
     await ctx.scheduler.runAt(completesAt, internal.army.completeMarchScheduled, { marchId });
@@ -829,6 +832,15 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
         isHome: false,
       });
       await recordMissionEvent(ctx, march.kingdomId, "territoriesClaimed", 1, false);
+      const currentAttackerDoc = await ctx.db.get(march.kingdomId);
+      if (currentAttackerDoc) {
+        await ctx.db.patch(march.kingdomId, {
+          glory: (currentAttackerDoc.glory ?? 0) + 1,
+          honor: (currentAttackerDoc.honor ?? 0) + 1,
+          conquestRewardsGranted: (currentAttackerDoc.conquestRewardsGranted ?? 0) + 1,
+          updatedAt: Date.now(),
+        });
+      }
     }
     for (const u of march.units) {
       const norm = normalizeUnitType(u.unitType);
@@ -841,6 +853,30 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
       battleResult: { outcome: "conquista_neutral", crushingVictory: false },
     });
     return { success: true, outcome: "conquista_neutral", cellId: march.targetCellId };
+  }
+
+  // Si la marcha fue enviada como conquista territorial sobre casilla neutral, pero al llegar ya tiene soberano (carrera entre jugadores):
+  // La resolución atómica es retorno automático sin combate, sin bajas y liberando el cupo de tropas.
+  if (march.isConquest && targetCell.ownerKingdomId && targetCell.ownerKingdomId !== march.kingdomId) {
+    for (const u of march.units) {
+      const norm = normalizeUnitType(u.unitType);
+      if (norm && u.count > 0) {
+        await addUnits(ctx, march.kingdomId, norm, u.level ?? 1, u.count);
+      }
+    }
+    await ctx.db.patch(marchId, {
+      status: "completada",
+      battleResult: {
+        outcome: "terreno_ya_reclamado",
+        note: "El territorio neutral fue reclamado por otro soberano antes de la llegada de tus tropas.",
+      },
+    });
+    return {
+      success: true,
+      outcome: "terreno_ya_reclamado",
+      cellId: march.targetCellId,
+      message: "El territorio neutral fue reclamado por otro soberano antes de la llegada de tus tropas. Tus tropas regresaron a la guarnición sin bajas.",
+    };
   }
 
   const defenderKingdomId = targetCell.ownerKingdomId;
@@ -1006,6 +1042,15 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   if (report.outcome === "victoria" && targetCell) {
     await ctx.db.patch(targetCell._id, { ownerKingdomId: march.kingdomId, claimedAt: now, isHome: false });
     await recordMissionEvent(ctx, march.kingdomId, "territoriesClaimed", 1, false);
+    const victorDoc = await ctx.db.get(march.kingdomId);
+    if (victorDoc) {
+      await ctx.db.patch(march.kingdomId, {
+        glory: (victorDoc.glory ?? 0) + 1,
+        honor: (victorDoc.honor ?? 0) + 1,
+        conquestRewardsGranted: (victorDoc.conquestRewardsGranted ?? 0) + 1,
+        updatedAt: now,
+      });
+    }
   }
 
   await ctx.db.patch(marchId, { status: "completada", battleResult: { outcome: report.outcome, crushingVictory: report.crushingVictory, battleId } });
