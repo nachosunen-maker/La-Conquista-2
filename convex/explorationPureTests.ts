@@ -93,9 +93,9 @@ export function runExplorationValidationTests(): ExplorationTestResult[] {
     knownCellIds: initialSightSet,
     activeCellIds: new Set(),
     ownedCoords: [homeCoord],
-    availableCivil: 5,
+    availableSpies: 5,
     currentResources: { gold: 100, food: 100 },
-    activeExpeditionsCount: 1,
+    activeExpeditionsCount: 50,
   });
 
   // 8. Progreso temporal
@@ -159,9 +159,9 @@ export function runExplorationValidationTests(): ExplorationTestResult[] {
     },
     {
       category: "CONTROL DE CONCURRENCIA",
-      test: "5. Respeta el límite autoritativo de 1 expedición de exploración activa por reino",
+      test: "5. Permite múltiples expediciones simultáneas con espías profesionales (hasta el tope autoritativo de 50)",
       passed: !busyCheck.success,
-      details: `Segunda expedición simultánea bloqueada: ${!busyCheck.success}`,
+      details: `Expedición por encima del tope de 50 bloqueada: ${!busyCheck.success}`,
     },
     {
       category: "PROGRESIÓN TEMPORAL",

@@ -233,12 +233,15 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
     });
   };
 
-  const handleStartExploration = () => {
+  const [selectedSpiesCount, setSelectedSpiesCount] = useState<number>(1);
+
+  const handleStartExploration = (count?: number) => {
     if (!selectedCell) return;
+    const spiesCount = count ?? selectedSpiesCount ?? 1;
     action.run('explore', async () => {
-      const result = await startExploration({ kingdomId, cellId: selectedCell.cellId });
-      if (result && result.success === false) return result;
-      return `Expedición enviada a ${result.cellId}. Llegada estimada en ${Math.round(result.durationSeconds / 60)} min. Coste: ${result.costs.gold} oro y ${result.costs.food} alimentos.`;
+      const result = await startExploration({ kingdomId, cellId: selectedCell.cellId, spiesCount });
+      if (result && (result as any).success === false) return result;
+      return `Expedición enviada a ${result.cellId} con ${spiesCount} espía(s). Llegada estimada en ${Math.round((result as any).durationSeconds / 60)} min. Coste: ${(result as any).costs.gold} oro y ${(result as any).costs.food} alimentos.`;
     });
   };
 
@@ -546,19 +549,109 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                       </div>
                       <p className="text-[#a89b88]">Este territorio no ha sido cartografiado.</p>
                       {selectedCell.canExplore ? (
-                        <div className="pt-2 border-t border-[#261f14] space-y-2">
-                          <button type="button" className={`${primaryButton} w-full`} disabled={action.busy !== null} onClick={handleStartExploration}>
-                            {action.busy === 'explore' ? 'Enviando…' : 'Enviar expedición de exploración'}
-                          </button>
-                          {isOwner && armyState?.spies?.active > 0 && (
-                            <button 
-                              type="button" 
-                              className="w-full bg-sky-900/60 hover:bg-sky-800 text-sky-100 py-1.5 rounded text-xs border border-sky-700/60 transition disabled:opacity-50" 
-                              disabled={action.busy !== null} 
-                              onClick={handleStartSpyExploration}
-                            >
-                              {action.busy === 'spy-explore' ? 'Enviando espía…' : `Infiltrar espía (disponibles: ${armyState.spies?.active ?? 0})`}
-                            </button>
+                        <div className="pt-2 border-t border-[#261f14] space-y-3">
+                          {/* Resumen numérico de espías del reino */}
+                          <div className="bg-[#0b0f19] p-2 rounded border border-sky-950 text-[11px] space-y-1">
+                            <div className="flex justify-between items-center text-[#c7beac]">
+                              <span>Espías totales del reino:</span>
+                              <span className="font-bold text-[#e6ded0] font-mono">{(armyState?.spies?.active ?? 0) + (armyState?.spies?.busy ?? 0)}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-[#c7beac]">
+                              <span>Espías disponibles:</span>
+                              <span className="font-bold text-emerald-400 font-mono">{armyState?.spies?.active ?? 0}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-[#c7beac]">
+                              <span>Espías en misión:</span>
+                              <span className="font-bold text-amber-400 font-mono">{armyState?.spies?.busy ?? 0}</span>
+                            </div>
+                          </div>
+
+                          {isOwner && (armyState?.spies?.active ?? 0) > 0 ? (
+                            <div className="space-y-2.5 bg-[#121824] p-2.5 rounded border border-sky-900/40">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-semibold text-sky-200">
+                                  Composición de espías:
+                                </span>
+                                <span className="text-[10px] text-sky-400 font-mono">
+                                  Disp: {armyState!.spies!.active}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  className="w-8 h-7 bg-[#1e293b] hover:bg-[#334155] text-sky-200 rounded border border-sky-800 text-xs font-bold disabled:opacity-40 cursor-pointer flex items-center justify-center"
+                                  disabled={selectedSpiesCount <= 1}
+                                  onClick={() => setSelectedSpiesCount((prev) => Math.max(1, prev - 1))}
+                                >
+                                  -
+                                </button>
+
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={armyState!.spies!.active}
+                                  value={Math.min(armyState!.spies!.active, Math.max(1, selectedSpiesCount))}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value) || 1;
+                                    setSelectedSpiesCount(Math.max(1, Math.min(armyState!.spies!.active, val)));
+                                  }}
+                                  className="w-14 bg-[#0f172a] text-center font-mono text-sky-100 font-bold border border-sky-700/60 rounded h-7 text-xs"
+                                />
+
+                                <button
+                                  type="button"
+                                  className="w-8 h-7 bg-[#1e293b] hover:bg-[#334155] text-sky-200 rounded border border-sky-800 text-xs font-bold disabled:opacity-40 cursor-pointer flex items-center justify-center"
+                                  disabled={selectedSpiesCount >= armyState!.spies!.active}
+                                  onClick={() => setSelectedSpiesCount((prev) => Math.min(armyState!.spies!.active, prev + 1))}
+                                >
+                                  +
+                                </button>
+
+                                <button
+                                  type="button"
+                                  className="px-2 h-7 bg-sky-950 hover:bg-sky-900 text-sky-300 rounded border border-sky-700 text-[10px] font-bold cursor-pointer ml-auto"
+                                  onClick={() => setSelectedSpiesCount(armyState!.spies!.active)}
+                                >
+                                  Máx ({armyState!.spies!.active})
+                                </button>
+                              </div>
+
+                              {selectedCell.explorationPlan && (
+                                <div className="text-[10px] text-sky-300/90 pt-1.5 space-y-0.5 border-t border-sky-900/30">
+                                  <div className="flex justify-between items-center">
+                                    <span>Duración estimada:</span>
+                                    <span className="font-mono font-bold text-sky-100">
+                                      {Math.round((selectedCell.explorationPlan.durationSeconds / Math.sqrt(Math.min(armyState!.spies!.active, Math.max(1, selectedSpiesCount)))) / 60)} min
+                                      {selectedSpiesCount > 1 && (
+                                        <span className="text-emerald-400 ml-1 font-normal">(×{Math.sqrt(selectedSpiesCount).toFixed(2)})</span>
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                    <span>Provisiones requeridas:</span>
+                                    <span className="font-mono text-amber-300">
+                                      {selectedCell.explorationPlan.costs.gold} oro / {selectedCell.explorationPlan.costs.food} alimento
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+
+                              <button
+                                type="button"
+                                className={`${primaryButton} w-full py-2 font-bold text-xs shadow-lg shadow-sky-950/40`}
+                                disabled={action.busy !== null || (armyState?.spies?.active ?? 0) < 1}
+                                onClick={() => handleStartExploration(Math.min(armyState!.spies!.active, Math.max(1, selectedSpiesCount)))}
+                              >
+                                {action.busy === 'explore'
+                                  ? 'Enviando expedición…'
+                                  : `Confirmar y enviar (${Math.min(armyState!.spies!.active, Math.max(1, selectedSpiesCount))} espía${selectedSpiesCount > 1 ? 's' : ''})`}
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="text-amber-300 text-[10px] bg-amber-950/40 p-2.5 rounded border border-amber-900/50">
+                              No tienes espías profesionales disponibles en tu reino ({(armyState?.spies?.busy ?? 0) > 0 ? `${armyState?.spies?.busy} en misión` : 'sin agentes reclutados'}). Recluta espías en el Cuartel para iniciar nuevas expediciones.
+                            </p>
                           )}
                         </div>
                       ) : (

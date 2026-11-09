@@ -93,7 +93,8 @@ export function canStartExploration(input: {
   knownCellIds: ReadonlySet<string>;
   activeCellIds: ReadonlySet<string>;
   ownedCoords: ReadonlyArray<HexCoord>;
-  availableCivil: number;
+  availableCivil?: number;
+  availableSpies?: number;
   currentResources: { gold: number; food: number };
   activeExpeditionsCount: number;
   worldRadius?: number;
@@ -153,10 +154,11 @@ export function canStartExploration(input: {
   const durationSeconds = Math.ceil(durationMs / 1000);
   const costs: ExplorationCosts = civExploration.costs;
 
-  if (input.availableCivil < EXPLORATION.SCOUTS_REQUIRED) {
+  const spiesCount = (input as any).availableSpies ?? input.availableCivil ?? 0;
+  if (spiesCount < EXPLORATION.SCOUTS_REQUIRED) {
     return {
       success: false,
-      error: `Se requiere al menos ${EXPLORATION.SCOUTS_REQUIRED} ciudadano libre para formar la partida de exploradores (disponibles: ${input.availableCivil}).`,
+      error: `No tienes espías profesionales disponibles en tu reino (disponibles: ${spiesCount}). Recluta espías en el Cuartel.`,
     };
   }
 

@@ -144,6 +144,7 @@ interface ArmyState {
   };
   spies: {
     active: number;
+    busy?: number;
     inQueue: number;
     capacity: number;
     cuartelLevel: number;
@@ -840,12 +841,18 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
               <p className="text-xs text-[#8e816d]">Gestión de agentes infiltrados y descubrimiento de fronteras</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs font-mono text-sky-400">
-            <span className="bg-[#1d1710] px-2.5 py-1 rounded border border-sky-900/30">
-              {state.spies?.active ?? 0} agentes activos
+          <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+            <span className="bg-[#1d1710] text-[#e6ded0] px-2.5 py-1 rounded border border-[#3b3123]">
+              Totales: {(state.spies?.active ?? 0) + (state.spies?.busy ?? 0)}
             </span>
-            <span className="bg-[#1d1710] px-2.5 py-1 rounded border border-sky-900/30">
-              {state.spies?.inQueue ?? 0} en instrucción
+            <span className="bg-[#1d1710] text-emerald-400 px-2.5 py-1 rounded border border-emerald-900/40 font-bold">
+              Disponibles: {state.spies?.active ?? 0}
+            </span>
+            <span className="bg-[#1d1710] text-amber-400 px-2.5 py-1 rounded border border-amber-900/40">
+              Ocupados: {state.spies?.busy ?? 0}
+            </span>
+            <span className="bg-[#1d1710] text-sky-400 px-2.5 py-1 rounded border border-sky-900/30">
+              En instrucción: {state.spies?.inQueue ?? 0}
             </span>
           </div>
         </div>
@@ -853,14 +860,22 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
            <div className="space-y-3">
               <div className={`${cardClass} space-y-2 text-[11px] text-[#c7beac]`}>
-                <p><strong className="text-[#e6ded0]">Capacidad Agentes:</strong> Limitada por el nivel del Cuartel (1 por cada 2 niveles).</p>
+                <p><strong className="text-[#e6ded0]">Capacidad y Estado de Agentes:</strong> Limitada por el nivel del Cuartel (1 espía por cada 2 niveles).</p>
                 <div className="flex justify-between items-center bg-[#0c0a08] p-2 rounded border border-[#2b2419]">
                   <span className="text-[#8e816d]">Nivel Cuartel:</span>
                   <span className="text-amber-400 font-bold">{state.spies?.cuartelLevel ?? 0}</span>
                 </div>
                 <div className="flex justify-between items-center bg-[#0c0a08] p-2 rounded border border-[#2b2419]">
-                  <span className="text-[#8e816d]">Límite de Agentes:</span>
+                  <span className="text-[#8e816d]">Capacidad Máxima:</span>
                   <span className="text-sky-400 font-bold">{state.spies?.capacity ?? 0}</span>
+                </div>
+                <div className="flex justify-between items-center bg-[#0c0a08] p-2 rounded border border-[#2b2419]">
+                  <span className="text-[#8e816d]">Disponibles / Ocupados:</span>
+                  <span className="font-bold">
+                    <span className="text-emerald-400">{state.spies?.active ?? 0} libres</span>
+                    <span className="text-[#8e816d] mx-1.5">|</span>
+                    <span className="text-amber-400">{state.spies?.busy ?? 0} en misión</span>
+                  </span>
                 </div>
               </div>
               <p className="text-[10px] text-[#8e816d] italic">

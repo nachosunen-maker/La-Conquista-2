@@ -1176,7 +1176,7 @@ export const EXPLORATION = {
   /** Radio de visión inicial alrededor del territorio principal (distancia <= 1, 7 celdas conocidas) */
   INITIAL_SIGHT_RADIUS: 1,
   /** Límite de expediciones de exploración concurrentes por reino */
-  MAX_CONCURRENT_EXPEDITIONS: 1,
+  MAX_CONCURRENT_EXPEDITIONS: 50,
   /** Reembolso al cancelar expedición en curso (D-04, D-21: 50%) */
   CANCELLATION_REFUND_RATIO: 0.5,
 } as const;

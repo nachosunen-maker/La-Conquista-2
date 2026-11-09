@@ -20,7 +20,7 @@ import { v } from "convex/values";
 import { recordMissionEvent } from "./missions";
 import { isKingdomOwner, DEMO_USER_ID } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
-import { addUnits } from "./army";
+import { addUnits, readArmyUnitDocs } from "./army";
 import { EXPLORATION, MAP, TERRAINS, type TerrainType } from "./balanceConfig";
 import {
   canClaimTerritory,
@@ -573,7 +573,7 @@ export const getWorldMap = query({
             knownCellIds: knownIds,
             activeCellIds: new Set(activeExpeditionMap.keys()),
             ownedCoords,
-            availableCivil: 999,
+            availableSpies: 999,
             currentResources: { gold: 999999, food: 999999 },
             activeExpeditionsCount,
             worldRadius: MAP.RADIUS,
@@ -717,6 +717,7 @@ export const startExploration = mutation({
   args: {
     kingdomId: v.id("kingdoms"),
     cellId: v.string(),
+    spiesCount: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
@@ -733,8 +734,10 @@ export const startExploration = mutation({
       throw new Error("La celda indicada no existe en el mapa de La Conquista.");
     }
 
-    // 3. Recopilar celdas conocidas, activas y poseídas
-    const [ownedDocs, exploredDocs, activeQueue, populationDoc, completedTech] = await Promise.all([
+    const spiesCount = Math.max(1, args.spiesCount ?? 1);
+
+    // 3. Recopilar celdas conocidas, activas, unidades de ejército y tecnologías
+    const [ownedDocs, exploredDocs, activeQueue, units, completedTech] = await Promise.all([
       ctx.db
         .query("territories")
         .withIndex("by_owner", (q) => q.eq("ownerKingdomId", args.kingdomId))
@@ -747,14 +750,12 @@ export const startExploration = mutation({
         .query("explorationQueue")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
         .collect(),
-      ctx.db
-        .query("population")
-        .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
-        .first(),
+      readArmyUnitDocs(ctx, args.kingdomId),
       readCompletedTechnologyIds(ctx, args.kingdomId),
     ]);
 
     const hasSpy2Tech = completedTech.includes("spy_2");
+    const availableSpies = units.filter(u => u.isSpy || u.unitType === "espia").reduce((sum, u) => sum + Math.max(0, u.count ?? 0), 0);
 
     const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
     const initialSight = getInitialSightCellIds(homeCoord, EXPLORATION.INITIAL_SIGHT_RADIUS, MAP.RADIUS);
@@ -773,16 +774,14 @@ export const startExploration = mutation({
       food: settled.settledResources.food,
     };
 
-    const availableCivil = populationDoc?.available ?? 0;
-
-    // 5. Validar reglas puras de exploración
+    // 5. Validar reglas puras de exploración con espías profesionales
     const check = canStartExploration({
       targetCoord: { q: target.q, r: target.r },
       targetCellId: target.cellId,
       knownCellIds: knownSet,
       activeCellIds: activeSet,
       ownedCoords: ownedDocs.map((c) => ({ q: c.q, r: c.r })),
-      availableCivil,
+      availableSpies,
       currentResources,
       activeExpeditionsCount: activeQueue.length,
       worldRadius: MAP.RADIUS,
@@ -794,7 +793,16 @@ export const startExploration = mutation({
       throw new Error(check.error);
     }
 
+    if (availableSpies < spiesCount) {
+      throw new Error(`No tienes suficientes espías profesionales disponibles (solicitados: ${spiesCount}, disponibles: ${availableSpies}). Recluta espías en el Cuartel.`);
+    }
+
     const { plan } = check;
+
+    // Duración con colaboración multi-espía
+    const collaborationFactor = 1 / Math.sqrt(spiesCount);
+    const durationMs = Math.ceil(plan.durationMs * collaborationFactor);
+    const durationSeconds = Math.ceil(durationMs / 1000);
 
     // 6. Deducir costes de recursos de forma atómica
     await ctx.db.patch(settled.resources._id, {
@@ -802,15 +810,18 @@ export const startExploration = mutation({
       food: settled.settledResources.food - plan.costs.food,
     });
 
-    // 7. Reservar explorador de la población civil libre
-    if (populationDoc) {
-      await ctx.db.patch(populationDoc._id, {
-        available: Math.max(0, (populationDoc.available ?? 0) - plan.scoutsRequired),
-      });
+    // 7. Reservar espías profesionales del ejército
+    let remainingToDeduct = spiesCount;
+    for (const u of units) {
+      if ((u.isSpy || u.unitType === "espia") && (u.count ?? 0) > 0 && remainingToDeduct > 0) {
+        const take = Math.min(u.count, remainingToDeduct);
+        await ctx.db.patch(u._id, { count: u.count - take });
+        remainingToDeduct -= take;
+      }
     }
 
     // 8. Crear documento de expedición en cola
-    const completesAt = now + plan.durationMs;
+    const completesAt = now + durationMs;
     const expeditionId = await ctx.db.insert("explorationQueue", {
       kingdomId: args.kingdomId,
       cellId: args.cellId,
@@ -818,10 +829,11 @@ export const startExploration = mutation({
       targetR: target.r,
       distance: plan.distance,
       startedAt: now,
-      durationMs: plan.durationMs,
+      durationMs,
       completesAt,
-      scoutsCount: plan.scoutsRequired,
+      scoutsCount: spiesCount,
       costs: plan.costs,
+      isSpyMission: true,
     });
 
     // 9. Programar finalización autoritativa mediante el scheduler de Convex
@@ -834,8 +846,8 @@ export const startExploration = mutation({
       expeditionId,
       cellId: args.cellId,
       completesAt,
-      durationMs: plan.durationMs,
-      durationSeconds: plan.durationSeconds,
+      durationMs,
+      durationSeconds,
       distance: plan.distance,
       costs: plan.costs,
     };
