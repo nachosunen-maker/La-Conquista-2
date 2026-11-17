@@ -36,7 +36,8 @@ import {
   Loader2,
   Award,
   Sun,
-  ShieldAlert
+  ShieldAlert,
+  Gift
 } from 'lucide-react';
 import { 
   calculateSimulatedKingdomResources, 
@@ -46,7 +47,7 @@ import {
 import { constructionProgress } from '../convex/buildingRules';
 import { useConvexAuth, useAuthActions } from "@convex-dev/auth/react";
 import { DEMO_USER_ID } from '../convex/kingdomAccess';
-import { BUILDINGS, CIVILIZATIONS, DAILY_BONUS, PROFESSION_EFFECTS, REST_POLICIES } from '../convex/balanceConfig';
+import { BUILDINGS, CIVILIZATIONS, CONSTRUCTION, DAILY_BONUS, PROFESSION_EFFECTS, REST_POLICIES } from '../convex/balanceConfig';
 import { TabNavigation, type MainTab } from './components/TabNavigation';
 import { FoundingWizard } from './components/FoundingWizard';
 import { HomeScreen } from './components/HomeScreen';
@@ -237,6 +238,100 @@ const reassignPopulationJobMutation = makeFunctionReference<"mutation">("economy
 const getConstructionStateQuery = makeFunctionReference<"query">("kingdoms:getConstructionState");
 const startConstructionMutation = makeFunctionReference<"mutation">("kingdoms:startConstruction");
 const cancelConstructionMutation = makeFunctionReference<"mutation">("kingdoms:cancelConstruction");
+const getOutageCompensationStatusQuery = makeFunctionReference<"query">("compensation:getOutageCompensationStatus");
+const claimOutageCompensationMutation = makeFunctionReference<"mutation">("compensation:claimOutageCompensation");
+
+interface OutageCompensationStatus {
+  authenticated: boolean;
+  eligible: boolean;
+  campaignId: string;
+  status: "unclaimed" | "pending" | "claimed" | "excluded";
+  resources: { gold: number; wood: number; stone: number; iron: number; food: number };
+  hasFoundedKingdom: boolean;
+  claimedAt: number | null;
+  claimedKingdomId: string | null;
+}
+
+function OutageCompensationCard(props: {
+  status: OutageCompensationStatus | undefined;
+  kingdomId?: string;
+  onClaim: (kingdomId?: string) => Promise<void>;
+  busy: boolean;
+  feedback: string | null;
+  error: string | null;
+}) {
+  const { status, kingdomId, onClaim, busy, feedback, error } = props;
+  if (!status || !status.authenticated || status.status === "excluded") return null;
+
+  return (
+    <section className="bg-gradient-to-r from-[#1c160d] via-[#17130d] to-[#13100b] border border-[#d4af37]/40 rounded-xl p-4 shadow-md space-y-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-[#2a2012] border border-[#d4af37]/50 rounded-lg text-[#d4af37] flex-shrink-0">
+            <Gift className="w-5 h-5" />
+          </div>
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-serif font-bold text-[#f7f2e4] uppercase tracking-wider">
+                Compensación del Reino por Caída del Servicio
+              </h3>
+              {status.status === "claimed" && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-700/60 text-emerald-300">
+                  Ya acreditada
+                </span>
+              )}
+              {status.status === "pending" && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950/60 border border-sky-700/60 text-sky-300">
+                  Reservada para fundación
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-[#c7beac]">
+              Cada cuenta recibe por única vez{' '}
+              <strong className="text-[#d4af37]">
+                +30.000 oro, +30.000 madera, +30.000 piedra, +30.000 hierro y +30.000 alimentos
+              </strong>{' '}
+              sin recorte por capacidad de almacén.
+            </p>
+          </div>
+        </div>
+
+        {status.status === "unclaimed" && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onClaim(kingdomId)}
+            className="px-4 py-2 bg-[#d4af37] hover:bg-[#e5c158] text-[#110e0a] font-serif font-bold text-xs uppercase tracking-wider rounded-lg shadow transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer flex-shrink-0"
+          >
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gift className="w-3.5 h-3.5" />}
+            <span>{busy ? "Acreditando…" : kingdomId ? "Reclamar +30.000 recursos" : "Reservar compensación"}</span>
+          </button>
+        )}
+      </div>
+
+      {status.status === "pending" && (
+        <p className="text-[11px] text-sky-300 bg-sky-950/30 border border-sky-900/50 rounded-lg px-3 py-2">
+          Tu compensación ya está reservada en la cuenta y se acreditará automáticamente en cuanto completes la fundación de tu reino.
+        </p>
+      )}
+      {status.status === "claimed" && !feedback && (
+        <p className="text-[11px] text-emerald-300/90">
+          Compensación recibida{status.claimedAt ? ` el ${new Date(status.claimedAt).toLocaleString('es-ES')}` : ''}. No puede reclamarse de nuevo.
+        </p>
+      )}
+      {feedback && (
+        <p className="text-[11px] text-emerald-300 bg-emerald-950/40 border border-emerald-800/50 rounded-lg px-3 py-2">
+          {feedback}
+        </p>
+      )}
+      {error && (
+        <p className="text-[11px] text-rose-300 bg-rose-950/40 border border-rose-800/50 rounded-lg px-3 py-2">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
 
 /* ==========================================================================
    SESIÓN (sección 5 de CLAUDE.md): nombre del gobernante y cerrar sesión.
@@ -684,6 +779,10 @@ function KingdomOverviewContent() {
     getParliamentBadgeQuery,
     kingdom ? { kingdomId: kingdom._id as any } : "skip"
   ) as { badgeCount: number } | undefined;
+  const outageCompStatus = useQuery(
+    getOutageCompensationStatusQuery,
+    isAuthenticated && viewer ? {} : "skip"
+  ) as OutageCompensationStatus | undefined;
 
   // Mutaciones autoritativas del Bloque B.8
   const settleKingdomEconomy = useMutation(settleKingdomEconomyMutation);
@@ -693,6 +792,27 @@ function KingdomOverviewContent() {
   const startConstruction = useMutation(startConstructionMutation);
   const bootstrapInitialBuildings = useMutation(bootstrapInitialBuildingsMutation);
   const ensureMyHomeTerritory = useMutation(ensureMyHomeTerritoryMutation);
+  const claimOutageCompensation = useMutation(claimOutageCompensationMutation);
+
+  const [compBusy, setCompBusy] = useState(false);
+  const [compFeedback, setCompFeedback] = useState<string | null>(null);
+  const [compError, setCompError] = useState<string | null>(null);
+
+  const handleClaimOutageCompensation = async (targetKingdomId?: string) => {
+    setCompBusy(true);
+    setCompError(null);
+    setCompFeedback(null);
+    try {
+      const res: any = await claimOutageCompensation(
+        targetKingdomId ? { kingdomId: targetKingdomId as any } : {}
+      );
+      setCompFeedback(res?.message ?? 'Compensación aplicada.');
+    } catch (err) {
+      setCompError(normalizeErrorMessage(err));
+    } finally {
+      setCompBusy(false);
+    }
+  };
 
   // Verificación estricta de titularidad en el servidor (P1)
   const isOwner = Boolean(
@@ -1253,6 +1373,17 @@ function KingdomOverviewContent() {
               </div>
             )}
           </div>
+          {viewer && (
+            <div className="max-w-3xl mx-auto">
+              <OutageCompensationCard
+                status={outageCompStatus}
+                onClaim={handleClaimOutageCompensation}
+                busy={compBusy}
+                feedback={compFeedback}
+                error={compError}
+              />
+            </div>
+          )}
           <FoundingWizard 
             defaultMonarchName={viewer?.rulerName ?? ''} 
             onFounded={() => setActiveTab('aldea')} 
@@ -1436,6 +1567,16 @@ function KingdomOverviewContent() {
       )}
 
       {activeTab === 'aldea' && (<>
+      {isOwner && (
+        <OutageCompensationCard
+          status={outageCompStatus}
+          kingdomId={kingdom._id}
+          onClaim={handleClaimOutageCompensation}
+          busy={compBusy}
+          feedback={compFeedback}
+          error={compError}
+        />
+      )}
       <MissionsPanel kingdomId={kingdom._id} isOwner={isOwner} />
       {/* ====================================================================
           2. PANEL DE RECURSOS DEL REINO (5 RECURSOS PRIMARIOS)
@@ -2374,7 +2515,7 @@ function KingdomOverviewContent() {
                   const label = entry?.label ?? staticConfig?.label ?? type;
 
                   const currentLevel = entry?.currentLevel ?? constructionState?.buildingLevels?.[type] ?? 0;
-                  const nextLevel = entry?.nextLevel ?? (currentLevel < 100 ? currentLevel + 1 : null);
+                  const nextLevel = entry?.nextLevel ?? (currentLevel < CONSTRUCTION.MAX_LEVEL ? currentLevel + 1 : null);
 
                   const activeConstruction = constructionState?.constructionQueue.find((c) => c.buildingType === type);
 
@@ -2392,7 +2533,7 @@ function KingdomOverviewContent() {
                     }
                   }
                   if (nextLevel === null) {
-                    blockers.push('nivel máximo alcanzado (100)');
+                    blockers.push(`nivel máximo alcanzado (${CONSTRUCTION.MAX_LEVEL})`);
                   }
 
                   const canStart = isOwner && blockers.length === 0 && !activeConstruction;
@@ -2446,7 +2587,7 @@ function KingdomOverviewContent() {
                             </span>
                           ) : nextLevel === null ? (
                             <span className="text-[10px] text-[#d4af37] bg-[#221c10] border border-[#d4af37]/40 px-2 py-0.5 rounded font-semibold">
-                              Máximo (100)
+                              Máximo ({CONSTRUCTION.MAX_LEVEL})
                             </span>
                           ) : blockers.length > 0 ? (
                             <span className="text-[10px] text-amber-400 bg-amber-950/30 border border-amber-800/40 px-2 py-0.5 rounded">

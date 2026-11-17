@@ -4,17 +4,20 @@
  * Sin acceso a Convex.
  */
 import {
+  CIVILIZATION_ZONES,
   FATIGUE,
   FATIGUE_TABLE,
   FOOD,
   MAP,
   MARCH,
   TERRAINS,
+  TERRITORIES,
   TIME,
   UNITS,
   type TerrainType,
   type UnitType,
 } from "./balanceConfig";
+import { normalizeCivilizationId } from "./civilizationRules";
 
 export interface HexCoord {
   q: number;
@@ -107,31 +110,299 @@ export function generateWorldCells(radius: number = MAP.RADIUS, seed: number = M
   return cells;
 }
 
+export interface ExistingKingdomSpawn {
+  q: number;
+  r: number;
+  civilization?: string | null;
+}
+
+export interface SpawnPlacementOptions {
+  civilization?: string | null;
+  existingKingdoms?: ReadonlyArray<ExistingKingdomSpawn>;
+  separationMin?: number;
+  separationMax?: number;
+  preferCenterIfEmpty?: boolean;
+}
+
+export interface SpawnPlacementDiagnostics {
+  cell: WorldCell | null;
+  civilization: string | null;
+  zoneAnchor: HexCoord | null;
+  zoneLabel: string | null;
+  nearestDistance: number | null;
+  distanceToAnchor: number | null;
+  withinTargetBand: boolean;
+  strictPackingImpossible: boolean;
+  reason: string;
+}
+
+export interface WorldSpawnGeometryAnalysis {
+  radius: number;
+  totalCells: number;
+  diameter: number;
+  separationMin: number;
+  separationMax: number;
+  greedyPackingMaxAtMinSeparation: number;
+  exclusiveDiskCellsAtHalfSep: number;
+  areaUpperBoundAtMinSeparation: number;
+  sameCivClusterMaxAtBand30: number;
+  notes: string;
+}
+
 /**
- * [DERIVADO de D-25] Territorio principal de un reino nuevo: el centro si está libre; si no,
- * la celda libre que maximiza la distancia mínima a los territorios principales existentes
- * (desempate por identificador), para repartir los reinos por el mapa de forma reproducible.
+ * Demostración geométrica verificable de empaquetamiento hexagonal sobre un disco de radio R.
+ * Calcula cota superior por área (discos disjuntos de radio floor((minSep-1)/2)) y cota constructiva greedy.
+ */
+export function analyzeWorldSpawnGeometry(
+  radius: number = MAP.RADIUS,
+  separationMin: number = TERRITORIES.SPAWN_SEPARATION_MIN,
+  separationMax: number = TERRITORIES.SPAWN_SEPARATION_MAX
+): WorldSpawnGeometryAnalysis {
+  const totalCells = 1 + 3 * radius * (radius + 1);
+  const diameter = 2 * radius;
+  const halfRadius = Math.max(0, Math.floor((separationMin - 1) / 2));
+  const exclusiveDiskCellsAtHalfSep = 1 + 3 * halfRadius * (halfRadius + 1);
+  const areaUpperBoundAtMinSeparation = Math.floor(totalCells / exclusiveDiskCellsAtHalfSep);
+
+  // Empaquetamiento constructivo en orden espiral/axial sobre el disco completo
+  const placed: HexCoord[] = [];
+  for (let q = -radius; q <= radius; q++) {
+    for (let r = Math.max(-radius, -q - radius); r <= Math.min(radius, -q + radius); r++) {
+      const candidate = { q, r };
+      if (placed.every((p) => hexDistance(candidate, p) >= separationMin)) {
+        placed.push(candidate);
+      }
+    }
+  }
+
+  // En una subregión de diámetro <= separationMax (radio <= separationMax / 2 = 15),
+  // cuántas capitales caben manteniendo distancia mutua >= separationMin (20):
+  const clusterRadius = Math.floor(separationMax / 2);
+  const clusterPlaced: HexCoord[] = [];
+  for (let q = -clusterRadius; q <= clusterRadius; q++) {
+    for (let r = Math.max(-clusterRadius, -q - clusterRadius); r <= Math.min(clusterRadius, -q + clusterRadius); r++) {
+      const candidate = { q, r };
+      if (clusterPlaced.every((p) => hexDistance(candidate, p) >= separationMin)) {
+        clusterPlaced.push(candidate);
+      }
+    }
+  }
+
+  return {
+    radius,
+    totalCells,
+    diameter,
+    separationMin,
+    separationMax,
+    greedyPackingMaxAtMinSeparation: placed.length,
+    exclusiveDiskCellsAtHalfSep,
+    areaUpperBoundAtMinSeparation,
+    sameCivClusterMaxAtBand30: clusterPlaced.length,
+    notes:
+      `En radio ${radius} (${totalCells} celdas, diámetro ${diameter}), cada reino con separación >= ${separationMin} ` +
+      `reserva al menos un disco exclusivo de radio ${halfRadius} (${exclusiveDiskCellsAtHalfSep} celdas): cota superior absoluta ~${areaUpperBoundAtMinSeparation} ` +
+      `reinos y empaquetamiento constructivo ${placed.length}. Además, dentro de una zona de diámetro ${separationMax} solo caben ` +
+      `${clusterPlaced.length} reinos con d >= ${separationMin} mutua; a partir de ese umbral resulta matemáticamente imposible satisfacer ` +
+      `a la vez separación >= ${separationMin}, distancia <= ${separationMax} y agrupación compacta en la misma zona.`,
+  };
+}
+
+/**
+ * Selecciona la casilla inicial con agrupación geográfica por civilización y banda objetivo [20, 30] hexágonos.
+ * Si no se pasa `options`, mantiene el comportamiento histórico para compatibilidad de pruebas heredadas.
+ */
+export function chooseHomeCellWithDiagnostics(
+  cells: ReadonlyArray<WorldCell>,
+  occupiedCellIds: ReadonlySet<string>,
+  existingHomes: ReadonlyArray<HexCoord>,
+  options?: SpawnPlacementOptions
+): SpawnPlacementDiagnostics {
+  const free = cells.filter((cell) => !occupiedCellIds.has(cell.cellId));
+  if (free.length === 0) {
+    return {
+      cell: null,
+      civilization: normalizeCivilizationId(options?.civilization),
+      zoneAnchor: null,
+      zoneLabel: null,
+      nearestDistance: null,
+      distanceToAnchor: null,
+      withinTargetBand: false,
+      strictPackingImpossible: true,
+      reason: "No hay casillas libres disponibles en el mapa.",
+    };
+  }
+
+  if (!options) {
+    if (existingHomes.length === 0) {
+      const center = free.find((cell) => cell.q === 0 && cell.r === 0) ?? free[0];
+      return {
+        cell: center,
+        civilization: null,
+        zoneAnchor: { q: 0, r: 0 },
+        zoneLabel: "Centro del mundo",
+        nearestDistance: null,
+        distanceToAnchor: hexDistance(center, { q: 0, r: 0 }),
+        withinTargetBand: true,
+        strictPackingImpossible: false,
+        reason: "Casilla central asignada al primer reino.",
+      };
+    }
+    let best: WorldCell | null = null;
+    let bestScore = -1;
+    for (const cell of free) {
+      const score = Math.min(...existingHomes.map((home) => hexDistance(cell, home)));
+      if (score > bestScore || (score === bestScore && best && cell.cellId < best.cellId)) {
+        best = cell;
+        bestScore = score;
+      }
+    }
+    return {
+      cell: best,
+      civilization: null,
+      zoneAnchor: null,
+      zoneLabel: null,
+      nearestDistance: bestScore,
+      distanceToAnchor: null,
+      withinTargetBand: bestScore >= TERRITORIES.SPAWN_SEPARATION_MIN && bestScore <= TERRITORIES.SPAWN_SEPARATION_MAX,
+      strictPackingImpossible: false,
+      reason: "Asignación heredada por distancia máxima mínima.",
+    };
+  }
+
+  const normCiv = normalizeCivilizationId(options.civilization);
+  const zone = normCiv ? CIVILIZATION_ZONES[normCiv] ?? null : null;
+  const anchor: HexCoord | null = zone ? { q: zone.q, r: zone.r } : null;
+  const minSep = options.separationMin ?? TERRITORIES.SPAWN_SEPARATION_MIN;
+  const maxSep = options.separationMax ?? TERRITORIES.SPAWN_SEPARATION_MAX;
+  const idealMid = (minSep + maxSep) / 2;
+
+  const existing: ReadonlyArray<ExistingKingdomSpawn> = options.existingKingdoms && options.existingKingdoms.length > 0
+    ? options.existingKingdoms
+    : existingHomes.map((h) => ({ q: h.q, r: h.r, civilization: null }));
+
+  if (existing.length === 0) {
+    const targetRef: HexCoord = options.preferCenterIfEmpty || !anchor ? { q: 0, r: 0 } : anchor;
+    let best = free[0];
+    let bestAnchorDist = hexDistance(best, targetRef);
+    for (const cell of free) {
+      const d = hexDistance(cell, targetRef);
+      if (d < bestAnchorDist || (d === bestAnchorDist && cell.cellId < best.cellId)) {
+        best = cell;
+        bestAnchorDist = d;
+      }
+    }
+    return {
+      cell: best,
+      civilization: normCiv,
+      zoneAnchor: options.preferCenterIfEmpty ? { q: 0, r: 0 } : anchor,
+      zoneLabel: options.preferCenterIfEmpty ? "Centro del mundo" : (zone?.label ?? null),
+      nearestDistance: null,
+      distanceToAnchor: bestAnchorDist,
+      withinTargetBand: true,
+      strictPackingImpossible: false,
+      reason: options.preferCenterIfEmpty
+        ? "Primer reino asignado al centro del mundo."
+        : zone
+          ? `Primer reino asignado a su zona geográfica (${zone.label}).`
+          : "Primer reino asignado al centro.",
+    };
+  }
+
+  const sameCiv = normCiv
+    ? existing.filter((k) => normalizeCivilizationId(k.civilization) === normCiv)
+    : [];
+
+  let bestFeasible: { cell: WorldCell; cost: number; nearest: number; anchorDist: number; inBand: boolean } | null = null;
+  let bestFallback: { cell: WorldCell; nearest: number; anchorDist: number } | null = null;
+
+  for (const cell of free) {
+    let nearest = Infinity;
+    for (const k of existing) {
+      const d = hexDistance(cell, k);
+      if (d < nearest) nearest = d;
+    }
+
+    const anchorDist = anchor ? hexDistance(cell, anchor) : 0;
+
+    if (nearest < minSep) {
+      if (
+        !bestFallback ||
+        nearest > bestFallback.nearest ||
+        (nearest === bestFallback.nearest && anchorDist < bestFallback.anchorDist) ||
+        (nearest === bestFallback.nearest && anchorDist === bestFallback.anchorDist && cell.cellId < bestFallback.cell.cellId)
+      ) {
+        bestFallback = { cell, nearest, anchorDist };
+      }
+      continue;
+    }
+
+    const inBand = nearest >= minSep && nearest <= maxSep;
+    let cost = 0;
+
+    if (sameCiv.length > 0) {
+      let nearestSame = Infinity;
+      for (const k of sameCiv) {
+        const d = hexDistance(cell, k);
+        if (d < nearestSame) nearestSame = d;
+      }
+      const sameBandPenalty = nearestSame <= maxSep ? 0 : (nearestSame - maxSep) * 4;
+      cost = sameBandPenalty + anchorDist * 1.5 + Math.abs(nearestSame - idealMid) * 0.5;
+    } else if (anchor) {
+      const farPenalty = nearest <= maxSep ? 0 : (nearest - maxSep) * 0.1;
+      cost = anchorDist * 2 + farPenalty;
+    } else {
+      const bandPenalty = inBand ? 0 : Math.abs(nearest - idealMid) * 2;
+      cost = bandPenalty + Math.abs(nearest - idealMid) * 0.25;
+    }
+
+    if (
+      !bestFeasible ||
+      cost < bestFeasible.cost ||
+      (cost === bestFeasible.cost && cell.cellId < bestFeasible.cell.cellId)
+    ) {
+      bestFeasible = { cell, cost, nearest, anchorDist, inBand };
+    }
+  }
+
+  if (bestFeasible) {
+    return {
+      cell: bestFeasible.cell,
+      civilization: normCiv,
+      zoneAnchor: anchor,
+      zoneLabel: zone?.label ?? null,
+      nearestDistance: bestFeasible.nearest,
+      distanceToAnchor: bestFeasible.anchorDist,
+      withinTargetBand: bestFeasible.inBand,
+      strictPackingImpossible: !bestFeasible.inBand && sameCiv.length > 0,
+      reason: bestFeasible.inBand
+        ? `Ubicado dentro de la banda objetivo [${minSep}, ${maxSep}] hexágonos` + (zone ? ` en ${zone.label}.` : ".")
+        : `Separación mínima >= ${minSep} preservada; banda <= ${maxSep} saturada o incompatible con ancla regional distante.`,
+    };
+  }
+
+  return {
+    cell: bestFallback?.cell ?? null,
+    civilization: normCiv,
+    zoneAnchor: anchor,
+    zoneLabel: zone?.label ?? null,
+    nearestDistance: bestFallback?.nearest ?? null,
+    distanceToAnchor: bestFallback?.anchorDist ?? null,
+    withinTargetBand: false,
+    strictPackingImpossible: true,
+    reason: `Saturación espacial del mapa: no existen casillas libres con separación >= ${minSep}; se eligió la máxima separación disponible (${bestFallback?.nearest ?? 0}).`,
+  };
+}
+
+/**
+ * [DERIVADO de D-25] Territorio principal de un reino nuevo.
  */
 export function chooseHomeCell(
   cells: ReadonlyArray<WorldCell>,
   occupiedCellIds: ReadonlySet<string>,
-  existingHomes: ReadonlyArray<HexCoord>
+  existingHomes: ReadonlyArray<HexCoord>,
+  options?: SpawnPlacementOptions
 ): WorldCell | null {
-  const free = cells.filter((cell) => !occupiedCellIds.has(cell.cellId));
-  if (free.length === 0) return null;
-  if (existingHomes.length === 0) {
-    return free.find((cell) => cell.q === 0 && cell.r === 0) ?? free[0];
-  }
-  let best: WorldCell | null = null;
-  let bestScore = -1;
-  for (const cell of free) {
-    const score = Math.min(...existingHomes.map((home) => hexDistance(cell, home)));
-    if (score > bestScore || (score === bestScore && best && cell.cellId < best.cellId)) {
-      best = cell;
-      bestScore = score;
-    }
-  }
-  return best;
+  return chooseHomeCellWithDiagnostics(cells, occupiedCellIds, existingHomes, options).cell;
 }
 
 /** [MAESTRA P48] Tras una victoria aplastante se reclama un territorio libre CERCANO: a distancia ≤ 2 de uno propio ([DERIVADO]). */
@@ -142,12 +413,22 @@ export function canClaimTerritory(input: {
   ownedCells: ReadonlyArray<HexCoord>;
   pendingClaims: number;
   exploredCellIds?: ReadonlySet<string>;
+  ownedCount?: number;
+  maxTerritories?: number;
 }): { success: true } | { success: false; error: string } {
+  const maxTerritories = input.maxTerritories ?? TERRITORIES.MAX_PER_KINGDOM;
+  const ownedCount = input.ownedCount ?? input.ownedCells.length;
   if (!Number.isInteger(input.pendingClaims) || input.pendingClaims < 1) {
     return { success: false, error: "No tienes reclamaciones territoriales pendientes; se obtienen con victorias aplastantes (P47)." };
   }
   if (input.target.ownerKingdomId) {
     return { success: false, error: "El territorio ya tiene propietario; no se arrebatan territorios ocupados (P48)." };
+  }
+  if (ownedCount >= maxTerritories) {
+    return {
+      success: false,
+      error: `Has alcanzado el límite máximo de ${maxTerritories} territorios por reino (actuales: ${ownedCount}).`,
+    };
   }
   if (input.exploredCellIds && !input.exploredCellIds.has(input.target.cellId)) {
     return { success: false, error: "Debes explorar y cartografiar este territorio antes de poder reclamarlo (P22/P49)." };
@@ -162,10 +443,110 @@ export function canClaimTerritory(input: {
   return { success: true };
 }
 
+export interface CleanupCandidateCell {
+  id: string;
+  cellId: string;
+  q: number;
+  r: number;
+  isHome?: boolean;
+  claimedAt?: number;
+}
+
+export interface TerritoryCapCleanupPlan {
+  capitalCellId: string;
+  totalOwned: number;
+  maxAllowed: number;
+  keptCellIds: string[];
+  releasedCellIds: string[];
+  releasedCells: CleanupCandidateCell[];
+  skipped: boolean;
+  reason?: string;
+}
+
+/**
+ * Planificador puro, determinista e idempotente para sanear reinos que excedan el tope de territorios.
+ * Conserva la capital canónica y las (maxAllowed - 1) casillas más cercanas por distancia hexagonal.
+ */
+export function planTerritoryCapCleanup(input: {
+  ownedCells: ReadonlyArray<CleanupCandidateCell>;
+  homeTerritoryId?: string | null;
+  maxAllowed?: number;
+}): TerritoryCapCleanupPlan {
+  const maxAllowed = input.maxAllowed ?? TERRITORIES.MAX_PER_KINGDOM;
+  const cells = [...input.ownedCells];
+  if (cells.length === 0) {
+    return {
+      capitalCellId: input.homeTerritoryId ?? "",
+      totalOwned: 0,
+      maxAllowed,
+      keptCellIds: [],
+      releasedCellIds: [],
+      releasedCells: [],
+      skipped: true,
+      reason: "Sin territorios propios.",
+    };
+  }
+
+  const sortedForCapital = [...cells].sort((a, b) => {
+    const aHomeId = input.homeTerritoryId && a.cellId === input.homeTerritoryId ? 0 : 1;
+    const bHomeId = input.homeTerritoryId && b.cellId === input.homeTerritoryId ? 0 : 1;
+    if (aHomeId !== bHomeId) return aHomeId - bHomeId;
+    const aIsHome = a.isHome ? 0 : 1;
+    const bIsHome = b.isHome ? 0 : 1;
+    if (aIsHome !== bIsHome) return aIsHome - bIsHome;
+    const distA = hexDistance(a, { q: 0, r: 0 });
+    const distB = hexDistance(b, { q: 0, r: 0 });
+    if (distA !== distB) return distA - distB;
+    const claimedA = typeof a.claimedAt === "number" ? a.claimedAt : Number.MAX_SAFE_INTEGER;
+    const claimedB = typeof b.claimedAt === "number" ? b.claimedAt : Number.MAX_SAFE_INTEGER;
+    if (claimedA !== claimedB) return claimedA - claimedB;
+    return a.cellId.localeCompare(b.cellId);
+  });
+
+  const capital = sortedForCapital[0];
+  if (cells.length <= maxAllowed) {
+    return {
+      capitalCellId: capital.cellId,
+      totalOwned: cells.length,
+      maxAllowed,
+      keptCellIds: cells.map((c) => c.cellId),
+      releasedCellIds: [],
+      releasedCells: [],
+      skipped: true,
+      reason: "Dentro del límite territorial.",
+    };
+  }
+
+  const others = cells
+    .filter((c) => c.cellId !== capital.cellId)
+    .sort((a, b) => {
+      const distA = hexDistance(capital, a);
+      const distB = hexDistance(capital, b);
+      if (distA !== distB) return distA - distB;
+      const claimedA = typeof a.claimedAt === "number" ? a.claimedAt : Number.MAX_SAFE_INTEGER;
+      const claimedB = typeof b.claimedAt === "number" ? b.claimedAt : Number.MAX_SAFE_INTEGER;
+      if (claimedA !== claimedB) return claimedA - claimedB;
+      return a.cellId.localeCompare(b.cellId);
+    });
+
+  const keepCount = Math.max(0, maxAllowed - 1);
+  const kept = [capital, ...others.slice(0, keepCount)];
+  const released = others.slice(keepCount);
+
+  return {
+    capitalCellId: capital.cellId,
+    totalOwned: cells.length,
+    maxAllowed,
+    keptCellIds: kept.map((c) => c.cellId),
+    releasedCellIds: released.map((c) => c.cellId),
+    releasedCells: released,
+    skipped: false,
+  };
+}
+
 // ----------------------------------------------------------------------------
 // Marcha y fatiga (P41, P32, D-26)
 // ----------------------------------------------------------------------------
-import { normalizeCivilizationId } from "./civilizationRules";
 
 export function terrainMarchMultiplier(terrain: TerrainType): number {
   return TERRAINS[terrain]?.marchMultiplier ?? 1;

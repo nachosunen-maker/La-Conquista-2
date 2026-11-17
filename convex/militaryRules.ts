@@ -22,14 +22,14 @@
 
 import type { ResourceType } from "./economyCalculations";
 import { getCivilizationPassive, civilizationTrainingDurationMultiplier } from "./civilizationRules";
-import { UNITS, UNIT_TYPES, resourceNameSpanish, type UnitType } from "./balanceConfig";
+import { UNITS, REGULAR_UNIT_TYPES, resourceNameSpanish, type RegularUnitType, type UnitType } from "./balanceConfig";
 
-export const VALID_MILITARY_UNIT_TYPES = UNIT_TYPES;
+export const VALID_MILITARY_UNIT_TYPES = REGULAR_UNIT_TYPES;
 
-export type MilitaryUnitType = UnitType;
+export type MilitaryUnitType = RegularUnitType;
 
 export function isValidMilitaryUnitType(type: string): type is MilitaryUnitType {
-  return (UNIT_TYPES as readonly string[]).includes(type);
+  return (REGULAR_UNIT_TYPES as readonly string[]).includes(type);
 }
 
 export const MILITARY_TIER_EFFICIENCY: Readonly<Record<number, number>> = {

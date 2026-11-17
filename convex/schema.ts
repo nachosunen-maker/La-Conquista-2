@@ -360,6 +360,25 @@ export default defineSchema({
       failedAttempts: v.number(),
       lockedUntil: v.optional(v.number()),
     }).index("by_user", ["userId"]),
+
+    // Compensación extraordinaria por caída de la plataforma: 1 reclamación atómica por cuenta (userId).
+    outageCompensations: defineTable({
+      userId: v.string(),
+      campaignId: v.string(),
+      status: v.union(v.literal("pending"), v.literal("claimed")),
+      resources: v.object({
+        gold: v.number(),
+        wood: v.number(),
+        stone: v.number(),
+        iron: v.number(),
+        food: v.number(),
+      }),
+      claimedKingdomId: v.optional(v.id("kingdoms")),
+      createdAt: v.number(),
+      claimedAt: v.optional(v.number()),
+    })
+      .index("by_user", ["userId"])
+      .index("by_user_and_campaign", ["userId", "campaignId"]),
   },
   {
     schemaValidation: false,

@@ -199,8 +199,8 @@ export const BUILDINGS: Readonly<Record<string, BuildingBalance>> = {
 };
 
 export const CONSTRUCTION = {
-  /** [COMPLEMENTO §1, confirmado] Nivel máximo técnico. */
-  MAX_LEVEL: 100,
+  /** [COMPLEMENTO §1, ampliado] Nivel máximo técnico de edificios. */
+  MAX_LEVEL: 200,
   /** [COMPLEMENTO §1, confirmado] Obras simultáneas. */
   MAX_CONCURRENT: 2,
   /** [MAESTRA P22] +1 % de duración por nivel. */
@@ -274,6 +274,29 @@ export const UNIT_TYPES: readonly UnitType[] = [
   "torres_asalto",
   "espia",
 ];
+
+export type RegularUnitType = Exclude<UnitType, "espia">;
+
+export const REGULAR_UNIT_TYPES: readonly RegularUnitType[] = [
+  "infanteria",
+  "arqueria",
+  "caballeria",
+  "asedio",
+  "onagro_campana",
+  "carrobalista",
+  "espringarda_movil",
+  "trabuchet_traccion",
+  "arcuballista",
+  "fustibalo_campo",
+  "mangonel_tactico",
+  "carros_artillados",
+  "ariete_movil",
+  "torres_asalto",
+];
+
+export function isRegularUnitType(value: string): value is RegularUnitType {
+  return (REGULAR_UNIT_TYPES as readonly string[]).includes(value);
+}
 
 export interface UnitBalance {
   label: string;
@@ -1144,9 +1167,9 @@ export const TERRAINS: Readonly<Record<TerrainType, TerrainBalance>> = {
 };
 
 export const MAP = {
-  /** [MAPA REDUCIDO] Mapa hexagonal axial de radio 25 alrededor del centro: exactamente 1.951 celdas (N = 1 + 3r(r+1)). */
-  RADIUS: 25,
-  MAX_CELLS: 1_951,
+  /** [MAESTRA / COMPLEMENTO D-23] Mapa hexagonal axial de radio 50 alrededor del centro: exactamente 7.651 celdas (N = 1 + 3r(r+1)). */
+  RADIUS: 50,
+  MAX_CELLS: 7_651,
   /** [HISTÓRICO] Radio original y celdas antes de la ampliación. */
   HISTORICAL_RADIUS: 10,
   HISTORICAL_CELLS: 331,
@@ -1154,6 +1177,44 @@ export const MAP = {
   MARCH_SECONDS_PER_HEX: 1_800,
   /** [DERIVADO] Semilla de mundo reproducible para asignar terrenos (D-25). */
   WORLD_SEED: 20261017,
+} as const;
+
+export const TERRITORIES = {
+  /** Límite estricto de territorios poseídos por reino (incluye la capital). */
+  MAX_PER_KINGDOM: 100,
+  /** Separación objetivo entre reinos al fundar (hexágonos). */
+  SPAWN_SEPARATION_MIN: 20,
+  SPAWN_SEPARATION_MAX: 30,
+} as const;
+
+/**
+ * Zonas geográficas canónicas de aparición para las 12 civilizaciones en el disco de radio 50.
+ * Todas las anclas quedan a distancia <= 42 del origen para dejar margen de agrupación sin salirse del mapa.
+ */
+export const CIVILIZATION_ZONES: Readonly<Record<string, { q: number; r: number; label: string }>> = {
+  ingleses: { q: 34, r: 0, label: "Islas Occidentales" },
+  romanos: { q: 0, r: 34, label: "Lacio Meridional" },
+  griegos: { q: -34, r: 34, label: "Archipiélago Egeo" },
+  vikingos: { q: -34, r: 0, label: "Fiordos del Norte" },
+  bizantinos: { q: 0, r: -34, label: "Estrecho Oriental" },
+  arabes: { q: 34, r: -34, label: "Desierto del Levante" },
+  mongoles: { q: 21, r: 21, label: "Estepa Alta" },
+  chinos: { q: -21, r: 42, label: "Valles del Río Amarillo" },
+  japoneses: { q: -42, r: 21, label: "Archipiélago del Sol Naciente" },
+  navajos: { q: -21, r: -21, label: "Cañones del Poniente" },
+  aztecas: { q: 21, r: -42, label: "Altiplano del Anáhuac" },
+  masais: { q: 42, r: -21, label: "Sabana del Rift" },
+};
+
+export const OUTAGE_COMPENSATION = {
+  CAMPAIGN_ID: "outage_2026_general_v1",
+  RESOURCES: {
+    gold: 30_000,
+    wood: 30_000,
+    stone: 30_000,
+    iron: 30_000,
+    food: 30_000,
+  },
 } as const;
 
 export const MARCH = {

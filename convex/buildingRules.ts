@@ -221,10 +221,10 @@ export function validateConstructionCompletion(input: {
 /**
  * [EXCEPCIÓN VIVIENDAS] Regla de progresión para el nivel máximo de cada edificio
  * según el nivel del Castillo:
- * - Castillo (el propio edificio): sin límite por el Castillo (hasta MAX_BUILDING_LEVEL = 100).
+ * - Castillo (el propio edificio): sin límite por el Castillo (hasta MAX_BUILDING_LEVEL = 200).
  * - Viviendas: nivel inicial 20. Para Castillo <= 2, el máximo es 20 (no se permite mejorar).
- *   Para Castillo >= 3, nivel máximo = nivel del Castillo + 18.
- * - Resto de edificios (D-05): nivel máximo = nivel del Castillo.
+ *   Para Castillo >= 3, nivel máximo = min(MAX_BUILDING_LEVEL, nivel del Castillo + 18).
+ * - Resto de edificios (D-05): nivel máximo = min(MAX_BUILDING_LEVEL, nivel del Castillo).
  */
 export function getMaxAllowedBuildingLevel(buildingType: string, castleLevel: number): number {
   if (buildingType === "castillo") {
@@ -232,11 +232,11 @@ export function getMaxAllowedBuildingLevel(buildingType: string, castleLevel: nu
   }
   if (buildingType === "viviendas") {
     if (castleLevel <= 2) {
-      return 20;
+      return Math.min(MAX_BUILDING_LEVEL, 20);
     }
-    return castleLevel + 18;
+    return Math.min(MAX_BUILDING_LEVEL, castleLevel + 18);
   }
-  return castleLevel;
+  return Math.min(MAX_BUILDING_LEVEL, castleLevel);
 }
 
 export function createConstructionPlan(input: {

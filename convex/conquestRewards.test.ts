@@ -72,8 +72,14 @@ describe("SISTEMA DE RECOMPENSAS Y BONIFICACIONES DE CONQUISTA", () => {
       return kId;
     });
 
-    // Reclamar territorio libre adyacente
-    await t.mutation(api.territories.claimFreeTerritory, { kingdomId, cellId: "1,0" });
+    // Reclamar territorio libre adyacente con identidad verificada del propietario
+    await t
+      .withIdentity({
+        subject: userId,
+        tokenIdentifier: `https://accounts.google.com|${userId}`,
+        issuer: "https://accounts.google.com",
+      })
+      .mutation(api.territories.claimFreeTerritory, { kingdomId, cellId: "1,0" });
 
     const updatedKingdom = await t.run(async (ctx) => await ctx.db.get(kingdomId));
     expect(updatedKingdom!.glory).toBe(11); // +1 gloria

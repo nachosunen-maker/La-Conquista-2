@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 
 import { StatusMessages, isInsufficientError, getNormalizedResourceMessage, normalizeErrorMessage, useActionState } from './shared';
+import { CONSTRUCTION } from '../../convex/balanceConfig';
 
 const getBuildingsAndQueueQuery = makeFunctionReference<"query">("kingdoms:getBuildingsAndQueue");
 const startConstructionMutation = makeFunctionReference<"mutation">("kingdoms:startConstruction");
@@ -250,7 +251,7 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
       </section>
 
       {/* ====================================================================
-          2. CATÁLOGO DE EDIFICIOS DEL REINO Y MEJORAS HASTA NIVEL 100
+          2. CATÁLOGO DE EDIFICIOS DEL REINO Y MEJORAS HASTA NIVEL ${CONSTRUCTION.MAX_LEVEL}
           ==================================================================== */}
       <section className="bg-[#17130e] border border-[#382f20] rounded-xl p-4 sm:p-5 shadow-xl space-y-4">
         <div className="border-b border-[#2b2216] pb-3 flex items-center justify-between">
@@ -259,7 +260,7 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
               Edificios y Infraestructura del Reino
             </h2>
             <p className="text-[11px] text-[#8e816d] mt-0.5">
-              Nivel máximo 100. Cada nivel superior incrementa un 1% la duración de construcción.
+              Nivel máximo {CONSTRUCTION.MAX_LEVEL}. Cada nivel superior incrementa un 1% la duración de construcción.
             </p>
           </div>
         </div>
@@ -353,7 +354,7 @@ export function BuildingsAndQueueView({ kingdomId, isOwner }: BuildingsAndQueueP
                 <div className="pt-2 border-t border-[#221b13]">
                   {b.isMaxLevel ? (
                     <div className="w-full py-2 text-center text-xs text-[#d4af37] font-serif bg-[#1a1410] border border-[#d4af37]/30 rounded">
-                      Nivel Máximo Alcanzado (100)
+                      Nivel Máximo Alcanzado ({CONSTRUCTION.MAX_LEVEL})
                     </div>
                   ) : b.isInConstruction ? (
                     <div className="w-full py-2 text-center text-xs text-amber-400 font-serif bg-amber-950/30 border border-amber-900/50 rounded">

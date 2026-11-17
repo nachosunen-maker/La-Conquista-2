@@ -80,7 +80,17 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
   const malformedQueue = createConstructionPlan(validInput({
     activeConstructions: [{ buildingType: "legacy", targetLevel: 1 } as ConstructionQueueEntry],
   }));
-  const atMaxLevel = createConstructionPlan(validInput({ currentLevel: 100, buildingLevels: { castillo: 100 } }));
+  const atMaxLevel = createConstructionPlan(validInput({ currentLevel: 200, buildingLevels: { castillo: 200 } }));
+  const level100To101 = createConstructionPlan(validInput({
+    currentLevel: 100,
+    buildingLevels: { castillo: 150 },
+    resources: { gold: 1e12, wood: 1e12, stone: 1e12, iron: 1e12, food: 1e12 },
+  }));
+  const level199To200 = createConstructionPlan(validInput({
+    currentLevel: 199,
+    buildingLevels: { castillo: 200 },
+    resources: { gold: 1e16, wood: 1e16, stone: 1e16, iron: 1e16, food: 1e16 },
+  }));
   const invalidLevel = createConstructionPlan(validInput({ currentLevel: 100.5 }));
   const invalidBaseDuration = createConstructionPlan(validInput({
     rule: { ...rule, baseDurationMs: 0 },
@@ -148,7 +158,7 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
     serverTimeMs: 40_000,
   });
   const newBuilding = validateConstructionCompletion({ buildingType: "granja", targetLevel: 1, existingLevels: [] });
-  const upgradedBuilding = validateConstructionCompletion({ buildingType: "granja", targetLevel: 100, existingLevels: [99] });
+  const upgradedBuilding = validateConstructionCompletion({ buildingType: "granja", targetLevel: 200, existingLevels: [199] });
   const invalidUpgrade = validateConstructionCompletion({ buildingType: "granja", targetLevel: 4, existingLevels: [2] });
 
   // [EXCEPCIÓN VIVIENDAS] Pruebas de progresión de Viviendas por nivel del Castillo
@@ -260,9 +270,16 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
       details: `Una ranura permite iniciar: ${twoQueuePlan.success}; cola llena, tipo repetido y fila incompleta rechazados: ${!fullQueue.success && !duplicateQueue.success && !malformedQueue.success}`,
     },
     {
-      test: "Límite de nivel 100 y validación de nivel entero",
-      passed: !atMaxLevel.success && !invalidLevel.success,
-      details: `Nivel 100 rechazado: ${!atMaxLevel.success}; nivel fraccionario rechazado: ${!invalidLevel.success}`,
+      test: "Límite de nivel 200, progresión >100 y validación de nivel entero",
+      passed:
+        CONSTRUCTION.MAX_LEVEL === 200 &&
+        level100To101.success &&
+        level100To101.plan.targetLevel === 101 &&
+        level199To200.success &&
+        level199To200.plan.targetLevel === 200 &&
+        !atMaxLevel.success &&
+        !invalidLevel.success,
+      details: `MAX_LEVEL=${CONSTRUCTION.MAX_LEVEL}; 100→101: ${level100To101.success}; 199→200: ${level199To200.success}; nivel 200 rechazado: ${!atMaxLevel.success}; fraccionario rechazado: ${!invalidLevel.success}`,
     },
     {
       test: "Ningún edificio supera el nivel del Castillo (D-05); el Castillo queda exento",
@@ -304,11 +321,11 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
       details: `Capacidad residencial inicial ${initialResidential} ≥ ${POPULATION.INITIAL}: ${initialResidential >= POPULATION.INITIAL}; capacidades laborales cubren la distribución inicial: ${initialWorkersCovered}`,
     },
     {
-      test: "Finalización conserva edificios y sólo permite crear nivel 1 o subir un nivel existente",
+      test: "Finalización conserva edificios y sólo permite crear nivel 1 o subir un nivel existente hasta 200",
       passed: newBuilding.success && newBuilding.action === "insert" &&
         upgradedBuilding.success && upgradedBuilding.action === "upgrade" &&
         !invalidUpgrade.success,
-      details: `Edificio nuevo: ${newBuilding.success}; mejora consecutiva hasta 100: ${upgradedBuilding.success}; salto de nivel rechazado: ${!invalidUpgrade.success}`,
+      details: `Edificio nuevo: ${newBuilding.success}; mejora consecutiva hasta 200: ${upgradedBuilding.success}; salto de nivel rechazado: ${!invalidUpgrade.success}`,
     },
     {
       test: "Requisitos configurados se validan contra niveles de edificios persistidos",

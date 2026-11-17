@@ -31,7 +31,6 @@ import {
 
 const getParliamentQuery = makeFunctionReference<"query">("parliament:getParliament");
 const listRivalsQuery = makeFunctionReference<"query">("parliament:listRivals");
-const getWorldMapQuery = makeFunctionReference<"query">("territories:getWorldMap");
 const getBattlesQuery = makeFunctionReference<"query">("parliament:getBattles");
 const getLeaderboardQuery = makeFunctionReference<"query">("parliament:getLeaderboard");
 const listBotsQuery = makeFunctionReference<"query">("bots:listBots");
@@ -178,14 +177,6 @@ export function ParliamentPanel(props: {
   const convex = useConvex();
   const parliament = useQuery(getParliamentQuery, kingdomId ? { kingdomId } : "skip") as ParliamentState | undefined;
   const rivals = useQuery(listRivalsQuery, kingdomId ? { kingdomId } : "skip") as RivalsState | undefined;
-  const worldMap = useQuery(getWorldMapQuery, kingdomId ? { kingdomId } : "skip") as {
-    cells?: Array<{
-      cellId: string;
-      state: string;
-      ownerKingdomId: string | null;
-      ownerName: string | null;
-    }>;
-  } | undefined;
   const battles = useQuery(getBattlesQuery, kingdomId ? { kingdomId } : "skip") as BattleRecord[] | undefined;
   const leaderboard = useQuery(getLeaderboardQuery, kingdomId ? { kingdomId } : "skip") as LeaderboardState | undefined;
   const createChallenge = useMutation(createChallengeMutation);
@@ -262,48 +253,18 @@ export function ParliamentPanel(props: {
     return botData.bots.filter((b: any) => (botTab === 'permanent' ? b.isPermanent : !b.isPermanent));
   }, [botData, botTab]);
 
-  if (!parliament) {
-    return <p className="text-xs text-[#8e816d] italic p-4">Convocando al Parlamento…</p>;
-  }
-  const writable = isOwner && parliament.writable;
-  const hasParliament = parliament.parliamentLevel >= parliament.requiredParliamentLevel;
-  const currentTax = taxInput ?? Math.round((props.taxRate ?? 0.1) * 100);
-  const nextBonusAt = (props.lastDailyBonusAt ?? 0) + props.dailyBonusCooldownMs;
-  const bonusAvailable = serverNow >= nextBonusAt;
-
   const visibleRivals = useMemo(() => {
     if (!rivals?.rivals) return [];
-
-    // Celdas conocidas y exploradas sobre el mapa autoritativo
-    const discoveredOnMap = new Set<string>();
-    if (worldMap?.cells) {
-      for (const cell of worldMap.cells) {
-        if (cell.state !== 'fog' && cell.ownerKingdomId && cell.ownerKingdomId !== kingdomId) {
-          discoveredOnMap.add(cell.ownerKingdomId);
-        }
-      }
-    }
 
     const seenIds = new Set<string>();
     const seenNames = new Set<string>();
     const filtered: typeof rivals.rivals = [];
 
     for (const rival of rivals.rivals) {
-      // 1. Excluir el propio reino
       if (rival.kingdomId === kingdomId) continue;
-
-      // 2. Excluir duplicados de identificador
       if (seenIds.has(rival.kingdomId)) continue;
-
-      // 3. Excluir reinos de demostración, pruebas o verificación
       if (isTestOrDemoKingdom({ name: rival.name })) continue;
 
-      // 4. Si el mapa ya ha cargado sus celdas, verificar estrictamente descubrimiento en mapa
-      if (worldMap?.cells && worldMap.cells.length > 0) {
-        if (!discoveredOnMap.has(rival.kingdomId)) continue;
-      }
-
-      // 5. Excluir duplicados por nombre normalizado (evitar que el mismo nombre aparezca 2 veces)
       const normName = (rival.name || '').toLowerCase().trim();
       if (normName && seenNames.has(normName)) continue;
       if (normName) seenNames.add(normName);
@@ -313,7 +274,16 @@ export function ParliamentPanel(props: {
     }
 
     return filtered;
-  }, [rivals?.rivals, worldMap?.cells, kingdomId]);
+  }, [rivals?.rivals, kingdomId]);
+
+  if (!parliament) {
+    return <p className="text-xs text-[#8e816d] italic p-4">Convocando al Parlamento…</p>;
+  }
+  const writable = isOwner && parliament.writable;
+  const hasParliament = parliament.parliamentLevel >= parliament.requiredParliamentLevel;
+  const currentTax = taxInput ?? Math.round((props.taxRate ?? 0.1) * 100);
+  const nextBonusAt = (props.lastDailyBonusAt ?? 0) + props.dailyBonusCooldownMs;
+  const bonusAvailable = serverNow >= nextBonusAt;
 
   const handleCreate = (rivalKingdomId: string, rivalName: string) =>
     action.run(`challenge-${rivalKingdomId}`, async () => {

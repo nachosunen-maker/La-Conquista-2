@@ -18,6 +18,7 @@ import {
   availableMilitaryLevels,
   availableWeaponTiers,
   calculateTrainingCancellation,
+  createSpyRecruitmentPlan,
   createTrainingPlan,
   normalizeUnitType,
   summarizeArmy,
@@ -33,10 +34,10 @@ import {
   validateMercenaryHire,
   type TrainingQueueEntry,
 } from "./armyRules";
-import { ARMORS, DEFAULT_TACTICAL_FORMATION, MAP, MERCENARIES, MILITARY_LEVELS, STRATEGIES, TACTICAL_FORMATIONS, TERRAINS, TIME, UNITS, UNIT_TYPES, WEAPONS, type ArmorTier, type UnitType, type WeaponTier } from "./balanceConfig";
+import { ARMORS, DEFAULT_TACTICAL_FORMATION, MAP, MERCENARIES, MILITARY_LEVELS, REGULAR_UNIT_TYPES, STRATEGIES, TACTICAL_FORMATIONS, TERRAINS, TERRITORIES, TIME, UNITS, UNIT_TYPES, WEAPONS, type ArmorTier, type UnitType, type WeaponTier } from "./balanceConfig";
 import { civilizationArmorLabel, civilizationTrainingCostMultiplier, civilizationTrainingDurationMultiplier, civilizationUnitLabel, civilizationWeaponLabel, getCivilizationIdentity, getCivilizationPassive } from "./civilizationRules";
 import type { ResourceType } from "./economyCalculations";
-import { getOrCreateTerritoryCell, patchTerritoryCell, readHomeCoord, readKnownCellIds, readPathTerrainMultiplier, readTerritoryCell, readWorld } from "./territories";
+import { getOrCreateTerritoryCell, patchTerritoryCell, readHomeCoord, readKnownCellIds, readPathTerrainMultiplier, readTerritoryCell } from "./territories";
 import {
   armyMarchMultiplier,
   cellId,
@@ -201,7 +202,7 @@ export const getArmyState = query({
         ...level,
         available: availableMilitaryLevels(buildingLevels).some((entry) => entry.level === level.level),
       })),
-      unitCatalog: UNIT_TYPES.map((unitType) => {
+      unitCatalog: REGULAR_UNIT_TYPES.map((unitType) => {
         const civCost = civilizationTrainingCostMultiplier(unitType, kingdom.civilization);
         const civDuration = civilizationTrainingDurationMultiplier(unitType, kingdom.civilization);
         const baseCosts = trainingCostsFor(unitType, 1);
@@ -337,6 +338,9 @@ export const startTraining = mutation({
     if (!population) throw new Error("No existe documento de población para el reino.");
     // [P6, decisión 21-10-2026] Ventaja y debilidad de la civilización en la instrucción (duración y coste por tipo).
     const civUnitType = normalizeUnitType(args.unitType);
+    if (civUnitType === "espia") {
+      throw new ConvexError("Los espías no se reclutan en formación militar ordinaria; utiliza la sección de Espionaje ('Instrucción de Agentes').");
+    }
     const civDuration = civUnitType ? civilizationTrainingDurationMultiplier(civUnitType, kingdom.civilization) : 1;
     const planResult = createTrainingPlan({
       unitType: args.unitType,
@@ -547,34 +551,45 @@ export const recruitSpy = mutation({
     const collection = validateBuildingCollection(buildings);
     if (!collection.success) throw new ConvexError(collection.error);
 
-    const units = await readArmyUnitsWithMigration(ctx, args.kingdomId);
-    const queue = await readTrainingQueue(ctx, args.kingdomId);
-    
-    const active = units.filter((doc) => doc.isSpy).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
-    const inQueue = queue.filter((doc) => doc.unitType === "espia").reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
-    const capacity = Math.floor((collection.levels.cuartel ?? 0) / 2);
-
-    if (active + inQueue + args.count > capacity) {
-        throw new ConvexError(`Capacidad de espías excedida (capacidad: ${capacity}, activos: ${active}, en cola: ${inQueue}, solicitado: ${args.count}).`);
+    if (!Number.isInteger(args.count) || args.count < 1) {
+      throw new ConvexError("La cantidad de espías debe ser un número entero positivo.");
     }
+
+    const [units, queue, explorationExpeditions] = await Promise.all([
+      readArmyUnitsWithMigration(ctx, args.kingdomId),
+      readTrainingQueue(ctx, args.kingdomId),
+      ctx.db
+        .query("explorationQueue")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
+        .collect(),
+    ]);
+
+    const active = units
+      .filter((doc) => doc.isSpy || normalizeUnitType(doc.unitType) === "espia")
+      .reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
+    const busySpies = explorationExpeditions
+      .filter((exp) => exp.isSpyMission)
+      .reduce((sum, exp) => sum + (exp.scoutsCount ?? 1), 0);
+    const inQueue = queue
+      .filter((doc) => normalizeUnitType(doc.unitType) === "espia")
+      .reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
 
     const completedTechnologies = await readCompletedTechnologyIds(ctx, args.kingdomId);
     const modifiers = computeTechnologyModifiers(completedTechnologies);
     const population = await ctx.db.get(settled.population._id);
     if (!population) throw new Error("No existe documento de población para el reino.");
 
-    const planResult = createTrainingPlan({
-      unitType: "espia",
+    const planResult = createSpyRecruitmentPlan({
       count: args.count,
-      level: 1,
       resources: settled.settledResources,
       availableCivil: population.available,
       buildingLevels: collection.levels,
       activeTraining: queue as TrainingQueueEntry[],
+      activeSpies: active,
+      busySpies,
+      inQueueSpies: inQueue,
       now,
       durationModifier: modifiers.trainingDuration,
-      costModifier: 1,
-      civilization: kingdom.civilization,
     });
     if (!planResult.success) throw new ConvexError(planResult.error);
     const plan = planResult.plan;
@@ -706,19 +721,31 @@ export const launchAttack = mutation({
     const homeCoord = await readHomeCoord(ctx, args.kingdomId);
     if (!homeCoord) throw new Error("El reino no tiene territorio principal asignado.");
 
-    const allTerritories = await readWorld(ctx);
-    const ownedCoords = allTerritories
-      .filter(t => t.ownerKingdomId && String(t.ownerKingdomId) === String(args.kingdomId))
-      .map(t => ({ q: t.q, r: t.r }));
-
-    if (homeCoord && !ownedCoords.some(o => o.q === homeCoord.q && o.r === homeCoord.r)) {
+    const ownedDocs = await ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", args.kingdomId))
+      .collect();
+    const ownedCellIds = new Set<string>();
+    const ownedCoords: Array<{ q: number; r: number }> = [];
+    for (const t of ownedDocs) {
+      ownedCellIds.add(t.cellId);
+      ownedCoords.push({ q: t.q, r: t.r });
+    }
+    const homeCellKey = cellId(homeCoord.q, homeCoord.r);
+    if (!ownedCellIds.has(homeCellKey)) {
+      ownedCellIds.add(homeCellKey);
       ownedCoords.push(homeCoord);
     }
 
-    // [VALIDACIÓN FRONTERA]: Solo permitir conquistar si es neutral adyacente a territorio propio
+    // [VALIDACIÓN FRONTERA + TOPE 100]: Solo permitir conquistar si es neutral adyacente a territorio propio y < 100 territorios
     if (!target.ownerKingdomId) {
+      if (ownedCellIds.size >= TERRITORIES.MAX_PER_KINGDOM) {
+        throw new ConvexError(
+          `Has alcanzado el límite máximo de ${TERRITORIES.MAX_PER_KINGDOM} territorios por reino (actuales: ${ownedCellIds.size}).`
+        );
+      }
       const neighbors = hexNeighbors({ q: target.q, r: target.r }, MAP.RADIUS);
-      const isAdjacentToOwned = neighbors.some(n => ownedCoords.some(o => o.q === n.q && o.r === n.r));
+      const isAdjacentToOwned = neighbors.some((n) => ownedCoords.some((o) => o.q === n.q && o.r === n.r));
       if (!isAdjacentToOwned) {
         throw new Error("El territorio neutral debe limitar con una de tus casillas propias para poder conquistarlo (Expansión contigua).");
       }
@@ -734,6 +761,9 @@ export const launchAttack = mutation({
       if (req.count <= 0) continue;
       const normalized = normalizeUnitType(req.unitType);
       if (!normalized) continue;
+      if (normalized === "espia") {
+        throw new ConvexError("Los espías no participan en marchas de ataque ni conquista territorial; solo en expediciones de exploración o espionaje.");
+      }
       const availableDoc = currentArmy.find((d) => normalizeUnitType(d.unitType) === normalized && unitLevelOf(d) === (req.level ?? 1));
       const availableCount = availableDoc ? (availableDoc.count ?? 0) : 0;
       if (availableCount < req.count) {
@@ -825,21 +855,33 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   await ctx.db.patch(march.kingdomId, { armyFatigue: newFatigue });
 
   if (!targetCell || !targetCell.ownerKingdomId || targetCell.ownerKingdomId === march.kingdomId) {
+    let capBlocked = false;
     if (targetCell && !targetCell.ownerKingdomId) {
-      await patchTerritoryCell(ctx, march.targetCellId, {
-        ownerKingdomId: march.kingdomId,
-        claimedAt: Date.now(),
-        isHome: false,
-      });
-      await recordMissionEvent(ctx, march.kingdomId, "territoriesClaimed", 1, false);
-      const currentAttackerDoc = await ctx.db.get(march.kingdomId);
-      if (currentAttackerDoc) {
-        await ctx.db.patch(march.kingdomId, {
-          glory: (currentAttackerDoc.glory ?? 0) + 1,
-          honor: (currentAttackerDoc.honor ?? 0) + 1,
-          conquestRewardsGranted: (currentAttackerDoc.conquestRewardsGranted ?? 0) + 1,
-          updatedAt: Date.now(),
+      const liveOwned = await ctx.db
+        .query("territories")
+        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", march.kingdomId))
+        .collect();
+      const liveOwnedIds = new Set(liveOwned.map((c) => c.cellId));
+      if (attackerKingdom.homeTerritoryId) liveOwnedIds.add(attackerKingdom.homeTerritoryId);
+
+      if (liveOwnedIds.size >= TERRITORIES.MAX_PER_KINGDOM) {
+        capBlocked = true;
+      } else {
+        await patchTerritoryCell(ctx, march.targetCellId, {
+          ownerKingdomId: march.kingdomId,
+          claimedAt: Date.now(),
+          isHome: false,
         });
+        await recordMissionEvent(ctx, march.kingdomId, "territoriesClaimed", 1, false);
+        const currentAttackerDoc = await ctx.db.get(march.kingdomId);
+        if (currentAttackerDoc) {
+          await ctx.db.patch(march.kingdomId, {
+            glory: (currentAttackerDoc.glory ?? 0) + 1,
+            honor: (currentAttackerDoc.honor ?? 0) + 1,
+            conquestRewardsGranted: (currentAttackerDoc.conquestRewardsGranted ?? 0) + 1,
+            updatedAt: Date.now(),
+          });
+        }
       }
     }
     for (const u of march.units) {
@@ -848,11 +890,18 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
         await addUnits(ctx, march.kingdomId, norm, u.level ?? 1, u.count);
       }
     }
+    const outcome = capBlocked ? "limite_territorios_alcanzado" : "conquista_neutral";
     await ctx.db.patch(marchId, {
       status: "completada",
-      battleResult: { outcome: "conquista_neutral", crushingVictory: false },
+      battleResult: capBlocked
+        ? {
+            outcome,
+            crushingVictory: false,
+            note: `Límite máximo de ${TERRITORIES.MAX_PER_KINGDOM} territorios alcanzado; el territorio neutral no se ha anexionado.`,
+          }
+        : { outcome, crushingVictory: false },
     });
-    return { success: true, outcome: "conquista_neutral", cellId: march.targetCellId };
+    return { success: true, outcome, cellId: march.targetCellId, territoryCapBlocked: capBlocked };
   }
 
   // Si la marcha fue enviada como conquista territorial sobre casilla neutral, pero al llegar ya tiene soberano (carrera entre jugadores):
@@ -1039,21 +1088,41 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   await applyCasualtiesToArmy(ctx, defenderKingdomId, report.defender.casualtiesComposition, report.defender.woundedComposition);
   await removeDeadFromPopulation(ctx, defenderKingdomId, report.defender.casualtiesComposition, report.defender.woundedComposition);
 
+  let territoryCapBlocked = false;
   if (report.outcome === "victoria" && targetCell) {
-    await ctx.db.patch(targetCell._id, { ownerKingdomId: march.kingdomId, claimedAt: now, isHome: false });
-    await recordMissionEvent(ctx, march.kingdomId, "territoriesClaimed", 1, false);
-    const victorDoc = await ctx.db.get(march.kingdomId);
-    if (victorDoc) {
-      await ctx.db.patch(march.kingdomId, {
-        glory: (victorDoc.glory ?? 0) + 1,
-        honor: (victorDoc.honor ?? 0) + 1,
-        conquestRewardsGranted: (victorDoc.conquestRewardsGranted ?? 0) + 1,
-        updatedAt: now,
-      });
+    const liveOwned = await ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", march.kingdomId))
+      .collect();
+    const liveOwnedIds = new Set(liveOwned.map((c) => c.cellId));
+    if (attackerKingdom.homeTerritoryId) liveOwnedIds.add(attackerKingdom.homeTerritoryId);
+
+    if (liveOwnedIds.size >= TERRITORIES.MAX_PER_KINGDOM) {
+      territoryCapBlocked = true;
+    } else {
+      await ctx.db.patch(targetCell._id, { ownerKingdomId: march.kingdomId, claimedAt: now, isHome: false });
+      await recordMissionEvent(ctx, march.kingdomId, "territoriesClaimed", 1, false);
+      const victorDoc = await ctx.db.get(march.kingdomId);
+      if (victorDoc) {
+        await ctx.db.patch(march.kingdomId, {
+          glory: (victorDoc.glory ?? 0) + 1,
+          honor: (victorDoc.honor ?? 0) + 1,
+          conquestRewardsGranted: (victorDoc.conquestRewardsGranted ?? 0) + 1,
+          updatedAt: now,
+        });
+      }
     }
   }
 
-  await ctx.db.patch(marchId, { status: "completada", battleResult: { outcome: report.outcome, crushingVictory: report.crushingVictory, battleId } });
+  await ctx.db.patch(marchId, {
+    status: "completada",
+    battleResult: {
+      outcome: report.outcome,
+      crushingVictory: report.crushingVictory,
+      battleId,
+      ...(territoryCapBlocked ? { territoryCapBlocked: true } : {}),
+    },
+  });
   
   // Mission updates
   await recordMissionEvent(ctx, march.kingdomId, "battlesFought", 1, false);

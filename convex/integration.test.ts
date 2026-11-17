@@ -6,10 +6,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import { createTestBackend } from "./test.setup";
-import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT, RESOURCE_PRODUCTION_MULTIPLIERS, PRODUCTION_PER_WORKER_PER_DAY } from "./balanceConfig";
+import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT, RESOURCE_PRODUCTION_MULTIPLIERS, PRODUCTION_PER_WORKER_PER_DAY, TERRITORIES, OUTAGE_COMPENSATION, CIVILIZATION_ZONES } from "./balanceConfig";
 import { costsForTargetLevel, BUILDING_RULES } from "./buildingRules";
 import { DEMO_USER_ID } from "./kingdomAccess";
 import { ensureHomeTerritory } from "./territories";
+import { generateWorldCells, hexDistance } from "./territoryRules";
 
 const DAY = TIME.MS_PER_GAME_YEAR;
 const T0 = new Date("2026-10-17T10:00:00Z").getTime();
@@ -606,9 +607,13 @@ describe("Parlamento y batalla (Bloques E y F)", () => {
 });
 
 describe("Exploración del mapa y territorios libres (P22, P49)", () => {
-  test("inicia expedición, reserva explorador, completa autoritativamente y revela la celda con hallazgo", async () => {
+  test("inicia expedición, reserva espía profesional, completa autoritativamente y revela la celda con hallazgo", async () => {
     const t = createTestBackend();
     const { asUser, kingdomId } = await foundKingdom(t, "user-a", "Reino A");
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 2, isSpy: true });
+    });
 
     const mapBefore = await asUser.query(api.territories.getWorldMap, { kingdomId });
     expect(mapBefore.exploredCount).toBe(7); // Capital (0,0) + 6 vecinos iniciales
@@ -619,6 +624,9 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
 
     const fullBefore = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     const freeCivilBefore = fullBefore!.population!.available;
+    const armyBefore = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(armyBefore.spies.active).toBe(2);
+    expect(armyBefore.spies.busy).toBe(0);
 
     const started = await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: "1,1" });
     expect(started.costs.gold).toBe(30);
@@ -627,7 +635,11 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
     const during = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     expect(during!.resources.gold).toBeCloseTo(fullBefore!.resources.gold - 30, 5);
     expect(during!.resources.food).toBeCloseTo(fullBefore!.resources.food - 40, 5);
-    expect(during!.population!.available).toBe(freeCivilBefore - 1);
+    expect(during!.population!.available).toBe(freeCivilBefore); // No consume civiles adicionales al enviar espía
+
+    const armyDuring = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(armyDuring.spies.active).toBe(1);
+    expect(armyDuring.spies.busy).toBe(1);
 
     const mapDuring = await asUser.query(api.territories.getWorldMap, { kingdomId });
     const cellDuring = mapDuring.cells.find((c) => c.cellId === "1,1");
@@ -644,13 +656,20 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
     expect(cellAfter?.terrain).not.toBe("desconocido");
     expect(mapAfter.exploredCount).toBe(8);
 
+    const armyAfter = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(armyAfter.spies.active).toBe(2); // Espía devuelto
+    expect(armyAfter.spies.busy).toBe(0);
     const fullAfter = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
-    expect(fullAfter!.population!.available).toBe(freeCivilBefore); // Explorador devuelto
+    expect(fullAfter!.population!.available).toBe(freeCivilBefore);
   });
 
-  test("cancelar expedición devuelve el 50 % de costes y libera al explorador", async () => {
+  test("cancelar expedición devuelve el 50 % de costes y libera al espía sin duplicar población civil", async () => {
     const t = createTestBackend();
     const { asUser, kingdomId } = await foundKingdom(t, "user-a", "Reino A");
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 2, isSpy: true });
+    });
 
     const fullBefore = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     const started = await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: "1,1" });
@@ -661,10 +680,15 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
 
     expect(cancelled.refund.gold).toBe(15);
     expect(cancelled.refund.food).toBe(20);
+    expect(cancelled.returnedSpies).toBe(1);
 
     const fullAfter = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     expect(fullAfter!.population!.available).toBe(fullBefore!.population!.available);
     expect(fullAfter!.resources.gold).toBeCloseTo(fullBefore!.resources.gold - 15, 5);
+
+    const armyAfter = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(armyAfter.spies.active).toBe(2);
+    expect(armyAfter.spies.busy).toBe(0);
 
     const mapAfter = await asUser.query(api.territories.getWorldMap, { kingdomId });
     expect(mapAfter.activeExpeditions).toHaveLength(0);
@@ -983,6 +1007,7 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     const { asUser, kingdomId } = await foundKingdom(t, "user-priv-map", "Reino Privado");
     await t.run(async (ctx) => {
       await ctx.db.patch(kingdomId, { pendingTerritoryClaims: 3 });
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 1, isSpy: true });
     });
     await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: "1,1" });
 
@@ -1107,6 +1132,387 @@ describe("Clasificación global de reinos (Bloque 15)", () => {
     expect(board.rankings[3].rank).toBe(4);
   });
 });
+
+describe("Bloque 1: Espías, tope de 100 territorios y saneamiento", () => {
+  test("excluye espías de entrenamiento normal/ataques y aplica tope de Cuartel incluyendo activos, en misión y en cola", async () => {
+    const t = createTestBackend();
+    const attacker = await foundKingdom(t, "user-spy-a", "Reino Espía");
+    const defender = await foundKingdom(t, "user-spy-b", "Reino Blanco");
+
+    await setBuildingLevel(t, attacker.kingdomId, "cuartel", 4); // Capacidad espías = floor(4/2) = 2
+    await attacker.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: attacker.kingdomId });
+    await defender.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: defender.kingdomId });
+
+    const armyState = await attacker.asUser.query(api.army.getArmyState, { kingdomId: attacker.kingdomId });
+    expect(armyState.unitCatalog.some((u: any) => u.unitType === "espia")).toBe(false);
+    expect(armyState.spies.capacity).toBe(2);
+
+    await expect(
+      attacker.asUser.mutation(api.army.startTraining, { kingdomId: attacker.kingdomId, unitType: "espia", count: 1 })
+    ).rejects.toThrow(/espías no se reclutan/i);
+
+    await expect(
+      attacker.asUser.mutation(api.military.trainUnits, { kingdomId: attacker.kingdomId, unitType: "espia", count: 1, level: 1 })
+    ).rejects.toThrow(/espías no se reclutan/i);
+
+    // 1 espía en misión (explorationQueue) + 1 reclutado por recruitSpy -> alcanza límite de 2
+    await t.run(async (ctx) => {
+      await ctx.db.insert("explorationQueue", {
+        kingdomId: attacker.kingdomId,
+        cellId: "1,1",
+        targetQ: 1,
+        targetR: 1,
+        distance: 2,
+        startedAt: T0,
+        durationMs: 600_000,
+        completesAt: T0 + 600_000,
+        scoutsCount: 1,
+        costs: { gold: 30, food: 40 },
+        isSpyMission: true,
+      });
+    });
+
+    const recruited = await attacker.asUser.mutation(api.army.recruitSpy, { kingdomId: attacker.kingdomId, count: 1 });
+    expect(recruited.success).toBe(true);
+
+    // 2do espía en cola supera capacidad = 2 (1 ocupado + 1 en cola)
+    await expect(
+      attacker.asUser.mutation(api.army.recruitSpy, { kingdomId: attacker.kingdomId, count: 1 })
+    ).rejects.toThrow(/Capacidad de espías excedida/i);
+
+    // También prohíbe enviar espías en launchAttack
+    const defT = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "espia", level: 1, count: 1, isSpy: true });
+      await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: defT.homeTerritoryId!, discoveredAt: T0 });
+    });
+
+    await expect(
+      attacker.asUser.mutation(api.army.launchAttack, {
+        kingdomId: attacker.kingdomId,
+        cellId: defT.homeTerritoryId!,
+        units: [{ unitType: "espia", level: 1, count: 1 }],
+      })
+    ).rejects.toThrow(/espías no participan en marchas de ataque/i);
+  });
+
+  test("respeta el tope estricto de 100 territorios en claimFreeTerritory, launchAttack y resolveMarch (neutral y enemigo)", async () => {
+    const t = createTestBackend();
+    const attacker = await foundKingdom(t, "user-cap-atk", "Imperio Cien");
+    const defender = await foundKingdom(t, "user-cap-def", "Reino Blanco");
+
+    await attacker.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: attacker.kingdomId });
+    await defender.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: defender.kingdomId });
+
+    const defT = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
+    const enemyCellId = defT.homeTerritoryId!;
+    const world = generateWorldCells(50, 20261017);
+
+    // Completar hasta 100 territorios (capital "0,0" + 99 más) dejando un vecino neutral cercano sin dueño
+    let adjacentFreeCellId = "";
+    await t.run(async (ctx) => {
+      const existingOwned = await ctx.db
+        .query("territories")
+        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", attacker.kingdomId))
+        .collect();
+      const occupied = new Set<string>([enemyCellId, ...existingOwned.map((c) => c.cellId)]);
+      let needed = TERRITORIES.MAX_PER_KINGDOM - existingOwned.length;
+      for (const cell of world) {
+        if (occupied.has(cell.cellId)) continue;
+        if (cell.q === 1 && cell.r === 0) {
+          adjacentFreeCellId = cell.cellId;
+          continue; // Reservar "1,0" como neutral adyacente a "0,0"
+        }
+        if (needed > 0) {
+          await ctx.db.insert("territories", {
+            cellId: cell.cellId,
+            q: cell.q,
+            r: cell.r,
+            terrain: cell.terrain,
+            ownerKingdomId: attacker.kingdomId,
+            isHome: false,
+            claimedAt: T0,
+          });
+          occupied.add(cell.cellId);
+          needed--;
+        }
+      }
+      await ctx.db.patch(attacker.kingdomId, { pendingTerritoryClaims: 2 });
+      await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 1, count: 1000 });
+      await ctx.db.insert("armyUnits", { kingdomId: defender.kingdomId, unitType: "infanteria", level: 1, count: 10 });
+      await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: adjacentFreeCellId, discoveredAt: T0 });
+      await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: enemyCellId, discoveredAt: T0 });
+    });
+
+    // 1. claimFreeTerritory bloqueado en 100
+    await expect(
+      attacker.asUser.mutation(api.territories.claimFreeTerritory, { kingdomId: attacker.kingdomId, cellId: adjacentFreeCellId })
+    ).rejects.toThrow(/límite máximo de 100 territorios/i);
+
+    // 2. launchAttack hacia celda neutral bloqueado en 100
+    await expect(
+      attacker.asUser.mutation(api.army.launchAttack, {
+        kingdomId: attacker.kingdomId,
+        cellId: adjacentFreeCellId,
+        units: [{ unitType: "infanteria", level: 1, count: 100 }],
+      })
+    ).rejects.toThrow(/límite máximo de 100 territorios/i);
+
+    // 3. Marcha directa sobre neutral llegada con 100 territorios: no anexiona y devuelve tropas
+    const neutralMarchId = await t.run(async (ctx) => {
+      const mId = await ctx.db.insert("armyMarches", {
+        kingdomId: attacker.kingdomId,
+        targetCellId: adjacentFreeCellId,
+        targetQ: 1,
+        targetR: 0,
+        distance: 1,
+        terrainMultiplier: 1,
+        units: [{ unitType: "infanteria", level: 1, count: 50 }],
+        startedAt: T0,
+        durationMs: 900_000,
+        completesAt: T0 + 900_000,
+        status: "marchando",
+        isConquest: true,
+      });
+      return mId;
+    });
+    const neutralRes: any = await t.mutation(internal.army.completeMarchScheduled, { marchId: neutralMarchId });
+    expect(neutralRes.outcome).toBe("limite_territorios_alcanzado");
+    expect(neutralRes.territoryCapBlocked).toBe(true);
+
+    // 4. Ataque contra enemigo con victoria aplastante cuando ya tiene 100 territorios: gana batalla pero no anexiona la celda #101
+    const enemyAttack = await attacker.asUser.mutation(api.army.launchAttack, {
+      kingdomId: attacker.kingdomId,
+      cellId: enemyCellId,
+      units: [{ unitType: "infanteria", level: 1, count: 500 }],
+    });
+    vi.setSystemTime(T0 + enemyAttack.durationSeconds * 1000 + 2000);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    const marchDoc = await t.run(async (ctx) => await ctx.db.get(enemyAttack.marchId));
+    expect((marchDoc?.battleResult as any)?.outcome).toBe("victoria");
+    expect((marchDoc?.battleResult as any)?.territoryCapBlocked).toBe(true);
+
+    const finalOwned = await attacker.asUser.query(api.territories.getKingdomTerritories, { kingdomId: attacker.kingdomId });
+    expect(finalOwned.territories).toHaveLength(100);
+  });
+
+  test("cleanupExcessTerritories sanea excesos >100 conservando capital + 99 cercanos, protege Iberia y es idempotente", async () => {
+    const t = createTestBackend();
+    const demoKingdomId = await t.run(async (ctx) => {
+      const dId = await ctx.db.insert("kingdoms", {
+        userId: DEMO_USER_ID,
+        name: "Reino de Iberia",
+        civilization: "ingleses",
+        homeTerritoryId: "0,0",
+      });
+      await ctx.db.insert("territories", { cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: dId, isHome: true });
+      return dId;
+    });
+
+    const { asUser, kingdomId } = await foundKingdom(t, "user-clean", "Reino Extenso");
+
+    await t.run(async (ctx) => {
+      const existingOwned = await ctx.db
+        .query("territories")
+        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdomId))
+        .collect();
+      for (const doc of existingOwned) {
+        await ctx.db.delete(doc._id);
+      }
+
+      const world = generateWorldCells(50, 20261017);
+      // Insertar exactamente 108 territorios para user-clean (capital "10,0" + 107)
+      await ctx.db.patch(kingdomId, { homeTerritoryId: "10,0" });
+      await ctx.db.insert("territories", { cellId: "10,0", q: 10, r: 0, terrain: "llanura", ownerKingdomId: kingdomId, isHome: true, claimedAt: 1 });
+      let added = 1;
+      for (const cell of world) {
+        if (cell.cellId === "0,0" || cell.cellId === "10,0") continue;
+        if (added >= 108) break;
+        await ctx.db.insert("territories", {
+          cellId: cell.cellId,
+          q: cell.q,
+          r: cell.r,
+          terrain: cell.terrain,
+          ownerKingdomId: kingdomId,
+          isHome: false,
+          claimedAt: 10 + added,
+        });
+        added++;
+      }
+    });
+
+    const dry = await t.mutation(api.territories.cleanupExcessTerritories, { dryRun: true });
+    expect(dry.dryRun).toBe(true);
+    expect(dry.territoriesReleased).toBe(8);
+
+    const real1 = await t.mutation(api.territories.cleanupExcessTerritories, { dryRun: false });
+    expect(real1.success).toBe(true);
+    expect(real1.territoriesReleased).toBe(8);
+    expect(real1.referentialIntegrity.intact).toBe(true);
+    expect(real1.details.find((d) => d.kingdomId === String(demoKingdomId))?.skippedDemo).toBe(true);
+
+    const ownedAfter = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
+    expect(ownedAfter.territories).toHaveLength(100);
+    expect(ownedAfter.homeTerritoryId).toBe("10,0");
+    expect(ownedAfter.territories.some((c) => c.cellId === "10,0" && c.isHome)).toBe(true);
+
+    // Segunda ejecución estrictamente idempotente
+    const real2 = await t.mutation(api.territories.cleanupExcessTerritories, { dryRun: false });
+    expect(real2.territoriesReleased).toBe(0);
+    expect(real2.kingdomsModified).toBe(0);
+  });
+});
+
+describe("Bloque 2: Mapa compacto y zonas geográficas de aparición", () => {
+  test("getWorldMapCompact devuelve celdas visibles sin fugar niebla privada ajena ni explorar de forma neutral", async () => {
+    const t = createTestBackend();
+    const userA = await foundKingdom(t, "user-compact-a", "Reino Compacto A");
+    const userB = await foundKingdom(t, "user-compact-b", "Reino Compacto B");
+
+    const compactA = await userA.asUser.query(api.territories.getWorldMapCompact, { kingdomId: userA.kingdomId });
+    expect(compactA.radius).toBe(50);
+    expect(compactA.totalCells).toBe(7651);
+    expect(compactA.exploredCount).toBe(7);
+    expect(compactA.visibleCells.length).toBeGreaterThanOrEqual(7);
+    expect(compactA.visibleCells.length).toBeLessThan(100);
+
+    await expect(
+      userA.asUser.query(api.territories.getWorldMapCompact, { kingdomId: userB.kingdomId })
+    ).rejects.toThrow(/No autorizado/);
+
+    const neutralCompact = await t.query(api.territories.getWorldMapCompact, {});
+    expect(neutralCompact.totalCells).toBe(7651);
+    expect(neutralCompact.pendingClaims).toBe(0);
+    expect(neutralCompact.activeExpeditions).toHaveLength(0);
+    expect(neutralCompact.visibleCells.length).toBe(2); // 2 capitales fundadas
+  });
+
+  test("los reinos posteriores aparecen agrupados por civilización manteniendo separación [20, 30] hex", async () => {
+    const t = createTestBackend();
+    const first = await t.withIdentity(identity("user-zone-1")).mutation(api.economy.getOrInitializeKingdom, {
+      name: "Centro Inicial",
+      civilization: "romanos",
+    });
+    const second = await t.withIdentity(identity("user-zone-2")).mutation(api.economy.getOrInitializeKingdom, {
+      name: "Legio II",
+      civilization: "romanos",
+    });
+    const third = await t.withIdentity(identity("user-zone-3")).mutation(api.economy.getOrInitializeKingdom, {
+      name: "Jarl Vikingo",
+      civilization: "vikingos",
+    });
+
+    const t1 = await t.withIdentity(identity("user-zone-1")).query(api.territories.getKingdomTerritories, { kingdomId: first._id as any });
+    const t2 = await t.withIdentity(identity("user-zone-2")).query(api.territories.getKingdomTerritories, { kingdomId: second._id as any });
+    const t3 = await t.withIdentity(identity("user-zone-3")).query(api.territories.getKingdomTerritories, { kingdomId: third._id as any });
+
+    expect(t1.homeTerritoryId).toBe("0,0");
+    const c2 = t2.territories.find((c) => c.isHome)!;
+    const c3 = t3.territories.find((c) => c.isHome)!;
+    const dist12 = hexDistance({ q: 0, r: 0 }, { q: c2.q, r: c2.r });
+    expect(dist12).toBeGreaterThanOrEqual(20);
+    expect(dist12).toBeLessThanOrEqual(30);
+    expect(hexDistance(c3, CIVILIZATION_ZONES.vikingos)).toBeLessThan(hexDistance(c3, CIVILIZATION_ZONES.romanos));
+  });
+});
+
+describe("Bloque 3: Edificios hasta nivel 200 y compensación por caída", () => {
+  test("permite ampliar edificios por encima de 100 hasta el nivel 200 y bloquea superar 200", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "user-lvl-200", "Reino Constructores");
+
+    await setBuildingLevel(t, kingdomId, "castillo", 200);
+    await setBuildingLevel(t, kingdomId, "viviendas", 150);
+
+    await t.run(async (ctx) => {
+      const res = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).first();
+      if (res) {
+        await ctx.db.patch(res._id, { gold: 1e14, wood: 1e14, stone: 1e14, iron: 1e14, food: 1e14 });
+      }
+    });
+
+    const upgrade151 = await asUser.mutation(api.kingdoms.startConstruction, {
+      kingdomId,
+      buildingType: "viviendas",
+    });
+    expect(upgrade151.success).toBe(true);
+    expect(upgrade151.targetLevel).toBe(151);
+
+    await expect(
+      asUser.mutation(api.kingdoms.startConstruction, { kingdomId, buildingType: "castillo" })
+    ).rejects.toThrow(/nivel máximo.*200/i);
+  });
+
+  test("compensación +30.000 por cuenta: excede almacén, es idempotente, soporta pre-fundación y no se duplica tras resetKingdom", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "user-comp-1", "Reino Compensado");
+
+    const statusBefore = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(statusBefore.eligible).toBe(true);
+    expect(statusBefore.status).toBe("unclaimed");
+
+    const claim1 = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    expect(claim1.success).toBe(true);
+    expect(claim1.alreadyClaimed).toBe(false);
+    expect(claim1.status).toBe("claimed");
+    expect(claim1.appliedImmediately).toBe(true);
+
+    const fullAfter = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-comp-1" });
+    // Tope de almacén base sin mercado = 10.000; la compensación (+30.000) debe excederlo intacta
+    expect(fullAfter!.resources.gold).toBeGreaterThanOrEqual(30_000);
+    expect(fullAfter!.resources.wood).toBeGreaterThanOrEqual(30_000);
+    expect(fullAfter!.resources.stone).toBeGreaterThanOrEqual(30_000);
+    expect(fullAfter!.resources.iron).toBeGreaterThanOrEqual(30_000);
+    expect(fullAfter!.resources.food).toBeGreaterThanOrEqual(30_000);
+
+    // Llamadas concurrentes / repetidas no duplican
+    const [dupA, dupB] = await Promise.all([
+      asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId }),
+      asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId }),
+    ]);
+    expect(dupA.alreadyClaimed).toBe(true);
+    expect(dupB.alreadyClaimed).toBe(true);
+
+    // Tras reiniciar reino y volver a fundar, NO se vuelve a conceder
+    await asUser.mutation(api.economy.resetKingdom, { kingdomId });
+    await asUser.mutation(api.economy.getOrInitializeKingdom, {
+      name: "Reino Refundado",
+      civilization: "griegos",
+    });
+    const afterRefound = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-comp-1" });
+    expect(afterRefound!.resources.gold).toBeLessThan(10_000);
+    const statusAfterRefound = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(statusAfterRefound.status).toBe("claimed");
+    expect(statusAfterRefound.eligible).toBe(false);
+
+    // Pre-fundación: usuario reclama antes de fundar -> estado "pending" -> auto-aplicado al fundar
+    const preUser = t.withIdentity(identity("user-comp-pre"));
+    const pendingRes = await preUser.mutation(api.compensation.claimOutageCompensation, {});
+    expect(pendingRes.status).toBe("pending");
+    expect(pendingRes.appliedImmediately).toBe(false);
+
+    await preUser.mutation(api.economy.getOrInitializeKingdom, {
+      name: "Reino Nuevo",
+      civilization: "arabes",
+    });
+    const foundedAfterPending = await preUser.query(api.kingdoms.getKingdomFull, { userId: "user-comp-pre" });
+    expect(foundedAfterPending!.resources.gold).toBeGreaterThanOrEqual(30_000);
+    expect(foundedAfterPending!.resources.food).toBeGreaterThanOrEqual(30_000);
+    const preStatusFinal = await preUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(preStatusFinal.status).toBe("claimed");
+
+    // Iberia está excluido
+    const demoCaller = t.withIdentity(identity(DEMO_USER_ID));
+    const demoStatus = await demoCaller.query(api.compensation.getOutageCompensationStatus, {});
+    expect(demoStatus.status).toBe("excluded");
+    expect(demoStatus.eligible).toBe(false);
+    await expect(
+      demoCaller.mutation(api.compensation.claimOutageCompensation, {})
+    ).rejects.toThrow(/excluido/i);
+  });
+});
+
 
 
 

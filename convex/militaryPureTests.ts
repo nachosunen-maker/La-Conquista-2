@@ -460,6 +460,24 @@ export function runMilitaryTests(): MilitaryTestResult[] {
     `Soldados: ${finalRegularSoldiers}; Trabajadores: 1750; Reserva civil: ${nextCivilianReserves}; Total censado: ${totalAccounted}`
   );
 
+  // 21. Exclusión de espías en formación militar ordinaria (Bloque 1.1)
+  const spyRejected = createTrainingPlan({
+    unitType: "espia",
+    count: 1,
+    level: 1,
+    resources: baseResources,
+    availableCivilians: 100,
+    activeTrainings: [],
+    buildingLevels: { castillo: 5, cuartel: 5 },
+    now: 100000,
+  });
+  record(
+    "EXCLUSIÓN DE ESPÍAS",
+    "21. Rechaza 'espia' en el catálogo de reclutamiento militar ordinario",
+    !spyRejected.success && spyRejected.error.includes("no admitido"),
+    `Espía rechazado: ${!spyRejected.success}`
+  );
+
   return results;
 }
 

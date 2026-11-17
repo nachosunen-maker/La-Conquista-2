@@ -21,7 +21,7 @@ import {
   validateKingdomResources,
   simulateEconomicProgress,
 } from "./economyCalculations";
-import { calculateBuildingWorkerCapacity } from "./buildingRules";
+import { calculateBuildingWorkerCapacity, MAX_BUILDING_LEVEL } from "./buildingRules";
 import { UNITS, type UnitType } from "./balanceConfig";
 
 export function isMatchingUserId(kingdomUserId: string, callerUserId: string): boolean {
@@ -344,7 +344,7 @@ export function adaptRemoteDocumentsToEconomicState(
         !building.buildingType.trim() ||
         !Number.isInteger(building.level) ||
         building.level < 1 ||
-        building.level > 100
+        building.level > MAX_BUILDING_LEVEL
       ) {
         return { success: false, error: "Hay un edificio inválido o asociado a otro reino." };
       }

@@ -1,8 +1,10 @@
 import {
+  analyzeWorldSpawnGeometry,
   armyMarchMultiplier,
   calculateArmyMarchPlan,
   canClaimTerritory,
   chooseHomeCell,
+  chooseHomeCellWithDiagnostics,
   fatigueMultiplier,
   generateWorldCells,
   hexDistance,
@@ -12,10 +14,11 @@ import {
   marchFatigue,
   marchTimeSeconds,
   parseCellId,
+  planTerritoryCapCleanup,
   recoverFatigue,
   terrainForCell,
 } from "./territoryRules";
-import { MAP } from "./balanceConfig";
+import { CIVILIZATION_ZONES, MAP, TERRITORIES } from "./balanceConfig";
 
 export interface TerritoryTestResult {
   test: string;
@@ -240,5 +243,96 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
       passed: standardOk && mongolesOk && masaisOk && siegeOk && maxBoundOk && minBoundOk && cappedFatigueOk,
       details: `Estándar: ${standardMarch.durationSeconds}s / ${standardMarch.fatigueAccrued}f; Mongoles: ${mongolesMarch.durationSeconds}s; Masáis fatiga: ${masaisMarch.fatigueAccrued}f; Asedio 2 hex montaña: ${siegeMarch.durationSeconds}s; Límite máx: ${maxBoundMarch.durationSeconds}s; Límite mín: ${minBoundTime}s; Tope fatiga: ${cappedFatigueMarch.finalFatigue}`,
     },
+    ...(() => {
+      // Bloque 1.2 & 1.3: Tope de 100 territorios y saneamiento determinista idempotente
+      const claimAtCap = canClaimTerritory({
+        target: { ...nearFree, ownerKingdomId: null },
+        ownedCells: [{ q: 0, r: 0 }],
+        pendingClaims: 1,
+        ownedCount: TERRITORIES.MAX_PER_KINGDOM,
+      });
+
+      const originCell = world.find((c) => c.cellId === "0,0")!;
+      const excessCells = [
+        originCell,
+        ...world.filter((c) => c.cellId !== "0,0" && hexDistance({ q: 0, r: 0 }, c) <= 10).slice(0, 114),
+      ].map((c, idx) => ({
+        id: `doc_${idx}`,
+        cellId: c.cellId,
+        q: c.q,
+        r: c.r,
+        isHome: c.cellId === "0,0",
+        claimedAt: 1000 + idx,
+      }));
+      const cleanupPlan1 = planTerritoryCapCleanup({
+        ownedCells: excessCells,
+        homeTerritoryId: "0,0",
+        maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
+      });
+      const keptSet = new Set(cleanupPlan1.keptCellIds);
+      const maxKeptDist = Math.max(...excessCells.filter((c) => keptSet.has(c.cellId)).map((c) => hexDistance({ q: 0, r: 0 }, c)));
+      const minReleasedDist = Math.min(...cleanupPlan1.releasedCells.map((c) => hexDistance({ q: 0, r: 0 }, c)));
+      const cleanupPlan2 = planTerritoryCapCleanup({
+        ownedCells: excessCells.filter((c) => keptSet.has(c.cellId)),
+        homeTerritoryId: "0,0",
+        maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
+      });
+
+      // Bloque 2.2 & 2.3: Agrupación por civilización, banda [20, 30] y análisis de empaquetamiento
+      const rom1 = chooseHomeCellWithDiagnostics(world, new Set(), [], {
+        civilization: "romanos",
+        existingKingdoms: [],
+        preferCenterIfEmpty: false,
+      });
+      const occupiedSpawns = new Set<string>([rom1.cell!.cellId]);
+      const existingSpawns = [{ q: rom1.cell!.q, r: rom1.cell!.r, civilization: "romanos" }];
+      const rom2 = chooseHomeCellWithDiagnostics(world, occupiedSpawns, [{ q: rom1.cell!.q, r: rom1.cell!.r }], {
+        civilization: "romanos",
+        existingKingdoms: existingSpawns,
+      });
+      const vik1 = chooseHomeCellWithDiagnostics(world, occupiedSpawns, [{ q: rom1.cell!.q, r: rom1.cell!.r }], {
+        civilization: "vikingos",
+        existingKingdoms: existingSpawns,
+      });
+      const geometry = analyzeWorldSpawnGeometry(50, 20, 30);
+
+      return [
+        {
+          test: "Tope de 100 territorios (Bloque 1.2) y planificador de saneamiento determinista e idempotente (Bloque 1.3)",
+          passed:
+            TERRITORIES.MAX_PER_KINGDOM === 100 &&
+            !claimAtCap.success &&
+            !cleanupPlan1.skipped &&
+            cleanupPlan1.capitalCellId === "0,0" &&
+            cleanupPlan1.keptCellIds.length === 100 &&
+            cleanupPlan1.releasedCellIds.length === 15 &&
+            cleanupPlan1.keptCellIds.includes("0,0") &&
+            maxKeptDist <= minReleasedDist &&
+            cleanupPlan2.skipped &&
+            cleanupPlan2.releasedCellIds.length === 0,
+          details: `Rechazo en 100: ${!claimAtCap.success}; saneo 115→${cleanupPlan1.keptCellIds.length} (liberados=${cleanupPlan1.releasedCellIds.length}); maxDistConservada=${maxKeptDist}<=minDistLiberada=${minReleasedDist}; 2ª ejecución idempotente: ${cleanupPlan2.skipped}`,
+        },
+        {
+          test: "Aparición por zonas de civilización, banda [20, 30] hex y prueba matemática de empaquetamiento (Bloques 2.2-2.3)",
+          passed:
+            Object.keys(CIVILIZATION_ZONES).length === 12 &&
+            rom1.cell?.q === CIVILIZATION_ZONES.romanos.q &&
+            rom1.cell?.r === CIVILIZATION_ZONES.romanos.r &&
+            rom2.withinTargetBand &&
+            rom2.nearestDistance !== null &&
+            rom2.nearestDistance >= 20 &&
+            rom2.nearestDistance <= 30 &&
+            vik1.cell !== null &&
+            hexDistance(vik1.cell, CIVILIZATION_ZONES.vikingos) < hexDistance(vik1.cell, CIVILIZATION_ZONES.romanos) &&
+            geometry.totalCells === 7651 &&
+            geometry.diameter === 100 &&
+            geometry.exclusiveDiskCellsAtHalfSep === 271 &&
+            geometry.areaUpperBoundAtMinSeparation === 28 &&
+            geometry.sameCivClusterMaxAtBand30 >= 1 &&
+            geometry.greedyPackingMaxAtMinSeparation >= 15,
+          details: `Romanos 1 en ${rom1.cell?.cellId}; Romanos 2 a dist=${rom2.nearestDistance} (banda=${rom2.withinTargetBand}); Vikingos cerca de su ancla: ${vik1.cell?.cellId}; cota área d>=20 en R50=${geometry.areaUpperBoundAtMinSeparation}, greedy=${geometry.greedyPackingMaxAtMinSeparation}, clúster diam=30=${geometry.sameCivClusterMaxAtBand30}`,
+        },
+      ];
+    })(),
   ];
 }

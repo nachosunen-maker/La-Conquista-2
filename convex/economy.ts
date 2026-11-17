@@ -18,6 +18,7 @@ import { normalizeCivilizationId } from "./civilizationRules";
 import { CIVILIZATIONS } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
 import { pickRandomUniqueColor } from "./kingdomColors";
+import { applyPendingOutageCompensationOnFounding } from "./compensation";
 import {
   simulateEconomicProgress,
   validatePopulationIntegrity,
@@ -536,16 +537,56 @@ export const getOrInitializeKingdom = mutation({
       if (args.civilization !== undefined && existing.civilization && args.civilization !== existing.civilization) {
         throw new ConvexError("La civilización se elige al fundar el reino y no puede cambiarse (D-45).");
       }
+      const now = Date.now();
       const identityPatch: Record<string, unknown> = {};
+      if (!existing.name && name) identityPatch.name = name;
       if (!existing.civilization && isCivilizationId(args.civilization)) identityPatch.civilization = args.civilization;
       if (!existing.castleName && args.castleName?.trim()) identityPatch.castleName = args.castleName.trim();
       if (!existing.monarchName && args.monarchName?.trim()) identityPatch.monarchName = args.monarchName.trim();
-      if (Object.keys(identityPatch).length > 0) await ctx.db.patch(existing._id, { ...identityPatch, updatedAt: Date.now() });
-      const current = await readRelationalKingdomState(ctx, existing._id);
-      if (!current.resources && !current.population && current.populationJobs.length === 0 && current.armyUnits.length === 0) {
-        await migrateAggregateKingdomState(ctx, existing);
+      if (Object.keys(identityPatch).length > 0) {
+        await ctx.db.patch(existing._id, { ...identityPatch, updatedAt: now });
+        existing = (await ctx.db.get(existing._id)) ?? existing;
       }
-      const now = Date.now();
+
+      const current = await readRelationalKingdomState(ctx, existing._id);
+      let newResourcesId = current.resources?._id ?? null;
+
+      if (!current.resources && !current.population && current.populationJobs.length === 0 && current.armyUnits.length === 0) {
+        if (typeof (existing as any).population === "number") {
+          await migrateAggregateKingdomState(ctx, existing);
+          const migrated = await readRelationalKingdomState(ctx, existing._id);
+          newResourcesId = migrated.resources?._id ?? null;
+        } else {
+          newResourcesId = await ctx.db.insert("resources" as any, {
+            kingdomId: existing._id,
+            ...INITIAL_KINGDOM_CONFIG.resources,
+            lastUpdated: now,
+            settlementInitialized: false,
+          });
+          await ctx.db.insert("population" as any, {
+            kingdomId: existing._id,
+            total: INITIAL_KINGDOM_CONFIG.population,
+            available: INITIAL_KINGDOM_CONFIG.unassignedCivil,
+          });
+          for (const [jobType, assignedCount] of Object.entries(INITIAL_KINGDOM_CONFIG.workers)) {
+            if (assignedCount > 0) {
+              await ctx.db.insert("populationJobs" as any, {
+                kingdomId: existing._id,
+                jobType,
+                assignedCount,
+              });
+            }
+          }
+          await insertInitialBuildings(ctx, existing._id);
+          await ensureHomeTerritory(ctx, existing._id);
+          existing = (await ctx.db.get(existing._id)) ?? existing;
+        }
+      }
+
+      if (newResourcesId && existing.name && existing.name.trim()) {
+        await applyPendingOutageCompensationOnFounding(ctx, callerUserId, existing._id, newResourcesId as any, now);
+      }
+
       const settled = await settleRelationalKingdomEconomy(ctx, existing, callerUserId, now);
       return legacyKingdomResponse(existing, settled);
     }
@@ -577,7 +618,7 @@ export const getOrInitializeKingdom = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    await ctx.db.insert("resources" as any, {
+    const resourcesId = await ctx.db.insert("resources" as any, {
       kingdomId,
       ...INITIAL_KINGDOM_CONFIG.resources,
       lastUpdated: now,
@@ -599,6 +640,7 @@ export const getOrInitializeKingdom = mutation({
     }
     await insertInitialBuildings(ctx, kingdomId);
     await ensureHomeTerritory(ctx, kingdomId);
+    await applyPendingOutageCompensationOnFounding(ctx, callerUserId, kingdomId, resourcesId as any, now);
     const kingdom = await ctx.db.get(kingdomId);
     if (!kingdom) throw new Error("No se pudo recuperar el reino recién inicializado.");
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);

@@ -886,35 +886,43 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
            <div className="space-y-4">
               <h4 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider">Instrucción de Agentes</h4>
               {writable ? (
-                <div className={`${cardClass} space-y-3 text-xs`}>
-                   <div className="flex items-center gap-3">
-                    <label className="flex-1 space-y-1">
-                      <span className="text-[#a0937e] block text-[11px]">Cantidad</span>
-                      <input
-                        className={`${inputClass} w-full text-right`}
-                        type="number"
-                        min={1}
-                        max={Math.max(0, (state.spies?.capacity ?? 0) - ((state.spies?.active ?? 0) + (state.spies?.inQueue ?? 0)))}
-                        step={1}
-                        value={spyCount}
-                        onChange={(e) => setSpyCount(Number(e.target.value))}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className={`${primaryButton} self-end py-1.5 px-4 font-bold`}
-                      disabled={action.busy === 'recruit-spy' || ((state.spies?.active ?? 0) + (state.spies?.inQueue ?? 0) + spyCount) > (state.spies?.capacity ?? 0) || spyCount <= 0}
-                      onClick={handleRecruitSpy}
-                    >
-                      {action.busy === 'recruit-spy' ? 'Instruyendo…' : 'Instruir Agentes'}
-                    </button>
-                  </div>
-                  {((state.spies?.active ?? 0) + (state.spies?.inQueue ?? 0)) >= (state.spies?.capacity ?? 0) && (
-                    <p className="text-amber-300 text-[10px] bg-amber-950/20 p-2 rounded border border-amber-900/30">
-                      Capacidad máxima de espías alcanzada para tu nivel de Cuartel actual.
-                    </p>
-                  )}
-                </div>
+                (() => {
+                  const spiesUsed = (state.spies?.active ?? 0) + (state.spies?.busy ?? 0) + (state.spies?.inQueue ?? 0);
+                  const spiesRoom = Math.max(0, (state.spies?.capacity ?? 0) - spiesUsed);
+                  return (
+                    <div className={`${cardClass} space-y-3 text-xs`}>
+                      <div className="flex items-center gap-3">
+                        <label className="flex-1 space-y-1">
+                          <span className="text-[#a0937e] block text-[11px]">
+                            Cantidad (ocupados + libres + cola: {spiesUsed}/{state.spies?.capacity ?? 0})
+                          </span>
+                          <input
+                            className={`${inputClass} w-full text-right`}
+                            type="number"
+                            min={1}
+                            max={spiesRoom}
+                            step={1}
+                            value={spyCount}
+                            onChange={(e) => setSpyCount(Number(e.target.value))}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className={`${primaryButton} self-end py-1.5 px-4 font-bold`}
+                          disabled={action.busy === 'recruit-spy' || spyCount > spiesRoom || spyCount <= 0}
+                          onClick={handleRecruitSpy}
+                        >
+                          {action.busy === 'recruit-spy' ? 'Instruyendo…' : 'Instruir Agentes'}
+                        </button>
+                      </div>
+                      {spiesRoom === 0 && (
+                        <p className="text-amber-300 text-[10px] bg-amber-950/20 p-2 rounded border border-amber-900/30">
+                          Capacidad máxima de espías alcanzada para tu nivel de Cuartel actual (incluye espías disponibles, en misión y en instrucción).
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()
               ) : (
                 <p className="text-xs text-[#8e816d] italic bg-[#18140f] p-3 rounded border border-[#2b2419]">{readOnlyNote}</p>
               )}

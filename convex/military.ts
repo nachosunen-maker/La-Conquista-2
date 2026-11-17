@@ -103,7 +103,10 @@ export const trainUnits = mutation({
     // 1. Autorización estricta del propietario (P1) y rechazo absoluto de Iberia
     const { kingdom, userId } = await requireMilitaryOwner(ctx, args.kingdomId);
 
-    // 2. Comprobación de números enteros y positivos
+    // 2. Comprobación de números enteros, positivos y exclusión de espías
+    if (args.unitType.toLowerCase().trim() === "espia") {
+      throw new Error("Los espías no se reclutan mediante formación militar ordinaria; utiliza la sección de Espionaje.");
+    }
     if (!Number.isInteger(args.count) || args.count <= 0) {
       throw new Error(`La cantidad de tropas a reclutar debe ser un número entero positivo (recibido: ${args.count}).`);
     }

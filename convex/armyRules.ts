@@ -8,6 +8,7 @@ import {
   ARMORS,
   EQUIPMENT_UNLOCKS,
   MILITARY_LEVELS,
+  REGULAR_UNIT_TYPES,
   STRATEGIES,
   TRAINING,
   UNITS,
@@ -26,7 +27,7 @@ import {
 import { MAX_BUILDING_LEVEL, checkBuildingRequirements } from "./buildingRules";
 import { normalizeCivilizationId } from "./civilizationRules";
 
-export const VALID_UNIT_TYPES: readonly string[] = UNIT_TYPES;
+export const VALID_UNIT_TYPES: readonly string[] = REGULAR_UNIT_TYPES;
 
 export function isUnitType(value: string): value is UnitType {
   return (UNIT_TYPES as readonly string[]).includes(value);
@@ -173,6 +174,12 @@ export function createTrainingPlan(input: {
 }): { success: true; plan: TrainingPlan } | { success: false; error: string } {
   const unitType = normalizeUnitType(input.unitType);
   if (!unitType) return { success: false, error: `Tipo de unidad no admitido: '${input.unitType}'.` };
+  if (unitType === "espia") {
+    return {
+      success: false,
+      error: "Los espías no se reclutan en formación militar ordinaria; utiliza la sección de Espionaje ('Instrucción de Agentes').",
+    };
+  }
   if (!Number.isInteger(input.count) || input.count < 1) return { success: false, error: "La cantidad debe ser un entero positivo." };
   if (!Number.isFinite(input.now) || input.now < 0) return { success: false, error: "Marca temporal inválida." };
   const unit = UNITS[unitType];
@@ -235,6 +242,95 @@ export function createTrainingPlan(input: {
       unitType,
       count: input.count,
       level: militaryLevel.level,
+      startedAt: input.now,
+      durationMs,
+      completesAt: input.now + durationMs,
+      costs,
+      populationReserved,
+    },
+  };
+}
+
+/** Plan exclusivo para reclutar espías desde 'Instrucción de Agentes' (incluye activos, ocupados en misión y en cola). */
+export function createSpyRecruitmentPlan(input: {
+  count: number;
+  resources: Record<ResourceType, number>;
+  availableCivil: number;
+  buildingLevels: Readonly<Record<string, number>>;
+  activeTraining: ReadonlyArray<TrainingQueueEntry>;
+  activeSpies: number;
+  busySpies: number;
+  inQueueSpies: number;
+  now: number;
+  durationModifier?: number;
+}): { success: true; plan: TrainingPlan; capacity: number; occupied: number } | { success: false; error: string } {
+  if (!Number.isInteger(input.count) || input.count < 1) {
+    return { success: false, error: "La cantidad de espías debe ser un entero positivo." };
+  }
+  if (!Number.isFinite(input.now) || input.now < 0) {
+    return { success: false, error: "Marca temporal inválida." };
+  }
+  if (input.activeTraining.some((entry) =>
+    !entry.unitType || !Number.isInteger(entry.count) || entry.count < 1 ||
+    !Number.isFinite(entry.startedAt) || !Number.isFinite(entry.durationMs) || entry.durationMs <= 0
+  )) {
+    return { success: false, error: "La cola de entrenamiento contiene un lote incompleto; requiere conciliación." };
+  }
+  const cuartelLevel = input.buildingLevels.cuartel ?? 0;
+  const reqCheck = checkBuildingRequirements(UNITS.espia.requirements, input.buildingLevels);
+  if (!reqCheck.satisfied) {
+    return { success: false, error: `Los espías requieren Cuartel nivel ${UNITS.espia.requirements.cuartel ?? 2}: ${reqCheck.error}` };
+  }
+  const slots = trainingQueueSlots(cuartelLevel);
+  if (slots === 0 || input.activeTraining.length >= slots) {
+    return { success: false, error: `Todas las colas de entrenamiento están ocupadas (${slots} con Cuartel nivel ${cuartelLevel}).` };
+  }
+
+  const capacity = Math.floor(cuartelLevel / 2);
+  const occupied = Math.max(0, input.activeSpies) + Math.max(0, input.busySpies) + Math.max(0, input.inQueueSpies);
+  if (occupied + input.count > capacity) {
+    return {
+      success: false,
+      error: `Capacidad de espías excedida (capacidad: ${capacity}, activos: ${input.activeSpies}, en misión: ${input.busySpies}, en cola: ${input.inQueueSpies}, solicitado: ${input.count}).`,
+    };
+  }
+
+  const populationReserved = UNITS.espia.populationPerUnit * input.count;
+  if (!Number.isInteger(input.availableCivil) || input.availableCivil < 0) {
+    return { success: false, error: "La reserva civil libre persistida no es válida." };
+  }
+  if (populationReserved > input.availableCivil) {
+    return {
+      success: false,
+      error: `Población civil libre insuficiente: se necesitan ${populationReserved} y hay ${input.availableCivil}. Reasigna trabajadores antes de instruir espías.`,
+    };
+  }
+
+  const totalCosts = trainingCostsFor("espia", input.count);
+  const costs: Partial<Record<ResourceType, number>> = {};
+  for (const resource of ["gold", "wood", "stone", "iron", "food"] as const) {
+    const cost = totalCosts[resource];
+    const balance = input.resources[resource];
+    if (!Number.isFinite(balance) || balance < 0) return { success: false, error: `Saldo inválido para '${resource}'.` };
+    if (cost > 0) {
+      if (balance < cost) {
+        return { success: false, error: `Recursos insuficientes: ${resourceNameSpanish(resource)} requiere ${cost} y hay ${Math.floor(balance)}.` };
+      }
+      costs[resource] = cost;
+    }
+  }
+
+  const durationMs = trainingDurationMs("espia", input.count, input.durationModifier ?? 1);
+  if (durationMs === null) return { success: false, error: "No se pudo calcular la duración de la instrucción de agentes." };
+
+  return {
+    success: true,
+    capacity,
+    occupied,
+    plan: {
+      unitType: "espia",
+      count: input.count,
+      level: 1,
       startedAt: input.now,
       durationMs,
       completesAt: input.now + durationMs,

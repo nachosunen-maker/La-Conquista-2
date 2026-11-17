@@ -1,13 +1,13 @@
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
-import { Map as MapIcon, Flag, Compass, Clock, ShieldAlert, Sparkles, CheckCircle2 } from 'lucide-react';
-import { useState, useMemo, useEffect, useRef } from 'react';
-import { JOB_LABELS, PanelSection, StatusMessages, cardClass, primaryButton, readOnlyNote, useActionState } from './shared';
+import { Map as MapIcon, Flag, Compass, Clock, Sparkles, Crosshair } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { JOB_LABELS, PanelSection, StatusMessages, UNIT_LABELS, cardClass, primaryButton, readOnlyNote, useActionState } from './shared';
 import { TroopSelector, TroopSelection } from './TroopSelector';
 import { MAP } from '../../convex/balanceConfig';
-import { generateWorldCells } from '../../convex/territoryRules';
+import { generateWorldCells, parseCellId } from '../../convex/territoryRules';
 
-const getWorldMapQuery = makeFunctionReference<"query">("territories:getWorldMap");
+const getWorldMapCompactQuery = makeFunctionReference<"query">("territories:getWorldMapCompact");
 const getKingdomTerritoriesQuery = makeFunctionReference<"query">("territories:getKingdomTerritories");
 const claimFreeTerritoryMutation = makeFunctionReference<"mutation">("territories:claimFreeTerritory");
 const ensureHomeTerritoryMutation = makeFunctionReference<"mutation">("territories:ensureMyHomeTerritory");
@@ -41,8 +41,9 @@ interface WorldMapCell {
   } | null;
 }
 
-interface WorldMap {
+interface CompactWorldMapResponse {
   radius: number;
+  worldSeed: number;
   generated: boolean;
   terrains: Record<string, { label: string; production: Record<string, number>; defense: number; commerce: number; marchMultiplier: number }>;
   totalCells: number;
@@ -65,7 +66,7 @@ interface WorldMap {
     completesAt: number;
     progressPercent: number;
     isConquest: boolean;
-    units: Record<string, number>;
+    units: Array<{ unitType: string; level?: number; count: number }> | Record<string, number>;
   }>;
   kingdomLegend?: Array<{
     id: string;
@@ -76,7 +77,7 @@ interface WorldMap {
   }>;
   pendingClaims: number;
   homeTerritoryId: string | null;
-  cells: WorldMapCell[];
+  visibleCells: WorldMapCell[];
 }
 
 interface KingdomTerritories {
@@ -100,18 +101,41 @@ const TERRAIN_COLORS: Record<string, string> = {
 
 const HEX_SIZE = 14;
 const SQRT3 = Math.sqrt(3);
+const MIN_ZOOM = 0.22;
+const MAX_ZOOM = 5.5;
+
+const HEX_OFFSETS = Array.from({ length: 6 }, (_, i) => {
+  const angle = (Math.PI / 180) * (60 * i - 30);
+  return { dx: HEX_SIZE * Math.cos(angle), dy: HEX_SIZE * Math.sin(angle) };
+});
 
 function hexCenter(q: number, r: number): { x: number; y: number } {
   return { x: HEX_SIZE * SQRT3 * (q + r / 2), y: HEX_SIZE * 1.5 * r };
 }
 
-function hexPoints(cx: number, cy: number): string {
-  const points: string[] = [];
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 180) * (60 * i - 30);
-    points.push(`${(cx + HEX_SIZE * Math.cos(angle)).toFixed(2)},${(cy + HEX_SIZE * Math.sin(angle)).toFixed(2)}`);
+function pixelToHex(wx: number, wy: number): { q: number; r: number } {
+  const qf = ((SQRT3 / 3) * wx - (1 / 3) * wy) / HEX_SIZE;
+  const rf = ((2 / 3) * wy) / HEX_SIZE;
+  const xf = qf;
+  const zf = rf;
+  const yf = -xf - zf;
+
+  let rx = Math.round(xf);
+  let ry = Math.round(yf);
+  let rz = Math.round(zf);
+
+  const dx = Math.abs(rx - xf);
+  const dy = Math.abs(ry - yf);
+  const dz = Math.abs(rz - zf);
+
+  if (dx > dy && dx > dz) {
+    rx = -ry - rz;
+  } else if (dy > dz) {
+    ry = -rx - rz;
+  } else {
+    rz = -rx - ry;
   }
-  return points.join(' ');
+  return { q: rx, r: rz };
 }
 
 function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
@@ -120,16 +144,30 @@ function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): 
   return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
 }
 
-function formatRemainingSeconds(completesAt: number): string {
-  const remainingSeconds = Math.max(0, Math.ceil((completesAt - Date.now()) / 1000));
+function formatRemainingSeconds(completesAt: number, nowMs: number): string {
+  const remainingSeconds = Math.max(0, Math.ceil((completesAt - nowMs) / 1000));
   const m = Math.floor(remainingSeconds / 60);
   const s = remainingSeconds % 60;
   return `${m}m ${s < 10 ? '0' : ''}${s}s`;
 }
 
+function formatMarchUnits(units: Array<{ unitType: string; level?: number; count: number }> | Record<string, number> | undefined): string {
+  if (!units) return '';
+  if (Array.isArray(units)) {
+    return units
+      .filter((u) => (u.count ?? 0) > 0)
+      .map((u) => `${UNIT_LABELS[u.unitType] ?? u.unitType}: ${u.count}`)
+      .join(', ');
+  }
+  return Object.entries(units)
+    .filter(([, c]) => (c ?? 0) > 0)
+    .map(([u, c]) => `${UNIT_LABELS[u] ?? u}: ${c}`)
+    .join(', ');
+}
+
 export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerritoryId: string | null }) {
   const { kingdomId, isOwner } = props;
-  const world = useQuery(getWorldMapQuery, { kingdomId }) as WorldMap | undefined;
+  const world = useQuery(getWorldMapCompactQuery, { kingdomId }) as CompactWorldMapResponse | undefined;
   const mine = useQuery(getKingdomTerritoriesQuery, { kingdomId }) as KingdomTerritories | undefined;
   const claim = useMutation(claimFreeTerritoryMutation);
   const ensureHome = useMutation(ensureHomeTerritoryMutation);
@@ -140,12 +178,24 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
   const startMarch = useMutation(launchAttackMutation);
   const armyState = useQuery(getArmyStateQuery, { kingdomId });
   const action = useActionState();
+
   const [selected, setSelected] = useState<string | null>(null);
+  const [hoveredCellId, setHoveredCellId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [showTroopSelector, setShowTroopSelector] = useState(false);
   const [targetCellId, setTargetCellId] = useState<string | null>(null);
-  const [mapZoom, setMapZoom] = useState(1);
-  const [mapPan, setMapPan] = useState({ x: 0, y: 0 });
+  const [selectedSpiesCount, setSelectedSpiesCount] = useState<number>(1);
+
+  // Cámara en coordenadas del mundo (x, y) y factor de zoom
+  const [camera, setCamera] = useState<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 1.35 });
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
+
+  const centeredKingdomRef = useRef<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>({ width: 720, height: 500 });
+
   const dragRef = useRef({
     isDragging: false,
     startX: 0,
@@ -153,7 +203,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
     hasMoved: false,
     touchMode: null as 'pan' | 'pinch' | null,
     initialPinchDist: 0,
-    initialZoom: 1,
+    initialZoom: 1.35,
   });
 
   useEffect(() => {
@@ -161,12 +211,358 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
     return () => clearInterval(interval);
   }, []);
 
+  const ownedCoords = mine?.territories ?? [];
+
+  // Reconstrucción determinista única en memoria de las 7.651 celdas base del disco
+  const baseCells = useMemo(() => {
+    const r = world?.radius ?? MAP.RADIUS;
+    const seed = world?.worldSeed ?? MAP.WORLD_SEED;
+    return generateWorldCells(r, seed);
+  }, [world?.radius, world?.worldSeed]);
+
+  const effectiveCellMap = useMemo(() => {
+    const map = new Map<string, WorldMapCell>();
+    for (const genCell of baseCells) {
+      map.set(genCell.cellId, {
+        cellId: genCell.cellId,
+        q: genCell.q,
+        r: genCell.r,
+        terrain: 'desconocido',
+        ownerKingdomId: null,
+        ownerName: null,
+        ownerColor: null,
+        isHome: false,
+        state: 'fog',
+        canExplore: false,
+        canConquer: false,
+        explorationPlan: null,
+        expedition: null,
+      });
+    }
+    if (world?.visibleCells) {
+      for (const cell of world.visibleCells) {
+        map.set(cell.cellId, cell);
+      }
+    }
+    return map;
+  }, [baseCells, world?.visibleCells]);
+
+  // Celdas reclamables a distancia <= 2 cuando hay reclamaciones pendientes
+  const claimableAdjacentIds = useMemo(() => {
+    const ids = new Set<string>();
+    if ((mine?.pendingClaims ?? 0) <= 0 || ownedCoords.length === 0) return ids;
+    for (const cell of world?.visibleCells ?? []) {
+      if (cell.state === 'explored' && !cell.ownerKingdomId) {
+        const d = Math.min(...ownedCoords.map((t) => hexDistance(t, cell)));
+        if (d <= 2) ids.add(cell.cellId);
+      }
+    }
+    return ids;
+  }, [world?.visibleCells, ownedCoords, mine?.pendingClaims]);
+
+  const resolvedHomeId = props.homeTerritoryId ?? world?.homeTerritoryId ?? mine?.homeTerritoryId ?? null;
+
+  const centerOnCellId = useCallback((cellIdStr: string | null, zoomLevel?: number) => {
+    const coord = cellIdStr ? parseCellId(cellIdStr) : null;
+    if (!coord) {
+      setCamera((prev) => ({ x: 0, y: 0, zoom: zoomLevel ?? prev.zoom }));
+      return;
+    }
+    const { x, y } = hexCenter(coord.q, coord.r);
+    setCamera((prev) => ({ x, y, zoom: zoomLevel ?? prev.zoom }));
+  }, []);
+
+  // Auto-centrado inicial en la capital del reino al abrir el mapa o cambiar de reino
+  useEffect(() => {
+    if (!world) return;
+    if (centeredKingdomRef.current === kingdomId) return;
+    centeredKingdomRef.current = kingdomId;
+    centerOnCellId(resolvedHomeId, 1.35);
+    if (resolvedHomeId) {
+      setSelected(resolvedHomeId);
+    }
+  }, [kingdomId, world, resolvedHomeId, centerOnCellId]);
+
+  // Observador de tamaño del contenedor para DPR exacto
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setViewportSize({ width: rect.width, height: rect.height });
+      }
+    };
+    updateSize();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(updateSize);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, [world !== undefined]);
+
+  // Zoom con rueda del ratón sin scroll de página ({ passive: false })
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.15 : 0.87;
+      setCamera((prev) => {
+        const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * factor));
+        const wx = prev.x + (mx - rect.width / 2) / prev.zoom;
+        const wy = prev.y + (my - rect.height / 2) / prev.zoom;
+        return {
+          x: wx - (mx - rect.width / 2) / nextZoom,
+          y: wy - (my - rect.height / 2) / nextZoom,
+          zoom: nextZoom,
+        };
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [world !== undefined]);
+
+  // Renderizador HTML5 <canvas> con frustum culling, DPR y nivel de detalle (LOD)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !world) return;
+    let rafId = 0;
+
+    rafId = window.requestAnimationFrame(() => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const { width, height } = viewportSize;
+      const targetW = Math.max(1, Math.floor(width * dpr));
+      const targetH = Math.max(1, Math.floor(height * dpr));
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = '#0a0806';
+      ctx.fillRect(0, 0, width, height);
+
+      const { x: camX, y: camY, zoom } = camera;
+      const radius = world.radius ?? MAP.RADIUS;
+      const pixelRadius = HEX_SIZE * zoom;
+      const showDetailIcons = pixelRadius >= 12;
+      const showMajorIcons = pixelRadius >= 6.5;
+      const drawFogStroke = pixelRadius >= 7.5;
+
+      // Bounding box visible en coordenadas del mundo (frustum culling)
+      const pad = HEX_SIZE * 2;
+      const minWx = camX - width / (2 * zoom) - pad;
+      const maxWx = camX + width / (2 * zoom) + pad;
+      const minWy = camY - height / (2 * zoom) - pad;
+      const maxWy = camY + height / (2 * zoom) + pad;
+
+      const rMin = Math.max(-radius, Math.floor(minWy / (HEX_SIZE * 1.5)) - 1);
+      const rMax = Math.min(radius, Math.ceil(maxWy / (HEX_SIZE * 1.5)) + 1);
+
+      ctx.save();
+      ctx.translate(width / 2 - camX * zoom, height / 2 - camY * zoom);
+      ctx.scale(zoom, zoom);
+
+      const drawCellPolygon = (cx: number, cy: number) => {
+        ctx.beginPath();
+        ctx.moveTo(cx + HEX_OFFSETS[0].dx, cy + HEX_OFFSETS[0].dy);
+        for (let i = 1; i < 6; i++) {
+          ctx.lineTo(cx + HEX_OFFSETS[i].dx, cy + HEX_OFFSETS[i].dy);
+        }
+        ctx.closePath();
+      };
+
+      // Pasada 1: rellenos base y bordes normales (solo hexágonos en viewport)
+      const highlighted: Array<{ cell: WorldMapCell; cx: number; cy: number }> = [];
+
+      for (let r = rMin; r <= rMax; r++) {
+        const qMin = Math.max(-radius, -r - radius, Math.floor(minWx / (HEX_SIZE * SQRT3) - r / 2) - 1);
+        const qMax = Math.min(radius, -r + radius, Math.ceil(maxWx / (HEX_SIZE * SQRT3) - r / 2) + 1);
+
+        for (let q = qMin; q <= qMax; q++) {
+          const id = `${q},${r}`;
+          const cell = effectiveCellMap.get(id);
+          if (!cell) continue;
+
+          const cx = HEX_SIZE * SQRT3 * (q + r / 2);
+          const cy = HEX_SIZE * 1.5 * r;
+
+          const isSelected = selected === id;
+          const isHovered = hoveredCellId === id;
+          const isOwned = cell.state === 'owned';
+          const isFog = cell.state === 'fog';
+          const isExploring = cell.state === 'exploring';
+          const isClaimable = claimableAdjacentIds.has(id);
+
+          drawCellPolygon(cx, cy);
+
+          if (isFog) {
+            ctx.fillStyle = cell.canExplore ? '#19222b' : '#14100c';
+            ctx.fill();
+            if (drawFogStroke) {
+              ctx.strokeStyle = '#221b14';
+              ctx.lineWidth = 0.5;
+              ctx.stroke();
+            }
+          } else if (isExploring) {
+            ctx.fillStyle = '#2b2113';
+            ctx.fill();
+          } else {
+            ctx.fillStyle = TERRAIN_COLORS[cell.terrain] ?? '#555555';
+            ctx.globalAlpha = isOwned ? 0.95 : cell.ownerKingdomId ? 0.72 : 0.86;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = '#1b160f';
+            ctx.lineWidth = 0.65;
+            ctx.stroke();
+          }
+
+          if (
+            isSelected ||
+            isHovered ||
+            isOwned ||
+            isExploring ||
+            cell.canExplore ||
+            cell.canConquer ||
+            isClaimable ||
+            Boolean(cell.ownerKingdomId)
+          ) {
+            highlighted.push({ cell, cx, cy });
+          }
+        }
+      }
+
+      // Pasada 2: bordes destacados, iconos y selección (encima de los vecinos)
+      for (const { cell, cx, cy } of highlighted) {
+        const isSelected = selected === cell.cellId;
+        const isHovered = hoveredCellId === cell.cellId;
+        const isOwned = cell.state === 'owned';
+        const isFog = cell.state === 'fog';
+        const isExploring = cell.state === 'exploring';
+        const isClaimable = claimableAdjacentIds.has(cell.cellId);
+
+        let stroke: string | null = null;
+        let lineWidth = 1.4;
+        let dashed = false;
+
+        if (isSelected) {
+          stroke = '#ffffff';
+          lineWidth = 2.4;
+        } else if (isOwned) {
+          stroke = cell.ownerColor || '#d4af37';
+          lineWidth = 1.8;
+        } else if (isExploring) {
+          stroke = '#f59e0b';
+          lineWidth = 1.9;
+          dashed = true;
+        } else if (cell.canExplore) {
+          stroke = '#0284c7';
+          lineWidth = 1.3;
+        } else if (cell.canConquer) {
+          stroke = '#7dd3fc';
+          lineWidth = 1.7;
+        } else if (isClaimable) {
+          stroke = '#7dd3fc';
+          lineWidth = 1.4;
+          dashed = true;
+        } else if (cell.ownerKingdomId) {
+          stroke = cell.ownerColor || '#c05050';
+          lineWidth = 1.7;
+        } else if (isHovered) {
+          stroke = '#d4af37';
+          lineWidth = 1.2;
+        }
+
+        if (stroke) {
+          drawCellPolygon(cx, cy);
+          ctx.save();
+          if (dashed) ctx.setLineDash([3, 2]);
+          ctx.strokeStyle = stroke;
+          ctx.lineWidth = lineWidth;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        if (showMajorIcons) {
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          if (cell.isHome) {
+            ctx.font = 'bold 11px serif';
+            ctx.fillStyle = cell.ownerColor || '#d4af37';
+            ctx.fillText('♜', cx, cy + 0.5);
+          } else if (isExploring) {
+            ctx.font = '10px sans-serif';
+            ctx.fillStyle = '#f59e0b';
+            ctx.fillText('🧭', cx, cy + 0.5);
+          } else if (showDetailIcons) {
+            if (isOwned || cell.ownerKingdomId) {
+              ctx.font = '10px sans-serif';
+              ctx.fillStyle = cell.ownerColor || '#f0e8d4';
+              ctx.fillText('⚑', cx, cy + 0.5);
+            } else if (isFog && cell.canExplore) {
+              ctx.font = '9px sans-serif';
+              ctx.fillStyle = '#38bdf8';
+              ctx.fillText('🔭', cx, cy + 0.5);
+            }
+          }
+        }
+      }
+
+      ctx.restore();
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [world, effectiveCellMap, claimableAdjacentIds, camera, viewportSize, selected, hoveredCellId]);
+
+  const screenToCell = useCallback(
+    (clientX: number, clientY: number): WorldMapCell | null => {
+      const el = containerRef.current;
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      const mx = clientX - rect.left;
+      const my = clientY - rect.top;
+      const cam = cameraRef.current;
+      const wx = cam.x + (mx - rect.width / 2) / cam.zoom;
+      const wy = cam.y + (my - rect.height / 2) / cam.zoom;
+      const { q, r } = pixelToHex(wx, wy);
+      return effectiveCellMap.get(`${q},${r}`) ?? null;
+    },
+    [effectiveCellMap]
+  );
+
+  const selectedCell = selected ? effectiveCellMap.get(selected) ?? null : null;
+  const hoveredCell = hoveredCellId ? effectiveCellMap.get(hoveredCellId) ?? null : null;
+
+  const selectedDistance =
+    selectedCell && ownedCoords.length
+      ? Math.min(...ownedCoords.map((t) => hexDistance(t, selectedCell)))
+      : null;
+
+  const canClaimSelected = Boolean(
+    isOwner &&
+      selectedCell &&
+      selectedCell.state === 'explored' &&
+      !selectedCell.ownerKingdomId &&
+      (mine?.pendingClaims ?? 0) > 0 &&
+      selectedDistance !== null &&
+      selectedDistance <= 2
+  );
+
   const handleStartSpyExploration = () => {
     if (!selectedCell) return;
     action.run('spy-explore', async () => {
-        const result = await startSpyExploration({ kingdomId, cellId: selectedCell.cellId });
-        if (result && (result as any).success === false) return result;
-        return `Espía enviado a ${selectedCell.cellId}. Llegada estimada en ${Math.round((result as any).durationSeconds / 60)} min.`;
+      const result = await startSpyExploration({ kingdomId, cellId: selectedCell.cellId });
+      if (result && (result as any).success === false) return result;
+      return `Espía enviado a ${selectedCell.cellId}. Llegada estimada en ${Math.round((result as any).durationSeconds / 60)} min.`;
     });
   };
 
@@ -181,80 +577,15 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
     });
   };
 
-  const ownedCoords = mine?.territories ?? [];
-
-  const effectiveWorld = useMemo<WorldMap | undefined>(() => {
-    if (!world) return undefined;
-    if (world.radius >= 50 && world.cells.length >= 7651) {
-      return world;
-    }
-    const serverMap = new Map<string, WorldMapCell>();
-    for (const c of world.cells) {
-      serverMap.set(c.cellId, c);
-    }
-    const allCells = generateWorldCells(50, MAP.WORLD_SEED);
-    const completedCells: WorldMapCell[] = allCells.map((genCell) => {
-      const existing = serverMap.get(genCell.cellId);
-      if (existing) return existing;
-      return {
-        cellId: genCell.cellId,
-        q: genCell.q,
-        r: genCell.r,
-        terrain: genCell.terrain,
-        ownerKingdomId: null,
-        ownerName: null,
-        ownerColor: null,
-        isHome: false,
-        state: "fog",
-        canExplore: false,
-        canConquer: false,
-        explorationPlan: null,
-        expedition: null,
-      };
-    });
-
-    return {
-      ...world,
-      radius: 50,
-      totalCells: 7651,
-      cells: completedCells,
-    };
-  }, [world]);
-
-  const viewBox = useMemo(() => {
-    if (!effectiveWorld) return '0 0 100 100';
-    const extent = HEX_SIZE * SQRT3 * (effectiveWorld.radius + 1.5);
-    const vertical = HEX_SIZE * 1.5 * (effectiveWorld.radius + 1.5);
-    return `${-extent} ${-vertical} ${extent * 2} ${vertical * 2}`;
-  }, [effectiveWorld]);
-
-  const selectedCell = effectiveWorld ? effectiveWorld.cells.find((c) => c.cellId === selected) ?? null : null;
-
-  const selectedDistance = selectedCell && ownedCoords.length
-    ? Math.min(...ownedCoords.map((t) => hexDistance(t, selectedCell)))
-    : null;
-
-  const canClaimSelected = Boolean(
-    isOwner &&
-    selectedCell &&
-    selectedCell.state === 'explored' &&
-    !selectedCell.ownerKingdomId &&
-    (mine?.pendingClaims ?? 0) > 0 &&
-    selectedDistance !== null &&
-    selectedDistance <= 2
-  );
-
   const handleClaim = () => {
-    if (!selectedCell || !effectiveWorld) return;
+    if (!selectedCell || !world) return;
     action.run('claim', async () => {
       const result = await claim({ kingdomId, cellId: selectedCell.cellId });
       if (result && result.success === false) return result;
       setSelected(null);
-      return `Territorio ${result.cellId} (${effectiveWorld.terrains[result.terrain]?.label ?? result.terrain}) anexionado a la corona; reclamaciones restantes: ${result.remainingClaims}.`;
+      return `Territorio ${result.cellId} (${world.terrains[result.terrain]?.label ?? result.terrain}) anexionado a la corona; reclamaciones restantes: ${result.remainingClaims}.`;
     });
   };
-
-  const [selectedSpiesCount, setSelectedSpiesCount] = useState<number>(1);
 
   const handleStartExploration = (count?: number) => {
     if (!selectedCell) return;
@@ -291,69 +622,9 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
       return `Territorio principal asignado en ${result.homeTerritoryId}.`;
     });
 
-  const activeExpedition = effectiveWorld?.activeExpeditions?.[0];
-
-  const renderedHexes = useMemo(() => {
-    if (!effectiveWorld) return null;
-    return effectiveWorld.cells.map((cell) => {
-      const { x, y } = hexCenter(cell.q, cell.r);
-      const isSelected = selected === cell.cellId;
-      const isOwned = cell.state === 'owned';
-      const isFog = cell.state === 'fog';
-      const isExploring = cell.state === 'exploring';
-      const isExplored = cell.state === 'explored';
-
-      const distanceToOwned = ownedCoords.length
-        ? Math.min(...ownedCoords.map((t) => hexDistance(t, cell)))
-        : null;
-
-      let fill = isFog ? '#16120e' : isExploring ? '#261e12' : (TERRAIN_COLORS[cell.terrain] ?? '#555');
-      let fillOpacity = isFog ? 0.92 : isExploring ? 0.85 : isOwned ? 0.95 : cell.ownerKingdomId ? 0.6 : 0.85;
-      let stroke = isFog ? '#221b14' : '#1b160f';
-      let strokeWidth = isFog ? 0.4 : 0.6;
-      let strokeDasharray: string | undefined = undefined;
-
-      if (isSelected) { stroke = '#ffffff'; strokeWidth = 2.5; }
-      else if (isOwned) { stroke = cell.ownerColor || '#d4af37'; strokeWidth = 1.8; }
-      else if (isExploring) { stroke = '#f59e0b'; strokeWidth = 2; strokeDasharray = '3,2'; }
-      else if (cell.canExplore) { stroke = '#0284c7'; strokeWidth = 1.4; }
-      else if (cell.canConquer) { stroke = '#7dd3fc'; strokeWidth = 1.8; }
-      else if (isExplored && !cell.ownerKingdomId && (mine?.pendingClaims ?? 0) > 0 && distanceToOwned !== null && distanceToOwned <= 2) { stroke = '#7dd3fc'; strokeWidth = 1.4; strokeDasharray = '2,1'; }
-      else if (cell.ownerKingdomId) { stroke = cell.ownerColor || '#c05050'; strokeWidth = 1.8; }
-
-      return (
-        <g 
-          key={cell.cellId} 
-          onClick={(e) => {
-            e.stopPropagation();
-            if (dragRef.current.hasMoved) {
-              return;
-            }
-            setSelected(cell.cellId);
-          }} 
-          className="cursor-pointer transition-opacity"
-        >
-          <polygon points={hexPoints(x, y)} fill={fill} fillOpacity={fillOpacity} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={strokeDasharray}>
-            <title>{isFog ? `${cell.cellId} · Niebla de guerra (Tierra incógnita)` : `${cell.cellId} · ${effectiveWorld.terrains[cell.terrain]?.label ?? cell.terrain}${cell.ownerName ? ` (${cell.ownerName})` : ''}`}</title>
-          </polygon>
-          {cell.isHome && (
-            <text x={x} y={y + 4} textAnchor="middle" fontSize={11} fill={cell.ownerColor || '#d4af37'} fontWeight="bold" pointerEvents="none">♜</text>
-          )}
-          {(isOwned || cell.ownerKingdomId) && !cell.isHome && (
-            <text x={x} y={y + 4} textAnchor="middle" fontSize={10} fill={cell.ownerColor || '#f0e8d4'} pointerEvents="none">⚑</text>
-          )}
-          {isExploring && <text x={x} y={y + 4} textAnchor="middle" fontSize={10} fill="#f59e0b" pointerEvents="none">🧭</text>}
-          {isFog && cell.canExplore && <text x={x} y={y + 3.5} textAnchor="middle" fontSize={9} fill="#38bdf8" pointerEvents="none">🔭</text>}
-        </g>
-      );
-    });
-  }, [effectiveWorld, selected, ownedCoords, mine?.pendingClaims]);
-
-  if (!effectiveWorld) {
+  if (!world) {
     return <p className="text-xs text-[#8e816d] italic p-4">Cartografiando el mundo y la niebla de guerra…</p>;
   }
-
-  // Instrumentación en tiempo real de estados de celdas (calculada arriba)
 
   return (
     <div className="space-y-6">
@@ -362,19 +633,21 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
         title="Mapa del mundo y exploración"
         aside={
           <span className="flex items-center gap-3">
-            <span>Explorado: {effectiveWorld.exploredCount}/{effectiveWorld.totalCells} ({effectiveWorld.totalCells > 0 ? Math.round((effectiveWorld.exploredCount / effectiveWorld.totalCells) * 100) : 0} %)</span>
+            <span>
+              Explorado: {world.exploredCount}/{world.totalCells} ({world.totalCells > 0 ? Math.round((world.exploredCount / world.totalCells) * 100) : 0} %)
+            </span>
             <span>·</span>
             <span className="text-[#d4af37]">{mine?.pendingClaims ?? 0} reclamación(es)</span>
           </span>
         }
       >
-        {!effectiveWorld.generated && (
+        {!world.generated && (
           <p className="text-xs text-amber-300 bg-amber-950/30 border border-amber-800/50 rounded p-3">
             El mundo aún no se ha generado en el servidor: se crea al fundar el primer reino o al asignar un territorio principal.
           </p>
         )}
 
-        {isOwner && !props.homeTerritoryId && (
+        {isOwner && !resolvedHomeId && (
           <div className="flex items-center gap-3 text-xs bg-[#18140f] p-3 rounded border border-amber-900/40">
             <span className="text-[#c7beac]">Este reino todavía no tiene territorio principal en el mapa.</span>
             <button type="button" className={primaryButton} disabled={action.busy !== null} onClick={handleEnsureHome}>
@@ -384,17 +657,17 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
         )}
 
         {/* Panel de actividades y expediciones simultáneas en curso */}
-        {((effectiveWorld.activeExpeditions && effectiveWorld.activeExpeditions.length > 0) ||
-          (effectiveWorld.activeMarches && effectiveWorld.activeMarches.length > 0)) && (
+        {((world.activeExpeditions && world.activeExpeditions.length > 0) ||
+          (world.activeMarches && world.activeMarches.length > 0)) && (
           <div className="space-y-2.5 bg-[#120f0c] p-3 rounded-lg border border-[#2b2419]">
             <div className="flex items-center justify-between text-xs font-semibold text-[#e6ded0]">
               <span className="flex items-center gap-1.5">
                 <Clock className="w-4 h-4 text-amber-400" />
-                Misiones y desplazamientos activos ({(effectiveWorld.activeExpeditions?.length ?? 0) + (effectiveWorld.activeMarches?.length ?? 0)})
+                Misiones y desplazamientos activos ({(world.activeExpeditions?.length ?? 0) + (world.activeMarches?.length ?? 0)})
               </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-              {effectiveWorld.activeExpeditions?.map((exp) => (
+              {world.activeExpeditions?.map((exp) => (
                 <div
                   key={exp.expeditionId}
                   className={`flex flex-col justify-between gap-2 text-xs border p-2.5 rounded-md ${
@@ -412,7 +685,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                       </span>
                     </span>
                     <span className="text-[10px] font-mono text-[#a89b88]">
-                      ⏳ {formatRemainingSeconds(exp.completesAt)}
+                      ⏳ {formatRemainingSeconds(exp.completesAt, now)}
                     </span>
                   </div>
 
@@ -436,14 +709,14 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                           Consolidar hallazgo
                         </button>
                       )}
-                      {isOwner && now < exp.completesAt && !exp.isSpyMission && (
+                      {isOwner && now < exp.completesAt && (
                         <button
                           type="button"
                           className="px-2 py-0.5 text-[10px] bg-[#331c17] hover:bg-[#4a241e] text-red-300 border border-red-900/40 rounded cursor-pointer"
                           onClick={() => handleCancelExploration(exp.expeditionId)}
                           disabled={action.busy !== null}
                         >
-                          Cancelar (50 % reembolso)
+                          {exp.isSpyMission ? 'Cancelar misión (devuelve espía)' : 'Cancelar (50 % reembolso)'}
                         </button>
                       )}
                     </div>
@@ -451,7 +724,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                 </div>
               ))}
 
-              {effectiveWorld.activeMarches?.map((march) => (
+              {world.activeMarches?.map((march) => (
                 <div
                   key={march.marchId}
                   className={`flex flex-col justify-between gap-2 text-xs border p-2.5 rounded-md ${
@@ -465,7 +738,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                       </span>
                     </span>
                     <span className="text-[10px] font-mono text-[#a89b88]">
-                      ⏳ {formatRemainingSeconds(march.completesAt)}
+                      ⏳ {formatRemainingSeconds(march.completesAt, now)}
                     </span>
                   </div>
 
@@ -477,7 +750,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                   </div>
 
                   <div className="flex items-center justify-between text-[10px] text-[#a89b88]">
-                    <span>Tropas: {Object.entries(march.units).map(([u, c]) => `${u}: ${c}`).join(', ')}</span>
+                    <span>Tropas: {formatMarchUnits(march.units)}</span>
                     <span>{march.progressPercent} % completado</span>
                   </div>
                 </div>
@@ -487,8 +760,9 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div 
-            className="lg:col-span-2 bg-[#0a0806] border border-[#2b2419] rounded-lg p-2 overflow-hidden flex items-center justify-center relative cursor-grab active:cursor-grabbing select-none h-[500px] touch-none"
+          <div
+            ref={containerRef}
+            className="lg:col-span-2 bg-[#0a0806] border border-[#2b2419] rounded-lg overflow-hidden relative cursor-grab active:cursor-grabbing select-none h-[500px] touch-none"
             onMouseDown={(e) => {
               if (e.button !== 0) return;
               dragRef.current.isDragging = true;
@@ -497,30 +771,42 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
               dragRef.current.hasMoved = false;
             }}
             onMouseMove={(e) => {
-              if (e.buttons !== 1 || !dragRef.current.isDragging) {
-                dragRef.current.isDragging = false;
-                return;
-              }
-              const dx = e.clientX - dragRef.current.startX;
-              const dy = e.clientY - dragRef.current.startY;
-              if (Math.hypot(dx, dy) > 8) {
-                dragRef.current.hasMoved = true;
-              }
-              if (dragRef.current.hasMoved) {
-                dragRef.current.startX = e.clientX;
-                dragRef.current.startY = e.clientY;
-                setMapPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+              if (e.buttons === 1 && dragRef.current.isDragging) {
+                const dx = e.clientX - dragRef.current.startX;
+                const dy = e.clientY - dragRef.current.startY;
+                if (Math.hypot(dx, dy) > 5) {
+                  dragRef.current.hasMoved = true;
+                }
+                if (dragRef.current.hasMoved) {
+                  dragRef.current.startX = e.clientX;
+                  dragRef.current.startY = e.clientY;
+                  setCamera((prev) => ({
+                    ...prev,
+                    x: prev.x - dx / prev.zoom,
+                    y: prev.y - dy / prev.zoom,
+                  }));
+                }
+              } else {
+                const hit = screenToCell(e.clientX, e.clientY);
+                const nextHover = hit?.cellId ?? null;
+                if (nextHover !== hoveredCellId) {
+                  setHoveredCellId(nextHover);
+                }
               }
             }}
-            onMouseUp={() => {
+            onMouseUp={(e) => {
+              const wasClick = dragRef.current.isDragging && !dragRef.current.hasMoved;
               dragRef.current.isDragging = false;
-              setTimeout(() => {
-                dragRef.current.hasMoved = false;
-              }, 120);
+              dragRef.current.hasMoved = false;
+              if (wasClick) {
+                const hit = screenToCell(e.clientX, e.clientY);
+                if (hit) setSelected(hit.cellId);
+              }
             }}
             onMouseLeave={() => {
               dragRef.current.isDragging = false;
               dragRef.current.hasMoved = false;
+              if (hoveredCellId !== null) setHoveredCellId(null);
             }}
             onTouchStart={(e) => {
               if (e.touches.length === 1) {
@@ -538,7 +824,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                   e.touches[0].clientY - e.touches[1].clientY
                 );
                 dragRef.current.initialPinchDist = dist;
-                dragRef.current.initialZoom = mapZoom;
+                dragRef.current.initialZoom = cameraRef.current.zoom;
               }
             }}
             onTouchMove={(e) => {
@@ -550,29 +836,37 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                 );
                 if (dragRef.current.initialPinchDist > 0) {
                   const scale = dist / dragRef.current.initialPinchDist;
-                  setMapZoom(Math.max(0.2, Math.min(6.0, dragRef.current.initialZoom * scale)));
+                  const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, dragRef.current.initialZoom * scale));
+                  setCamera((prev) => ({ ...prev, zoom: nextZoom }));
                 }
               } else if (e.touches.length === 1 && dragRef.current.touchMode === 'pan') {
                 const dx = e.touches[0].clientX - dragRef.current.startX;
                 const dy = e.touches[0].clientY - dragRef.current.startY;
-                if (Math.hypot(dx, dy) > 8) {
+                if (Math.hypot(dx, dy) > 6) {
                   dragRef.current.hasMoved = true;
                 }
                 if (dragRef.current.hasMoved) {
                   if (e.cancelable) e.preventDefault();
                   dragRef.current.startX = e.touches[0].clientX;
                   dragRef.current.startY = e.touches[0].clientY;
-                  setMapPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+                  setCamera((prev) => ({
+                    ...prev,
+                    x: prev.x - dx / prev.zoom,
+                    y: prev.y - dy / prev.zoom,
+                  }));
                 }
               }
             }}
             onTouchEnd={(e) => {
               if (e.touches.length === 0) {
+                const wasTap = dragRef.current.touchMode === 'pan' && !dragRef.current.hasMoved;
                 dragRef.current.isDragging = false;
                 dragRef.current.touchMode = null;
-                setTimeout(() => {
-                  dragRef.current.hasMoved = false;
-                }, 120);
+                dragRef.current.hasMoved = false;
+                if (wasTap && e.changedTouches.length > 0) {
+                  const hit = screenToCell(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+                  if (hit) setSelected(hit.cellId);
+                }
               } else if (e.touches.length === 1) {
                 dragRef.current.touchMode = 'pan';
                 dragRef.current.startX = e.touches[0].clientX;
@@ -580,18 +874,17 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                 dragRef.current.hasMoved = true;
               }
             }}
-            onWheel={(e) => {
-              e.preventDefault();
-              const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-              setMapZoom((prev) => Math.max(0.2, Math.min(6.0, prev * zoomFactor)));
-            }}
           >
-            {/* Controles flotantes de Zoom y Reset */}
-            <div className="absolute top-3 right-3 z-10 flex flex-col gap-1 bg-[#18140f]/90 border border-[#2b2419] p-1 rounded shadow-lg">
+            {/* Controles flotantes de Zoom, Centrado y Vista global */}
+            <div
+              className="absolute top-3 right-3 z-10 flex flex-col gap-1 bg-[#18140f]/90 border border-[#2b2419] p-1 rounded shadow-lg"
+              onMouseDown={(e) => e.stopPropagation()}
+              onMouseUp={(e) => e.stopPropagation()}
+            >
               <button
                 type="button"
                 className="w-7 h-7 flex items-center justify-center bg-[#241c14] hover:bg-[#33281d] text-[#e6ded0] rounded text-sm font-bold cursor-pointer transition"
-                onClick={() => setMapZoom((prev) => Math.min(6.0, prev * 1.25))}
+                onClick={() => setCamera((prev) => ({ ...prev, zoom: Math.min(MAX_ZOOM, prev.zoom * 1.25) }))}
                 title="Acercar (Zoom +)"
               >
                 +
@@ -599,26 +892,50 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
               <button
                 type="button"
                 className="w-7 h-7 flex items-center justify-center bg-[#241c14] hover:bg-[#33281d] text-[#e6ded0] rounded text-sm font-bold cursor-pointer transition"
-                onClick={() => setMapZoom((prev) => Math.max(0.2, prev * 0.8))}
+                onClick={() => setCamera((prev) => ({ ...prev, zoom: Math.max(MIN_ZOOM, prev.zoom * 0.8) }))}
                 title="Alejar (Zoom -)"
               >
                 -
               </button>
               <button
                 type="button"
-                className="w-7 h-7 flex items-center justify-center bg-[#241c14] hover:bg-[#33281d] text-[#8e816d] hover:text-[#e6ded0] rounded text-[10px] cursor-pointer transition"
-                onClick={() => { setMapZoom(1); setMapPan({ x: 0, y: 0 }); }}
-                title="Restablecer vista"
+                className="w-7 h-7 flex items-center justify-center bg-[#241c14] hover:bg-[#33281d] text-[#d4af37] rounded cursor-pointer transition"
+                onClick={() => {
+                  centerOnCellId(resolvedHomeId, 1.45);
+                  if (resolvedHomeId) setSelected(resolvedHomeId);
+                }}
+                title="Centrar en mi capital"
+              >
+                <Crosshair className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                className="w-7 h-7 flex items-center justify-center bg-[#241c14] hover:bg-[#33281d] text-[#8e816d] hover:text-[#e6ded0] rounded text-[11px] cursor-pointer transition"
+                onClick={() => setCamera({ x: 0, y: 0, zoom: 0.34 })}
+                title="Vista completa del mundo"
               >
                 ⌂
               </button>
             </div>
 
-            <svg viewBox={viewBox} className="w-full h-full select-none" role="img" aria-label="Mapa hexagonal de La Conquista">
-              <g transform={`translate(${mapPan.x}, ${mapPan.y}) scale(${mapZoom})`} style={{ transformOrigin: 'center center' }}>
-                {renderedHexes}
-              </g>
-            </svg>
+            {/* Indicador flotante de celda bajo el cursor */}
+            {hoveredCell && (
+              <div className="pointer-events-none absolute bottom-3 left-3 z-10 bg-[#14110d]/90 border border-[#2b2419] px-2.5 py-1 rounded text-[10px] text-[#e6ded0] shadow">
+                <span className="font-mono text-[#d4af37] mr-1.5">[{hoveredCell.cellId}]</span>
+                <span>
+                  {hoveredCell.state === 'fog'
+                    ? 'Niebla de guerra (Tierra incógnita)'
+                    : `${world.terrains[hoveredCell.terrain]?.label ?? hoveredCell.terrain}${hoveredCell.ownerName ? ` · ${hoveredCell.ownerName}` : ''}`}
+                </span>
+              </div>
+            )}
+
+            <canvas
+              ref={canvasRef}
+              className="w-full h-full block"
+              role="img"
+              aria-label="Mapa hexagonal de La Conquista"
+            />
           </div>
 
           <div className="space-y-3 text-[11px]">
@@ -639,7 +956,6 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                       <p className="text-[#a89b88]">Este territorio no ha sido cartografiado.</p>
                       {selectedCell.canExplore ? (
                         <div className="pt-2 border-t border-[#261f14] space-y-3">
-                          {/* Resumen numérico de espías del reino */}
                           <div className="bg-[#0b0f19] p-2 rounded border border-sky-950 text-[11px] space-y-1">
                             <div className="flex justify-between items-center text-[#c7beac]">
                               <span>Espías totales del reino:</span>
@@ -658,12 +974,8 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                           {isOwner && (armyState?.spies?.active ?? 0) > 0 ? (
                             <div className="space-y-2.5 bg-[#121824] p-2.5 rounded border border-sky-900/40">
                               <div className="flex items-center justify-between text-xs">
-                                <span className="font-semibold text-sky-200">
-                                  Composición de espías:
-                                </span>
-                                <span className="text-[10px] text-sky-400 font-mono">
-                                  Disp: {armyState!.spies!.active}
-                                </span>
+                                <span className="font-semibold text-sky-200">Composición de espías:</span>
+                                <span className="text-[10px] text-sky-400 font-mono">Disp: {armyState!.spies!.active}</span>
                               </div>
 
                               <div className="flex items-center gap-1.5">
@@ -763,16 +1075,18 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                       </div>
                       <div className="flex justify-between text-[10px] text-[#c7beac]">
                         <span>Progreso: {selectedCell.expedition.progressPercent} %</span>
-                        <span>Restante: {formatRemainingSeconds(selectedCell.expedition.completesAt)}</span>
+                        <span>Restante: {formatRemainingSeconds(selectedCell.expedition.completesAt, now)}</span>
                       </div>
-                      {isOwner && !selectedCell.expedition.isSpyMission && (
+                      {isOwner && now < selectedCell.expedition.completesAt && (
                         <button
                           type="button"
                           className="w-full py-1 text-[10px] bg-[#331c17] hover:bg-[#4a241e] text-red-300 rounded border border-red-900/40 cursor-pointer"
                           disabled={action.busy !== null}
                           onClick={() => handleCancelExploration(selectedCell.expedition!.expeditionId)}
                         >
-                          Cancelar expedición (recuperar 50 % costes)
+                          {selectedCell.expedition.isSpyMission
+                            ? 'Cancelar misión (devuelve espía y 50 % costes)'
+                            : 'Cancelar expedición (recuperar 50 % costes)'}
                         </button>
                       )}
                     </div>
@@ -782,7 +1096,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                     <div className="space-y-1.5 bg-[#14100c] p-2.5 rounded border border-[#2b2419]">
                       <div className="flex items-center gap-2">
                         <span className="inline-block w-3.5 h-3.5 rounded border border-[#1b160f]" style={{ backgroundColor: TERRAIN_COLORS[selectedCell.terrain] ?? '#555' }} />
-                        <span className="font-semibold text-[#e6ded0] text-xs">{effectiveWorld.terrains[selectedCell.terrain]?.label ?? selectedCell.terrain}</span>
+                        <span className="font-semibold text-[#e6ded0] text-xs">{world.terrains[selectedCell.terrain]?.label ?? selectedCell.terrain}</span>
                         {selectedCell.state === 'owned' && (
                           <span className="text-amber-400 font-medium text-[10px]">
                             {selectedCell.isHome ? '👑 Capital' : '🏰 Posesión de la corona'}
@@ -795,25 +1109,23 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                           : 'Territorio libre · Sin soberano'}
                       </p>
 
-                      {/* Rendimiento comarcal y modificadores de terreno */}
-                      {effectiveWorld.terrains[selectedCell.terrain] && (
+                      {world.terrains[selectedCell.terrain] && (
                         <div className="text-[10px] text-[#a89b88] bg-[#0c0a08] p-1.5 rounded">
                           <span className="block text-[#c7beac] font-medium mb-0.5">Rendimiento comarcal:</span>
-                          {Object.entries(effectiveWorld.terrains[selectedCell.terrain].production).map(([job, bonus]) => (
+                          {Object.entries(world.terrains[selectedCell.terrain].production).map(([job, bonus]) => (
                             <span key={job} className="mr-2">+{Math.round(bonus * 100)} % {JOB_LABELS[job] ?? job}</span>
                           ))}
-                          {effectiveWorld.terrains[selectedCell.terrain].defense > 0 && (
-                            <span className="mr-2">+{Math.round(effectiveWorld.terrains[selectedCell.terrain].defense * 100)} % defensa</span>
+                          {world.terrains[selectedCell.terrain].defense > 0 && (
+                            <span className="mr-2">+{Math.round(world.terrains[selectedCell.terrain].defense * 100)} % defensa</span>
                           )}
-                          {effectiveWorld.terrains[selectedCell.terrain].marchMultiplier !== 1.0 && (
+                          {world.terrains[selectedCell.terrain].marchMultiplier !== 1.0 && (
                             <span className="mr-2 text-amber-300">
-                              ×{effectiveWorld.terrains[selectedCell.terrain].marchMultiplier.toFixed(2)} marcha ({effectiveWorld.terrains[selectedCell.terrain].marchMultiplier > 1 ? `+${Math.round((effectiveWorld.terrains[selectedCell.terrain].marchMultiplier - 1) * 100)} % tiempo y fatiga` : ''})
+                              ×{world.terrains[selectedCell.terrain].marchMultiplier.toFixed(2)} marcha ({world.terrains[selectedCell.terrain].marchMultiplier > 1 ? `+${Math.round((world.terrains[selectedCell.terrain].marchMultiplier - 1) * 100)} % tiempo y fatiga` : ''})
                             </span>
                           )}
                         </div>
                       )}
 
-                      {/* Reclamación de territorio libre o conquista */}
                       {isOwner && !selectedCell.ownerKingdomId && (
                         <div className="pt-2 border-t border-[#261f14] space-y-2">
                           {(mine?.pendingClaims ?? 0) > 0 && (
@@ -831,7 +1143,15 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                             </button>
                           )}
                           {selectedCell.canConquer ? (
-                            <button type="button" className={`${primaryButton} w-full`} disabled={action.busy !== null || (armyState?.summary?.totalActive ?? 0) === 0} onClick={() => { setTargetCellId(selectedCell.cellId); setShowTroopSelector(true); }}>
+                            <button
+                              type="button"
+                              className={`${primaryButton} w-full`}
+                              disabled={action.busy !== null || (armyState?.summary?.totalActive ?? 0) === 0}
+                              onClick={() => {
+                                setTargetCellId(selectedCell.cellId);
+                                setShowTroopSelector(true);
+                              }}
+                            >
                               Conquistar territorio con ejército
                             </button>
                           ) : (
@@ -843,7 +1163,15 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                       )}
                       {isOwner && selectedCell.ownerKingdomId && selectedCell.ownerKingdomId !== kingdomId && (
                         <div className="pt-2 border-t border-[#261f14] space-y-2">
-                          <button type="button" className="w-full bg-red-900/60 hover:bg-red-800 text-red-100 py-1.5 rounded text-xs border border-red-800/40 transition disabled:opacity-50" disabled={action.busy !== null || (armyState?.summary?.totalActive ?? 0) === 0} onClick={() => { setTargetCellId(selectedCell.cellId); setShowTroopSelector(true); }}>
+                          <button
+                            type="button"
+                            className="w-full bg-red-900/60 hover:bg-red-800 text-red-100 py-1.5 rounded text-xs border border-red-800/40 transition disabled:opacity-50"
+                            disabled={action.busy !== null || (armyState?.summary?.totalActive ?? 0) === 0}
+                            onClick={() => {
+                              setTargetCellId(selectedCell.cellId);
+                              setShowTroopSelector(true);
+                            }}
+                          >
                             Lanzar ataque militar
                           </button>
                         </div>
@@ -857,11 +1185,11 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                         selectedCell
                           ? {
                               cellId: selectedCell.cellId,
-                              terrainLabel: effectiveWorld.terrains[selectedCell.terrain]?.label ?? selectedCell.terrain,
+                              terrainLabel: world.terrains[selectedCell.terrain]?.label ?? selectedCell.terrain,
                               distance: selectedDistance ?? undefined,
-                              terrainMultiplier: effectiveWorld.terrains[selectedCell.terrain]?.marchMultiplier,
-                              resourceBonusLabel: effectiveWorld.terrains[selectedCell.terrain]?.production
-                                ? Object.entries(effectiveWorld.terrains[selectedCell.terrain].production)
+                              terrainMultiplier: world.terrains[selectedCell.terrain]?.marchMultiplier,
+                              resourceBonusLabel: world.terrains[selectedCell.terrain]?.production
+                                ? Object.entries(world.terrains[selectedCell.terrain].production)
                                     .map(([j, v]) => `+${Math.round(v * 100)}% ${JOB_LABELS[j] ?? j}`)
                                     .join(', ')
                                 : undefined,
@@ -879,15 +1207,14 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
               )}
             </div>
 
-            {/* Leyenda política de reinos en el mapa */}
-            {effectiveWorld.kingdomLegend && effectiveWorld.kingdomLegend.length > 0 && (
+            {world.kingdomLegend && world.kingdomLegend.length > 0 && (
               <div className={`${cardClass} space-y-1.5`}>
                 <span className="font-semibold text-[#e6ded0] text-xs flex items-center justify-between">
-                  <span>Reinos del mundo ({effectiveWorld.kingdomLegend.length})</span>
+                  <span>Reinos del mundo ({world.kingdomLegend.length})</span>
                   <span className="text-[10px] text-[#8e816d]">Identidad de color</span>
                 </span>
                 <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                  {effectiveWorld.kingdomLegend.map((k) => (
+                  {world.kingdomLegend.map((k) => (
                     <div key={k.id} className="flex items-center justify-between text-[11px] bg-[#120f0c] p-1.5 rounded border border-[#221c15]">
                       <div className="flex items-center gap-2 overflow-hidden">
                         <span className="w-3 h-3 rounded-full shrink-0 border border-[#000]/40 shadow-sm" style={{ backgroundColor: k.color }} />
@@ -909,10 +1236,9 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
           </div>
         </div>
 
-        {/* SECCIÓN INFORMATIVA DEBAJO DEL MAPA — Historial de Exploración, Provincias y Leyenda */}
+        {/* SECCIÓN INFORMATIVA DEBAJO DEL MAPA */}
         <div className="mt-6 space-y-4 pt-4 border-t border-[#2b2419]">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Historial Completo de Descubrimientos de Exploración */}
             <div className={`${cardClass} space-y-2.5`}>
               <span className="font-semibold text-[#e6ded0] text-xs flex items-center justify-between border-b border-[#221c15] pb-2">
                 <span className="flex items-center gap-1.5">
@@ -956,9 +1282,7 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
               )}
             </div>
 
-            {/* Provincias de la Corona y Clave Cartográfica */}
             <div className="space-y-4">
-              {/* Provincias de la Corona */}
               <div className={`${cardClass} space-y-2`}>
                 <span className="font-semibold text-[#e6ded0] text-xs flex items-center justify-between border-b border-[#221c15] pb-2">
                   <span className="flex items-center gap-1.5">
@@ -970,14 +1294,22 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                 {mine?.territories.length ? (
                   <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
                     {mine.territories.map((t) => (
-                      <div key={t.cellId} className="flex justify-between items-center text-[11px] text-[#c7beac] bg-[#120f0c] p-2 rounded border border-[#221c15]">
+                      <button
+                        type="button"
+                        key={t.cellId}
+                        onClick={() => {
+                          setSelected(t.cellId);
+                          centerOnCellId(t.cellId);
+                        }}
+                        className="w-full flex justify-between items-center text-[11px] text-[#c7beac] bg-[#120f0c] hover:bg-[#1a1510] p-2 rounded border border-[#221c15] cursor-pointer text-left transition"
+                      >
                         <span className="font-mono">
-                          [{t.cellId}] · <span className="text-[#e6ded0]">{effectiveWorld.terrains[t.terrain]?.label ?? t.terrain}</span>
+                          [{t.cellId}] · <span className="text-[#e6ded0]">{world.terrains[t.terrain]?.label ?? t.terrain}</span>
                         </span>
                         <span className="text-[10px] text-amber-400 font-medium">
                           {t.isHome ? '👑 Capital' : '🏰 Provincia'}
                         </span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ) : (
@@ -985,7 +1317,6 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                 )}
               </div>
 
-              {/* Clave cartográfica del mapa */}
               <div className={`${cardClass} space-y-1.5`}>
                 <span className="font-semibold text-[#e6ded0] text-xs block">Clave cartográfica del mapa</span>
                 <div className="grid grid-cols-2 gap-2 text-[10px] pt-1">

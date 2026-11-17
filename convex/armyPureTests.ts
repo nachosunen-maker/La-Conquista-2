@@ -1,6 +1,7 @@
 import {
   availableMilitaryLevels,
   calculateTrainingCancellation,
+  createSpyRecruitmentPlan,
   createTrainingPlan,
   getMilitaryLevel,
   summarizeArmy,
@@ -81,6 +82,53 @@ export function runArmyValidationTests(): ArmyTestResult[] {
   const hireDefault = validateMercenaryHire({ typeId: undefined, count: 5, tavernLevel: 1, activeMercenaries: 0, gold: 100 });
   const hirePoor = validateMercenaryHire({ typeId: undefined, count: 5, tavernLevel: 1, activeMercenaries: 0, gold: 99 });
 
+  // Espías: bloqueados en entrenamiento normal y limitados por Cuartel en createSpyRecruitmentPlan
+  const spyBlockedInNormal = createTrainingPlan(baseInput({ unitType: "espia", count: 1, buildingLevels: { castillo: 3, cuartel: 4 } }));
+  const spyNoCuartel2 = createSpyRecruitmentPlan({
+    count: 1,
+    resources: { ...richResources },
+    availableCivil: 10,
+    buildingLevels: { castillo: 3, cuartel: 1 },
+    activeTraining: [],
+    activeSpies: 0,
+    busySpies: 0,
+    inQueueSpies: 0,
+    now: 1_000_000,
+  });
+  const spyCapExceededWithBusy = createSpyRecruitmentPlan({
+    count: 1,
+    resources: { ...richResources },
+    availableCivil: 10,
+    buildingLevels: { castillo: 3, cuartel: 4 }, // capacidad = 2
+    activeTraining: [],
+    activeSpies: 1,
+    busySpies: 1,
+    inQueueSpies: 0,
+    now: 1_000_000,
+  });
+  const spyOkWithinCap = createSpyRecruitmentPlan({
+    count: 1,
+    resources: { ...richResources },
+    availableCivil: 10,
+    buildingLevels: { castillo: 3, cuartel: 6 }, // capacidad = 3
+    activeTraining: [],
+    activeSpies: 1,
+    busySpies: 1,
+    inQueueSpies: 0,
+    now: 1_000_000,
+  });
+  const spyNoCivilians = createSpyRecruitmentPlan({
+    count: 1,
+    resources: { ...richResources },
+    availableCivil: 0,
+    buildingLevels: { castillo: 3, cuartel: 4 },
+    activeTraining: [],
+    activeSpies: 0,
+    busySpies: 0,
+    inQueueSpies: 0,
+    now: 1_000_000,
+  });
+
   return [
     {
       test: "Mercenarios por tipo: hay tipos más baratos y más caros, y el nivel de Taberna los desbloquea",
@@ -144,6 +192,19 @@ export function runArmyValidationTests(): ArmyTestResult[] {
       passed: !equipmentLocked.success && equipmentOpen.success && equipmentOpen.weaponTier === "acero" && equipmentOpen.armorTier === "piel" &&
         equipmentOpen.tacticalFormation === "ofensiva" && !equipmentInvalidFormation.success && equipmentInvalidFormation.error.includes("Formación táctica desconocida"),
       details: `Acero bloqueado: ${!equipmentLocked.success}; con tecnología y formación ofensiva: ${equipmentOpen.success}; formación arbitraria rechazada: ${!equipmentInvalidFormation.success}`,
+    },
+    {
+      test: "Espías: excluidos del entrenamiento militar normal y sujetos a capacidad floor(cuartel/2) incluyendo activos + misión + cola",
+      passed:
+        !spyBlockedInNormal.success &&
+        !spyNoCuartel2.success &&
+        !spyCapExceededWithBusy.success &&
+        spyOkWithinCap.success &&
+        spyOkWithinCap.capacity === 3 &&
+        spyOkWithinCap.occupied === 2 &&
+        spyOkWithinCap.plan.unitType === "espia" &&
+        !spyNoCivilians.success,
+      details: `Normal bloqueado: ${!spyBlockedInNormal.success}; Cuartel 1 bloqueado: ${!spyNoCuartel2.success}; tope activos+misión bloqueado: ${!spyCapExceededWithBusy.success}; dentro de tope (2/3): ${spyOkWithinCap.success}; sin civiles bloqueado: ${!spyNoCivilians.success}`,
     },
   ];
 }

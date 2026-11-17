@@ -4,7 +4,7 @@
  *
  * THIS CODE IS AUTOMATICALLY GENERATED.
  *
- * To regenerate, run `npx convex dev`.
+ * To regenerate, run `npx convex dev` (or `node scripts/regenerateConvexApi.mjs` offline).
  * @module
  */
 
@@ -33,6 +33,7 @@ import type * as challengeRules from "../challengeRules.js";
 import type * as civilizationPureTests from "../civilizationPureTests.js";
 import type * as civilizationRules from "../civilizationRules.js";
 import type * as civilizations from "../civilizations.js";
+import type * as compensation from "../compensation.js";
 import type * as constructionPureTests from "../constructionPureTests.js";
 import type * as economy from "../economy.js";
 import type * as economyAdapter from "../economyAdapter.js";
@@ -100,6 +101,7 @@ declare const fullApi: ApiFromModules<{
   civilizationPureTests: typeof civilizationPureTests;
   civilizationRules: typeof civilizationRules;
   civilizations: typeof civilizations;
+  compensation: typeof compensation;
   constructionPureTests: typeof constructionPureTests;
   economy: typeof economy;
   economyAdapter: typeof economyAdapter;
