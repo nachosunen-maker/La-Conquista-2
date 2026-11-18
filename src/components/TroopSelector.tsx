@@ -37,7 +37,7 @@ export function TroopSelector({
   const [counts, setCounts] = useState<Record<string, number>>({});
 
   const unitsToSelect = useMemo(() => {
-    return availableUnits.filter((u) => u.unitType !== 'espia' && u.count > 0);
+    return availableUnits.filter((u) => !u.isSpy && u.unitType !== 'espia' && u.count > 0);
   }, [availableUnits]);
 
   const handleCountChange = (id: string, count: number, max: number) => {

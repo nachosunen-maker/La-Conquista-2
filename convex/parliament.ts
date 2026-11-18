@@ -343,14 +343,14 @@ export const requestEspionageReport = mutation({
     if (spyLevel < 1) throw new Error("Se necesita la tecnología Espionaje I para solicitar informes (P42).");
 
     const spiesCount = Math.max(1, args.spiesCount ?? 1);
-    const armyUnits = await readArmyUnitDocs(ctx, args.kingdomId);
-    const totalSpies = armyUnits.filter(u => u.isSpy || u.unitType === "espia").reduce((sum, u) => sum + Math.max(0, u.count ?? 0), 0);
+    const armyUnits = await readArmyUnitsWithMigration(ctx, args.kingdomId);
+    const totalSpies = armyUnits.filter((u) => isSpyUnitDoc(u)).reduce((sum, u) => sum + Math.max(0, u.count ?? 0), 0);
     if (totalSpies < spiesCount) throw new Error(`No tienes suficientes espías disponibles para la misión (solicitados: ${spiesCount}, disponibles: ${totalSpies}).`);
 
     // Descontar espías temporalmente
     let remainingToDeduct = spiesCount;
     for (const u of armyUnits) {
-      if ((u.isSpy || u.unitType === "espia") && (u.count ?? 0) > 0 && remainingToDeduct > 0) {
+      if (isSpyUnitDoc(u) && (u.count ?? 0) > 0 && remainingToDeduct > 0) {
         const take = Math.min(u.count, remainingToDeduct);
         await ctx.db.patch(u._id, { count: u.count - take });
         remainingToDeduct -= take;

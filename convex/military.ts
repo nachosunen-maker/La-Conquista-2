@@ -321,6 +321,8 @@ export const completeTraining = internalMutation({
 
     const count = training.count ?? 0;
     const unitType = (training.unitType ?? "infanteria").trim().toLowerCase();
+    const isSpy = unitType === "espia";
+    const level = isSpy ? 1 : (training.level ?? 1);
 
     // 1. Incorporación atómica en la tabla armyUnits
     const existingUnits = await ctx.db
@@ -330,16 +332,21 @@ export const completeTraining = internalMutation({
 
     const inc = resolveArmyUnitsIncorporation(existingUnits, unitType, count);
     if (inc.action === "update") {
-      await ctx.db.patch(inc.existingId, { count: inc.nextCount });
+      await ctx.db.patch(inc.existingId, {
+        count: inc.nextCount,
+        ...(isSpy ? { unitType: "espia", isSpy: true, level: 1 } : {}),
+      });
     } else {
       await ctx.db.insert("armyUnits", {
         kingdomId: training.kingdomId,
         unitType,
+        level,
         count: inc.nextCount,
+        isSpy,
       });
     }
 
-    // 2. Sincronización atómica de regularSoldiers (P18: solo combatientes vivos devengan raciones)
+    // 2. Sincronización atómica de regularSoldiers (P18: solo combatientes vivos devengan raciones; excluye espías)
     const nextRegular = calculateNextRegularSoldiers(kingdom.regularSoldiers ?? 0, count, unitType);
     await ctx.db.patch(training.kingdomId, { regularSoldiers: nextRegular });
 
@@ -393,17 +400,24 @@ export const resolveCompletedTrainings = mutation({
     for (const task of expired) {
       const count = task.count ?? 0;
       const type = (task.unitType ?? "infanteria").trim().toLowerCase();
+      const isSpy = type === "espia";
+      const level = isSpy ? 1 : (task.level ?? 1);
       const current = unitsMap.get(type);
       if (current && current.id) {
         const nextCount = current.count + count;
-        await ctx.db.patch(current.id, { count: nextCount });
+        await ctx.db.patch(current.id, {
+          count: nextCount,
+          ...(isSpy ? { unitType: "espia", isSpy: true, level: 1 } : {}),
+        });
         unitsMap.set(type, { id: current.id, count: nextCount });
       } else {
         const nextCount = (current?.count ?? 0) + count;
         const newId = await ctx.db.insert("armyUnits", {
           kingdomId: args.kingdomId,
           unitType: type,
+          level,
           count: nextCount,
+          isSpy,
         });
         unitsMap.set(type, { id: newId, count: nextCount });
       }

@@ -86,10 +86,11 @@ export async function readArmyUnitsWithMigration(ctx: MutationCtx, kingdomId: Id
     legacy = [];
   }
   for (const doc of legacy) {
-    const unitType = normalizeUnitType(doc.unitType);
+    const unitType = isSpyUnitDoc(doc) ? "espia" : normalizeUnitType(doc.unitType);
+    const level = unitType === "espia" ? 1 : unitLevelOf(doc);
     const count = Number.isInteger(doc.count) && doc.count > 0 ? doc.count : 0;
     if (unitType && count > 0) {
-      await addUnits(ctx, kingdomId, unitType, 1, count);
+      await addUnits(ctx, kingdomId, unitType, level, count);
     }
     await ctx.db.delete(doc._id);
   }
@@ -102,20 +103,32 @@ export async function readArmyUnitsWithMigration(ctx: MutationCtx, kingdomId: Id
 /** Suma unidades al documento (tipo, nivel) correspondiente, creándolo si no existe. */
 export async function addUnits(ctx: MutationCtx, kingdomId: Id<"kingdoms">, unitType: string, level: number, count: number): Promise<void> {
   if (count <= 0) return;
+  const normalizedType = normalizeUnitType(unitType) ?? unitType;
+  const isSpy = normalizedType === "espia";
+  const effectiveLevel = isSpy ? 1 : unitLevelOf({ level });
   const docs = await ctx.db
     .query("armyUnits")
     .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
     .collect();
-  const existing = docs.find((doc) => normalizeUnitType(doc.unitType) === unitType && unitLevelOf(doc) === level);
+  const existing = docs.find((doc) =>
+    isSpy
+      ? isSpyUnitDoc(doc)
+      : !isSpyUnitDoc(doc) && normalizeUnitType(doc.unitType) === normalizedType && unitLevelOf(doc) === effectiveLevel
+  );
   if (existing) {
-    await ctx.db.patch(existing._id, { count: existing.count + count, level });
+    await ctx.db.patch(existing._id, {
+      unitType: normalizedType,
+      count: existing.count + count,
+      level: effectiveLevel,
+      isSpy,
+    });
   } else {
-    await ctx.db.insert("armyUnits", { 
-      kingdomId, 
-      unitType, 
-      level, 
-      count, 
-      isSpy: unitType === "espia" 
+    await ctx.db.insert("armyUnits", {
+      kingdomId,
+      unitType: normalizedType,
+      level: effectiveLevel,
+      count,
+      isSpy,
     });
   }
 }
@@ -570,7 +583,7 @@ export const recruitSpy = mutation({
     ]);
 
     const active = units
-      .filter((doc) => doc.isSpy || normalizeUnitType(doc.unitType) === "espia")
+      .filter((doc) => isSpyUnitDoc(doc))
       .reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
     const busySpies = explorationExpeditions
       .filter((exp) => exp.isSpyMission)

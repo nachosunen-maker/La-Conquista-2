@@ -21,6 +21,7 @@ export const UNIT_LABELS: Record<string, string> = {
   arqueria: 'Arquería',
   caballeria: 'Caballería',
   asedio: 'Asedio',
+  espia: 'Espía',
 };
 
 export const JOB_LABELS: Record<string, string> = {

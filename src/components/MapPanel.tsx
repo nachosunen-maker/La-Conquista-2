@@ -1046,7 +1046,10 @@ export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerri
                               >
                                 {action.busy === 'explore'
                                   ? 'Enviando expedición…'
-                                  : `Confirmar y enviar (${Math.min(armyState!.spies!.active, Math.max(1, selectedSpiesCount))} espía${selectedSpiesCount > 1 ? 's' : ''})`}
+                                  : (() => {
+                                      const eff = Math.min(armyState!.spies!.active, Math.max(1, selectedSpiesCount));
+                                      return `Confirmar y enviar (${eff} espía${eff > 1 ? 's' : ''})`;
+                                    })()}
                               </button>
                             </div>
                           ) : (

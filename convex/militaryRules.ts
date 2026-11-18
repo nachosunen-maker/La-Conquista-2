@@ -309,6 +309,7 @@ export function resolveArmyUnitsIncorporation(
  */
 export function isLivingRegularTroop(unitType: string): boolean {
   const norm = (unitType || "").trim().toLowerCase() as UnitType;
+  if (norm === "espia") return false;
   const unit = UNITS[norm];
   return unit ? unit.isLivingTroop : true;
 }

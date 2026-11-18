@@ -18,12 +18,12 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import { recordMissionEvent } from "./missions";
 import { isKingdomOwner, DEMO_USER_ID } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
 import { ensureAllKingdomsHaveColors } from "./kingdomColors";
-import { addUnits, readArmyUnitDocs } from "./army";
+import { addUnits, readArmyUnitDocs, readArmyUnitsWithMigration } from "./army";
 import { isSpyUnitDoc } from "./armyRules";
 import { runMapReduction } from "./mapReduction";
 import { EXPLORATION, MAP, TERRAINS, TERRITORIES, type TerrainType } from "./balanceConfig";
@@ -1167,7 +1167,7 @@ async function executeExplorationStart(
       .query("explorationQueue")
       .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
       .collect(),
-    readArmyUnitDocs(ctx, args.kingdomId),
+    readArmyUnitsWithMigration(ctx, args.kingdomId),
     readCompletedTechnologyIds(ctx, args.kingdomId),
   ]);
 
@@ -1314,6 +1314,9 @@ export const cancelExploration = mutation({
     }
 
     const now = Date.now();
+    if (now >= expedition.completesAt) {
+      throw new ConvexError("No se puede cancelar una expedición que ya ha alcanzado su tiempo de finalización.");
+    }
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     const refund = calculateExplorationRefund(expedition.costs);
 
