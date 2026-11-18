@@ -899,37 +899,76 @@ export const launchAttack = mutation({
 
     const currentArmy = await readArmyUnitsWithMigration(ctx, args.kingdomId);
     const requestedComposition: Partial<Record<UnitType, number>> = {};
+    const requestedByTypeLevel = new Map<string, { unitType: UnitType; level: number; count: number }>();
+
     for (const req of args.units) {
-      if (req.count <= 0) continue;
+      if (!Number.isInteger(req.count) || req.count <= 0) {
+        throw new ConvexError("Cada cantidad de tropas debe ser un entero positivo.");
+      }
       const normalized = normalizeUnitType(req.unitType);
-      if (!normalized) continue;
+      if (!normalized) {
+        throw new ConvexError(`Tipo de unidad no válido para una marcha: '${req.unitType}'.`);
+      }
       if (normalized === "espia") {
         throw new ConvexError("Los espías no participan en marchas de ataque ni conquista territorial; solo en expediciones de exploración o espionaje.");
       }
-      const availableDoc = currentArmy.find((d) => normalizeUnitType(d.unitType) === normalized && unitLevelOf(d) === (req.level ?? 1));
-      const availableCount = availableDoc ? (availableDoc.count ?? 0) : 0;
-      if (availableCount < req.count) {
-        throw new ConvexError(`Tropas insuficientes de '${normalized}' nivel ${req.level ?? 1}: solicitadas ${req.count}, disponibles ${availableCount}.`);
+      const level = req.level ?? 1;
+      if (!Number.isInteger(level) || level < 1 || level > 5) {
+        throw new ConvexError(`Nivel militar no válido para '${normalized}': ${level}.`);
       }
-      requestedComposition[normalized as UnitType] = (requestedComposition[normalized as UnitType] ?? 0) + req.count;
+      const key = `${normalized}:${level}`;
+      const previous = requestedByTypeLevel.get(key);
+      requestedByTypeLevel.set(key, {
+        unitType: normalized,
+        level,
+        count: (previous?.count ?? 0) + req.count,
+      });
+      requestedComposition[normalized] = (requestedComposition[normalized] ?? 0) + req.count;
     }
 
-    if (Object.keys(requestedComposition).length === 0) {
-      throw new Error("Debes seleccionar al menos un tipo de tropa válido para la marcha.");
+    if (requestedByTypeLevel.size === 0) {
+      throw new ConvexError("Debes seleccionar al menos un tipo de tropa válido para la marcha.");
     }
 
-    for (const req of args.units) {
-      if (req.count <= 0) continue;
-      const normalized = normalizeUnitType(req.unitType);
-      if (!normalized) continue;
-      const doc = currentArmy.find((d) => normalizeUnitType(d.unitType) === normalized && unitLevelOf(d) === (req.level ?? 1));
-      if (doc) {
-        const nextCount = doc.count - req.count;
+    for (const request of requestedByTypeLevel.values()) {
+      const matchingDocs = currentArmy.filter((doc) =>
+        !isSpyUnitDoc(doc) &&
+        normalizeUnitType(doc.unitType) === request.unitType &&
+        unitLevelOf(doc) === request.level
+      );
+      const availableCount = matchingDocs.reduce(
+        (sum, doc) => sum + (Number.isInteger(doc.count) && doc.count > 0 ? doc.count : 0),
+        0
+      );
+      if (availableCount < request.count) {
+        throw new ConvexError(`Tropas insuficientes de '${request.unitType}' nivel ${request.level}: solicitadas ${request.count}, disponibles ${availableCount}.`);
+      }
+    }
+
+    for (const request of requestedByTypeLevel.values()) {
+      let remaining = request.count;
+      const matchingDocs = currentArmy
+        .filter((doc) =>
+          !isSpyUnitDoc(doc) &&
+          normalizeUnitType(doc.unitType) === request.unitType &&
+          unitLevelOf(doc) === request.level &&
+          Number.isInteger(doc.count) &&
+          doc.count > 0
+        )
+        .sort((a, b) => b.count - a.count || String(a._id).localeCompare(String(b._id)));
+      for (const doc of matchingDocs) {
+        if (remaining <= 0) break;
+        const taken = Math.min(doc.count, remaining);
+        const nextCount = doc.count - taken;
         if (nextCount <= 0) {
           await ctx.db.delete(doc._id);
         } else {
           await ctx.db.patch(doc._id, { count: nextCount });
         }
+        remaining -= taken;
+      }
+      if (remaining !== 0) {
+        throw new ConvexError(`No se pudo reservar íntegramente la composición de '${request.unitType}' nivel ${request.level}.`);
       }
     }
 

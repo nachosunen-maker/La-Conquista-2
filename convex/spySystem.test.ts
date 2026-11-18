@@ -19,11 +19,12 @@ import {
   createSpyRecruitmentPlan,
   isLegacyDocRepresentedInCanonical,
   isSpyUnitDoc,
+  normalizeUnitType,
   planArmyUnitsMigration,
   reconcileArmyUnitDocs,
   summarizeArmy,
 } from "./armyRules";
-import { readArmyUnitsWithMigration } from "./army";
+import { readArmyUnitDocs, readArmyUnitsWithMigration, resolveMarch } from "./army";
 import { isLivingRegularTroop } from "./militaryRules";
 import { cellId, hexNeighbors, parseCellId } from "./territoryRules";
 import { MAP } from "./balanceConfig";
@@ -1959,4 +1960,138 @@ describe("Protección integral de registros heredados: validación de todos los 
     expect(afterState.summary.totalWounded).toBe(5);
   });
 });
+
+// =============================================================================
+// PRUEBAS DE REGRESIÓN OBLIGATORIAS (PARTE 3)
+// =============================================================================
+
+describe("Pruebas de regresión del sistema militar y parches de lanzamiento de ataque", () => {
+  test("1. Varios documentos del mismo tipo y nivel suman correctamente su disponibilidad y se descuentan de forma distribuida", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "reg-multi-lots", "Reino Múltiples Lotes");
+    await setResourcesAndPop(t, kingdomId, { gold: 10000, wood: 10000, food: 10000, stone: 10000, iron: 10000 });
+
+    const targetCellId = "1,1";
+    await t.run(async (ctx) => {
+      // Crear celda enemiga o neutral adyacente válida y explorada
+      await ctx.db.insert("territories", { cellId: "1,1", q: 1, r: 1, terrain: "llanura" });
+      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: "1,1", discoveredAt: Date.now() });
+      // Lote 1 de infantería nivel 1 (count: 4)
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 1, count: 4 });
+      // Lote 2 de infantería nivel 1 (count: 6)
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 1, count: 6 });
+    });
+
+    // Lanzar ataque solicitando 7 unidades (supera lote 1 pero cabe en la suma 4 + 6 = 10)
+    const res = await asUser.mutation(api.army.launchAttack, {
+      kingdomId,
+      cellId: targetCellId,
+      units: [{ unitType: "infanteria", level: 1, count: 7 }],
+    });
+    expect(res.success).toBe(true);
+
+    // Verificar que los lotes restantes suman exactamente 10 - 7 = 3 unidades
+    const state = await asUser.query(api.army.getArmyState, { kingdomId });
+    const remainingInf = state.units.filter((d: any) => normalizeUnitType(d.unitType) === "infanteria");
+    const totalRemaining = remainingInf.reduce((sum: number, d: any) => sum + d.count, 0);
+    expect(totalRemaining).toBe(3);
+  });
+
+  test("2. Solicitudes repetidas del mismo tipo y nivel se agregan antes de validar disponibilidad", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "reg-repeated-req", "Reino Solicitudes Repetidas");
+    await setResourcesAndPop(t, kingdomId, { gold: 10000, wood: 10000, food: 10000, stone: 10000, iron: 10000 });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("territories", { cellId: "1,1", q: 1, r: 1, terrain: "llanura" });
+      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: "1,1", discoveredAt: Date.now() });
+      // Total disponible: 5
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "arqueria", level: 1, count: 5 });
+    });
+
+    // Enviar dos objetos separados solicitando 3 y 3 (total 6 > 5 disponibles) -> debe fallar por insuficiencia
+    await expect(
+      asUser.mutation(api.army.launchAttack, {
+        kingdomId,
+        cellId: "1,1",
+        units: [
+          { unitType: "arqueria", level: 1, count: 3 },
+          { unitType: "arqueria", level: 1, count: 3 },
+        ],
+      })
+    ).rejects.toThrow(/Tropas insuficientes/i);
+  });
+
+  test("3. Un documento de infantería con isSpy: true o tipo espía con isSpy: false no pueden utilizarse como tropa ordinaria", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "reg-contradictory", "Reino Contradictorio");
+    await setResourcesAndPop(t, kingdomId, { gold: 10000, wood: 10000, food: 10000, stone: 10000, iron: 10000 });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("territories", { cellId: "1,1", q: 1, r: 1, terrain: "llanura" });
+      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: "1,1", discoveredAt: Date.now() });
+      // Documento contradictorio 1: infantería pero isSpy: true
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 1, count: 10, isSpy: true });
+      // Documento contradictorio 2: espía pero isSpy: false
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 5, isSpy: false });
+    });
+
+    // Intentar atacar con infantería debe arrojar error de tropas insuficientes (porque el único documento de infantería es espía y está excluido)
+    await expect(
+      asUser.mutation(api.army.launchAttack, {
+        kingdomId,
+        cellId: "1,1",
+        units: [{ unitType: "infanteria", level: 1, count: 2 }],
+      })
+    ).rejects.toThrow(/Tropas insuficientes/i);
+  });
+
+  test("4. Marcha cancelada o resuelta sin combate devuelve las tropas correctamente a través de refundMarchUnitsToGarrison sin convertir espías", async () => {
+    const t = createTestBackend();
+    const { kingdomId } = await foundKingdom(t, "reg-refund", "Reino Devolución Marcha");
+
+    await t.run(async (ctx) => {
+      // Insertar un espía y verificar que refundMarchUnitsToGarrison lo ignora o no lo crea como infantería
+      await (ctx.db as any).insert("armyUnits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 5,
+        isSpy: true,
+      });
+    });
+
+    // Simular llamada directa a resolución de marcha cancelada con unidades mixtas
+    const marchId = await t.run(async (ctx) => {
+      return await ctx.db.insert("armyMarches", {
+        kingdomId,
+        targetCellId: "1,1",
+        targetQ: 1,
+        targetR: 1,
+        distance: 1,
+        units: [
+          { unitType: "infanteria", level: 1, count: 4 },
+          { unitType: "espia", level: 1, count: 2 },
+        ],
+        startedAt: Date.now(),
+        durationMs: 1000,
+        completesAt: Date.now() + 1000,
+        status: "marchando",
+      });
+    });
+
+    await t.run(async (ctx) => {
+      // Forzar cancelación o resolución que devuelva tropas
+      await resolveMarch(ctx, marchId);
+    });
+
+    const unitsFinal = await t.run(async (ctx) => readArmyUnitDocs(ctx, kingdomId));
+    // La infantería (4) debe haberse devuelto correctamente; el espía (2) nunca se convierte en infantería
+    const infDoc = unitsFinal.find((d: any) => normalizeUnitType(d.unitType) === "infanteria");
+    const spyDoc = unitsFinal.find((d: any) => isSpyUnitDoc(d));
+    expect(infDoc.count).toBe(4);
+    expect(spyDoc.count).toBe(5); // El espía original sigue intacto y no se alteró por la marcha
+  });
+});
+
 
