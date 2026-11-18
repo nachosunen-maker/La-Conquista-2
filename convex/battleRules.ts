@@ -248,7 +248,7 @@ export function computeSideFactors(side: BattleSide, composition: Composition, e
   const terrain = 1 + Math.max(0, side.terrainDefenseBonus) + wallsBonus;
   const counter = tacticalCounterMultiplier(ownTactical, enemyTactical);
   const offensivePower = effectives > 0 ? offensive ** E.number * formationAttack ** E.formation * (training ** E.training) * common * counter : 0;
-  const defensivePower = effectives > 0 ? (defensive * terrain) ** E.number * formationDefense ** E.formation * common * counter : 0;
+  const defensivePower = effectives > 0 ? (defensive * terrain) ** E.number * formationDefense ** E.formation * (training ** E.training) * common * counter : 0;
   const W = COMBAT.WEIGHTS;
   const linearScore = W.number * (effectives / COMBAT.NUMBER_REFERENCE) + W.training * training
     + W.weapons * weapons + W.armor * armor + W.formation * formationAttack
@@ -656,6 +656,10 @@ export function calculateHospitalRecovery(input: {
 export function applyFormation(composition: Composition, formation: Partial<Record<UnitType, number>> | undefined | null): Composition {
   const result = emptyComposition();
   for (const type of UNIT_TYPES) {
+    if (type === "espia") {
+      result[type] = 0;
+      continue;
+    }
     let raw = formation?.[type];
     if (raw === undefined && !UNITS[type].isLivingTroop) {
       raw = formation?.asedio;

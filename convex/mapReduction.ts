@@ -1,13 +1,14 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
+import { MAP } from "./balanceConfig";
 import { hexDistance } from "./territoryRules";
 import { addUnits } from "./army";
 import { calculateExplorationRefund } from "./explorationRules";
 import { settleRelationalKingdomEconomy } from "./economy";
 
-export const executeMapReduction = mutation({
+export const executeMapReduction = internalMutation({
   args: {},
   handler: async (ctx) => {
-    const radiusLimit = 25;
+    const radiusLimit = MAP.RADIUS;
     const now = Date.now();
 
     // 1. Recover Units and Resources from Exterior Missions

@@ -363,10 +363,10 @@ export interface MilitaryLevelBalance {
 }
 export const MILITARY_LEVELS: readonly MilitaryLevelBalance[] = [
   { level: 1, name: "Milicia", multiplier: 1.00, foodMultiplier: 1.00, requirements: { cuartel: 1 }, costs: { gold: 0, wood: 0, stone: 0, iron: 0, food: 0 }, upgradeDurationSeconds: 0 },
-  { level: 2, name: "Entrenado", multiplier: 1.10, foodMultiplier: 1.10, requirements: { castillo: 2, cuartel: 2, herreria: 1 }, costs: { gold: 200, wood: 100, stone: 100, iron: 100, food: 200 }, upgradeDurationSeconds: 60 },
-  { level: 3, name: "Veterano", multiplier: 1.20, foodMultiplier: 1.20, requirements: { castillo: 3, cuartel: 3, herreria: 2, universidad: 1 }, costs: { gold: 500, wood: 250, stone: 250, iron: 250, food: 500 }, upgradeDurationSeconds: 120 },
-  { level: 4, name: "Profesional", multiplier: 1.30, foodMultiplier: 1.30, requirements: { castillo: 4, cuartel: 4, herreria: 3, universidad: 2 }, costs: { gold: 1200, wood: 600, stone: 600, iron: 600, food: 1200 }, upgradeDurationSeconds: 300 },
-  { level: 5, name: "Élite", multiplier: 1.40, foodMultiplier: 1.40, requirements: { castillo: 5, cuartel: 5, herreria: 4, universidad: 3 }, costs: { gold: 2500, wood: 1200, stone: 1200, iron: 1200, food: 2500 }, upgradeDurationSeconds: 600 },
+  { level: 2, name: "Entrenado", multiplier: 1.15, foodMultiplier: 1.10, requirements: { castillo: 2, cuartel: 2 }, costs: { gold: 200, wood: 100, stone: 100, iron: 100, food: 200 }, upgradeDurationSeconds: 60 },
+  { level: 3, name: "Veterano", multiplier: 1.35, foodMultiplier: 1.20, requirements: { castillo: 4, cuartel: 3, universidad: 2 }, costs: { gold: 500, wood: 250, stone: 250, iron: 250, food: 500 }, upgradeDurationSeconds: 120 },
+  { level: 4, name: "Profesional", multiplier: 1.60, foodMultiplier: 1.30, requirements: { castillo: 6, cuartel: 4, universidad: 3 }, costs: { gold: 1200, wood: 600, stone: 600, iron: 600, food: 1200 }, upgradeDurationSeconds: 300 },
+  { level: 5, name: "Élite", multiplier: 1.90, foodMultiplier: 1.40, requirements: { castillo: 8, cuartel: 5, universidad: 4, herreria: 5 }, costs: { gold: 2500, wood: 1200, stone: 1200, iron: 1200, food: 2500 }, upgradeDurationSeconds: 600 },
 ];
 
 /** [MAESTRA P30] Calidad de armas. */
@@ -506,11 +506,11 @@ export const MERCENARIES = {
 export type MercenaryTypeId = (typeof MERCENARIES.TYPES)[number]["id"];
 export type MercenaryType = (typeof MERCENARIES.TYPES)[number];
 
-/** [DECISIÓN 17-10-2026, actualizada 03-11-2026] Ranuras de investigación fijadas a 1 activa por decisión técnica. */
+/** [DECISIÓN M-03 opción B / P25] Ranuras de investigación por nivel de Universidad: 1 (1–2), 2 (3–4), 3 (5+). */
 export const RESEARCH_SLOTS_BY_UNIVERSITY: readonly { minLevel: number; slots: number }[] = [
   { minLevel: 1, slots: 1 },
-  { minLevel: 3, slots: 1 },
-  { minLevel: 5, slots: 1 },
+  { minLevel: 3, slots: 2 },
+  { minLevel: 5, slots: 3 },
 ];
 
 /** [DECISIÓN 17-10-2026, M-04 opción A] Políticas de descanso del Castillo (P15, P55). */
@@ -1135,9 +1135,9 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
 
 
 export const RESEARCH = {
-  /** [COMPLEMENTO §4, actualizado 03-11-2026] Una investigación activa por reino fijada a 1 por decisión. */
+  /** [M-03 opción B / P25] 1 ranura base, hasta 3 con Universidad nivel 5+. */
   BASE_SLOTS: 1,
-  MAX_SLOTS: 1,
+  MAX_SLOTS: 3,
   /** [COMPLEMENTO §4] Reembolso del 50 % al cancelar. */
   CANCEL_REFUND_RATIO: 0.5,
   /** [COMPLEMENTO §4] Mínimo de duración de construcción tras reducciones tecnológicas. */

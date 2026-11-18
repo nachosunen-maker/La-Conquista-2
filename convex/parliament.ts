@@ -12,7 +12,7 @@ import { isKingdomOwner } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
 import { settleRelationalKingdomEconomy } from "./economy";
 import { readArmyUnitDocs, readArmyUnitsWithMigration, addUnits } from "./army";
-import { normalizeUnitType, summarizeArmy, unitLevelOf } from "./armyRules";
+import { isSpyUnitDoc, normalizeUnitType, summarizeArmy, unitLevelOf } from "./armyRules";
 import { validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import { distanceBetweenKingdoms, pathTerrainBetweenKingdoms, readHomeCoord, readDiscoveredKingdomIds } from "./territories";
@@ -62,6 +62,7 @@ async function readPopulationTotal(ctx: QueryCtx | MutationCtx, kingdomId: Id<"k
 function activeComposition(units: any[]): Composition {
   const composition = emptyComposition();
   for (const unit of units) {
+    if (isSpyUnitDoc(unit)) continue;
     const type = normalizeUnitType(unit.unitType);
     if (!type) continue;
     composition[type] += Number.isInteger(unit.count) && unit.count > 0 ? unit.count : 0;

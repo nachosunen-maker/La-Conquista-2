@@ -12,7 +12,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { MISSIONS, TIME, UNITS, UNIT_TYPES, type MissionCounterKey, type MissionReward } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
 import { storageCapacity } from "./economyExtended";
-import { normalizeUnitType } from "./armyRules";
+import { isSpyUnitDoc, normalizeUnitType } from "./armyRules";
 import {
   allSecretMissions,
   conditionProgress,
@@ -93,6 +93,7 @@ async function buildSnapshot(ctx: Ctx, kingdomId: Id<"kingdoms">, now: number): 
     population: typeof (population as any)?.total === "number" ? (population as any).total : kingdomAny.population ?? 0,
     completedTechnologyIds: (technologies as any[]).filter((t) => t.status === "completed").map((t) => t.technologyId as string),
     armySize: (units as any[]).reduce((sum, u) => {
+      if (isSpyUnitDoc(u)) return sum;
       const norm = normalizeUnitType(u.unitType);
       return sum + (norm && UNITS[norm]?.isLivingTroop ? Math.max(0, u.count ?? 0) : 0);
     }, 0),

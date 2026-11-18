@@ -1,10 +1,11 @@
-import { query } from "./_generated/server";
+import { internalQuery } from "./_generated/server";
+import { MAP } from "./balanceConfig";
 import { hexDistance } from "./territoryRules";
 
-export const auditMapReductionDeep = query({
+export const auditMapReductionDeep = internalQuery({
   args: {},
   handler: async (ctx) => {
-    const radiusLimit = 25;
+    const radiusLimit = MAP.RADIUS;
     
     // Read data
     const territories = await ctx.db.query("territories").collect();

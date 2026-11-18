@@ -35,18 +35,18 @@ const richResources: ResourceCosts = { gold: 10_000, wood: 10_000, stone: 10_000
 export function runTechnologyTests(): TechnologyTestResult[] {
   const results: TechnologyTestResult[] = [];
 
-  // 1. Ranuras de investigación fijadas a 1
+  // 1. Ranuras de investigación según M-03 opción B (P25): 1 (Univ 1-2), 2 (Univ 3-4), 3 (Univ 5+)
   {
     const slotsU1 = researchSlots(1);
     const slotsU3 = researchSlots(3);
     const slotsU5 = researchSlots(5);
     const maxSlots = RESEARCH.MAX_SLOTS;
-    const allSlotsOne = slotsU1 === 1 && slotsU3 === 1 && slotsU5 === 1 && maxSlots === 1;
+    const slotsMatchM03 = slotsU1 === 1 && slotsU3 === 2 && slotsU5 === 3 && maxSlots === 3;
 
     results.push({
-      category: "ÁRBOL TECNOLÓGICO Y RANURAS (E0)",
-      test: "1. Una sola investigación activa a la vez en todos los niveles de Universidad",
-      passed: allSlotsOne,
+      category: "ÁRBOL TECNOLÓGICO Y RANURAS (M-03 / P25)",
+      test: "1. Ranuras progresivas por nivel de Universidad (1 / 2 / 3) con MAX_SLOTS = 3",
+      passed: slotsMatchM03,
       details: `Univ 1: ${slotsU1}, Univ 3: ${slotsU3}, Univ 5: ${slotsU5}, MAX_SLOTS: ${maxSlots}`,
     });
   }

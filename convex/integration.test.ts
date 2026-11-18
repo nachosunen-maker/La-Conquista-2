@@ -851,6 +851,14 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
       await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 1, count: 500 });
       await ctx.db.insert("armyUnits", { kingdomId: defender.kingdomId, unitType: "infanteria", level: 1, count: 100 });
       await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: targetCellId, discoveredAt: T0 });
+      await ctx.db.insert("challenges", {
+        challengerKingdomId: attacker.kingdomId,
+        targetKingdomId: defender.kingdomId,
+        challengeType: "batalla",
+        status: "ACCEPTED",
+        createdAt: T0,
+        expiresAt: T0 + 86_400_000,
+      });
     });
 
     const marchRes = await attacker.asUser.mutation(api.army.launchAttack, {
@@ -883,6 +891,14 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
       await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 2, count: 200 });
       await ctx.db.insert("armyUnits", { kingdomId: defender.kingdomId, unitType: "infanteria", level: 1, count: 50 });
       await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: targetCellId, discoveredAt: T0 });
+      await ctx.db.insert("challenges", {
+        challengerKingdomId: attacker.kingdomId,
+        targetKingdomId: defender.kingdomId,
+        challengeType: "batalla",
+        status: "ACCEPTED",
+        createdAt: T0,
+        expiresAt: T0 + 86_400_000,
+      });
     });
 
     const marchRes = await attacker.asUser.mutation(api.army.launchAttack, {
@@ -915,6 +931,14 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     await t.run(async (ctx) => {
       await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "infanteria", level: 1, count: 200 });
       await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: targetCellId, discoveredAt: T0 });
+      await ctx.db.insert("challenges", {
+        challengerKingdomId: attacker.kingdomId,
+        targetKingdomId: defender.kingdomId,
+        challengeType: "batalla",
+        status: "ACCEPTED",
+        createdAt: T0,
+        expiresAt: T0 + 86_400_000,
+      });
     });
 
     // 1. Obtener previsualización autoritativa
@@ -1185,6 +1209,14 @@ describe("Bloque 1: Espías, tope de 100 territorios y saneamiento", () => {
     await t.run(async (ctx) => {
       await ctx.db.insert("armyUnits", { kingdomId: attacker.kingdomId, unitType: "espia", level: 1, count: 1, isSpy: true });
       await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: defT.homeTerritoryId!, discoveredAt: T0 });
+      await ctx.db.insert("challenges", {
+        challengerKingdomId: attacker.kingdomId,
+        targetKingdomId: defender.kingdomId,
+        challengeType: "batalla",
+        status: "ACCEPTED",
+        createdAt: T0,
+        expiresAt: T0 + 86_400_000,
+      });
     });
 
     await expect(
@@ -1205,17 +1237,19 @@ describe("Bloque 1: Espías, tope de 100 territorios y saneamiento", () => {
     await defender.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: defender.kingdomId });
 
     const defT = await defender.asUser.query(api.territories.getKingdomTerritories, { kingdomId: defender.kingdomId });
-    const enemyCellId = defT.homeTerritoryId!;
+    const defHomeCellId = defT.homeTerritoryId!;
     const world = generateWorldCells(50, 20261017);
 
     // Completar hasta 100 territorios (capital "0,0" + 99 más) dejando un vecino neutral cercano sin dueño
+    // y una celda secundaria enemiga (no capital, P48) para probar el tope de 100 en conquista PvP.
     let adjacentFreeCellId = "";
+    let enemyCellId = "";
     await t.run(async (ctx) => {
       const existingOwned = await ctx.db
         .query("territories")
         .withIndex("by_owner", (q) => q.eq("ownerKingdomId", attacker.kingdomId))
         .collect();
-      const occupied = new Set<string>([enemyCellId, ...existingOwned.map((c) => c.cellId)]);
+      const occupied = new Set<string>([defHomeCellId, ...existingOwned.map((c) => c.cellId)]);
       let needed = TERRITORIES.MAX_PER_KINGDOM - existingOwned.length;
       for (const cell of world) {
         if (occupied.has(cell.cellId)) continue;
@@ -1235,6 +1269,18 @@ describe("Bloque 1: Espías, tope de 100 territorios y saneamiento", () => {
           });
           occupied.add(cell.cellId);
           needed--;
+        } else if (!enemyCellId) {
+          enemyCellId = cell.cellId;
+          await ctx.db.insert("territories", {
+            cellId: cell.cellId,
+            q: cell.q,
+            r: cell.r,
+            terrain: cell.terrain,
+            ownerKingdomId: defender.kingdomId,
+            isHome: false,
+            claimedAt: T0,
+          });
+          occupied.add(cell.cellId);
         }
       }
       await ctx.db.patch(attacker.kingdomId, { pendingTerritoryClaims: 2 });
@@ -1242,6 +1288,14 @@ describe("Bloque 1: Espías, tope de 100 territorios y saneamiento", () => {
       await ctx.db.insert("armyUnits", { kingdomId: defender.kingdomId, unitType: "infanteria", level: 1, count: 10 });
       await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: adjacentFreeCellId, discoveredAt: T0 });
       await ctx.db.insert("exploredTerritories", { kingdomId: attacker.kingdomId, cellId: enemyCellId, discoveredAt: T0 });
+      await ctx.db.insert("challenges", {
+        challengerKingdomId: attacker.kingdomId,
+        targetKingdomId: defender.kingdomId,
+        challengeType: "batalla",
+        status: "ACCEPTED",
+        createdAt: T0,
+        expiresAt: T0 + 86_400_000,
+      });
     });
 
     // 1. claimFreeTerritory bloqueado en 100
@@ -1342,11 +1396,11 @@ describe("Bloque 1: Espías, tope de 100 territorios y saneamiento", () => {
       }
     });
 
-    const dry = await t.mutation(api.territories.cleanupExcessTerritories, { dryRun: true });
+    const dry = await t.mutation(internal.territories.cleanupExcessTerritories, { dryRun: true });
     expect(dry.dryRun).toBe(true);
     expect(dry.territoriesReleased).toBe(8);
 
-    const real1 = await t.mutation(api.territories.cleanupExcessTerritories, { dryRun: false });
+    const real1 = await t.mutation(internal.territories.cleanupExcessTerritories, { dryRun: false });
     expect(real1.success).toBe(true);
     expect(real1.territoriesReleased).toBe(8);
     expect(real1.referentialIntegrity.intact).toBe(true);
@@ -1358,7 +1412,7 @@ describe("Bloque 1: Espías, tope de 100 territorios y saneamiento", () => {
     expect(ownedAfter.territories.some((c) => c.cellId === "10,0" && c.isHome)).toBe(true);
 
     // Segunda ejecución estrictamente idempotente
-    const real2 = await t.mutation(api.territories.cleanupExcessTerritories, { dryRun: false });
+    const real2 = await t.mutation(internal.territories.cleanupExcessTerritories, { dryRun: false });
     expect(real2.territoriesReleased).toBe(0);
     expect(real2.kingdomsModified).toBe(0);
   });

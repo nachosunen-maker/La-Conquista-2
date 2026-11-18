@@ -20,6 +20,7 @@ import {
   calculateTrainingCancellation,
   createSpyRecruitmentPlan,
   createTrainingPlan,
+  isSpyUnitDoc,
   normalizeUnitType,
   summarizeArmy,
   trainingCostsFor,
@@ -254,7 +255,7 @@ export const getArmyState = query({
         tacticalFormationCatalog: TACTICAL_FORMATIONS,
       },
       spies: {
-        active: units.filter((doc) => doc.isSpy).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0),
+        active: units.filter((doc) => isSpyUnitDoc(doc)).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0),
         busy: busySpies,
         inQueue: queue.filter((doc) => doc.unitType === "espia").reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0),
         capacity: Math.floor((buildingLevels.cuartel ?? 0) / 2),
@@ -298,10 +299,13 @@ export const upgradeArmyLevel = mutation({
     // Upgrade kingdom armyLevel
     await ctx.db.patch(args.kingdomId, { armyLevel: args.targetLevel, updatedAt: now });
 
-    // Upgrade all existing armyUnits for this kingdom
+    // Upgrade all existing combat armyUnits for this kingdom (spies are excluded from military tiers)
     const units = await readArmyUnitsWithMigration(ctx, args.kingdomId);
+    let unitsUpgraded = 0;
     for (const doc of units) {
+      if (isSpyUnitDoc(doc)) continue;
       await ctx.db.patch(doc._id, { level: args.targetLevel });
+      unitsUpgraded += 1;
     }
 
     return {
@@ -309,7 +313,7 @@ export const upgradeArmyLevel = mutation({
       armyLevel: args.targetLevel,
       levelName: validation.levelInfo.name,
       multiplier: validation.levelInfo.multiplier,
-      unitsUpgraded: units.length,
+      unitsUpgraded,
     };
   },
 });
@@ -637,7 +641,7 @@ export const setFormation = mutation({
   handler: async (ctx, args) => {
     await requireOwner(ctx, args.kingdomId);
     const formation: Partial<Record<UnitType, number>> = {};
-    for (const type of UNIT_TYPES) {
+    for (const type of REGULAR_UNIT_TYPES) {
       const value = args.formation[type];
       if (value === undefined) continue;
       if (!Number.isFinite(value) || value < 0 || value > 1) throw new ConvexError(`La fracción de '${type}' debe estar entre 0 y 1.`);
@@ -651,6 +655,7 @@ export const setFormation = mutation({
 function activeComposition(units: any[]): Composition {
   const composition = emptyComposition();
   for (const unit of units) {
+    if (isSpyUnitDoc(unit)) continue;
     const type = normalizeUnitType(unit.unitType);
     if (!type) continue;
     composition[type] += Number.isInteger(unit.count) && unit.count > 0 ? unit.count : 0;
@@ -748,6 +753,23 @@ export const launchAttack = mutation({
       const isAdjacentToOwned = neighbors.some((n) => ownedCoords.some((o) => o.q === n.q && o.r === n.r));
       if (!isAdjacentToOwned) {
         throw new Error("El territorio neutral debe limitar con una de tus casillas propias para poder conquistarlo (Expansión contigua).");
+      }
+    } else {
+      // [MAESTRA P38] No existen ataques sorpresivos entre reinos: se exige desafío aceptado o congelado en el Parlamento.
+      const [asChallenger, asTarget] = await Promise.all([
+        ctx.db.query("challenges").withIndex("by_challenger", (q) => q.eq("challengerKingdomId", args.kingdomId)).collect(),
+        ctx.db.query("challenges").withIndex("by_target", (q) => q.eq("targetKingdomId", args.kingdomId)).collect(),
+      ]);
+      const hasActiveParliamentChallenge = [...asChallenger, ...asTarget].some((ch) => {
+        const involvesTarget =
+          (String(ch.challengerKingdomId) === String(args.kingdomId) && String(ch.targetKingdomId) === String(target.ownerKingdomId)) ||
+          (String(ch.challengerKingdomId) === String(target.ownerKingdomId) && String(ch.targetKingdomId) === String(args.kingdomId));
+        return involvesTarget && (ch.status === "ACCEPTED" || ch.status === "FROZEN");
+      });
+      if (!hasActiveParliamentChallenge) {
+        throw new ConvexError(
+          "Procedimiento de Parlamento requerido (P38): para atacar territorios de otro reino debes declarar un desafío en el Parlamento y contar con un reto aceptado o congelado."
+        );
       }
     }
 
@@ -1085,31 +1107,39 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     }
   }
 
+  // [MAESTRA P54] Descontar los muertos definitivos del censo tanto del atacante como del defensor.
+  await removeDeadFromPopulation(ctx, march.kingdomId, report.attacker.casualtiesComposition, report.attacker.woundedComposition);
   await applyCasualtiesToArmy(ctx, defenderKingdomId, report.defender.casualtiesComposition, report.defender.woundedComposition);
   await removeDeadFromPopulation(ctx, defenderKingdomId, report.defender.casualtiesComposition, report.defender.woundedComposition);
 
   let territoryCapBlocked = false;
+  let capitalProtected = false;
   if (report.outcome === "victoria" && targetCell) {
-    const liveOwned = await ctx.db
-      .query("territories")
-      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", march.kingdomId))
-      .collect();
-    const liveOwnedIds = new Set(liveOwned.map((c) => c.cellId));
-    if (attackerKingdom.homeTerritoryId) liveOwnedIds.add(attackerKingdom.homeTerritoryId);
-
-    if (liveOwnedIds.size >= TERRITORIES.MAX_PER_KINGDOM) {
-      territoryCapBlocked = true;
+    if (targetCell.isHome) {
+      // [MAESTRA P48] La capital (territorio principal) no puede ser conquistada ni perder su condición de capital.
+      capitalProtected = true;
     } else {
-      await ctx.db.patch(targetCell._id, { ownerKingdomId: march.kingdomId, claimedAt: now, isHome: false });
-      await recordMissionEvent(ctx, march.kingdomId, "territoriesClaimed", 1, false);
-      const victorDoc = await ctx.db.get(march.kingdomId);
-      if (victorDoc) {
-        await ctx.db.patch(march.kingdomId, {
-          glory: (victorDoc.glory ?? 0) + 1,
-          honor: (victorDoc.honor ?? 0) + 1,
-          conquestRewardsGranted: (victorDoc.conquestRewardsGranted ?? 0) + 1,
-          updatedAt: now,
-        });
+      const liveOwned = await ctx.db
+        .query("territories")
+        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", march.kingdomId))
+        .collect();
+      const liveOwnedIds = new Set(liveOwned.map((c) => c.cellId));
+      if (attackerKingdom.homeTerritoryId) liveOwnedIds.add(attackerKingdom.homeTerritoryId);
+
+      if (liveOwnedIds.size >= TERRITORIES.MAX_PER_KINGDOM) {
+        territoryCapBlocked = true;
+      } else {
+        await ctx.db.patch(targetCell._id, { ownerKingdomId: march.kingdomId, claimedAt: now, isHome: false });
+        await recordMissionEvent(ctx, march.kingdomId, "territoriesClaimed", 1, false);
+        const victorDoc = await ctx.db.get(march.kingdomId);
+        if (victorDoc) {
+          await ctx.db.patch(march.kingdomId, {
+            glory: (victorDoc.glory ?? 0) + 1,
+            honor: (victorDoc.honor ?? 0) + 1,
+            conquestRewardsGranted: (victorDoc.conquestRewardsGranted ?? 0) + 1,
+            updatedAt: now,
+          });
+        }
       }
     }
   }
@@ -1121,6 +1151,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
       crushingVictory: report.crushingVictory,
       battleId,
       ...(territoryCapBlocked ? { territoryCapBlocked: true } : {}),
+      ...(capitalProtected ? { capitalProtected: true } : {}),
     },
   });
   

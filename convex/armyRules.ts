@@ -52,6 +52,12 @@ export function getUnitCategory(unitType: UnitType): "infanteria" | "arqueria" |
   return "asedio";
 }
 
+/** Criterio único y canónico para identificar unidades espía en todo el backend (Paquete C). */
+export function isSpyUnitDoc(unit: { unitType?: string | null; isSpy?: boolean } | null | undefined): boolean {
+  if (!unit) return false;
+  return Boolean(unit.isSpy) || normalizeUnitType(unit.unitType ?? "") === "espia";
+}
+
 export function validateMilitaryUnitInput(unitType: string, count: number): { success: boolean; error?: string } {
   if (!normalizeUnitType(unitType)) {
     return { success: false, error: `Tipo de unidad no admitido: '${unitType}'. Válidos: ${UNIT_TYPES.join(", ")}.` };
@@ -412,24 +418,28 @@ export function summarizeArmy(units: ReadonlyArray<ArmyUnitRecord>): ArmySummary
   let weighted = 0;
   let totalActive = 0;
   let totalWounded = 0;
+  let siegeMachines = 0;
+  let siegeOperators = 0;
   for (const unit of units) {
-    const type = normalizeUnitType(unit.unitType);
-    if (!type) continue;
     const active = Number.isInteger(unit.count) && unit.count > 0 ? unit.count : 0;
     const wounded = Number.isInteger(unit.wounded) && (unit.wounded as number) > 0 ? (unit.wounded as number) : 0;
-    if (type === "espia") {
-       byType[type].active += active;
-       byType[type].wounded += wounded;
-       continue;
+    if (isSpyUnitDoc(unit)) {
+      byType.espia.active += active;
+      byType.espia.wounded += wounded;
+      continue;
     }
+    const type = normalizeUnitType(unit.unitType);
+    if (!type) continue;
     byType[type].active += active;
     byType[type].wounded += wounded;
     totalActive += active;
     totalWounded += wounded;
     weighted += active * (getMilitaryLevel(unitLevelOf(unit))?.multiplier ?? 1);
+    if (!UNITS[type].isLivingTroop) {
+      siegeMachines += active;
+      siegeOperators += active * UNITS[type].populationPerUnit;
+    }
   }
-  const siegeMachines = byType.asedio.active;
-  const siegeOperators = siegeMachines * UNITS.asedio.populationPerUnit;
   const livingSoldiers = totalActive - siegeMachines + siegeOperators;
   return {
     totalActive,
@@ -499,9 +509,13 @@ const LEGACY_MERCENARY_IDS: Record<string, string> = {
 };
 
 export function getMercenaryType(id: string | null | undefined): MercenaryType | null {
-  const raw = id ?? MERCENARIES.DEFAULT_TYPE_ID;
+  if (id === null || id === undefined) {
+    return MERCENARIES.TYPES.find((type) => type.id === MERCENARIES.DEFAULT_TYPE_ID) ?? null;
+  }
+  const raw = id.trim();
+  if (!raw) return null;
   const wanted = LEGACY_MERCENARY_IDS[raw] ?? raw;
-  return MERCENARIES.TYPES.find((type) => type.id === wanted) ?? MERCENARIES.TYPES[0] ?? null;
+  return MERCENARIES.TYPES.find((type) => type.id === wanted) ?? null;
 }
 
 /** Tipos contratables con el nivel de Taberna indicado (sin Taberna, ninguno). */

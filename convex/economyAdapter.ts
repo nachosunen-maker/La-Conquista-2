@@ -23,6 +23,7 @@ import {
 } from "./economyCalculations";
 import { calculateBuildingWorkerCapacity, MAX_BUILDING_LEVEL } from "./buildingRules";
 import { UNITS, type UnitType } from "./balanceConfig";
+import { isSpyUnitDoc } from "./armyRules";
 
 export function isMatchingUserId(kingdomUserId: string, callerUserId: string): boolean {
   if (!kingdomUserId || !callerUserId) return false;
@@ -260,6 +261,11 @@ export function classifyArmyUnits(
     const unitWounded = (unit as { wounded?: number }).wounded;
     if (unitWounded !== undefined && (!Number.isInteger(unitWounded) || unitWounded < 0)) {
       throw new Error(`Heridos inválidos en unidad militar '${unit.unitType}': debe ser un entero no negativo.`);
+    }
+
+    // [Paquete C] Los espías son unidades independientes y no devengan raciones militares ordinarias.
+    if (isSpyUnitDoc(unit as { unitType?: string | null; isSpy?: boolean })) {
+      continue;
     }
 
     const typeNormalized = (unit.unitType || "").toLowerCase().trim() as UnitType;

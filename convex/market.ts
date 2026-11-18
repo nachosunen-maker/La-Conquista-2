@@ -2,7 +2,7 @@ import { query, mutation } from "./_generated/server.js";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { isKingdomOwner } from "./kingdomAccess.js";
+import { DEMO_USER_ID, isKingdomOwner } from "./kingdomAccess.js";
 import { settleRelationalKingdomEconomy } from "./economy.js";
 import { storageCapacity } from "./economyExtended.js";
 
@@ -56,6 +56,16 @@ export const getMarketInfo = query({
   handler: async (ctx, args) => {
     const kingdom = await ctx.db.get(args.kingdomId);
     if (!kingdom) return null;
+
+    const isDemoRead = kingdom.userId === DEMO_USER_ID;
+    if (!isDemoRead) {
+      const userId = await getAuthUserId(ctx);
+      const identity = userId ? null : await ctx.auth.getUserIdentity();
+      const callerUserId = userId ?? identity?.subject ?? null;
+      if (!isKingdomOwner(kingdom.userId, callerUserId)) {
+        throw new ConvexError("No autorizado: solo puede consultar el mercado de su propio reino.");
+      }
+    }
 
     const mercadoBuilding = await ctx.db
       .query("buildings")

@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { TERRAINS } from "./balanceConfig";
 import { getCivilizationPassive } from "./civilizationRules";
@@ -7,7 +7,7 @@ import { simulateExtendedEconomy } from "./economyExtended";
 import { calculateJobCapacities, calculateResidentialCapacity, validateBuildingCollection } from "./buildingRules";
 import { activeProductionBonusMultiplier } from "./missionRules";
 
-export const auditWormeyDeep = query({
+export const auditWormeyDeep = internalQuery({
   args: {},
   handler: async (ctx) => {
     // 1. Find Wormey's user & kingdom

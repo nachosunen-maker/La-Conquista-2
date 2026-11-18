@@ -59,7 +59,7 @@ export const getTechnologies = query({
       writable: isKingdomOwner(kingdom.userId, identity?.subject),
       slots,
       slotsFree: Math.max(0, slots - researching.length),
-      modifiers: computeTechnologyModifiers([...completedIds]),
+      modifiers: (() => computeTechnologyModifiers([...completedIds]))(),
       researching: researching.map((doc) => ({
         ...doc,
         name: TECHNOLOGY_CATALOG[doc.technologyId]?.name ?? doc.technologyId,
@@ -70,31 +70,35 @@ export const getTechnologies = query({
           ? doc.startedAt + doc.durationMs
           : null,
       })),
-      catalog: TECHNOLOGIES
-        .filter((technology) => {
-          if (technology.branch !== "civilizacion") return true;
-          return !technology.civilizationRequirement || normalizeCivilizationId(technology.civilizationRequirement) === normalizeCivilizationId(kingdom.civilization);
-        })
-        .map((technology) => {
-        const evaluation = evaluateTechnologyStatus({
-          technology,
-          completedIds,
-          researchingIds,
-          buildingLevels,
-          kingdomCivilization: kingdom.civilization,
-        });
+      catalog: (() => {
+        const techModifiers = computeTechnologyModifiers([...completedIds]);
         const civPassive = getCivilizationPassive(kingdom.civilization);
-        const multiplier = typeof civPassive.researchDurationMultiplier === 'number' ? civPassive.researchDurationMultiplier : 1.0;
-        const baseDuration = typeof technology.durationSeconds === 'number' ? technology.durationSeconds : 60;
-        const bonifiedDurationSeconds = Math.max(1, Math.ceil(baseDuration * multiplier));
-        
-        return { 
-          ...technology, 
-          status: evaluation.status, 
-          blockers: evaluation.blockers, 
-          bonifiedDurationSeconds 
-        };
-      }),
+        const civMultiplier = typeof civPassive.researchDurationMultiplier === "number" ? civPassive.researchDurationMultiplier : 1.0;
+        const combinedMultiplier = techModifiers.researchDuration * civMultiplier;
+        return TECHNOLOGIES
+          .filter((technology) => {
+            if (technology.branch !== "civilizacion") return true;
+            return !technology.civilizationRequirement || normalizeCivilizationId(technology.civilizationRequirement) === normalizeCivilizationId(kingdom.civilization);
+          })
+          .map((technology) => {
+            const evaluation = evaluateTechnologyStatus({
+              technology,
+              completedIds,
+              researchingIds,
+              buildingLevels,
+              kingdomCivilization: kingdom.civilization,
+            });
+            const baseDuration = typeof technology.durationSeconds === "number" ? technology.durationSeconds : 60;
+            const bonifiedDurationSeconds = Math.max(1, Math.ceil(baseDuration * combinedMultiplier));
+
+            return {
+              ...technology,
+              status: evaluation.status,
+              blockers: evaluation.blockers,
+              bonifiedDurationSeconds,
+            };
+          });
+      })(),
     };
   },
 });

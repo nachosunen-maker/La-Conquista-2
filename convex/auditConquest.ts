@@ -1,8 +1,8 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { TERRAINS } from "./balanceConfig";
 
-export const auditAllKingdoms = query({
+export const auditAllKingdoms = internalQuery({
   args: {},
   handler: async (ctx) => {
     const kingdoms = await ctx.db.query("kingdoms").collect();
@@ -65,7 +65,7 @@ export const auditAllKingdoms = query({
   },
 });
 
-export const regularizeConquestRewards = mutation({
+export const regularizeConquestRewards = internalMutation({
   args: {},
   handler: async (ctx) => {
     const kingdoms = await ctx.db.query("kingdoms").collect();

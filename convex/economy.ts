@@ -9,12 +9,12 @@ import { ensureHomeTerritory, releaseTerritories } from "./territories";
 import { calculateJobCapacities, calculateResidentialCapacity, validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import { simulateExtendedEconomy, type ExtendedEconomyResult } from "./economyExtended";
-import { normalizeUnitType } from "./armyRules";
-import { TAXES, WELLBEING, UNITS, TERRAINS, HOSPITAL_RECOVERY_PER_YEAR, HOSPITAL_RECOVERY_CAP, REST_POLICIES } from "./balanceConfig";
-import { woundedRecoveryRatio } from "./battleRules";
+import { isSpyUnitDoc, normalizeUnitType } from "./armyRules";
+import { TAXES, WELLBEING, UNITS, TERRAINS, REST_POLICIES } from "./balanceConfig";
+import { calculateHospitalRecovery } from "./battleRules";
 import { recoverFatigue } from "./territoryRules";
 import { isCivilizationId } from "./civilizations";
-import { normalizeCivilizationId } from "./civilizationRules";
+import { getCivilizationPassive, normalizeCivilizationId } from "./civilizationRules";
 import { CIVILIZATIONS } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
 import { pickRandomUniqueColor } from "./kingdomColors";
@@ -230,12 +230,13 @@ export async function settleRelationalKingdomEconomy(
       throw new Error(adapted.error ?? "No se pudo adaptar el estado relacional del reino.");
     }
     const terrainBonuses = await readTerrainBonuses(ctx, kingdom._id);
+    const techModifiers = computeTechnologyModifiers(completedTechnologies);
     extended = simulateExtendedEconomy({
       kingdomState: adapted.kingdomState,
       now,
       jobCapacities: calculateJobCapacities(state.buildings),
-      residentialCapacity: calculateResidentialCapacity(state.buildings),
-      technologyModifiers: computeTechnologyModifiers(completedTechnologies),
+      residentialCapacity: calculateResidentialCapacity(state.buildings, techModifiers.housingCapacityBonus),
+      technologyModifiers: techModifiers,
       terrainBonuses,
       taxRate: typeof kingdom.taxRate === "number" ? kingdom.taxRate : TAXES.INITIAL_RATE,
       happiness: typeof kingdom.happiness === "number" ? kingdom.happiness : WELLBEING.INITIAL_HAPPINESS,
@@ -318,25 +319,37 @@ export async function settleRelationalKingdomEconomy(
       }
     }
 
-    // [MAESTRA P45] Recuperación de heridos por nivel de Hospital militar (+ tecnología, tope 60 %).
-    // [M-07] La medicina (trabajadores del Hospital) suma a la bonificación tecnológica, con el mismo tope del 60 %.
-    const recoveryRatio = woundedRecoveryRatio(
-      buildingLevels.hospitalMilitar ?? 0,
-      computeTechnologyModifiers(completedTechnologies).woundedRecoveryBonus + extended.professions.woundedRecoveryBonus,
-      HOSPITAL_RECOVERY_PER_YEAR,
-      HOSPITAL_RECOVERY_CAP
-    );
-    if (recoveryRatio > 0 && extended.elapsedDays > 0) {
-      for (const doc of state.armyUnits) {
-        const wounded = Number.isInteger(doc.wounded) && doc.wounded > 0 ? doc.wounded : 0;
-        if (wounded === 0) continue;
-        const progress = (typeof doc.recoveryProgress === "number" ? doc.recoveryProgress : 0) + wounded * recoveryRatio * extended.elapsedDays;
-        const recovered = Math.min(wounded, Math.floor(progress));
-        await ctx.db.patch(doc._id, {
-          wounded: wounded - recovered,
-          count: doc.count + recovered,
-          recoveryProgress: recovered >= wounded ? 0 : progress - recovered,
-        });
+    // [MAESTRA P45 y Sección B] Recuperación de heridos en Hospital militar (capacidad = nivel × 100,
+    // exceso al 5 % de triaje de campaña, + tecnología + medicina + pasiva de civilización, tope 60 %).
+    const totalWounded = state.armyUnits
+      .filter((doc: any) => !isSpyUnitDoc(doc))
+      .reduce((sum: number, doc: any) => sum + (Number.isInteger(doc.wounded) && doc.wounded > 0 ? doc.wounded : 0), 0);
+    if (totalWounded > 0 && extended.elapsedDays > 0) {
+      const civPassive = getCivilizationPassive(kingdom.civilization);
+      const hospitalTechModifiers = computeTechnologyModifiers(completedTechnologies);
+      const hospitalRecovery = calculateHospitalRecovery({
+        hospitalLevel: buildingLevels.hospitalMilitar ?? 0,
+        totalWounded,
+        technologyBonus: hospitalTechModifiers.woundedRecoveryBonus,
+        medicsBonus: extended.professions.woundedRecoveryBonus,
+        elapsedDays: extended.elapsedDays,
+        civilizationBonus: civPassive.woundedRecoveryBonus ?? 0,
+      });
+      if (hospitalRecovery.effectiveRecoveryRatio > 0) {
+        for (const doc of state.armyUnits) {
+          if (isSpyUnitDoc(doc)) continue;
+          const wounded = Number.isInteger(doc.wounded) && doc.wounded > 0 ? doc.wounded : 0;
+          if (wounded === 0) continue;
+          const progress =
+            (typeof doc.recoveryProgress === "number" ? doc.recoveryProgress : 0) +
+            wounded * hospitalRecovery.effectiveRecoveryRatio * extended.elapsedDays;
+          const recovered = Math.min(wounded, Math.floor(progress));
+          await ctx.db.patch(doc._id, {
+            wounded: wounded - recovered,
+            count: doc.count + recovered,
+            recoveryProgress: recovered >= wounded ? 0 : progress - recovered,
+          });
+        }
       }
     }
 
@@ -381,6 +394,7 @@ async function applyMilitaryDesertion(ctx: any, armyUnits: any[], personnel: num
   let remaining = personnel;
   const living = armyUnits
     .filter((doc) => {
+      if (isSpyUnitDoc(doc)) return false;
       const norm = normalizeUnitType(doc.unitType);
       return norm && UNITS[norm]?.isLivingTroop && doc.count > 0;
     })
@@ -394,6 +408,7 @@ async function applyMilitaryDesertion(ctx: any, armyUnits: any[], personnel: num
   // Operadores de asedio desertan en bloques de máquina completa.
   if (remaining > 0) {
     const siege = armyUnits.filter((doc) => {
+      if (isSpyUnitDoc(doc)) return false;
       const norm = normalizeUnitType(doc.unitType);
       return norm && !UNITS[norm]?.isLivingTroop && doc.count > 0;
     });

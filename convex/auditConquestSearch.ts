@@ -1,6 +1,6 @@
-import { query } from "./_generated/server";
+import { internalQuery } from "./_generated/server";
 
-export const findWormey = query({
+export const findWormey = internalQuery({
   args: {},
   handler: async (ctx) => {
     const kingdoms = await ctx.db.query("kingdoms").collect();

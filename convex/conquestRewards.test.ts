@@ -107,7 +107,7 @@ describe("SISTEMA DE RECOMPENSAS Y BONIFICACIONES DE CONQUISTA", () => {
     });
 
     // Primera regularización
-    const res1 = await t.mutation(api.auditConquest.regularizeConquestRewards, {});
+    const res1 = await t.mutation(internal.auditConquest.regularizeConquestRewards, {});
     expect(res1.success).toBe(true);
 
     const k1 = await t.run(async (ctx) => await ctx.db.get(kingdomId));
@@ -116,7 +116,7 @@ describe("SISTEMA DE RECOMPENSAS Y BONIFICACIONES DE CONQUISTA", () => {
     expect(k1!.conquestRewardsGranted).toBe(3);
 
     // Segunda regularización (idempotente)
-    const res2 = await t.mutation(api.auditConquest.regularizeConquestRewards, {});
+    const res2 = await t.mutation(internal.auditConquest.regularizeConquestRewards, {});
     expect(res2.success).toBe(true);
 
     const k2 = await t.run(async (ctx) => await ctx.db.get(kingdomId));
