@@ -54,6 +54,7 @@ import {
   type BattleSide,
   type Composition,
 } from "./battleRules";
+import { isScheduleWindow } from "./challengeRules";
 
 /** Lectura de solo consulta: une armyUnits con la tabla heredada sin escribir. */
 export async function readArmyUnitDocs(ctx: QueryCtx | MutationCtx, kingdomId: Id<"kingdoms">): Promise<any[]> {
@@ -742,6 +743,8 @@ export const launchAttack = mutation({
       ownedCoords.push(homeCoord);
     }
 
+    let authorizedChallengeId: Id<"challenges"> | undefined = undefined;
+
     // [VALIDACIÓN FRONTERA + TOPE 100]: Solo permitir conquistar si es neutral adyacente a territorio propio y < 100 territorios
     if (!target.ownerKingdomId) {
       if (ownedCellIds.size >= TERRITORIES.MAX_PER_KINGDOM) {
@@ -755,22 +758,77 @@ export const launchAttack = mutation({
         throw new Error("El territorio neutral debe limitar con una de tus casillas propias para poder conquistarlo (Expansión contigua).");
       }
     } else {
-      // [MAESTRA P38] No existen ataques sorpresivos entre reinos: se exige desafío aceptado o congelado en el Parlamento.
-      const [asChallenger, asTarget] = await Promise.all([
+      // [MAESTRA P38] No existen ataques sorpresivos ni prematuros entre reinos:
+      // se exige un desafío parlamentario ACCEPTED exactamente entre atacante y defensor,
+      // con ventana y scheduledAt válidos ya alcanzados, sin caducar y no reutilizado.
+      const [asChallenger, existingMarches] = await Promise.all([
         ctx.db.query("challenges").withIndex("by_challenger", (q) => q.eq("challengerKingdomId", args.kingdomId)).collect(),
-        ctx.db.query("challenges").withIndex("by_target", (q) => q.eq("targetKingdomId", args.kingdomId)).collect(),
+        ctx.db.query("armyMarches").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
       ]);
-      const hasActiveParliamentChallenge = [...asChallenger, ...asTarget].some((ch) => {
-        const involvesTarget =
-          (String(ch.challengerKingdomId) === String(args.kingdomId) && String(ch.targetKingdomId) === String(target.ownerKingdomId)) ||
-          (String(ch.challengerKingdomId) === String(target.ownerKingdomId) && String(ch.targetKingdomId) === String(args.kingdomId));
-        return involvesTarget && (ch.status === "ACCEPTED" || ch.status === "FROZEN");
-      });
-      if (!hasActiveParliamentChallenge) {
+
+      const usedChallengeIds = new Set<string>();
+      for (const m of existingMarches) {
+        if (m.challengeId && m.status !== "cancelada") {
+          usedChallengeIds.add(String(m.challengeId));
+        }
+      }
+
+      const pairChallenges = asChallenger.filter(
+        (ch) =>
+          String(ch.challengerKingdomId) === String(args.kingdomId) &&
+          String(ch.targetKingdomId) === String(target.ownerKingdomId)
+      );
+
+      const acceptedUnused = pairChallenges.filter(
+        (ch) =>
+          ch.status === "ACCEPTED" &&
+          !ch.battleId &&
+          !ch.resolvedAt &&
+          !usedChallengeIds.has(String(ch._id))
+      );
+
+      if (acceptedUnused.length === 0) {
+        const hasFrozen = pairChallenges.some((ch) => ch.status === "FROZEN");
+        if (hasFrozen) {
+          throw new ConvexError(
+            "Procedimiento de Parlamento requerido (P38): el desafío ya está congelado (FROZEN) para resolución automática del Parlamento y no admite ataques manuales."
+          );
+        }
+        const hasReusedOrResolved = pairChallenges.some(
+          (ch) => ch.status === "RESOLVED" || Boolean(ch.battleId) || Boolean(ch.resolvedAt) || usedChallengeIds.has(String(ch._id))
+        );
+        if (hasReusedOrResolved) {
+          throw new ConvexError(
+            "Procedimiento de Parlamento requerido (P38): el desafío ya fue utilizado o resuelto y no puede reutilizarse para ataques adicionales."
+          );
+        }
         throw new ConvexError(
-          "Procedimiento de Parlamento requerido (P38): para atacar territorios de otro reino debes declarar un desafío en el Parlamento y contar con un reto aceptado o congelado."
+          "Procedimiento de Parlamento requerido (P38): para atacar territorios de otro reino debes contar con un desafío aceptado (ACCEPTED) vigente entre atacante y defensor."
         );
       }
+
+      const validScheduled = acceptedUnused.filter((ch) => {
+        const hasValidWindow = typeof ch.window === "string" && isScheduleWindow(ch.window);
+        const hasValidScheduledAt = typeof ch.scheduledAt === "number" && Number.isFinite(ch.scheduledAt) && ch.scheduledAt > 0;
+        const hasValidFreezeAt = typeof ch.freezeAt === "number" && Number.isFinite(ch.freezeAt) && ch.freezeAt <= (ch.scheduledAt as number);
+        const notExpiredBeforeResponse = typeof ch.respondedAt === "number" ? ch.respondedAt < ch.expiresAt : now < ch.expiresAt;
+        return hasValidWindow && hasValidScheduledAt && hasValidFreezeAt && notExpiredBeforeResponse;
+      });
+
+      if (validScheduled.length === 0) {
+        throw new ConvexError(
+          "Procedimiento de Parlamento requerido (P38): el desafío aceptado carece de una programación temporal válida (window, freezeAt, scheduledAt)."
+        );
+      }
+
+      const readyChallenge = validScheduled.find((ch) => now >= (ch.scheduledAt as number));
+      if (!readyChallenge) {
+        throw new ConvexError(
+          "Procedimiento de Parlamento requerido (P38): aún no ha llegado la fecha y hora programadas (scheduledAt) para iniciar el combate."
+        );
+      }
+
+      authorizedChallengeId = readyChallenge._id;
     }
 
     const distance = ownedCoords.length
@@ -836,6 +894,7 @@ export const launchAttack = mutation({
       completesAt,
       status: "marchando",
       isConquest,
+      ...(authorizedChallengeId ? { challengeId: authorizedChallengeId } : {}),
     });
 
     await ctx.scheduler.runAt(completesAt, internal.army.completeMarchScheduled, { marchId });
@@ -1030,7 +1089,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   const now = Date.now();
 
   const battleId = await ctx.db.insert("Battle", {
-    challengeId: null as any,
+    challengeId: march.challengeId ?? (null as any),
     attackerKingdomId: march.kingdomId,
     defenderKingdomId,
     resolvedAt: now,
@@ -1039,6 +1098,17 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     crushingVictory: report.crushingVictory,
     report,
   });
+
+  if (march.challengeId) {
+    const linkedChallenge = await ctx.db.get(march.challengeId);
+    if (linkedChallenge && linkedChallenge.status !== "RESOLVED") {
+      await ctx.db.patch(march.challengeId, {
+        status: "RESOLVED",
+        resolvedAt: now,
+        battleId,
+      });
+    }
+  }
 
   const unitsByType: Record<string, Array<{ unitType: string; level: number; count: number }>> = {};
   for (const u of march.units) {

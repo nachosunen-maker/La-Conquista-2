@@ -204,15 +204,19 @@ describe("Paquete B: Motor de combate, progresión, hospital y reglas P23/P25/P2
       })
     ).rejects.toThrow(/Procedimiento de Parlamento requerido \(P38\)/i);
 
-    // 2. Con desafío ACCEPTED, el ataque se permite
+    // 2. Con desafío ACCEPTED y programación temporal P38 válida ya alcanzada, el ataque se permite
     await t.run(async (ctx) => {
       await ctx.db.insert("challenges", {
         challengerKingdomId: attacker.kingdomId,
         targetKingdomId: defender.kingdomId,
         challengeType: "batalla",
         status: "ACCEPTED",
-        createdAt: T0,
+        createdAt: T0 - 90_000_000,
         expiresAt: T0 + 86_400_000,
+        respondedAt: T0 - 86_400_000,
+        window: "proxima",
+        freezeAt: T0 - 900_000,
+        scheduledAt: T0,
       });
     });
 

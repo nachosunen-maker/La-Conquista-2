@@ -24,6 +24,7 @@ import { requireOwner } from "./buildings";
 import { ensureAllKingdomsHaveColors } from "./kingdomColors";
 import { addUnits, readArmyUnitDocs } from "./army";
 import { isSpyUnitDoc } from "./armyRules";
+import { runMapReduction } from "./mapReduction";
 import { EXPLORATION, MAP, TERRAINS, TERRITORIES, type TerrainType } from "./balanceConfig";
 import {
   canClaimTerritory,
@@ -493,15 +494,17 @@ export const getWorldMap = query({
     const names = new Map<string, string>();
     for (const owner of owners) if (owner) names.set(String(owner._id), owner.name);
 
-    // Si no se especifica kingdomId (vista global pública/demo), se devuelve el mapa cartográfico sin niebla
+    // Si no se especifica kingdomId (vista cartográfica global pública): solo terreno y coordenadas,
+    // sin exponer propiedad, nombres de reinos, capitales ni ningún dato oculto por la niebla de guerra.
     if (!args.kingdomId) {
       return {
         radius: MAP.RADIUS,
         generated: world.length > 0,
         terrains: TERRAINS,
         totalCells: world.length,
-        exploredCount: world.length,
+        exploredCount: 0,
         activeExpeditions: [],
+        kingdomLegend: [],
         pendingClaims: 0,
         homeTerritoryId: null,
         cells: world.map((cell) => ({
@@ -509,11 +512,13 @@ export const getWorldMap = query({
           q: cell.q,
           r: cell.r,
           terrain: cell.terrain,
-          ownerKingdomId: cell.ownerKingdomId ?? null,
-          ownerName: cell.ownerKingdomId ? names.get(String(cell.ownerKingdomId)) ?? null : null,
-          isHome: cell.isHome ?? false,
-          state: (cell.ownerKingdomId ? "owned" : "explored") as CellExplorationState,
+          ownerKingdomId: null,
+          ownerName: null,
+          ownerColor: null,
+          isHome: false,
+          state: "fog" as CellExplorationState,
           canExplore: false,
+          canConquer: false,
           explorationPlan: null,
           expedition: null,
         })),
@@ -551,30 +556,9 @@ export const getWorldMap = query({
       ctx.db.query("kingdoms").collect(),
     ]);
 
-    const ownedCountByKingdom = new Map<string, number>();
-    for (const cell of world) {
-      if (cell.ownerKingdomId) {
-        const key = String(cell.ownerKingdomId);
-        ownedCountByKingdom.set(key, (ownedCountByKingdom.get(key) ?? 0) + 1);
-      }
-    }
-
     const colorsMap = new Map<string, string>();
-    const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
-
     for (const k of allKingdomDocs) {
-      const ownedCount = ownedCountByKingdom.get(String(k._id)) ?? 0;
-      const kColor = k.color ?? "#d4af37";
-      colorsMap.set(String(k._id), kColor);
-      if (ownedCount > 0) {
-        legendList.push({
-          id: String(k._id),
-          name: k.name,
-          monarchName: k.monarchName,
-          color: kColor,
-          territoryCount: ownedCount,
-        });
-      }
+      colorsMap.set(String(k._id), k.color ?? "#d4af37");
     }
 
     const hasSpy2Tech = completedTech.includes("spy_2");
@@ -583,13 +567,13 @@ export const getWorldMap = query({
     if (kingdom.homeTerritoryId) {
       ownedIds.add(String(kingdom.homeTerritoryId));
     }
-    
+
     const ownedCoords: HexCoord[] = ownedCells.map((c) => ({ q: c.q, r: c.r }));
     if (homeCoord && !ownedCoords.some(c => c.q === homeCoord.q && c.r === homeCoord.r)) {
       ownedCoords.push(homeCoord);
     }
 
-    // Celdas conocidas: territorios propios + visión inicial + exploradas guardadas + vecinos de frontera
+    // Celdas conocidas: territorios propios + visión inicial + exploradas guardadas
     const knownIds = new Set<string>([
       ...Array.from(ownedIds),
       ...getInitialSightCellIds(homeCoord, EXPLORATION.INITIAL_SIGHT_RADIUS, MAP.RADIUS),
@@ -604,6 +588,28 @@ export const getWorldMap = query({
         knownIds.add(exp.cellId);
       } else {
         activeExpeditionMap.set(exp.cellId, exp);
+      }
+    }
+
+    // Leyenda filtrada estrictamente a territorios conocidos por este reino (sin filtrar reinos ni conteos bajo niebla)
+    const knownOwnedCountByKingdom = new Map<string, number>();
+    for (const cell of world) {
+      if (cell.ownerKingdomId && knownIds.has(cell.cellId)) {
+        const key = String(cell.ownerKingdomId);
+        knownOwnedCountByKingdom.set(key, (knownOwnedCountByKingdom.get(key) ?? 0) + 1);
+      }
+    }
+    const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
+    for (const k of allKingdomDocs) {
+      const visibleOwnedCount = knownOwnedCountByKingdom.get(String(k._id)) ?? 0;
+      if (visibleOwnedCount > 0) {
+        legendList.push({
+          id: String(k._id),
+          name: k.name,
+          monarchName: k.monarchName,
+          color: colorsMap.get(String(k._id)) ?? "#d4af37",
+          territoryCount: visibleOwnedCount,
+        });
       }
     }
 
@@ -681,17 +687,19 @@ export const getWorldMap = query({
           }
         : null;
 
-      const ownerColor = state === "fog" ? null : cell.ownerKingdomId ? (colorsMap.get(String(cell.ownerKingdomId)) ?? "#d4af37") : null;
+      // Solo las celdas ya conocidas (owned o explored) revelan terreno, propietario y capital.
+      const isHidden = !isKnown;
+      const ownerColor = isHidden ? null : cell.ownerKingdomId ? (colorsMap.get(String(cell.ownerKingdomId)) ?? "#d4af37") : null;
 
       return {
         cellId: cell.cellId,
         q: cell.q,
         r: cell.r,
-        terrain: state === "fog" ? "desconocido" : cell.terrain,
-        ownerKingdomId: state === "fog" ? null : cell.ownerKingdomId ?? null,
-        ownerName: state === "fog" ? null : cell.ownerKingdomId ? names.get(String(cell.ownerKingdomId)) ?? null : null,
+        terrain: isHidden ? "desconocido" : cell.terrain,
+        ownerKingdomId: isHidden ? null : cell.ownerKingdomId ?? null,
+        ownerName: isHidden ? null : cell.ownerKingdomId ? names.get(String(cell.ownerKingdomId)) ?? null : null,
         ownerColor,
-        isHome: state === "fog" ? false : cell.isHome ?? false,
+        isHome: isHidden ? false : cell.isHome ?? false,
         state,
         canExplore,
         canConquer,
@@ -746,6 +754,25 @@ export const getWorldMapCompact = query({
     kingdomId: v.optional(v.id("kingdoms")),
   },
   handler: async (ctx, args) => {
+    // Consulta global sin kingdomId: devuelve únicamente la base cartográfica pública (semilla y radio),
+    // sin exponer celdas ocupadas, capitales ni leyenda de reinos ocultos por la niebla de guerra.
+    if (!args.kingdomId) {
+      return {
+        radius: MAP.RADIUS,
+        worldSeed: MAP.WORLD_SEED,
+        generated: true,
+        terrains: TERRAINS,
+        totalCells: MAP.MAX_CELLS,
+        exploredCount: 0,
+        activeExpeditions: [],
+        activeMarches: [],
+        kingdomLegend: [],
+        pendingClaims: 0,
+        homeTerritoryId: null,
+        visibleCells: [],
+      };
+    }
+
     const allKingdomDocs = await ctx.db.query("kingdoms").collect();
     const names = new Map<string, string>();
     const colorsMap = new Map<string, string>();
@@ -765,54 +792,10 @@ export const getWorldMapCompact = query({
     );
 
     const ownedByCellId = new Map<string, Doc<"territories">>();
-    const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
-
     for (const entry of ownedByKingdom) {
       for (const cell of entry.cells) {
         ownedByCellId.set(cell.cellId, cell);
       }
-      if (entry.cells.length > 0) {
-        legendList.push({
-          id: String(entry.kingdom._id),
-          name: entry.kingdom.name,
-          monarchName: entry.kingdom.monarchName,
-          color: colorsMap.get(String(entry.kingdom._id)) ?? "#d4af37",
-          territoryCount: entry.cells.length,
-        });
-      }
-    }
-
-    if (!args.kingdomId) {
-      const visibleCells = Array.from(ownedByCellId.values()).map((cell) => ({
-        cellId: cell.cellId,
-        q: cell.q,
-        r: cell.r,
-        terrain: cell.terrain,
-        ownerKingdomId: cell.ownerKingdomId ?? null,
-        ownerName: cell.ownerKingdomId ? names.get(String(cell.ownerKingdomId)) ?? null : null,
-        ownerColor: cell.ownerKingdomId ? colorsMap.get(String(cell.ownerKingdomId)) ?? "#d4af37" : null,
-        isHome: cell.isHome ?? false,
-        state: "owned" as CellExplorationState,
-        canExplore: false,
-        canConquer: false,
-        explorationPlan: null,
-        expedition: null,
-      }));
-
-      return {
-        radius: MAP.RADIUS,
-        worldSeed: MAP.WORLD_SEED,
-        generated: true,
-        terrains: TERRAINS,
-        totalCells: MAP.MAX_CELLS,
-        exploredCount: MAP.MAX_CELLS,
-        activeExpeditions: [],
-        activeMarches: [],
-        kingdomLegend: legendList,
-        pendingClaims: 0,
-        homeTerritoryId: null,
-        visibleCells,
-      };
     }
 
     const kingdomId = args.kingdomId;
@@ -959,25 +942,48 @@ export const getWorldMapCompact = query({
           }
         : null;
 
+      const isHidden = !isKnown;
       const realTerrain = dbOwned?.terrain ?? terrainForCell(coord.q, coord.r, MAP.WORLD_SEED, MAP.RADIUS);
       const ownerId = dbOwned?.ownerKingdomId ?? null;
-      const ownerColor = state === "fog" ? null : ownerId ? colorsMap.get(String(ownerId)) ?? "#d4af37" : null;
+      const ownerColor = isHidden ? null : ownerId ? colorsMap.get(String(ownerId)) ?? "#d4af37" : null;
 
       visibleCells.push({
         cellId: id,
         q: coord.q,
         r: coord.r,
-        terrain: state === "fog" ? "desconocido" : realTerrain,
-        ownerKingdomId: state === "fog" ? null : ownerId,
-        ownerName: state === "fog" ? null : ownerId ? names.get(String(ownerId)) ?? null : null,
+        terrain: isHidden ? "desconocido" : realTerrain,
+        ownerKingdomId: isHidden ? null : ownerId,
+        ownerName: isHidden ? null : ownerId ? names.get(String(ownerId)) ?? null : null,
         ownerColor,
-        isHome: state === "fog" ? false : dbOwned?.isHome ?? false,
+        isHome: isHidden ? false : dbOwned?.isHome ?? false,
         state,
         canExplore,
         canConquer,
         explorationPlan,
         expedition,
       });
+    }
+
+    // Leyenda filtrada estrictamente a territorios conocidos por este reino (idéntico a getWorldMap)
+    const knownOwnedCountByKingdom = new Map<string, number>();
+    for (const [cid, cell] of ownedByCellId.entries()) {
+      if (cell.ownerKingdomId && knownIds.has(cid)) {
+        const key = String(cell.ownerKingdomId);
+        knownOwnedCountByKingdom.set(key, (knownOwnedCountByKingdom.get(key) ?? 0) + 1);
+      }
+    }
+    const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
+    for (const k of allKingdomDocs) {
+      const visibleOwnedCount = knownOwnedCountByKingdom.get(String(k._id)) ?? 0;
+      if (visibleOwnedCount > 0) {
+        legendList.push({
+          id: String(k._id),
+          name: k.name,
+          monarchName: k.monarchName,
+          color: colorsMap.get(String(k._id)) ?? "#d4af37",
+          territoryCount: visibleOwnedCount,
+        });
+      }
     }
 
     return {
@@ -1667,84 +1673,10 @@ export const previewArmyMarchPlan = query({
   },
 });
 
+/**
+ * Delegador temporal retrocompatible: la lógica única y canónica vive en `convex/mapReduction.ts`.
+ */
 export const executeMapReduction = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const radiusLimit = MAP.RADIUS;
-    const now = Date.now();
-
-    // 1. Recover Units and Resources from Exterior Missions
-    const expQueue = await ctx.db.query("explorationQueue").collect();
-    for (const exp of expQueue) {
-        if (hexDistance({ q: exp.targetQ, r: exp.targetR }, { q: 0, r: 0 }) > radiusLimit) {
-            // Cancel Exploration
-            if (exp.isSpyMission) {
-                await addUnits(ctx, exp.kingdomId, "espia", 1, exp.scoutsCount || 1);
-            } else {
-                 const populationDoc = await ctx.db
-                    .query("population")
-                    .withIndex("by_kingdom", (q) => q.eq("kingdomId", exp.kingdomId))
-                    .first();
-                 if (populationDoc) {
-                    await ctx.db.patch(populationDoc._id, {
-                        available: (populationDoc.available ?? 0) + (exp.scoutsCount ?? 1),
-                    });
-                 }
-            }
-            // Refund resources
-            const kingdom = await ctx.db.get(exp.kingdomId);
-            if (kingdom) {
-                const settled = await settleRelationalKingdomEconomy(ctx, kingdom, kingdom.userId, now);
-                const refund = calculateExplorationRefund(exp.costs);
-                await ctx.db.patch(settled.resources._id, {
-                    gold: settled.settledResources.gold + refund.gold,
-                    food: settled.settledResources.food + refund.food,
-                });
-            }
-            await ctx.db.delete(exp._id);
-        }
-    }
-
-    const armyMarches = await ctx.db.query("armyMarches").collect();
-    for (const march of armyMarches) {
-        if (hexDistance({ q: march.targetQ, r: march.targetR }, { q: 0, r: 0 }) > radiusLimit) {
-            // Cancel March and return units
-            for (const unit of march.units) {
-                 await addUnits(ctx, march.kingdomId, unit.unitType as any, unit.level || 1, unit.count);
-            }
-            await ctx.db.delete(march._id);
-        }
-    }
-
-    // 2. Delete Exterior Territories and Explorations in batches
-    const territories = await ctx.db.query("territories").collect();
-    const exteriorTerritories = territories.filter(t => hexDistance({ q: t.q, r: t.r }, { q: 0, r: 0 }) > radiusLimit);
-    for (let i = 0; i < exteriorTerritories.length; i += 500) {
-        const batch = exteriorTerritories.slice(i, i + 500);
-        for (const t of batch) {
-            await ctx.db.delete(t._id);
-        }
-    }
-
-    const explorations = await ctx.db.query("exploredTerritories").collect();
-    const exteriorExplorations = explorations.filter(e => {
-        const parts = e.cellId.split(',');
-        const q = Number(parts[0]);
-        const r = Number(parts[1]);
-        return hexDistance({ q, r }, { q: 0, r: 0 }) > radiusLimit;
-    });
-    for (let i = 0; i < exteriorExplorations.length; i += 500) {
-        const batch = exteriorExplorations.slice(i, i + 500);
-        for (const e of batch) {
-            await ctx.db.delete(e._id);
-        }
-    }
-
-    return {
-        territoriesDeleted: exteriorTerritories.length,
-        explorationsDeleted: exteriorExplorations.length,
-        missionsCancelled: expQueue.length - (await ctx.db.query("explorationQueue").collect()).length,
-        marchesCancelled: armyMarches.length - (await ctx.db.query("armyMarches").collect()).length
-    };
-  },
+  args: { dryRun: v.optional(v.boolean()) },
+  handler: async (ctx, args) => runMapReduction(ctx, args),
 });

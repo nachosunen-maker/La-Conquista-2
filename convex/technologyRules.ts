@@ -51,6 +51,7 @@ export interface ResearchQueueEntry {
  */
 export function researchSlots(universityLevel: number = 0): number {
   const level = Number.isInteger(universityLevel) && universityLevel > 0 ? universityLevel : 0;
+  if (level === 0) return 0;
   let slots = 0;
   for (const row of RESEARCH_SLOTS_BY_UNIVERSITY) if (level >= row.minLevel) slots = row.slots;
   return Math.min(RESEARCH.MAX_SLOTS, Math.max(RESEARCH.BASE_SLOTS, slots));

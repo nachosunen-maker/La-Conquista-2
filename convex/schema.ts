@@ -258,6 +258,7 @@ export default defineSchema({
       status: v.union(v.literal("marchando"), v.literal("completada"), v.literal("cancelada")),
       battleResult: v.optional(v.any()),
       isConquest: v.optional(v.boolean()),
+      challengeId: v.optional(v.id("challenges")),
     }).index("by_kingdom", ["kingdomId"]),
 
     // Desafíos del Parlamento (Bloque E): máquina de estados server-authoritative (BLOQUE 9).

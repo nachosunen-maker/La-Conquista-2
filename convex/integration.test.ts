@@ -856,8 +856,12 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
         targetKingdomId: defender.kingdomId,
         challengeType: "batalla",
         status: "ACCEPTED",
-        createdAt: T0,
+        createdAt: T0 - 90_000_000,
         expiresAt: T0 + 86_400_000,
+        respondedAt: T0 - 86_400_000,
+        window: "proxima",
+        freezeAt: T0 - 900_000,
+        scheduledAt: T0,
       });
     });
 
@@ -896,8 +900,12 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
         targetKingdomId: defender.kingdomId,
         challengeType: "batalla",
         status: "ACCEPTED",
-        createdAt: T0,
+        createdAt: T0 - 90_000_000,
         expiresAt: T0 + 86_400_000,
+        respondedAt: T0 - 86_400_000,
+        window: "proxima",
+        freezeAt: T0 - 900_000,
+        scheduledAt: T0,
       });
     });
 
@@ -936,8 +944,12 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
         targetKingdomId: defender.kingdomId,
         challengeType: "batalla",
         status: "ACCEPTED",
-        createdAt: T0,
+        createdAt: T0 - 90_000_000,
         expiresAt: T0 + 86_400_000,
+        respondedAt: T0 - 86_400_000,
+        window: "proxima",
+        freezeAt: T0 - 900_000,
+        scheduledAt: T0,
       });
     });
 
@@ -1214,8 +1226,12 @@ describe("Bloque 1: Espías, tope de 100 territorios y saneamiento", () => {
         targetKingdomId: defender.kingdomId,
         challengeType: "batalla",
         status: "ACCEPTED",
-        createdAt: T0,
+        createdAt: T0 - 90_000_000,
         expiresAt: T0 + 86_400_000,
+        respondedAt: T0 - 86_400_000,
+        window: "proxima",
+        freezeAt: T0 - 900_000,
+        scheduledAt: T0,
       });
     });
 
@@ -1293,8 +1309,12 @@ describe("Bloque 1: Espías, tope de 100 territorios y saneamiento", () => {
         targetKingdomId: defender.kingdomId,
         challengeType: "batalla",
         status: "ACCEPTED",
-        createdAt: T0,
+        createdAt: T0 - 90_000_000,
         expiresAt: T0 + 86_400_000,
+        respondedAt: T0 - 86_400_000,
+        window: "proxima",
+        freezeAt: T0 - 900_000,
+        scheduledAt: T0,
       });
     });
 
@@ -1439,7 +1459,8 @@ describe("Bloque 2: Mapa compacto y zonas geográficas de aparición", () => {
     expect(neutralCompact.totalCells).toBe(7651);
     expect(neutralCompact.pendingClaims).toBe(0);
     expect(neutralCompact.activeExpeditions).toHaveLength(0);
-    expect(neutralCompact.visibleCells.length).toBe(2); // 2 capitales fundadas
+    expect(neutralCompact.visibleCells).toHaveLength(0);
+    expect(neutralCompact.kingdomLegend).toHaveLength(0);
   });
 
   test("los reinos posteriores aparecen agrupados por civilización manteniendo separación [20, 30] hex", async () => {
