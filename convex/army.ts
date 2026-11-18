@@ -718,11 +718,30 @@ function activeComposition(units: any[]): Composition {
   return composition;
 }
 
+export async function refundMarchUnitsToGarrison(ctx: MutationCtx, kingdomId: Id<"kingdoms">, units: any[]): Promise<void> {
+  if (!Array.isArray(units)) return;
+  for (const u of units) {
+    if (!u || typeof u !== "object") continue;
+    if (isSpyUnitDoc(u) || normalizeUnitType(u.unitType) === "espia" || u.isSpy === true) {
+      continue;
+    }
+    const norm = normalizeUnitType(u.unitType);
+    if (!norm || norm === "espia") continue;
+    const count = Number(u.count);
+    if (!Number.isInteger(count) || count <= 0) continue;
+    const level = Number.isInteger(u.level) && u.level >= 1 && u.level <= 5 ? u.level : 1;
+    await addUnits(ctx, kingdomId, norm, level, count);
+  }
+}
+
 async function applyCasualtiesToArmy(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
   const units = await readArmyUnitsWithMigration(ctx, kingdomId);
   for (const type of UNIT_TYPES as readonly UnitType[]) {
+    if (type === "espia") continue;
     let remaining = casualties[type];
-    const docs = units.filter((doc) => normalizeUnitType(doc.unitType) === type).sort((a, b) => b.count - a.count);
+    const docs = units
+      .filter((doc) => !isSpyUnitDoc(doc) && normalizeUnitType(doc.unitType) === type)
+      .sort((a, b) => b.count - a.count || String(a._id).localeCompare(String(b._id)));
     for (const doc of docs) {
       if (remaining <= 0) break;
       const removed = Math.min(doc.count, remaining);
@@ -1073,12 +1092,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
         }
       }
     }
-    for (const u of march.units) {
-      const norm = normalizeUnitType(u.unitType);
-      if (norm && u.count > 0) {
-        await addUnits(ctx, march.kingdomId, norm, u.level ?? 1, u.count);
-      }
-    }
+    await refundMarchUnitsToGarrison(ctx, march.kingdomId, march.units);
     const outcome = capBlocked ? "limite_territorios_alcanzado" : "conquista_neutral";
     await ctx.db.patch(marchId, {
       status: "completada",
@@ -1096,12 +1110,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   // Si la marcha fue enviada como conquista territorial sobre casilla neutral, pero al llegar ya tiene soberano (carrera entre jugadores):
   // La resolución atómica es retorno automático sin combate, sin bajas y liberando el cupo de tropas.
   if (march.isConquest && targetCell.ownerKingdomId && targetCell.ownerKingdomId !== march.kingdomId) {
-    for (const u of march.units) {
-      const norm = normalizeUnitType(u.unitType);
-      if (norm && u.count > 0) {
-        await addUnits(ctx, march.kingdomId, norm, u.level ?? 1, u.count);
-      }
-    }
+    await refundMarchUnitsToGarrison(ctx, march.kingdomId, march.units);
     await ctx.db.patch(marchId, {
       status: "completada",
       battleResult: {
@@ -1120,12 +1129,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   const defenderKingdomId = targetCell.ownerKingdomId;
   const defenderKingdom = await ctx.db.get(defenderKingdomId);
   if (!defenderKingdom) {
-    for (const u of march.units) {
-      const norm = normalizeUnitType(u.unitType);
-      if (norm && u.count > 0) {
-        await addUnits(ctx, march.kingdomId, norm, u.level ?? 1, u.count);
-      }
-    }
+    await refundMarchUnitsToGarrison(ctx, march.kingdomId, march.units);
     await ctx.db.patch(marchId, { status: "completada" });
     return { success: true, outcome: "sin_oposicion" };
   }
@@ -1227,12 +1231,8 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
         },
       });
       if (march.unitsRefundedAt == null) {
-        for (const u of march.units) {
-          const norm = normalizeUnitType(u.unitType);
-          if (norm && u.count > 0) {
-            await addUnits(ctx, march.kingdomId, norm, u.level ?? 1, u.count);
-          }
-        }
+        await refundMarchUnitsToGarrison(ctx, march.kingdomId, march.units);
+        await ctx.db.patch(marchId, { unitsRefundedAt: cancelNow });
       }
       return { success: false, outcome: "desafio_no_vigente" };
     }
@@ -1266,9 +1266,10 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
 
   const unitsByType: Record<string, Array<{ unitType: string; level: number; count: number }>> = {};
   for (const u of march.units) {
+    if (isSpyUnitDoc(u) || normalizeUnitType(u.unitType) === "espia" || (u as any).isSpy === true) continue;
     const norm = normalizeUnitType(u.unitType);
-    if (!norm || u.count <= 0) continue;
-    const lvl = u.level ?? 1;
+    if (!norm || norm === "espia") continue;
+    const lvl = typeof u.level === "number" && Number.isInteger(u.level) && u.level >= 1 && u.level <= 5 ? u.level : 1;
     if (!unitsByType[norm]) unitsByType[norm] = [];
     unitsByType[norm].push({ unitType: norm, level: lvl, count: u.count });
   }

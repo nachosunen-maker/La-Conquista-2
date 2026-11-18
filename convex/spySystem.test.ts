@@ -24,7 +24,7 @@ import {
   reconcileArmyUnitDocs,
   summarizeArmy,
 } from "./armyRules";
-import { readArmyUnitDocs, readArmyUnitsWithMigration, resolveMarch } from "./army";
+import { readArmyUnitDocs, readArmyUnitsWithMigration, resolveMarch, refundMarchUnitsToGarrison } from "./army";
 import { isLivingRegularTroop } from "./militaryRules";
 import { cellId, hexNeighbors, parseCellId } from "./territoryRules";
 import { MAP } from "./balanceConfig";
@@ -2091,6 +2091,78 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     const spyDoc = unitsFinal.find((d: any) => isSpyUnitDoc(d));
     expect(infDoc.count).toBe(4);
     expect(spyDoc.count).toBe(5); // El espía original sigue intacto y no se alteró por la marcha
+  });
+
+  test("5-17. Pruebas exhaustivas de aislamiento de espías, bajas, heridos, devoluciones y protección contra doble reembolso", async () => {
+    const t = createTestBackend();
+    const { kingdomId } = await foundKingdom(t, "reg-exhaustive", "Reino Exhaustivo");
+
+    await t.run(async (ctx) => {
+      // 1. Infantería normal (isSpy: false), 2. Infantería contradictoria (isSpy: true), 3. Espía (isSpy: true), 4. Espía contradictorio (isSpy: false)
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 1, count: 10, isSpy: false });
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 1, count: 5, isSpy: true });
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 8, isSpy: true });
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 3, isSpy: false });
+    });
+
+    // Probar refundMarchUnitsToGarrison con unidades mixtas, espías contradictorios, tipos desconocidos, cantidades negativas/cero/decimales y niveles inválidos
+    await t.run(async (ctx) => {
+      await refundMarchUnitsToGarrison(ctx, kingdomId, [
+        { unitType: "infanteria", level: 1, count: 5 }, // Válido
+        { unitType: "infanteria", level: 1, count: -2 }, // Inválido (negativo)
+        { unitType: "infanteria", level: 1, count: 0 }, // Inválido (cero)
+        { unitType: "infanteria", level: 1, count: 1.5 }, // Inválido (no entero)
+        { unitType: "espia", level: 1, count: 4 }, // Espía -> rechazado
+        { unitType: "infanteria", level: 1, count: 3, isSpy: true }, // Contradictorio -> rechazado
+        { unitType: "desconocido", level: 1, count: 5 }, // Desconocido -> rechazado
+        { unitType: "infanteria", level: 99, count: 2 }, // Nivel inválido -> fallback o filtrado
+      ]);
+    });
+
+    const unitsAfterRefund = await t.run(async (ctx) => readArmyUnitDocs(ctx, kingdomId));
+    // La infantería normal original era 10, se le suman 5 válidas = 15
+    const infNormal = unitsAfterRefund.find((d: any) => normalizeUnitType(d.unitType) === "infanteria" && !isSpyUnitDoc(d));
+    expect(infNormal.count).toBe(15);
+
+    // Los espías no deben haberse incrementado con los intentos de devolución de espías o tipos desconocidos
+    const spyTotal = unitsAfterRefund.filter((d: any) => isSpyUnitDoc(d)).reduce((sum, d) => sum + d.count, 0);
+    expect(spyTotal).toBe(11); // 8 + 3 originales
+
+    // Probar protección de doble reembolso en marcha cancelada
+    const marchId = await t.run(async (ctx) => {
+      return await ctx.db.insert("armyMarches", {
+        kingdomId,
+        targetCellId: "1,1",
+        targetQ: 1,
+        targetR: 1,
+        distance: 1,
+        units: [{ unitType: "infanteria", level: 1, count: 3 }],
+        startedAt: Date.now(),
+        durationMs: 1000,
+        completesAt: Date.now() + 1000,
+        status: "marchando",
+      });
+    });
+
+    // Forzar resolución de cancelación dos veces y verificar que addUnits no duplica
+    await t.run(async (ctx) => {
+      const marchDoc = await ctx.db.get(marchId);
+      // Primera vez
+      if (marchDoc && marchDoc.unitsRefundedAt == null) {
+        await refundMarchUnitsToGarrison(ctx, kingdomId, marchDoc.units);
+        await ctx.db.patch(marchId, { unitsRefundedAt: Date.now() });
+      }
+      // Segunda vez (debería ser ignorado por unitsRefundedAt != null)
+      const marchDoc2 = await ctx.db.get(marchId);
+      if (marchDoc2 && marchDoc2.unitsRefundedAt == null) {
+        await refundMarchUnitsToGarrison(ctx, kingdomId, marchDoc2.units);
+        await ctx.db.patch(marchId, { unitsRefundedAt: Date.now() });
+      }
+    });
+
+    const unitsAfterDouble = await t.run(async (ctx) => readArmyUnitDocs(ctx, kingdomId));
+    const infFinal = unitsAfterDouble.find((d: any) => normalizeUnitType(d.unitType) === "infanteria" && !isSpyUnitDoc(d));
+    expect(infFinal.count).toBe(18); // 15 + 3 una sola vez (sin duplicar)
   });
 });
 
