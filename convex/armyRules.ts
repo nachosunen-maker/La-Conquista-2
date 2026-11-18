@@ -1048,12 +1048,7 @@ export function planArmyUnitsMigration(
   const actions: LegacyMigrationAction[] = [];
 
   for (const doc of legacy) {
-    const verifiedMatch = findVerifiedCanonicalMatch(doc, canonical, index);
-    if (verifiedMatch) {
-      actions.push({ kind: "delete_duplicate_legacy", legacyId: doc._id, matchedCanonicalId: verifiedMatch._id });
-      continue;
-    }
-
+    // 1. Clasificar primero el documento heredado para evitar borrar registros inválidos/dudosos
     const classified = classifyLegacyArmyUnitDoc(doc);
     if (classified.status === "empty") {
       actions.push({ kind: "delete_empty_legacy", legacyId: doc._id });
@@ -1066,6 +1061,13 @@ export function planArmyUnitsMigration(
         rawUnitType: classified.rawUnitType,
         reason: classified.reason,
       });
+      continue;
+    }
+
+    // 2. Solo si es 'valid', comprobar si existe correspondencia canónica verificable para deduplicar
+    const verifiedMatch = findVerifiedCanonicalMatch(doc, canonical, index);
+    if (verifiedMatch) {
+      actions.push({ kind: "delete_duplicate_legacy", legacyId: doc._id, matchedCanonicalId: verifiedMatch._id });
       continue;
     }
 
