@@ -1735,3 +1735,228 @@ describe("Defecto residual 2: clasificación conservadora y preservación de reg
     expect(state.summary.totalWounded).toBe(4);
   });
 });
+
+// =============================================================================
+// PROTECCIÓN INTEGRAL DE REGISTROS HEREDADOS — VALIDACIÓN CONSERVADORA DE TODOS LOS CAMPOS
+// =============================================================================
+
+describe("Protección integral de registros heredados: validación de todos los campos conocidos, procedencia y atributos adicionales", () => {
+  test("3.1 Clasificador conservador: todos los 15 escenarios obligatorios sin mutar el documento original", () => {
+    const assertQuarantinedUntouched = (doc: Record<string, unknown>) => {
+      const snapshot = structuredClone(doc);
+      const res = classifyLegacyArmyUnitDoc(doc as any);
+      expect(res.status).toBe("unrecognized");
+      // El clasificador nunca muta ni normaliza el documento original
+      expect(doc).toEqual(snapshot);
+    };
+
+    // 1. count: 0 y isSpy: "true"
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, isSpy: "true" });
+    // 2. count: 0 y isSpy: 1
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, isSpy: 1 });
+    // 3. count: 0 y isMercenary: "false"
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, isMercenary: "false" });
+    // 4. count: 0 y isMercenary: 1
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, isMercenary: 1 });
+    // 5. count: 0 y legacy con valores relevantes (true, cadena, número u objeto)
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, legacy: true });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, legacy: "v0_origen" });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, legacy: 1 });
+    // 6. count: 0 y level inválido (9, -1, 1.5, "2")
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, level: 9 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, level: -1 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, level: 1.5 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, level: "2" });
+    // 7. count: 0 y recoveryProgress inválido (<0, >=1, cadena)
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, recoveryProgress: -0.1 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, recoveryProgress: 1 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, recoveryProgress: 1.5 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, recoveryProgress: "0.5" });
+    // 8. count: 0 y contractEndsAt inválido (cadena, 0, negativo, NaN)
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, contractEndsAt: "2026-12-01" });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, contractEndsAt: 0 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, contractEndsAt: -500 });
+    // 9. count: 0 y mercenaryTypeId inválido (número, cadena vacía, o sin isMercenary: true)
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, mercenaryTypeId: 42 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, mercenaryTypeId: "" });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, mercenaryTypeId: "guardia" });
+    // 10. Campos adicionales desconocidos con información (con count: 0 y también con count > 0)
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, notaHistorica: "batalla_sur" });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, metadataExtra: { origen: "v1" } });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 5, atributoNoCanonico: "no_descartar" });
+    // 11. Campos de procedencia de migración inválidos o con metadatos sin destino canónico verificado
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, migrated: "true" });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, migrated: 1 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, migrated: true });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, migratedToId: 12345 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, migratedToId: "" });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, migratedToId: "canon_sin_confirmar" });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, canonicalId: 999 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, migratedFromLegacyId: 77 });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, migratedFromLegacyIds: "no_es_array" });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, migratedFromLegacyIds: [123] });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, migrationAmbiguous: "yes" });
+    // 12. Combinaciones de campos válidos e inválidos (y contradicciones semánticas)
+    assertQuarantinedUntouched({ unitType: "espia", count: 0, isSpy: false });
+    assertQuarantinedUntouched({ unitType: "espia", count: 3, isMercenary: true });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 4, isSpy: "true" });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: "0" });
+    assertQuarantinedUntouched({ unitType: "infanteria", count: 0, wounded: "0" });
+    // 13. Documentos realmente vacíos que SÍ cumplen todos los criterios de 'empty'
+    expect(classifyLegacyArmyUnitDoc({ unitType: "infanteria", count: 0, wounded: 0 }).status).toBe("empty");
+    expect(
+      classifyLegacyArmyUnitDoc({
+        unitType: "arqueria",
+        level: 1,
+        count: 0,
+        wounded: 0,
+        isSpy: false,
+        isMercenary: false,
+        recoveryProgress: 0,
+        legacy: false,
+        migrated: false,
+      }).status
+    ).toBe("empty");
+    // 14. Documentos con count: 0 y wounded positivo entero -> válidos y migrables
+    const validWounded = classifyLegacyArmyUnitDoc({
+      unitType: "caballeria",
+      level: 3,
+      count: 0,
+      wounded: 6,
+      recoveryProgress: 0.25,
+    });
+    expect(validWounded.status).toBe("valid");
+    if (validWounded.status === "valid") {
+      expect(validWounded.payload).toEqual({
+        unitType: "caballeria",
+        level: 3,
+        count: 0,
+        wounded: 6,
+        recoveryProgress: 0.25,
+        isSpy: false,
+      });
+    }
+    // 15. Documentos con tipo de unidad desconocido -> cuarentena
+    assertQuarantinedUntouched({ unitType: "catapulta_v0", count: 0 });
+    assertQuarantinedUntouched({ unitType: "catapulta_v0", count: 2 });
+    assertQuarantinedUntouched({ unitType: null, count: 0 });
+  });
+
+  test("3.2 Migración transaccional real: preserva bit a bit todos los documentos en cuarentena en Armyunits, migra válidos, limpia solo vacíos y es idempotente", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "prot-int-32", "Reino Integridad Total");
+
+    const quarantinePayloads: Array<Record<string, unknown>> = [
+      { kingdomId, unitType: "infanteria", count: 0, isSpy: "true" },
+      { kingdomId, unitType: "infanteria", count: 0, isSpy: 1 },
+      { kingdomId, unitType: "infanteria", count: 0, isMercenary: "false" },
+      { kingdomId, unitType: "infanteria", count: 0, isMercenary: 1 },
+      { kingdomId, unitType: "infanteria", count: 0, legacy: "v0_historico" },
+      { kingdomId, unitType: "infanteria", count: 0, legacy: true },
+      { kingdomId, unitType: "infanteria", count: 0, level: 9 },
+      { kingdomId, unitType: "infanteria", count: 0, level: -1 },
+      { kingdomId, unitType: "infanteria", count: 0, level: 1.5 },
+      { kingdomId, unitType: "infanteria", count: 0, recoveryProgress: 1.25 },
+      { kingdomId, unitType: "infanteria", count: 0, recoveryProgress: "0.3" },
+      { kingdomId, unitType: "infanteria", count: 0, contractEndsAt: "2026-12-31" },
+      { kingdomId, unitType: "infanteria", count: 0, mercenaryTypeId: 999 },
+      { kingdomId, unitType: "infanteria", count: 0, campoDesconocido: "no_borrar", extraNum: 42 },
+      { kingdomId, unitType: "infanteria", count: 0, migrated: "true", migratedToId: 123 },
+      { kingdomId, unitType: "infanteria", count: 0, migratedFromLegacyIds: "invalido" },
+      { kingdomId, unitType: "espia", count: 2, isSpy: false },
+      { kingdomId, unitType: "infanteria", count: "0", wounded: "0" },
+      { kingdomId, unitType: "ballestero_v0", count: 3 },
+    ];
+
+    const originalQuarantinedDocs = await t.run(async (ctx) => {
+      const saved: Array<Record<string, unknown>> = [];
+      for (const payload of quarantinePayloads) {
+        const id = await (ctx.db as any).insert("Armyunits", payload);
+        const doc = await (ctx.db as any).get(id);
+        saved.push(structuredClone(doc));
+      }
+      // 2 registros válidos: uno con count: 0 y wounded: 5, y otro de espías válidos
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "infanteria",
+        level: 2,
+        count: 0,
+        wounded: 5,
+        recoveryProgress: 0.5,
+      });
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 2,
+      });
+      // 1 registro genuinamente vacío (único elegible para eliminación)
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "arqueria",
+        level: 1,
+        count: 0,
+        wounded: 0,
+        isSpy: false,
+        isMercenary: false,
+      });
+      return saved;
+    });
+
+    // Verificar coherencia antes de migrar: readArmyUnitDocs (reconcileArmyUnitDocs) solo ve los 2 válidos
+    const beforeState = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(beforeState.spies.active).toBe(2);
+    expect(beforeState.summary.totalActive).toBe(0);
+    expect(beforeState.summary.totalWounded).toBe(5);
+
+    // Primera ejecución real de la migración
+    const pass1 = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    expect(pass1).toHaveLength(2);
+    expect(pass1.find((d) => d.unitType === "infanteria")).toMatchObject({
+      unitType: "infanteria",
+      level: 2,
+      count: 0,
+      wounded: 5,
+      recoveryProgress: 0.5,
+      isSpy: false,
+    });
+    expect(pass1.find((d) => isSpyUnitDoc(d))).toMatchObject({
+      unitType: "espia",
+      level: 1,
+      count: 2,
+      isSpy: true,
+    });
+
+    // Comprobar conservación ÍNTEGRA (mismo _id, mismos campos y mismos valores exactos) en Armyunits
+    const legacyAfterPass1 = await t.run(async (ctx) =>
+      (ctx.db as any).query("Armyunits").filter((q: any) => q.eq(q.field("kingdomId"), kingdomId)).collect()
+    );
+    expect(legacyAfterPass1).toHaveLength(originalQuarantinedDocs.length);
+    for (const orig of originalQuarantinedDocs) {
+      const persisted = legacyAfterPass1.find((d: any) => d._id === orig._id);
+      expect(persisted).toBeDefined();
+      expect(persisted).toEqual(orig);
+    }
+
+    // Segunda ejecución: idempotencia total (ni duplica canónicos ni modifica o elimina cuarentena)
+    const pass2 = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    expect(pass2).toHaveLength(2);
+    expect(pass2).toEqual(pass1);
+
+    const legacyAfterPass2 = await t.run(async (ctx) =>
+      (ctx.db as any).query("Armyunits").filter((q: any) => q.eq(q.field("kingdomId"), kingdomId)).collect()
+    );
+    expect(legacyAfterPass2).toHaveLength(originalQuarantinedDocs.length);
+    for (const orig of originalQuarantinedDocs) {
+      const persisted = legacyAfterPass2.find((d: any) => d._id === orig._id);
+      expect(persisted).toEqual(orig);
+    }
+
+    // Verificar contadores finales de getArmyState: ninguno de los documentos en cuarentena se contabiliza
+    const afterState = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(afterState.spies.active).toBe(2);
+    expect(afterState.summary.totalActive).toBe(0);
+    expect(afterState.summary.totalWounded).toBe(5);
+  });
+});
+

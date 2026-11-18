@@ -618,6 +618,7 @@ export function validateBuildingLevelMap(levels: Readonly<Record<string, number>
  */
 export interface RawArmyUnitDoc {
   _id?: unknown;
+  _creationTime?: number;
   kingdomId?: unknown;
   unitType?: string | null;
   level?: number;
@@ -702,16 +703,138 @@ const KNOWN_LEGACY_DOC_KEYS = new Set<string>([
   "legacy",
 ]);
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function validateKnownLegacyFields(doc: RawArmyUnitDoc): string | null {
+  if (doc._id !== undefined && !isNonEmptyString(doc._id)) {
+    return `Valor de '_id' inválido (${String(doc._id)}). Conservado en cuarentena sin borrado.`;
+  }
+  if (doc._creationTime !== undefined) {
+    if (typeof doc._creationTime !== "number" || !Number.isFinite(doc._creationTime) || doc._creationTime < 0) {
+      return `Valor de '_creationTime' inválido (${String(doc._creationTime)}). Conservado en cuarentena sin borrado.`;
+    }
+  }
+  if (doc.kingdomId !== undefined && !isNonEmptyString(doc.kingdomId)) {
+    return `Valor de 'kingdomId' inválido (${String(doc.kingdomId)}). Conservado en cuarentena sin borrado.`;
+  }
+
+  let normalizedRawType: UnitType | null = null;
+  if (doc.unitType !== undefined) {
+    if (typeof doc.unitType !== "string") {
+      return `Valor de 'unitType' inválido (${String(doc.unitType)}). Conservado en cuarentena sin borrado.`;
+    }
+    normalizedRawType = normalizeUnitType(doc.unitType);
+    if (!normalizedRawType) {
+      return `Tipo de unidad heredado no reconocido ('${doc.unitType}'). Conservado en cuarentena sin conversión ni borrado.`;
+    }
+  }
+
+  if (doc.count !== undefined) {
+    if (typeof doc.count !== "number" || !Number.isInteger(doc.count) || doc.count < 0) {
+      return `Valor de 'count' inválido o no interpretable (${String(doc.count)}). Conservado en cuarentena sin borrado.`;
+    }
+  }
+  if (doc.wounded !== undefined) {
+    if (typeof doc.wounded !== "number" || !Number.isInteger(doc.wounded) || doc.wounded < 0) {
+      return `Valor de 'wounded' inválido o no interpretable (${String(doc.wounded)}). Conservado en cuarentena sin borrado.`;
+    }
+  }
+  if (doc.level !== undefined) {
+    if (typeof doc.level !== "number" || !Number.isInteger(doc.level) || doc.level < 1 || doc.level > 5) {
+      return `Valor de 'level' inválido o fuera de rango (${String(doc.level)}). Conservado en cuarentena sin borrado.`;
+    }
+  }
+  if (doc.isSpy !== undefined && typeof doc.isSpy !== "boolean") {
+    return `Valor de 'isSpy' inválido (${String(doc.isSpy)}). Conservado en cuarentena sin borrado.`;
+  }
+  if (doc.isMercenary !== undefined && typeof doc.isMercenary !== "boolean") {
+    return `Valor de 'isMercenary' inválido (${String(doc.isMercenary)}). Conservado en cuarentena sin borrado.`;
+  }
+  if (doc.mercenaryTypeId !== undefined && !isNonEmptyString(doc.mercenaryTypeId)) {
+    return `Valor de 'mercenaryTypeId' inválido (${String(doc.mercenaryTypeId)}). Conservado en cuarentena sin borrado.`;
+  }
+  if (doc.contractEndsAt !== undefined) {
+    if (typeof doc.contractEndsAt !== "number" || !Number.isFinite(doc.contractEndsAt) || doc.contractEndsAt <= 0) {
+      return `Valor de 'contractEndsAt' inválido (${String(doc.contractEndsAt)}). Conservado en cuarentena sin borrado.`;
+    }
+  }
+  if (doc.recoveryProgress !== undefined) {
+    if (
+      typeof doc.recoveryProgress !== "number" ||
+      !Number.isFinite(doc.recoveryProgress) ||
+      doc.recoveryProgress < 0 ||
+      doc.recoveryProgress >= 1
+    ) {
+      return `Valor de 'recoveryProgress' inválido o fuera de [0, 1) (${String(doc.recoveryProgress)}). Conservado en cuarentena sin borrado.`;
+    }
+  }
+  if (doc.legacy !== undefined && typeof doc.legacy !== "boolean") {
+    return `Valor de 'legacy' inválido (${String(doc.legacy)}). Conservado en cuarentena sin borrado.`;
+  }
+  if (doc.migrated !== undefined && typeof doc.migrated !== "boolean") {
+    return `Valor de 'migrated' inválido (${String(doc.migrated)}). Conservado en cuarentena sin borrado.`;
+  }
+  if (doc.migratedToId !== undefined && !isNonEmptyString(doc.migratedToId)) {
+    return `Valor de 'migratedToId' inválido (${String(doc.migratedToId)}). Conservado en cuarentena sin borrado.`;
+  }
+  if (doc.canonicalId !== undefined && !isNonEmptyString(doc.canonicalId)) {
+    return `Valor de 'canonicalId' inválido (${String(doc.canonicalId)}). Conservado en cuarentena sin borrado.`;
+  }
+  if (doc.migratedFromLegacyId !== undefined && !isNonEmptyString(doc.migratedFromLegacyId)) {
+    return `Valor de 'migratedFromLegacyId' inválido (${String(doc.migratedFromLegacyId)}). Conservado en cuarentena sin borrado.`;
+  }
+  if (doc.migratedFromLegacyIds !== undefined) {
+    if (
+      !Array.isArray(doc.migratedFromLegacyIds) ||
+      !doc.migratedFromLegacyIds.every((id) => isNonEmptyString(id))
+    ) {
+      return `Valor de 'migratedFromLegacyIds' inválido (${String(doc.migratedFromLegacyIds)}). Conservado en cuarentena sin borrado.`;
+    }
+  }
+  if (doc.migrationAmbiguous !== undefined && typeof doc.migrationAmbiguous !== "boolean") {
+    return `Valor de 'migrationAmbiguous' inválido (${String(doc.migrationAmbiguous)}). Conservado en cuarentena sin borrado.`;
+  }
+
+  // Contradicciones semánticas entre campos conocidos
+  if (normalizedRawType === "espia" && doc.isSpy === false) {
+    return "Contradicción entre 'unitType: espia' e 'isSpy: false'. Conservado en cuarentena sin borrado.";
+  }
+  if (doc.isMercenary === true && (doc.isSpy === true || normalizedRawType === "espia")) {
+    return "Contradicción entre 'isMercenary: true' y unidad espía. Conservado en cuarentena sin borrado.";
+  }
+  if ((doc.mercenaryTypeId !== undefined || doc.contractEndsAt !== undefined) && doc.isMercenary !== true) {
+    return "Metadatos de contrato mercenario sin 'isMercenary: true'. Conservado en cuarentena sin borrado.";
+  }
+
+  // Atributos adicionales desconocidos: nunca descartar información ajena al esquema canónico
+  for (const [key, val] of Object.entries(doc as Record<string, unknown>)) {
+    if (!KNOWN_LEGACY_DOC_KEYS.has(key) && val !== undefined) {
+      return `Atributo adicional desconocido '${key}' presente en el documento heredado. Conservado íntegro en cuarentena.`;
+    }
+  }
+
+  return null;
+}
+
 function hasExtraRelevantAttributes(doc: RawArmyUnitDoc): boolean {
   if (doc.isMercenary === true) return true;
   if (doc.isSpy === true) return true;
-  if (typeof doc.mercenaryTypeId === "string" && doc.mercenaryTypeId.trim().length > 0) return true;
-  if (doc.contractEndsAt !== undefined && doc.contractEndsAt !== null) return true;
+  if (doc.mercenaryTypeId !== undefined) return true;
+  if (doc.contractEndsAt !== undefined) return true;
   if (typeof doc.recoveryProgress === "number" && Number.isFinite(doc.recoveryProgress) && doc.recoveryProgress > 0) {
     return true;
   }
+  if (doc.legacy === true) return true;
+  if (doc.migrated === true) return true;
+  if (doc.migratedToId !== undefined) return true;
+  if (doc.canonicalId !== undefined) return true;
+  if (doc.migratedFromLegacyId !== undefined) return true;
+  if (Array.isArray(doc.migratedFromLegacyIds) && doc.migratedFromLegacyIds.length > 0) return true;
+  if (doc.migrationAmbiguous === true) return true;
   for (const [key, val] of Object.entries(doc as Record<string, unknown>)) {
-    if (!KNOWN_LEGACY_DOC_KEYS.has(key) && val !== undefined && val !== null) {
+    if (!KNOWN_LEGACY_DOC_KEYS.has(key) && val !== undefined) {
       return true;
     }
   }
@@ -786,15 +909,15 @@ export function findVerifiedCanonicalMatch(
     }
   }
 
-  if (legacyDoc.migratedToId !== undefined && legacyDoc.migratedToId !== null) {
-    const target = index.canonicalById.get(String(legacyDoc.migratedToId));
+  if (isNonEmptyString(legacyDoc.migratedToId)) {
+    const target = index.canonicalById.get(legacyDoc.migratedToId);
     if (target && sameKingdom(target.kingdomId, legacyDoc.kingdomId)) {
       return target;
     }
   }
 
-  if (legacyDoc.canonicalId !== undefined && legacyDoc.canonicalId !== null) {
-    const target = index.canonicalById.get(String(legacyDoc.canonicalId));
+  if (isNonEmptyString(legacyDoc.canonicalId)) {
+    const target = index.canonicalById.get(legacyDoc.canonicalId);
     if (target && sameKingdom(target.kingdomId, legacyDoc.kingdomId)) {
       return target;
     }
@@ -813,79 +936,37 @@ export function isLegacyDocRepresentedInCanonical(
 
 /**
  * Clasifica conservadoramente un documento heredado de 'Armyunits' en uno de tres estados:
- * - `empty`: carece realmente de unidades y de atributos relevantes que deban preservarse.
- * - `valid`: tipo y campos numéricos/estructurales válidos y normalizables con seguridad.
- * - `unrecognized`: contiene valores inválidos (decimales, cadenas, negativos, niveles fuera de rango),
- *   tipo desconocido o atributos relevantes sin cantidad interpretable -> cuarentena sin borrado ni conversión.
+ * - `empty`: demostrado vacío (sin activos, sin heridos, sin atributos relevantes, sin datos de procedencia/herencia
+ *   por conservar, sin campos adicionales desconocidos y con todos los campos presentes validados).
+ * - `valid`: todos los campos presentes validados y coherentes, con unidades activas o heridas migrables.
+ * - `unrecognized`: cualquier campo con tipo/valor inválido, contradicción, tipo desconocido, atributo adicional
+ *   o metadato relevante sin cantidad interpretable -> cuarentena íntegra sin borrado ni conversión.
  */
 export function classifyLegacyArmyUnitDoc(doc: RawArmyUnitDoc): LegacyDocClassification {
   const rawUnitType = typeof doc.unitType === "string" ? doc.unitType : null;
 
-  // 1. Nunca convertir valores inválidos en cero: si count o wounded están presentes con valor inválido, cuarentena.
-  if (doc.count !== undefined) {
-    if (typeof doc.count !== "number" || !Number.isInteger(doc.count) || doc.count < 0) {
-      return {
-        status: "unrecognized",
-        rawUnitType,
-        reason: `Valor de 'count' inválido o no interpretable (${String(doc.count)}). Conservado en cuarentena sin borrado.`,
-      };
-    }
-  }
-  if (doc.wounded !== undefined) {
-    if (typeof doc.wounded !== "number" || !Number.isInteger(doc.wounded) || doc.wounded < 0) {
-      return {
-        status: "unrecognized",
-        rawUnitType,
-        reason: `Valor de 'wounded' inválido o no interpretable (${String(doc.wounded)}). Conservado en cuarentena sin borrado.`,
-      };
-    }
-  }
-  if (doc.level !== undefined) {
-    if (typeof doc.level !== "number" || !Number.isInteger(doc.level) || doc.level < 1 || doc.level > 5) {
-      return {
-        status: "unrecognized",
-        rawUnitType,
-        reason: `Valor de 'level' inválido o fuera de rango (${String(doc.level)}). Conservado en cuarentena sin borrado.`,
-      };
-    }
-  }
-  if (doc.recoveryProgress !== undefined) {
-    if (typeof doc.recoveryProgress !== "number" || !Number.isFinite(doc.recoveryProgress) || doc.recoveryProgress < 0) {
-      return {
-        status: "unrecognized",
-        rawUnitType,
-        reason: `Valor de 'recoveryProgress' inválido (${String(doc.recoveryProgress)}). Conservado en cuarentena sin borrado.`,
-      };
-    }
-  }
-  if (doc.contractEndsAt !== undefined) {
-    if (typeof doc.contractEndsAt !== "number" || !Number.isFinite(doc.contractEndsAt)) {
-      return {
-        status: "unrecognized",
-        rawUnitType,
-        reason: `Valor de 'contractEndsAt' inválido (${String(doc.contractEndsAt)}). Conservado en cuarentena sin borrado.`,
-      };
-    }
+  // 1. Validación estricta de todos los campos conocidos, contradicciones y atributos adicionales.
+  const validationError = validateKnownLegacyFields(doc);
+  if (validationError !== null) {
+    return {
+      status: "unrecognized",
+      rawUnitType,
+      reason: validationError,
+    };
   }
 
   const count = doc.count ?? 0;
   const wounded = doc.wounded ?? 0;
   const normalizedRawType = normalizeUnitType(doc.unitType);
 
-  // 2. Registro sin unidades activas ni heridos: solo es 'empty' si tampoco tiene tipo desconocido ni atributos relevantes.
+  // 2. Registro sin unidades activas ni heridos: solo es 'empty' si no contiene ningún atributo relevante ni procedencia.
   if (count === 0 && wounded === 0) {
-    if (doc.unitType !== undefined && doc.unitType !== null && !normalizedRawType) {
-      return {
-        status: "unrecognized",
-        rawUnitType,
-        reason: `Tipo de unidad heredado no reconocido ('${rawUnitType ?? ""}'). Conservado en cuarentena sin borrado.`,
-      };
-    }
     if (hasExtraRelevantAttributes(doc)) {
       return {
         status: "unrecognized",
         rawUnitType,
-        reason: "Registro sin cantidad activa pero con atributos relevantes que no deben perderse. Conservado en cuarentena.",
+        reason:
+          "Registro sin cantidad activa pero con atributos relevantes o metadatos de procedencia/herencia que no deben perderse. Conservado en cuarentena.",
       };
     }
     return { status: "empty" };
