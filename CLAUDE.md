@@ -13,6 +13,7 @@ Fuentes, de más antigua a más reciente:
 7. `La_Conquista_12_Civilizaciones_Historicas.pdf` (20-10-2026) — dossier histórico de las 12 civilizaciones: **propuestas de diseño, no aprobadas ni implementadas** (sección 6).
 8. `docs/DEFINICIONES_PENDIENTES.md` e `INFORME_VALIDACION_LOCAL.md` (23-10-2026) — valores propuestos pendientes de aprobación (apartados A1–A6) y resultados de verificación local del equipo.
 9. Decisiones del responsable en conversación (20, 21 y 23-10-2026) — sección 21. **Manda siempre la decisión más reciente.**
+10. `docs/La_Conquista_Actualizaciones_8_Puntos_2026-11-18.md` (18-11-2026) — **documentación prioritaria de la actualización**: plan de trabajo y criterios de aceptación de las 8 líneas de actualización acordadas (concreta las actualizaciones sin sustituir la especificación maestra vigente).
 
 Las referencias `(P17)`, `(D-02)`, `(M-05)`… apuntan a esos documentos.
 Idioma de documentación, textos de interfaz y nombres visibles: **español**.

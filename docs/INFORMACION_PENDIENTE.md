@@ -128,6 +128,7 @@ Resultados completos del banco (escenarios del Complemento §6): fuerzas iguales
 ## 7. Consolidación técnica (Fase 3 — Mapa canónico, reducción, P38 y privacidad)
 
 > El historial de decisiones anteriores (§2–§5) se conserva íntegro como trazabilidad. Esta sección documenta el estado vigente tras la auditoría y consolidación de Fase 3.
+> **Documentación prioritaria de la actualización (18-11-2026):** `docs/La_Conquista_Actualizaciones_8_Puntos_2026-11-18.md` (especificación y plan de trabajo de las 8 líneas de actualización acordadas).
 
 - **Mapa mundial (histórico vs definitivo):**
   - *Mapa histórico (D-23 inicial):* radio 10, **331 celdas** (`MAP.HISTORICAL_RADIUS = 10`, `MAP.HISTORICAL_CELLS = 331`).
