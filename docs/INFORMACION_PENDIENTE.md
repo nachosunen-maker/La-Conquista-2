@@ -122,3 +122,28 @@ Resultados completos del banco (escenarios del Complemento §6): fuerzas iguales
 3. La liquidación (`settleRelationalKingdomEconomy`) completa obras, lotes e investigaciones vencidas aunque el scheduler no se haya ejecutado, y aplica recursos, población, bienestar, heridos y fatiga en una sola transacción.
 4. Ningún cambio se ha desplegado al backend remoto; todo es local en la rama.
 5. Las pruebas de integración usan `convex-test` con el reloj simulado (`vi.useFakeTimers`) para completar obras, lotes, investigaciones y desafíos programados sin esperar tiempo real.
+
+---
+
+## 7. Consolidación técnica (Fase 3 — Mapa canónico, reducción, P38 y privacidad)
+
+> El historial de decisiones anteriores (§2–§5) se conserva íntegro como trazabilidad. Esta sección documenta el estado vigente tras la auditoría y consolidación de Fase 3.
+
+- **Mapa mundial (histórico vs definitivo):**
+  - *Mapa histórico (D-23 inicial):* radio 10, **331 celdas** (`MAP.HISTORICAL_RADIUS = 10`, `MAP.HISTORICAL_CELLS = 331`).
+  - *Implementación y objetivo definitivo:* disco hexagonal completo de **radio 50**, exactamente **7.651 celdas** (`1 + 3 × 50 × 51 = 7.651`, `MAP.RADIUS = 50`, `MAP.MAX_CELLS = 7651`, `MAP.WORLD_SEED = 20261017`).
+  - `ensureWorld` y `readWorld` contrastan las coordenadas reales contra el mapa canónico (`generateWorldCells`, `inspectWorldIntegrity`), detectando celdas faltantes, duplicados y registros exteriores sin confiar únicamente en el número total de documentos.
+- **Reducción del mapa y seguridad de tropas (`convex/mapReduction.ts`):**
+  - Implementación única y canónica con `dryRun = true` por defecto, radio límite `MAP.RADIUS = 50` y protección absoluta de capitales (`isHome === true`).
+  - Solo se cancelan y devuelven unidades de marchas exteriores activas (`status === "marchando"`) sin devolución previa (`unitsRefundedAt == null`). Las marchas completadas, canceladas o ya procesadas nunca generan devolución ni se borran del historial.
+  - Si una marcha exterior activa estaba vinculada a un desafío parlamentario abierto (`ACCEPTED` / `FROZEN`), el desafío pasa atómicamente a `CANCELLED` para impedir su resolución posterior por scheduler; los desafíos ajenos o ya resueltos no se alteran.
+- **P38 — Flujo canónico de desafíos y combate (`convex/parliament.ts`, `convex/army.ts`):**
+  - El flujo canónico definido en P38/P40/D-35/D-36/`BLOQUE_9.txt` es `PENDING → ACCEPTED → FROZEN (scheduledAt − 15 min) → RESOLVED (scheduledAt)` ejecutado por el scheduler del Parlamento.
+  - Para eliminar cualquier riesgo de doble batalla o doble aplicación de bajas frente a la ruta heredada de marcha manual (`launchAttack`/`resolveMarch`), ambas vías comparten un bloqueo atómico en el desafío (`activeMarchId` / `resolutionLockedBy`) y comprobación en `Battle.by_challenge`.
+  - **Decisión pendiente de producto:** confirmar si las marchas manuales PvP (`launchAttack` sobre celdas de otro reino) deben retirarse por completo en favor de la resolución exclusivamente parlamentaria o integrarse formalmente con el estado `FROZEN`.
+- **Privacidad del mapa y niebla de guerra (`convex/territories.ts`):**
+  - `getWorldMap` y `getWorldMapCompact` validan autenticación y pertenencia al reino **antes** de leer datos estratégicos.
+  - *Información geográfica pública:* coordenadas, terreno base y metadatos del mapa (consulta global sin `kingdomId`, sin leer propietarios ni reinos).
+  - *Información estratégica protegida:* propietarios, nombres/colores de reinos, capitales no descubiertas, estado de exploración e inteligencia de espionaje (cargados y devueltos únicamente para celdas conocidas en `knownIds`).
+- **P25 / M-03 (conservado sin cambios):** ranuras de investigación por nivel de Universidad (`0 / 1 / 2 / 3` para niveles `0 / 1–2 / 3–4 / 5+`), verificado mediante pruebas de regresión.
+

@@ -784,6 +784,8 @@ export const launchAttack = mutation({
           ch.status === "ACCEPTED" &&
           !ch.battleId &&
           !ch.resolvedAt &&
+          !ch.activeMarchId &&
+          !ch.resolutionLockedBy &&
           !usedChallengeIds.has(String(ch._id))
       );
 
@@ -795,7 +797,13 @@ export const launchAttack = mutation({
           );
         }
         const hasReusedOrResolved = pairChallenges.some(
-          (ch) => ch.status === "RESOLVED" || Boolean(ch.battleId) || Boolean(ch.resolvedAt) || usedChallengeIds.has(String(ch._id))
+          (ch) =>
+            ch.status === "RESOLVED" ||
+            Boolean(ch.battleId) ||
+            Boolean(ch.resolvedAt) ||
+            Boolean(ch.activeMarchId) ||
+            Boolean(ch.resolutionLockedBy) ||
+            usedChallengeIds.has(String(ch._id))
         );
         if (hasReusedOrResolved) {
           throw new ConvexError(
@@ -896,6 +904,13 @@ export const launchAttack = mutation({
       isConquest,
       ...(authorizedChallengeId ? { challengeId: authorizedChallengeId } : {}),
     });
+
+    if (authorizedChallengeId) {
+      await ctx.db.patch(authorizedChallengeId, {
+        activeMarchId: marchId,
+        resolutionLockedBy: "march",
+      });
+    }
 
     await ctx.scheduler.runAt(completesAt, internal.army.completeMarchScheduled, { marchId });
 
@@ -1085,6 +1100,51 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     woundedRateBonus: defenderTech.woundedRateBonus,
   };
 
+  // [P38] Exclusión mutua y garantía de batalla única: si la marcha está vinculada a un desafío
+  // que ya fue resuelto, cancelado o bloqueado por el Parlamento, abortar combate y devolver tropas sin bajas.
+  if (march.challengeId) {
+    const linkedChallenge = await ctx.db.get(march.challengeId);
+    const existingBattle = await ctx.db
+      .query("Battle")
+      .withIndex("by_challenge", (q) => q.eq("challengeId", march.challengeId!))
+      .first();
+
+    const invalidChallengeState =
+      !linkedChallenge ||
+      Boolean(existingBattle) ||
+      Boolean(linkedChallenge.battleId) ||
+      Boolean(linkedChallenge.resolvedAt) ||
+      linkedChallenge.status === "RESOLVED" ||
+      linkedChallenge.status === "CANCELLED" ||
+      linkedChallenge.status === "REJECTED" ||
+      linkedChallenge.status === "EXPIRED" ||
+      (linkedChallenge.resolutionLockedBy && linkedChallenge.resolutionLockedBy !== "march") ||
+      (linkedChallenge.activeMarchId && String(linkedChallenge.activeMarchId) !== String(marchId));
+
+    if (invalidChallengeState) {
+      const cancelNow = Date.now();
+      await ctx.db.patch(marchId, {
+        status: "cancelada",
+        cancelledAt: cancelNow,
+        cancelReason: "challenge_already_resolved_or_cancelled",
+        unitsRefundedAt: march.unitsRefundedAt ?? cancelNow,
+        battleResult: {
+          outcome: "desafio_no_vigente",
+          note: "El desafío parlamentario ya fue resuelto o cancelado antes de la llegada de la marcha; las tropas regresan sin bajas.",
+        },
+      });
+      if (march.unitsRefundedAt == null) {
+        for (const u of march.units) {
+          const norm = normalizeUnitType(u.unitType);
+          if (norm && u.count > 0) {
+            await addUnits(ctx, march.kingdomId, norm, u.level ?? 1, u.count);
+          }
+        }
+      }
+      return { success: false, outcome: "desafio_no_vigente" };
+    }
+  }
+
   const report = simulateBattle(attackerSide, defenderSide);
   const now = Date.now();
 
@@ -1106,6 +1166,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
         status: "RESOLVED",
         resolvedAt: now,
         battleId,
+        resolutionLockedBy: "march",
       });
     }
   }

@@ -259,6 +259,9 @@ export default defineSchema({
       battleResult: v.optional(v.any()),
       isConquest: v.optional(v.boolean()),
       challengeId: v.optional(v.id("challenges")),
+      cancelledAt: v.optional(v.number()),
+      cancelReason: v.optional(v.string()),
+      unitsRefundedAt: v.optional(v.number()),
     }).index("by_kingdom", ["kingdomId"]),
 
     // Desafíos del Parlamento (Bloque E): máquina de estados server-authoritative (BLOQUE 9).
@@ -268,7 +271,7 @@ export default defineSchema({
       challengeType: v.string(),
       status: v.union(
         v.literal("PENDING"), v.literal("ACCEPTED"), v.literal("REJECTED"),
-        v.literal("FROZEN"), v.literal("RESOLVED"), v.literal("EXPIRED")
+        v.literal("FROZEN"), v.literal("RESOLVED"), v.literal("EXPIRED"), v.literal("CANCELLED")
       ),
       createdAt: v.number(),
       expiresAt: v.number(),
@@ -278,6 +281,10 @@ export default defineSchema({
       freezeAt: v.optional(v.number()),
       frozenAt: v.optional(v.number()),
       resolvedAt: v.optional(v.number()),
+      cancelledAt: v.optional(v.number()),
+      cancelReason: v.optional(v.string()),
+      activeMarchId: v.optional(v.id("armyMarches")),
+      resolutionLockedBy: v.optional(v.union(v.literal("parliament"), v.literal("march"))),
       distance: v.optional(v.number()),
       marchSeconds: v.optional(v.number()),
       terrainMultiplier: v.optional(v.number()), // [R-14] media del terreno del camino
@@ -301,7 +308,8 @@ export default defineSchema({
       report: v.any(),
     })
       .index("by_attacker", ["attackerKingdomId"])
-      .index("by_defender", ["defenderKingdomId"]),
+      .index("by_defender", ["defenderKingdomId"])
+      .index("by_challenge", ["challengeId"]),
 
     // Informes de espionaje (D-39), caducan a las 24 h reales.
     espionageReports: defineTable({

@@ -8,15 +8,16 @@
 import type { ResourceType } from "./economyCalculations";
 import { PARLIAMENT, PREDEFINED_MESSAGES, type ScheduleWindow } from "./balanceConfig";
 
-export type ChallengeStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "FROZEN" | "RESOLVED" | "EXPIRED";
+export type ChallengeStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "FROZEN" | "RESOLVED" | "EXPIRED" | "CANCELLED";
 
 export const CHALLENGE_TRANSITIONS: Readonly<Record<ChallengeStatus, readonly ChallengeStatus[]>> = {
-  PENDING: ["ACCEPTED", "REJECTED", "EXPIRED"],
-  ACCEPTED: ["FROZEN"],
-  FROZEN: ["RESOLVED"],
+  PENDING: ["ACCEPTED", "REJECTED", "EXPIRED", "CANCELLED"],
+  ACCEPTED: ["FROZEN", "CANCELLED"],
+  FROZEN: ["RESOLVED", "CANCELLED"],
   REJECTED: [],
   RESOLVED: [],
   EXPIRED: [],
+  CANCELLED: [],
 };
 
 export function canTransition(from: ChallengeStatus, to: ChallengeStatus): boolean {

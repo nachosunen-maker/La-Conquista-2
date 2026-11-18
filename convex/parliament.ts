@@ -479,6 +479,15 @@ export const freezeChallenge = internalMutation({
   handler: async (ctx, args) => {
     const challenge = await ctx.db.get(args.challengeId);
     if (!challenge) return { frozen: false };
+    if (challenge.battleId || challenge.resolvedAt) {
+      return { frozen: false, reason: "El desafío ya está resuelto." };
+    }
+    if (challenge.resolutionLockedBy === "march" || challenge.activeMarchId) {
+      const activeMarch = challenge.activeMarchId ? await ctx.db.get(challenge.activeMarchId) : null;
+      if (!activeMarch || activeMarch.status !== "cancelada") {
+        return { frozen: false, reason: "El desafío ya está vinculado a una marcha activa." };
+      }
+    }
     const transition = assertTransition(challenge.status as ChallengeStatus, "FROZEN");
     if (!transition.success) return { frozen: false, reason: transition.error };
     const distance = challenge.distance ?? 0;
@@ -529,6 +538,42 @@ export const resolveChallenge = internalMutation({
   handler: async (ctx, args) => {
     const challenge = await ctx.db.get(args.challengeId);
     if (!challenge) return { resolved: false };
+
+    // 1. Estados terminales o no autorizados: nunca resolver un desafío cancelado, rechazado, caducado, pendiente o ya resuelto
+    if (
+      challenge.status === "RESOLVED" ||
+      challenge.status === "CANCELLED" ||
+      challenge.status === "REJECTED" ||
+      challenge.status === "EXPIRED" ||
+      challenge.status === "PENDING" ||
+      challenge.battleId ||
+      challenge.resolvedAt
+    ) {
+      return { resolved: false, reason: `Desafío no resoluble en estado ${challenge.status}.` };
+    }
+
+    // 2. Exclusión mutua con ruta de marcha manual: si ya hay una marcha activa/completada reclamando este desafío, no crear doble batalla
+    if (challenge.resolutionLockedBy === "march" || challenge.activeMarchId) {
+      const linkedMarch = challenge.activeMarchId ? await ctx.db.get(challenge.activeMarchId) : null;
+      if (!linkedMarch || linkedMarch.status !== "cancelada") {
+        return { resolved: false, reason: "El desafío ya está siendo resuelto o fue resuelto por una marcha." };
+      }
+    }
+
+    // 3. Salvaguarda de unicidad de batalla en tabla Battle
+    const existingBattle = await ctx.db
+      .query("Battle")
+      .withIndex("by_challenge", (q) => q.eq("challengeId", args.challengeId))
+      .first();
+    if (existingBattle) {
+      await ctx.db.patch(args.challengeId, {
+        status: "RESOLVED",
+        resolvedAt: challenge.resolvedAt ?? existingBattle.resolvedAt,
+        battleId: existingBattle._id,
+      });
+      return { resolved: false, reason: "Ya existe una batalla registrada para este desafío." };
+    }
+
     if (challenge.status === "ACCEPTED") {
       // El scheduler de congelación no se ejecutó: congelar ahora y continuar (idempotente).
       const distance = challenge.distance ?? 0;
@@ -581,7 +626,12 @@ export const resolveChallenge = internalMutation({
       await ctx.db.patch(side, patch);
     }
 
-    await ctx.db.patch(args.challengeId, { status: "RESOLVED", resolvedAt: now, battleId });
+    await ctx.db.patch(args.challengeId, {
+      status: "RESOLVED",
+      resolvedAt: now,
+      battleId,
+      resolutionLockedBy: "parliament",
+    });
     // [Misiones] Contadores de batalla y evaluación para ambos reinos.
     for (const side of [current.challengerKingdomId, current.targetKingdomId]) {
       await recordMissionEvent(ctx, side, "battlesFought", 1, false);

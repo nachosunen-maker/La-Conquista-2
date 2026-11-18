@@ -14,8 +14,10 @@ export const auditMapReductionDeep = internalQuery({
     const armyMarches = await ctx.db.query("armyMarches").collect();
     const armyUnits = await ctx.db.query("armyUnits").collect();
 
-    // Identify exterior elements
-    const exteriorTerritories = territories.filter(t => hexDistance({ q: t.q, r: t.r }, { q: 0, r: 0 }) > radiusLimit);
+    // Identify exterior elements (excluding protected capitals, matching runMapReduction)
+    const exteriorTerritoriesAll = territories.filter(t => hexDistance({ q: t.q, r: t.r }, { q: 0, r: 0 }) > radiusLimit);
+    const protectedCapitals = exteriorTerritoriesAll.filter(t => t.isHome === true);
+    const exteriorTerritories = exteriorTerritoriesAll.filter(t => t.isHome !== true);
     
     // Explored territories: need to parse cellId
     const exteriorExplorations = explorations.filter(e => {
@@ -23,14 +25,17 @@ export const auditMapReductionDeep = internalQuery({
         if (parts.length !== 2) return false;
         const q = Number(parts[0]);
         const r = Number(parts[1]);
+        if (!Number.isFinite(q) || !Number.isFinite(r)) return false;
         return hexDistance({ q, r }, { q: 0, r: 0 }) > radiusLimit;
     });
 
     // Expeditions
     const exteriorExpQueue = expQueue.filter(e => hexDistance({ q: e.targetQ, r: e.targetR }, { q: 0, r: 0 }) > radiusLimit);
     
-    // Marches
-    const exteriorMarches = armyMarches.filter(m => hexDistance({ q: m.targetQ, r: m.targetR }, { q: 0, r: 0 }) > radiusLimit);
+    // Marches: only active marches that have not already been refunded
+    const exteriorMarches = armyMarches.filter(
+      m => hexDistance({ q: m.targetQ, r: m.targetR }, { q: 0, r: 0 }) > radiusLimit && m.status === "marchando" && m.unitsRefundedAt == null
+    );
 
     // Kingdoms affected
     const affectedKingdomIds = new Set<string>();
@@ -38,6 +43,7 @@ export const auditMapReductionDeep = internalQuery({
     
     return {
         territoriesToDelete: exteriorTerritories.length,
+        protectedCapitals: protectedCapitals.length,
         exploredTerritoriesToDelete: exteriorExplorations.length,
         expeditionsToCancel: exteriorExpQueue.length,
         marchesToCancel: exteriorMarches.length,

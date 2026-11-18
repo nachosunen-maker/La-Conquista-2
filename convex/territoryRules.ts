@@ -1,7 +1,7 @@
 /**
  * LA CONQUISTA — REGLAS PURAS DEL MAPA Y TERRITORIOS (Bloque G, D-22 a D-26)
- * Mapa hexagonal con coordenadas axiales (q, r), radio 10 → 331 celdas.
- * Sin acceso a Convex.
+ * Mapa hexagonal canónico con coordenadas axiales (q, r), radio 50 → 7.651 celdas (1 + 3 × 50 × 51).
+ * Referencia histórica: radio 10 → 331 celdas. Sin acceso a Convex.
  */
 import {
   CIVILIZATION_ZONES,
@@ -99,7 +99,13 @@ export function terrainForCell(q: number, r: number, seed: number = MAP.WORLD_SE
   return TERRAIN_ORDER[0];
 }
 
-/** [COMPLEMENTO D-23] Todas las celdas del mundo (331 con radio 10). */
+/** Fórmula geométrica exacta de un disco hexagonal de radio r: 1 + 3 × r × (r + 1). */
+export function canonicalWorldCellCount(radius: number = MAP.RADIUS): number {
+  if (!Number.isInteger(radius) || radius < 0) return 0;
+  return 1 + 3 * radius * (radius + 1);
+}
+
+/** [MAPA CANÓNICO] Todas las celdas del disco hexagonal completo (7.651 con radio 50; histórico: 331 con radio 10). */
 export function generateWorldCells(radius: number = MAP.RADIUS, seed: number = MAP.WORLD_SEED): WorldCell[] {
   const cells: WorldCell[] = [];
   for (let q = -radius; q <= radius; q++) {
@@ -108,6 +114,79 @@ export function generateWorldCells(radius: number = MAP.RADIUS, seed: number = M
     }
   }
   return cells;
+}
+
+export interface WorldIntegrityReport {
+  radius: number;
+  expectedCanonicalCells: number;
+  persistedTotal: number;
+  uniqueCanonicalPresent: number;
+  missingCellIds: string[];
+  duplicateCellIds: string[];
+  outOfBoundsCellIds: string[];
+  isComplete: boolean;
+  isExact: boolean;
+}
+
+/**
+ * Contrasta los registros persistidos de `territories` contra el mapa hexagonal canónico.
+ * Detecta celdas faltantes, duplicados y coordenadas fuera del radio canónico,
+ * sin confiar únicamente en el recuento total de filas.
+ */
+export function inspectWorldIntegrity(
+  persistedCells: ReadonlyArray<{ cellId: string; q: number; r: number }>,
+  radius: number = MAP.RADIUS,
+  seed: number = MAP.WORLD_SEED
+): WorldIntegrityReport {
+  const canonical = generateWorldCells(radius, seed);
+  const canonicalIds = new Set(canonical.map((c) => c.cellId));
+  const seenCanonical = new Set<string>();
+  const duplicateCellIds: string[] = [];
+  const outOfBoundsCellIds: string[] = [];
+
+  for (const row of persistedCells) {
+    const parsed = parseCellId(row.cellId);
+    const matchesCoords =
+      parsed !== null &&
+      parsed.q === row.q &&
+      parsed.r === row.r &&
+      isInsideWorld(parsed, radius) &&
+      canonicalIds.has(row.cellId);
+
+    if (!matchesCoords) {
+      outOfBoundsCellIds.push(row.cellId);
+      continue;
+    }
+
+    if (seenCanonical.has(row.cellId)) {
+      duplicateCellIds.push(row.cellId);
+    } else {
+      seenCanonical.add(row.cellId);
+    }
+  }
+
+  const missingCellIds: string[] = [];
+  for (const cell of canonical) {
+    if (!seenCanonical.has(cell.cellId)) {
+      missingCellIds.push(cell.cellId);
+    }
+  }
+
+  return {
+    radius,
+    expectedCanonicalCells: canonical.length,
+    persistedTotal: persistedCells.length,
+    uniqueCanonicalPresent: seenCanonical.size,
+    missingCellIds,
+    duplicateCellIds,
+    outOfBoundsCellIds,
+    isComplete: missingCellIds.length === 0,
+    isExact:
+      missingCellIds.length === 0 &&
+      duplicateCellIds.length === 0 &&
+      outOfBoundsCellIds.length === 0 &&
+      persistedCells.length === canonical.length,
+  };
 }
 
 export interface ExistingKingdomSpawn {

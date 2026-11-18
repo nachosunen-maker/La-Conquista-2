@@ -1,7 +1,8 @@
 /**
  * LA CONQUISTA — MAPA, TERRITORIOS Y EXPLORACIÓN (Bloques G, P22, P47-P49)
- * El mundo se genera una sola vez (331 celdas, semilla reproducible). Cada reino
- * recibe un territorio principal al fundarse; los demás permanecen libres hasta
+ * El mundo canónico es un disco hexagonal completo de radio 50 con exactamente
+ * 7.651 celdas (1 + 3 × 50 × 51, semilla reproducible; histórico: radio 10 / 331 celdas).
+ * Cada reino recibe un territorio principal al fundarse; los demás permanecen libres hasta
  * explorarse y reclamarse tras una victoria aplastante (P47-P49) o expedición.
  *
  * Incluye sistema autoritativo de niebla de guerra, expediciones de exploración,
@@ -32,6 +33,7 @@ import {
   generateWorldCells,
   hexDistance,
   hexNeighbors,
+  inspectWorldIntegrity,
   parseCellId,
   cellId,
   planTerritoryCapCleanup,
@@ -59,11 +61,19 @@ import { settleRelationalKingdomEconomy } from "./economy";
 
 export async function readWorld(ctx: QueryCtx | MutationCtx) {
   const existing = await ctx.db.query("territories").collect();
-  if (existing.length >= MAP.MAX_CELLS) {
-    return existing;
-  }
   const existingMap = new Map<string, typeof existing[0]>();
-  for (const t of existing) existingMap.set(t.cellId, t);
+  for (const t of existing) {
+    const parsed = parseCellId(t.cellId);
+    if (!parsed || parsed.q !== t.q || parsed.r !== t.r || !isInsideWorld(parsed, MAP.RADIUS)) {
+      continue;
+    }
+    const prev = existingMap.get(t.cellId);
+    if (!prev) {
+      existingMap.set(t.cellId, t);
+    } else if ((!prev.isHome && t.isHome) || (!prev.ownerKingdomId && t.ownerKingdomId)) {
+      existingMap.set(t.cellId, t);
+    }
+  }
 
   const targetCells = generateWorldCells(MAP.RADIUS, MAP.WORLD_SEED);
   return targetCells.map((genCell) => {
@@ -138,30 +148,35 @@ export async function patchTerritoryCell(ctx: MutationCtx, cellIdStr: string, up
 }
 
 /**
- * Asegura la existencia de las 7.651 celdas del mundo hexagonal (radio 50).
- * Si el mundo ya contiene celdas (p. ej. las 331 originales o un conjunto parcial),
- * CONSERVA ÍNTEGRAMENTE todos los registros existentes (sin modificar terrenos,
- * propietarios, capitales ni fechas de reclamación) e inserta únicamente las celdas
- * faltantes hasta completar exactamente las 7.651 celdas.
- * Es estrictamente idempotente.
+ * Asegura la existencia de las 7.651 celdas del mundo hexagonal canónico (radio 50).
+ * Valida la correspondencia real de coordenadas contra `generateWorldCells(MAP.RADIUS, MAP.WORLD_SEED)`
+ * en lugar de confiar únicamente en el recuento total de registros.
+ * Conserva íntegramente todos los registros existentes (terrenos, propietarios, capitales
+ * y fechas de reclamación) e inserta únicamente las celdas canónicas faltantes.
+ * Es estrictamente idempotente y no destructiva.
  */
 export async function ensureWorld(ctx: MutationCtx): Promise<number> {
   const existing = await ctx.db.query("territories").collect();
-  if (existing.length >= MAP.MAX_CELLS) return 0;
+  const existingCanonicalIds = new Set<string>();
+  for (const cell of existing) {
+    const parsed = parseCellId(cell.cellId);
+    if (parsed && parsed.q === cell.q && parsed.r === cell.r && isInsideWorld(parsed, MAP.RADIUS)) {
+      existingCanonicalIds.add(cell.cellId);
+    }
+  }
 
-  const existingIds = new Set(existing.map((cell) => cell.cellId));
   const targetCells = generateWorldCells(MAP.RADIUS, MAP.WORLD_SEED);
   let added = 0;
 
   for (const cell of targetCells) {
-    if (!existingIds.has(cell.cellId)) {
+    if (!existingCanonicalIds.has(cell.cellId)) {
       await ctx.db.insert("territories", {
         cellId: cell.cellId,
         q: cell.q,
         r: cell.r,
         terrain: cell.terrain,
       });
-      existingIds.add(cell.cellId);
+      existingCanonicalIds.add(cell.cellId);
       added++;
     }
   }
@@ -176,11 +191,19 @@ export const expandWorld = internalMutation({
   args: {},
   handler: async (ctx) => {
     const added = await ensureWorld(ctx);
-    const count = (await ctx.db.query("territories").collect()).length;
+    const persisted = await ctx.db.query("territories").collect();
+    const integrity = inspectWorldIntegrity(persisted, MAP.RADIUS, MAP.WORLD_SEED);
     return {
       success: true,
       added,
-      totalCells: count,
+      totalCells: persisted.length,
+      canonicalCells: integrity.uniqueCanonicalPresent,
+      expectedCanonicalCells: integrity.expectedCanonicalCells,
+      missingCanonicalCells: integrity.missingCellIds.length,
+      duplicateRecords: integrity.duplicateCellIds.length,
+      outOfBoundsRecords: integrity.outOfBoundsCellIds.length,
+      isComplete: integrity.isComplete,
+      isExact: integrity.isExact,
       radius: MAP.RADIUS,
     };
   },
@@ -488,26 +511,22 @@ export const getWorldMap = query({
     kingdomId: v.optional(v.id("kingdoms")),
   },
   handler: async (ctx, args) => {
-    const world = await readWorld(ctx);
-    const ownerIds = [...new Set(world.map((cell) => cell.ownerKingdomId).filter((id): id is Id<"kingdoms"> => Boolean(id)))];
-    const owners = await Promise.all(ownerIds.map((id) => ctx.db.get(id)));
-    const names = new Map<string, string>();
-    for (const owner of owners) if (owner) names.set(String(owner._id), owner.name);
-
-    // Si no se especifica kingdomId (vista cartográfica global pública): solo terreno y coordenadas,
-    // sin exponer propiedad, nombres de reinos, capitales ni ningún dato oculto por la niebla de guerra.
+    // 1. Consulta global sin kingdomId (información geográfica pública únicamente):
+    // NO lee propietarios ni reinos de la base de datos; devuelve solo coordenadas y terreno canónico.
     if (!args.kingdomId) {
+      const publicCells = generateWorldCells(MAP.RADIUS, MAP.WORLD_SEED);
       return {
         radius: MAP.RADIUS,
-        generated: world.length > 0,
+        generated: publicCells.length > 0,
         terrains: TERRAINS,
-        totalCells: world.length,
+        totalCells: publicCells.length,
         exploredCount: 0,
         activeExpeditions: [],
+        activeMarches: [],
         kingdomLegend: [],
         pendingClaims: 0,
         homeTerritoryId: null,
-        cells: world.map((cell) => ({
+        cells: publicCells.map((cell) => ({
           cellId: cell.cellId,
           q: cell.q,
           r: cell.r,
@@ -525,12 +544,12 @@ export const getWorldMap = query({
       };
     }
 
-    // Consulta con visibilidad y niebla de guerra por reino (P22)
+    // 2. Autorización ESTRICTA ANTES de leer territorios, propietarios o reinos rivales (P22)
     const kingdomId = args.kingdomId;
+    const identity = await ctx.auth.getUserIdentity();
     const kingdom = await ctx.db.get(kingdomId);
     if (!kingdom) throw new Error("Reino no encontrado.");
 
-    const identity = await ctx.auth.getUserIdentity();
     const isDemoRead = kingdom.userId === DEMO_USER_ID;
     if (!isDemoRead && !isKingdomOwner(kingdom.userId, identity?.subject)) {
       throw new Error("No autorizado: solo puede consultar la niebla de guerra de su propio reino.");
@@ -538,8 +557,8 @@ export const getWorldMap = query({
 
     const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
 
-    const ownedCells = world.filter((c) => c.ownerKingdomId && String(c.ownerKingdomId) === String(kingdomId));
-    const [exploredRecords, activeQueue, completedTech, activeMarchesDocs, allKingdomDocs] = await Promise.all([
+    const [world, exploredRecords, activeQueue, completedTech, activeMarchesDocs] = await Promise.all([
+      readWorld(ctx),
       ctx.db
         .query("exploredTerritories")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
@@ -553,14 +572,9 @@ export const getWorldMap = query({
         .query("armyMarches")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
         .collect(),
-      ctx.db.query("kingdoms").collect(),
     ]);
 
-    const colorsMap = new Map<string, string>();
-    for (const k of allKingdomDocs) {
-      colorsMap.set(String(k._id), k.color ?? "#d4af37");
-    }
-
+    const ownedCells = world.filter((c) => c.ownerKingdomId && String(c.ownerKingdomId) === String(kingdomId));
     const hasSpy2Tech = completedTech.includes("spy_2");
     const ownedIds = new Set<string>();
     for (const c of ownedCells) ownedIds.add(String(c.cellId));
@@ -573,7 +587,7 @@ export const getWorldMap = query({
       ownedCoords.push(homeCoord);
     }
 
-    // Celdas conocidas: territorios propios + visión inicial + exploradas guardadas
+    // Celdas conocidas: territorios propios + visión inicial + exploradas/espionaje guardadas
     const knownIds = new Set<string>([
       ...Array.from(ownedIds),
       ...getInitialSightCellIds(homeCoord, EXPLORATION.INITIAL_SIGHT_RADIUS, MAP.RADIUS),
@@ -591,23 +605,36 @@ export const getWorldMap = query({
       }
     }
 
-    // Leyenda filtrada estrictamente a territorios conocidos por este reino (sin filtrar reinos ni conteos bajo niebla)
+    // Cargar ÚNICAMENTE los reinos propietarios de al menos una celda ya conocida (nunca reinos bajo niebla)
     const knownOwnedCountByKingdom = new Map<string, number>();
+    const visibleOwnerIdMap = new Map<string, Id<"kingdoms">>();
     for (const cell of world) {
       if (cell.ownerKingdomId && knownIds.has(cell.cellId)) {
         const key = String(cell.ownerKingdomId);
         knownOwnedCountByKingdom.set(key, (knownOwnedCountByKingdom.get(key) ?? 0) + 1);
+        visibleOwnerIdMap.set(key, cell.ownerKingdomId);
       }
     }
+
+    const visibleOwnerDocs = await Promise.all(
+      Array.from(visibleOwnerIdMap.values()).map((id) => ctx.db.get(id))
+    );
+    const names = new Map<string, string>();
+    const colorsMap = new Map<string, string>();
     const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
-    for (const k of allKingdomDocs) {
-      const visibleOwnedCount = knownOwnedCountByKingdom.get(String(k._id)) ?? 0;
+    for (const k of visibleOwnerDocs) {
+      if (!k) continue;
+      const key = String(k._id);
+      const color = k.color ?? "#d4af37";
+      names.set(key, k.name);
+      colorsMap.set(key, color);
+      const visibleOwnedCount = knownOwnedCountByKingdom.get(key) ?? 0;
       if (visibleOwnedCount > 0) {
         legendList.push({
-          id: String(k._id),
+          id: key,
           name: k.name,
           monarchName: k.monarchName,
-          color: colorsMap.get(String(k._id)) ?? "#d4af37",
+          color,
           territoryCount: visibleOwnedCount,
         });
       }
@@ -773,43 +800,23 @@ export const getWorldMapCompact = query({
       };
     }
 
-    const allKingdomDocs = await ctx.db.query("kingdoms").collect();
-    const names = new Map<string, string>();
-    const colorsMap = new Map<string, string>();
-    for (const k of allKingdomDocs) {
-      names.set(String(k._id), k.name);
-      colorsMap.set(String(k._id), k.color ?? "#d4af37");
-    }
-
-    const ownedByKingdom = await Promise.all(
-      allKingdomDocs.map(async (k) => ({
-        kingdom: k,
-        cells: await ctx.db
-          .query("territories")
-          .withIndex("by_owner", (q) => q.eq("ownerKingdomId", k._id))
-          .collect(),
-      }))
-    );
-
-    const ownedByCellId = new Map<string, Doc<"territories">>();
-    for (const entry of ownedByKingdom) {
-      for (const cell of entry.cells) {
-        ownedByCellId.set(cell.cellId, cell);
-      }
-    }
-
+    // 2. Autorización ESTRICTA ANTES de leer territorios, propietarios o reinos rivales (P22)
     const kingdomId = args.kingdomId;
-    const kingdom = allKingdomDocs.find((k) => k._id === kingdomId) ?? (await ctx.db.get(kingdomId));
+    const identity = await ctx.auth.getUserIdentity();
+    const kingdom = await ctx.db.get(kingdomId);
     if (!kingdom) throw new Error("Reino no encontrado.");
 
-    const identity = await ctx.auth.getUserIdentity();
     const isDemoRead = kingdom.userId === DEMO_USER_ID;
     if (!isDemoRead && !isKingdomOwner(kingdom.userId, identity?.subject)) {
       throw new Error("No autorizado: solo puede consultar la niebla de guerra de su propio reino.");
     }
 
-    const ownedCells = ownedByKingdom.find((e) => e.kingdom._id === kingdomId)?.cells ?? [];
-    const [exploredRecords, activeQueue, completedTech, activeMarchesDocs] = await Promise.all([
+    // 3. Leer ÚNICAMENTE los datos propios del reino autorizado
+    const [ownedCells, exploredRecords, activeQueue, completedTech, activeMarchesDocs] = await Promise.all([
+      ctx.db
+        .query("territories")
+        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdomId))
+        .collect(),
       ctx.db
         .query("exploredTerritories")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
@@ -829,7 +836,11 @@ export const getWorldMapCompact = query({
     const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
 
     const ownedIds = new Set<string>();
-    for (const c of ownedCells) ownedIds.add(String(c.cellId));
+    const knownTerritoryByCellId = new Map<string, Doc<"territories">>();
+    for (const c of ownedCells) {
+      ownedIds.add(String(c.cellId));
+      knownTerritoryByCellId.set(c.cellId, c);
+    }
     if (kingdom.homeTerritoryId) ownedIds.add(String(kingdom.homeTerritoryId));
 
     const ownedCoords: HexCoord[] = ownedCells.map((c) => ({ q: c.q, r: c.r }));
@@ -850,6 +861,60 @@ export const getWorldMapCompact = query({
         knownIds.add(exp.cellId);
       } else {
         activeExpeditionMap.set(exp.cellId, exp);
+      }
+    }
+
+    // Leer de `territories` ÚNICAMENTE las celdas conocidas (nunca celdas ni reinos bajo niebla)
+    const missingKnownIds = Array.from(knownIds).filter((id) => {
+      if (knownTerritoryByCellId.has(id)) return false;
+      const coord = parseCellId(id);
+      return coord !== null && isInsideWorld(coord, MAP.RADIUS);
+    });
+    const fetchedKnownDocs = await Promise.all(
+      missingKnownIds.map((cid) =>
+        ctx.db
+          .query("territories")
+          .withIndex("by_cell", (q) => q.eq("cellId", cid))
+          .first()
+      )
+    );
+    for (const doc of fetchedKnownDocs) {
+      if (doc) knownTerritoryByCellId.set(doc.cellId, doc);
+    }
+
+    // Cargar ÚNICAMENTE los reinos propietarios de celdas conocidas
+    const knownOwnedCountByKingdom = new Map<string, number>();
+    const visibleOwnerIdMap = new Map<string, Id<"kingdoms">>();
+    for (const cid of knownIds) {
+      const cell = knownTerritoryByCellId.get(cid);
+      if (cell?.ownerKingdomId) {
+        const key = String(cell.ownerKingdomId);
+        knownOwnedCountByKingdom.set(key, (knownOwnedCountByKingdom.get(key) ?? 0) + 1);
+        visibleOwnerIdMap.set(key, cell.ownerKingdomId);
+      }
+    }
+
+    const visibleOwnerDocs = await Promise.all(
+      Array.from(visibleOwnerIdMap.values()).map((id) => ctx.db.get(id))
+    );
+    const names = new Map<string, string>();
+    const colorsMap = new Map<string, string>();
+    const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
+    for (const k of visibleOwnerDocs) {
+      if (!k) continue;
+      const key = String(k._id);
+      const color = k.color ?? "#d4af37";
+      names.set(key, k.name);
+      colorsMap.set(key, color);
+      const visibleOwnedCount = knownOwnedCountByKingdom.get(key) ?? 0;
+      if (visibleOwnedCount > 0) {
+        legendList.push({
+          id: key,
+          name: k.name,
+          monarchName: k.monarchName,
+          color,
+          territoryCount: visibleOwnedCount,
+        });
       }
     }
 
@@ -882,10 +947,10 @@ export const getWorldMapCompact = query({
       const coord = parseCellId(id);
       if (!coord || !isInsideWorld(coord, MAP.RADIUS)) continue;
 
-      const dbOwned = ownedByCellId.get(id);
       const isOwned = ownedIds.has(id);
       const isExploring = activeExpeditionMap.has(id);
       const isKnown = knownIds.has(id);
+      const dbKnown = isKnown ? knownTerritoryByCellId.get(id) : undefined;
 
       let state: CellExplorationState;
       if (isOwned) {
@@ -925,7 +990,7 @@ export const getWorldMapCompact = query({
       }
 
       let canConquer = false;
-      if (state === "explored" && !dbOwned?.ownerKingdomId) {
+      if (state === "explored" && !dbKnown?.ownerKingdomId) {
         const neighbors = hexNeighbors(coord, MAP.RADIUS);
         canConquer = neighbors.some((n) => ownedIds.has(cellId(n.q, n.r)));
       }
@@ -943,8 +1008,8 @@ export const getWorldMapCompact = query({
         : null;
 
       const isHidden = !isKnown;
-      const realTerrain = dbOwned?.terrain ?? terrainForCell(coord.q, coord.r, MAP.WORLD_SEED, MAP.RADIUS);
-      const ownerId = dbOwned?.ownerKingdomId ?? null;
+      const realTerrain = dbKnown?.terrain ?? terrainForCell(coord.q, coord.r, MAP.WORLD_SEED, MAP.RADIUS);
+      const ownerId = dbKnown?.ownerKingdomId ?? null;
       const ownerColor = isHidden ? null : ownerId ? colorsMap.get(String(ownerId)) ?? "#d4af37" : null;
 
       visibleCells.push({
@@ -955,35 +1020,13 @@ export const getWorldMapCompact = query({
         ownerKingdomId: isHidden ? null : ownerId,
         ownerName: isHidden ? null : ownerId ? names.get(String(ownerId)) ?? null : null,
         ownerColor,
-        isHome: isHidden ? false : dbOwned?.isHome ?? false,
+        isHome: isHidden ? false : dbKnown?.isHome ?? false,
         state,
         canExplore,
         canConquer,
         explorationPlan,
         expedition,
       });
-    }
-
-    // Leyenda filtrada estrictamente a territorios conocidos por este reino (idéntico a getWorldMap)
-    const knownOwnedCountByKingdom = new Map<string, number>();
-    for (const [cid, cell] of ownedByCellId.entries()) {
-      if (cell.ownerKingdomId && knownIds.has(cid)) {
-        const key = String(cell.ownerKingdomId);
-        knownOwnedCountByKingdom.set(key, (knownOwnedCountByKingdom.get(key) ?? 0) + 1);
-      }
-    }
-    const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
-    for (const k of allKingdomDocs) {
-      const visibleOwnedCount = knownOwnedCountByKingdom.get(String(k._id)) ?? 0;
-      if (visibleOwnedCount > 0) {
-        legendList.push({
-          id: String(k._id),
-          name: k.name,
-          monarchName: k.monarchName,
-          color: colorsMap.get(String(k._id)) ?? "#d4af37",
-          territoryCount: visibleOwnedCount,
-        });
-      }
     }
 
     return {

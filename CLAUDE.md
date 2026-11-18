@@ -354,7 +354,8 @@ Contrarrestar: ×1,15 sobre la potencia (término «Contramedida»). Según el s
 ## 14. Parlamento y diplomacia (P38–P42, P58, P60, D-34 a D-42)
 
 - **Sin ataques sorpresa.** Todo PvP importante pasa por el Parlamento (nivel 1 para enviar o recibir desafíos).
-- **Máquina de estados** (server-authoritative): `PENDING → ACCEPTED / REJECTED → FROZEN → RESOLVED`. Transiciones validadas en servidor; resolución idempotente.
+- **Máquina de estados** (server-authoritative): `PENDING → ACCEPTED / REJECTED / EXPIRED`, `ACCEPTED → FROZEN → RESOLVED`, más estado terminal `CANCELLED` (p. ej. si una reducción de mapa cancela una marcha exterior vinculada). Transiciones validadas en servidor; resolución estrictamente idempotente.
+- **Flujo canónico P38 y exclusión mutua:** `acceptChallenge` programa automáticamente `freezeChallenge` (`scheduledAt - 15 min`) y `resolveChallenge` (`scheduledAt`). Las rutas automática (Parlamento) y manual (`launchAttack`/`resolveMarch`) comparten un bloqueo atómico en el desafío (`activeMarchId` / `resolutionLockedBy`) y verificación de unicidad en la tabla `Battle` (`by_challenge`), garantizando como máximo una batalla y una aplicación de bajas por desafío.
 - Un desafío incluye rival, fecha, hora, condiciones. **Aceptado: tres fechas** a 1, 3 y 7 días reales. Un desafío pendiente caduca a los 7 días reales (R-10).
 - **Rechazar:** pierde un **2 % de cada recurso** (mínimo 10, máximo 500 por recurso; nunca por debajo de 0). No se penalizan población ni tropas.
 - **Congelación del contingente** 15 minutos reales antes del combate.
@@ -375,11 +376,14 @@ Los heridos salen del ejército, no combaten y se muestran aparte. **Hospital mi
 
 ## 16. Mapa, territorios y exploración (P41, P47–P49, D-22 a D-26, R-06, R-07)
 
-- Mapa **hexagonal** con coordenadas axiales `(q, r)`, radio 10: **331 celdas**. Semilla de mundo reproducible. Distancia: `(|Δq| + |Δr| + |Δq+Δr|)/2`.
+- **Geometría canónica del mapa (objetivo definitivo):** disco hexagonal completo con coordenadas axiales `(q, r)` de **radio 50** → exactamente **7.651 celdas** (`1 + 3 × 50 × 51 = 7.651`, `MAP.RADIUS = 50`, `MAP.MAX_CELLS = 7651`). **Referencia histórica (D-23 inicial):** radio 10 → **331 celdas** (`MAP.HISTORICAL_RADIUS = 10`, `MAP.HISTORICAL_CELLS = 331`), preservado únicamente como compatibilidad histórica de frontera costera y datos heredados. Semilla reproducible: `MAP.WORLD_SEED = 20261017`. Distancia: `(|Δq| + |Δr| + |Δq+Δr|)/2`.
+- **Generación e inicialización (`generateWorldCells`, `ensureWorld`, `readWorld`, `inspectWorldIntegrity`):** generación determinista y sin duplicados; `ensureWorld` valida la correspondencia real de coordenadas canónicas (no solo el recuento total de filas), conserva registros previos e inserta únicamente celdas faltantes; `readWorld` proyecta siempre el disco canónico exacto de 7.651 celdas.
+- **Reducción del mapa (`runMapReduction` / `executeMapReduction`):** implementación única y canónica en `convex/mapReduction.ts` (delegada desde `territories.ts`) con `dryRun = true` por defecto, radio límite `MAP.RADIUS = 50`, protección estricta de capitales (`isHome === true`), cancelación atómica y devolución única de tropas solo para marchas exteriores activas (`status === "marchando"` y `!unitsRefundedAt`, conservando historial sin devolver tropas de marchas completadas/canceladas), y cancelación (`CANCELLED`) de desafíos abiertos vinculados a marchas exteriores canceladas.
+- **Privacidad y niebla de guerra (`getWorldMap`, `getWorldMapCompact`):** ambas consultas aplican exactamente la misma política en servidor y validan identidad y pertenencia al reino **antes** de leer datos estratégicos. **Información geográfica pública:** coordenadas, terreno base y metadatos del mapa (consulta global sin `kingdomId`, sin leer propietarios ni reinos). **Información estratégica protegida:** propietarios, nombre y color de reinos, capitales no descubiertas, estado de exploración e inteligencia de espionaje (solo se cargan y muestran para celdas en `knownIds`, nunca durante `"fog"` ni `"exploring"`).
 - Terrenos: llanura (+10 % agricultura) · bosque (+15 % madera) · colina (+10 % piedra) · montaña (+15 % hierro, +10 % defensa) · río (+10 % agricultura) · costa (+10 % comercio).
-- Colocación de reinos: el primero en el centro; cada nuevo reino en la celda libre más alejada de los territorios principales.
-- **Territorios libres:** sin propietario. Tras una **victoria aplastante** se puede reclamar uno **cercano (distancia ≤ 2) y ya explorado**. Al reclamarlo pasa a territorios del reino. **No se roba el territorio principal enemigo.** Si dos jugadores lo reclaman a la vez, gana el primero que llega al servidor.
-- **Exploración (en alcance, decisión del responsable):** expedición de reconocimiento con coste en oro y comida, un explorador civil y marcha de 1.800 s por hexágono. Desvela la niebla de guerra. Cancelar devuelve el 50 %. Una expedición a la vez.
+- Colocación de reinos: el primero en el centro; cada nuevo reino según agrupación por civilización y separación objetivo `[20, 30]` hexágonos.
+- **Territorios libres:** sin propietario. Tras una **victoria aplastante** se puede reclamar uno **cercano (distancia ≤ 2) y ya explorado** (límite estricto de 100 territorios por reino incluida la capital). **No se roba el territorio principal enemigo (P48).** Si dos jugadores lo reclaman a la vez, gana el primero que llega al servidor.
+- **Exploración (en alcance, decisión del responsable):** expedición de reconocimiento con coste en oro y comida, espías reservados y marcha de 1.800 s por hexágono. Desvela la niebla de guerra. Cancelar devuelve el 50 %.
 
 ---
 

@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { MAP } from "./balanceConfig";
 import { hexDistance } from "./territoryRules";
 import { addUnits } from "./army";
+import { normalizeUnitType } from "./armyRules";
 import { calculateExplorationRefund } from "./explorationRules";
 import { settleRelationalKingdomEconomy } from "./economy";
 
@@ -14,13 +15,21 @@ export interface MapReductionResult {
   explorationsDeleted: number;
   missionsCancelled: number;
   marchesCancelled: number;
+  marchesSkippedCompleted: number;
+  marchesSkippedCancelled: number;
+  marchesSkippedAlreadyProcessed: number;
+  challengesCancelled: number;
+  unitsRefunded: number;
 }
 
 /**
- * Implementación única y canónica de la reducción del mapa según MAP.RADIUS.
+ * Implementación única y canónica de la reducción del mapa según MAP.RADIUS (radio 50, 7.651 celdas).
  * - `dryRun` por defecto `true`: simula sin realizar escrituras persistentes.
  * - Protege estrictamente las capitales (`isHome === true`), que nunca se eliminan.
- * - Es idempotente: una segunda ejecución real tras completar la reducción devuelve 0 cambios.
+ * - Solo cancela y devuelve unidades de marchas exteriores activas (`status === "marchando"`) sin devolución previa (`!unitsRefundedAt`).
+ * - Conserva el registro histórico de marchas (`status: "cancelada"`, sin eliminarlas) y nunca devuelve tropas de marchas completadas, canceladas o ya procesadas.
+ * - Si una marcha exterior activa estaba vinculada a un desafío parlamentario abierto (`ACCEPTED`/`FROZEN` sin batalla), cancela ese desafío (`CANCELLED`) de forma atómica para impedir que el scheduler lo resuelva después.
+ * - Es estrictamente idempotente y segura frente a ejecuciones concurrentes (transacción atómica OCC de Convex).
  */
 export async function runMapReduction(
   ctx: MutationCtx,
@@ -40,8 +49,22 @@ export async function runMapReduction(
   const exteriorExpeditions = expQueue.filter(
     (exp) => hexDistance({ q: exp.targetQ, r: exp.targetR }, { q: 0, r: 0 }) > radiusLimit
   );
-  const exteriorMarches = armyMarches.filter(
+
+  const exteriorMarchesAll = armyMarches.filter(
     (march) => hexDistance({ q: march.targetQ, r: march.targetR }, { q: 0, r: 0 }) > radiusLimit
+  );
+
+  const activeExteriorMarches = exteriorMarchesAll.filter(
+    (march) => march.status === "marchando" && march.unitsRefundedAt == null
+  );
+  const skippedCompletedMarches = exteriorMarchesAll.filter(
+    (march) => march.status === "completada"
+  );
+  const skippedCancelledMarches = exteriorMarchesAll.filter(
+    (march) => march.status === "cancelada"
+  );
+  const skippedAlreadyProcessedMarches = exteriorMarchesAll.filter(
+    (march) => march.status === "marchando" && march.unitsRefundedAt != null
   );
 
   const exteriorTerritoriesAll = territories.filter(
@@ -60,6 +83,30 @@ export async function runMapReduction(
   });
 
   if (dryRun) {
+    let previewChallengesToCancel = 0;
+    const seenChallengeIds = new Set<string>();
+    let previewUnitsToRefund = 0;
+
+    for (const march of activeExteriorMarches) {
+      for (const unit of march.units) {
+        if (unit.count > 0 && normalizeUnitType(unit.unitType)) {
+          previewUnitsToRefund += unit.count;
+        }
+      }
+      if (march.challengeId && !seenChallengeIds.has(String(march.challengeId))) {
+        const linked = await ctx.db.get(march.challengeId);
+        if (
+          linked &&
+          (linked.status === "ACCEPTED" || linked.status === "FROZEN") &&
+          !linked.battleId &&
+          !linked.resolvedAt
+        ) {
+          seenChallengeIds.add(String(march.challengeId));
+          previewChallengesToCancel++;
+        }
+      }
+    }
+
     return {
       dryRun: true,
       radiusLimit,
@@ -67,7 +114,12 @@ export async function runMapReduction(
       protectedCapitals: protectedCapitals.length,
       explorationsDeleted: exteriorExplorations.length,
       missionsCancelled: exteriorExpeditions.length,
-      marchesCancelled: exteriorMarches.length,
+      marchesCancelled: activeExteriorMarches.length,
+      marchesSkippedCompleted: skippedCompletedMarches.length,
+      marchesSkippedCancelled: skippedCancelledMarches.length,
+      marchesSkippedAlreadyProcessed: skippedAlreadyProcessedMarches.length,
+      challengesCancelled: previewChallengesToCancel,
+      unitsRefunded: previewUnitsToRefund,
     };
   }
 
@@ -98,15 +150,55 @@ export async function runMapReduction(
     await ctx.db.delete(exp._id);
   }
 
-  // 2. Cancelar marchas exteriores y devolver tropas
-  for (const march of exteriorMarches) {
-    for (const unit of march.units) {
-      await addUnits(ctx, march.kingdomId, unit.unitType as any, unit.level || 1, unit.count);
+  // 2. Cancelar únicamente marchas exteriores activas sin devolución previa (atómico, sin borrar historial)
+  let marchesCancelled = 0;
+  let challengesCancelled = 0;
+  let unitsRefunded = 0;
+
+  for (const march of activeExteriorMarches) {
+    const freshMarch = await ctx.db.get(march._id);
+    if (!freshMarch || freshMarch.status !== "marchando" || freshMarch.unitsRefundedAt != null) {
+      continue;
     }
-    await ctx.db.delete(march._id);
+
+    // Marcar estado y sello de devolución atómicamente antes de acreditar unidades
+    await ctx.db.patch(freshMarch._id, {
+      status: "cancelada",
+      cancelledAt: now,
+      cancelReason: "map_reduction",
+      unitsRefundedAt: now,
+    });
+
+    for (const unit of freshMarch.units) {
+      const normalized = normalizeUnitType(unit.unitType);
+      if (normalized && unit.count > 0) {
+        await addUnits(ctx, freshMarch.kingdomId, normalized, unit.level || 1, unit.count);
+        unitsRefunded += unit.count;
+      }
+    }
+    marchesCancelled++;
+
+    // Si la marcha estaba vinculada a un desafío parlamentario abierto (no resuelto), cancelarlo
+    // para que el scheduler no resuelva posteriormente un combate cuya marcha fue cancelada.
+    if (freshMarch.challengeId) {
+      const linkedChallenge = await ctx.db.get(freshMarch.challengeId);
+      if (
+        linkedChallenge &&
+        (linkedChallenge.status === "ACCEPTED" || linkedChallenge.status === "FROZEN") &&
+        !linkedChallenge.battleId &&
+        !linkedChallenge.resolvedAt
+      ) {
+        await ctx.db.patch(linkedChallenge._id, {
+          status: "CANCELLED",
+          cancelledAt: now,
+          cancelReason: "map_reduction_march_cancelled",
+        });
+        challengesCancelled++;
+      }
+    }
   }
 
-  // 3. Eliminar territorios exteriores no capitales en lotes
+  // 3. Eliminar territorios exteriores no capitales en lotes (nunca toca celdas <= MAP.RADIUS ni capitales)
   for (let i = 0; i < exteriorTerritories.length; i += 500) {
     const batch = exteriorTerritories.slice(i, i + 500);
     for (const t of batch) {
@@ -129,7 +221,12 @@ export async function runMapReduction(
     protectedCapitals: protectedCapitals.length,
     explorationsDeleted: exteriorExplorations.length,
     missionsCancelled: exteriorExpeditions.length,
-    marchesCancelled: exteriorMarches.length,
+    marchesCancelled,
+    marchesSkippedCompleted: skippedCompletedMarches.length,
+    marchesSkippedCancelled: skippedCancelledMarches.length,
+    marchesSkippedAlreadyProcessed: skippedAlreadyProcessedMarches.length,
+    challengesCancelled,
+    unitsRefunded,
   };
 }
 
