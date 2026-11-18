@@ -593,3 +593,207 @@ export function validateEquipmentSelection(input: {
 export function validateBuildingLevelMap(levels: Readonly<Record<string, number>>): boolean {
   return Object.values(levels).every((level) => Number.isInteger(level) && level >= 0 && level <= MAX_BUILDING_LEVEL);
 }
+
+/**
+ * ============================================================================
+ * RECONCILIACIÓN DETERMINISTA DE INVENTARIO HEREDADO ('Armyunits') Y CANÓNICO ('armyUnits')
+ * ============================================================================
+ * Reglas de seguridad:
+ * 1. Un documento heredado L solo se considera ya representado en 'armyUnits' cuando existe
+ *    un vínculo explícito de procedencia:
+ *    - C.migratedFromLegacyId === String(L._id)
+ *    - C.migratedFromLegacyIds contiene String(L._id)
+ *    - L.migrated === true
+ *    - L.canonicalId o L.migratedToId coincide con el _id de un documento canónico C.
+ * 2. Nunca se descarta ni fusiona arbitrariamente un documento heredado por simple coincidencia
+ *    de (unitType, level), ya que pueden existir registros legítimos independientes. Si coexiste
+ *    un canónico del mismo tipo/nivel sin vínculo de procedencia, el documento heredado se
+ *    migra preservando todos sus atributos y marcado con `migrationAmbiguous: true`.
+ * 3. Nunca se convierten espías en tropas ordinarias ni tropas ordinarias en espías, y se
+ *    preservan nivel, cantidad, heridos, mercenarios y demás atributos funcionales.
+ */
+export interface RawArmyUnitDoc {
+  _id?: unknown;
+  kingdomId?: unknown;
+  unitType?: string | null;
+  level?: number;
+  count?: number;
+  wounded?: number;
+  recoveryProgress?: number;
+  isMercenary?: boolean;
+  mercenaryTypeId?: string;
+  contractEndsAt?: number;
+  isSpy?: boolean;
+  migratedFromLegacyId?: string;
+  migratedFromLegacyIds?: string[];
+  migrationAmbiguous?: boolean;
+  migrated?: boolean;
+  migratedToId?: unknown;
+  canonicalId?: unknown;
+  legacy?: boolean;
+}
+
+export interface NormalizedLegacyPayload {
+  unitType: UnitType;
+  level: number;
+  count: number;
+  isSpy: boolean;
+  wounded?: number;
+  recoveryProgress?: number;
+  isMercenary?: boolean;
+  mercenaryTypeId?: string;
+  contractEndsAt?: number;
+}
+
+export type LegacyMigrationAction =
+  | { kind: "delete_duplicate_legacy"; legacyId: unknown; matchedCanonicalId?: unknown }
+  | { kind: "delete_empty_legacy"; legacyId: unknown }
+  | {
+      kind: "insert_canonical";
+      legacyId: unknown;
+      ambiguous: boolean;
+      payload: NormalizedLegacyPayload;
+    };
+
+function buildCanonicalProvenanceSets(canonical: ReadonlyArray<RawArmyUnitDoc>) {
+  const canonicalIds = new Set<string>();
+  const representedLegacyIds = new Set<string>();
+  const canonicalSignatureKeys = new Set<string>();
+
+  for (const doc of canonical) {
+    if (doc._id !== undefined && doc._id !== null) {
+      canonicalIds.add(String(doc._id));
+    }
+    if (typeof doc.migratedFromLegacyId === "string" && doc.migratedFromLegacyId.length > 0) {
+      representedLegacyIds.add(doc.migratedFromLegacyId);
+    }
+    if (Array.isArray(doc.migratedFromLegacyIds)) {
+      for (const id of doc.migratedFromLegacyIds) {
+        if (typeof id === "string" && id.length > 0) {
+          representedLegacyIds.add(id);
+        }
+      }
+    }
+    const isSpy = isSpyUnitDoc(doc);
+    const unitType = isSpy ? "espia" : normalizeUnitType(doc.unitType);
+    if (unitType) {
+      const level = unitLevelOf({ level: doc.level });
+      const mercKey = doc.isMercenary ? `merc:${doc.mercenaryTypeId ?? ""}:${doc.contractEndsAt ?? ""}` : "std";
+      canonicalSignatureKeys.add(`${unitType}|${level}|${isSpy ? "spy" : "reg"}|${mercKey}`);
+    }
+  }
+
+  return { canonicalIds, representedLegacyIds, canonicalSignatureKeys };
+}
+
+export function isLegacyDocRepresentedInCanonical(
+  legacyDoc: RawArmyUnitDoc,
+  canonical: ReadonlyArray<RawArmyUnitDoc>,
+  precomputed?: ReturnType<typeof buildCanonicalProvenanceSets>
+): boolean {
+  const sets = precomputed ?? buildCanonicalProvenanceSets(canonical);
+  const legacyId = legacyDoc._id !== undefined && legacyDoc._id !== null ? String(legacyDoc._id) : null;
+  if (legacyId && sets.representedLegacyIds.has(legacyId)) return true;
+  if (legacyDoc.migrated === true) return true;
+  if (legacyDoc.migratedToId !== undefined && legacyDoc.migratedToId !== null && sets.canonicalIds.has(String(legacyDoc.migratedToId))) {
+    return true;
+  }
+  if (legacyDoc.canonicalId !== undefined && legacyDoc.canonicalId !== null && sets.canonicalIds.has(String(legacyDoc.canonicalId))) {
+    return true;
+  }
+  return false;
+}
+
+export function normalizeLegacyArmyUnitDoc(doc: RawArmyUnitDoc): NormalizedLegacyPayload | null {
+  const isSpy = isSpyUnitDoc(doc);
+  const unitType = isSpy ? "espia" : normalizeUnitType(doc.unitType);
+  if (!unitType) return null;
+  const count = Number.isInteger(doc.count) && (doc.count as number) > 0 ? (doc.count as number) : 0;
+  const wounded = Number.isInteger(doc.wounded) && (doc.wounded as number) > 0 ? (doc.wounded as number) : 0;
+  if (count <= 0 && wounded <= 0) return null;
+
+  const payload: NormalizedLegacyPayload = {
+    unitType,
+    level: unitLevelOf({ level: doc.level }),
+    count,
+    isSpy,
+  };
+  if (wounded > 0) payload.wounded = wounded;
+  if (typeof doc.recoveryProgress === "number" && Number.isFinite(doc.recoveryProgress) && doc.recoveryProgress > 0) {
+    payload.recoveryProgress = doc.recoveryProgress;
+  }
+  if (doc.isMercenary) {
+    payload.isMercenary = true;
+    if (typeof doc.mercenaryTypeId === "string") payload.mercenaryTypeId = doc.mercenaryTypeId;
+    if (typeof doc.contractEndsAt === "number" && Number.isFinite(doc.contractEndsAt)) {
+      payload.contractEndsAt = doc.contractEndsAt;
+    }
+  }
+  return payload;
+}
+
+/**
+ * Vista de solo lectura determinista que combina 'armyUnits' y los registros de 'Armyunits'
+ * que todavía no tienen representación canónica, evitando cualquier doble conteo en getArmyState.
+ */
+export function reconcileArmyUnitDocs<T extends RawArmyUnitDoc>(
+  canonical: ReadonlyArray<T>,
+  legacy: ReadonlyArray<RawArmyUnitDoc>
+): T[] {
+  const sets = buildCanonicalProvenanceSets(canonical);
+  const reconciledLegacy: RawArmyUnitDoc[] = [];
+
+  for (const doc of legacy) {
+    if (isLegacyDocRepresentedInCanonical(doc, canonical, sets)) {
+      continue;
+    }
+    const normalized = normalizeLegacyArmyUnitDoc(doc);
+    if (!normalized) continue;
+    reconciledLegacy.push({
+      ...doc,
+      ...normalized,
+      legacy: true,
+    });
+  }
+
+  return [...canonical, ...(reconciledLegacy as T[])];
+}
+
+/**
+ * Planifica de forma determinista la migración transaccional de 'Armyunits' hacia 'armyUnits'.
+ */
+export function planArmyUnitsMigration(
+  canonical: ReadonlyArray<RawArmyUnitDoc>,
+  legacy: ReadonlyArray<RawArmyUnitDoc>
+): LegacyMigrationAction[] {
+  const sets = buildCanonicalProvenanceSets(canonical);
+  const actions: LegacyMigrationAction[] = [];
+
+  for (const doc of legacy) {
+    if (isLegacyDocRepresentedInCanonical(doc, canonical, sets)) {
+      actions.push({ kind: "delete_duplicate_legacy", legacyId: doc._id });
+      continue;
+    }
+    const payload = normalizeLegacyArmyUnitDoc(doc);
+    if (!payload) {
+      actions.push({ kind: "delete_empty_legacy", legacyId: doc._id });
+      continue;
+    }
+    const mercKey = payload.isMercenary ? `merc:${payload.mercenaryTypeId ?? ""}:${payload.contractEndsAt ?? ""}` : "std";
+    const signatureKey = `${payload.unitType}|${payload.level}|${payload.isSpy ? "spy" : "reg"}|${mercKey}`;
+    const ambiguous = sets.canonicalSignatureKeys.has(signatureKey);
+    sets.canonicalSignatureKeys.add(signatureKey);
+    if (doc._id !== undefined && doc._id !== null) {
+      sets.representedLegacyIds.add(String(doc._id));
+    }
+    actions.push({
+      kind: "insert_canonical",
+      legacyId: doc._id,
+      ambiguous,
+      payload,
+    });
+  }
+
+  return actions;
+}
+

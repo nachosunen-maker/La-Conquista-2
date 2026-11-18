@@ -325,7 +325,7 @@ export default defineSchema({
     // Unidades militares del reino (esquema mínimo persistido)
     armyUnits: defineTable({
       kingdomId: v.id("kingdoms"),
-      unitType: v.string(), // "infanteria", "caballeria", "arqueria", "asedio"
+      unitType: v.string(), // "infanteria", "caballeria", "arqueria", "asedio", "espia"
       level: v.optional(v.number()), // Nivel militar P29 (1-5); ausente = 1
       count: v.number(),    // Activos: cantidad entera no negativa
       wounded: v.optional(v.number()), // Heridos (P44) separados de los disponibles
@@ -334,6 +334,9 @@ export default defineSchema({
       mercenaryTypeId: v.optional(v.string()), // [DECISIÓN 21-10-2026] Tipo contratado (MERCENARIES.TYPES)
       contractEndsAt: v.optional(v.number()),
       isSpy: v.optional(v.boolean()),
+      migratedFromLegacyId: v.optional(v.string()), // Trazabilidad 1:1 del documento origen en Armyunits
+      migratedFromLegacyIds: v.optional(v.array(v.string())), // Trazabilidad acumulada de documentos migrados
+      migrationAmbiguous: v.optional(v.boolean()), // Marcador explícito cuando coexistía sin vínculo con un canónico del mismo tipo/nivel
     }).index("by_kingdom", ["kingdomId"]),
 
     // Misiones (sección 17 de CLAUDE.md, decisión 2026-10-21): cada misión concedida una sola vez.

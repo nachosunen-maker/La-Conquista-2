@@ -22,6 +22,8 @@ import {
   createTrainingPlan,
   isSpyUnitDoc,
   normalizeUnitType,
+  planArmyUnitsMigration,
+  reconcileArmyUnitDocs,
   summarizeArmy,
   trainingCostsFor,
   trainingDurationMs,
@@ -56,7 +58,7 @@ import {
 } from "./battleRules";
 import { isScheduleWindow } from "./challengeRules";
 
-/** Lectura de solo consulta: une armyUnits con la tabla heredada sin escribir. */
+/** Lectura de solo consulta: reconcilia armyUnits con la tabla heredada sin escribir ni duplicar registros ya migrados. */
 export async function readArmyUnitDocs(ctx: QueryCtx | MutationCtx, kingdomId: Id<"kingdoms">): Promise<any[]> {
   const canonical = await ctx.db
     .query("armyUnits")
@@ -71,11 +73,23 @@ export async function readArmyUnitDocs(ctx: QueryCtx | MutationCtx, kingdomId: I
   } catch {
     legacy = [];
   }
-  return [...canonical, ...legacy.map((doc) => ({ ...doc, legacy: true }))];
+  return reconcileArmyUnitDocs(canonical, legacy);
 }
 
-/** Lectura con migración: mueve los documentos heredados a armyUnits (idempotente) y devuelve el inventario canónico. */
+/**
+ * Lectura con migración transaccional e idempotente:
+ * - Si un registro de Armyunits ya tiene representación canónica (por vínculo de procedencia),
+ *   se elimina la copia heredada sin volver a sumar sus cantidades.
+ * - Si es un registro heredado no migrado, se inserta en armyUnits conservando todos sus atributos
+ *   (tipo, nivel, cantidad, isSpy, heridos, mercenario) y registrando su trazabilidad (migratedFromLegacyId).
+ * - Si coexiste un registro canónico del mismo tipo y nivel sin vínculo de procedencia, se preserva
+ *   como documento independiente marcado con migrationAmbiguous: true sin perder unidades ni fusionarlas a ciegas.
+ */
 export async function readArmyUnitsWithMigration(ctx: MutationCtx, kingdomId: Id<"kingdoms">): Promise<any[]> {
+  const canonical = await ctx.db
+    .query("armyUnits")
+    .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+    .collect();
   let legacy: any[] = [];
   try {
     legacy = await (ctx.db as any)
@@ -85,35 +99,53 @@ export async function readArmyUnitsWithMigration(ctx: MutationCtx, kingdomId: Id
   } catch {
     legacy = [];
   }
-  for (const doc of legacy) {
-    const unitType = isSpyUnitDoc(doc) ? "espia" : normalizeUnitType(doc.unitType);
-    const level = unitType === "espia" ? 1 : unitLevelOf(doc);
-    const count = Number.isInteger(doc.count) && doc.count > 0 ? doc.count : 0;
-    if (unitType && count > 0) {
-      await addUnits(ctx, kingdomId, unitType, level, count);
-    }
-    await ctx.db.delete(doc._id);
+  if (legacy.length === 0) {
+    return canonical;
   }
+
+  const actions = planArmyUnitsMigration(canonical, legacy);
+  for (const action of actions) {
+    if (action.kind === "insert_canonical") {
+      const legacyIdStr = String(action.legacyId);
+      await ctx.db.insert("armyUnits", {
+        kingdomId,
+        unitType: action.payload.unitType,
+        level: action.payload.level,
+        count: action.payload.count,
+        isSpy: action.payload.isSpy,
+        ...(action.payload.wounded !== undefined ? { wounded: action.payload.wounded } : {}),
+        ...(action.payload.recoveryProgress !== undefined ? { recoveryProgress: action.payload.recoveryProgress } : {}),
+        ...(action.payload.isMercenary ? { isMercenary: true } : {}),
+        ...(action.payload.mercenaryTypeId !== undefined ? { mercenaryTypeId: action.payload.mercenaryTypeId } : {}),
+        ...(action.payload.contractEndsAt !== undefined ? { contractEndsAt: action.payload.contractEndsAt } : {}),
+        migratedFromLegacyId: legacyIdStr,
+        migratedFromLegacyIds: [legacyIdStr],
+        ...(action.ambiguous ? { migrationAmbiguous: true } : {}),
+      });
+    }
+    await ctx.db.delete(action.legacyId as any);
+  }
+
   return await ctx.db
     .query("armyUnits")
     .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
     .collect();
 }
 
-/** Suma unidades al documento (tipo, nivel) correspondiente, creándolo si no existe. */
+/** Suma unidades al documento (tipo, nivel) correspondiente, creándolo si no existe. Conserva niveles distintos también en espías. */
 export async function addUnits(ctx: MutationCtx, kingdomId: Id<"kingdoms">, unitType: string, level: number, count: number): Promise<void> {
   if (count <= 0) return;
   const normalizedType = normalizeUnitType(unitType) ?? unitType;
   const isSpy = normalizedType === "espia";
-  const effectiveLevel = isSpy ? 1 : unitLevelOf({ level });
+  const effectiveLevel = unitLevelOf({ level });
   const docs = await ctx.db
     .query("armyUnits")
     .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
     .collect();
   const existing = docs.find((doc) =>
     isSpy
-      ? isSpyUnitDoc(doc)
-      : !isSpyUnitDoc(doc) && normalizeUnitType(doc.unitType) === normalizedType && unitLevelOf(doc) === effectiveLevel
+      ? isSpyUnitDoc(doc) && unitLevelOf(doc) === effectiveLevel && !doc.migrationAmbiguous
+      : !isSpyUnitDoc(doc) && !doc.isMercenary && normalizeUnitType(doc.unitType) === normalizedType && unitLevelOf(doc) === effectiveLevel && !doc.migrationAmbiguous
   );
   if (existing) {
     await ctx.db.patch(existing._id, {

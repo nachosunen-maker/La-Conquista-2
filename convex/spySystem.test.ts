@@ -15,6 +15,7 @@ import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { DEMO_USER_ID } from "./kingdomAccess";
 import { createSpyRecruitmentPlan, isSpyUnitDoc, summarizeArmy } from "./armyRules";
+import { readArmyUnitsWithMigration } from "./army";
 import { isLivingRegularTroop } from "./militaryRules";
 import { cellId, hexNeighbors, parseCellId } from "./territoryRules";
 import { MAP } from "./balanceConfig";
@@ -340,11 +341,13 @@ describe("Sistema de Reclutamiento y Gestión de Espías", () => {
     const spyDocs = canonical.filter((d) => isSpyUnitDoc(d));
     const infDocs = canonical.filter((d) => !isSpyUnitDoc(d) && d.unitType === "infanteria");
     expect(infDocs).toHaveLength(0);
-    expect(spyDocs).toHaveLength(1);
-    expect(spyDocs[0].unitType).toBe("espia");
-    expect(spyDocs[0].isSpy).toBe(true);
-    expect(spyDocs[0].level).toBe(1);
-    expect(spyDocs[0].count).toBe(2);
+    expect(spyDocs.reduce((sum, d) => sum + d.count, 0)).toBe(2);
+    for (const d of spyDocs) {
+      expect(d.unitType).toBe("espia");
+      expect(d.isSpy).toBe(true);
+      expect(d.level).toBe(1);
+      expect(typeof d.migratedFromLegacyId).toBe("string");
+    }
   });
 
   test("11, 12, 13 y 14. Expedición con espías disponibles, rechazo sin espías, rechazo de tropas ordinarias como espías y reserva correcta", async () => {
@@ -558,3 +561,409 @@ describe("Sistema de Reclutamiento y Gestión de Espías", () => {
     expect(summarizeArmy(docs).livingSoldiers).toBe(0);
   });
 });
+
+describe("Migración y reconciliación determinista Armyunits -> armyUnits (Casos A–G)", () => {
+  test("Caso A — Solo registros antiguos: migra espías desde Armyunits conservando todos sus atributos", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "mig-caso-a", "Reino Antiguo");
+
+    const legacyId = await t.run(async (ctx) =>
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 3,
+      })
+    );
+
+    // Antes de migrar: getArmyState ya refleja exactamente 3 espías
+    const stateBefore = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(stateBefore.spies.active).toBe(3);
+
+    // Ejecutar migración transaccional
+    const migrated = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    const legacyRemaining = await t.run(async (ctx) =>
+      (ctx.db as any).query("Armyunits").filter((q: any) => q.eq(q.field("kingdomId"), kingdomId)).collect()
+    );
+
+    expect(legacyRemaining).toHaveLength(0);
+    expect(migrated).toHaveLength(1);
+    expect(migrated[0].unitType).toBe("espia");
+    expect(migrated[0].isSpy).toBe(true);
+    expect(migrated[0].level).toBe(1);
+    expect(migrated[0].count).toBe(3);
+    expect(migrated[0].kingdomId).toBe(kingdomId);
+    expect(migrated[0].migratedFromLegacyId).toBe(String(legacyId));
+    expect(migrated[0].migrationAmbiguous).toBeUndefined();
+  });
+
+  test("Caso B — Solo registros canónicos: la migración no altera cantidades, documentos ni atributos", async () => {
+    const t = createTestBackend();
+    const { kingdomId } = await foundKingdom(t, "mig-caso-b", "Reino Canónico");
+
+    const canonicalId = await t.run(async (ctx) =>
+      ctx.db.insert("armyUnits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 4,
+        isSpy: true,
+      })
+    );
+
+    const after = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    expect(after).toHaveLength(1);
+    expect(after[0]._id).toBe(canonicalId);
+    expect(after[0].unitType).toBe("espia");
+    expect(after[0].isSpy).toBe(true);
+    expect(after[0].level).toBe(1);
+    expect(after[0].count).toBe(4);
+  });
+
+  test("Caso C — Datos mixtos: no duplica la unidad ya representada en ambas tablas y conserva unidades legítimas distintas", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "mig-caso-c", "Reino Mixto");
+
+    const { dupLegacyId, distinctLegacyId, ambiguousLegacyId } = await t.run(async (ctx) => {
+      // 1. Unidad presente en AMBAS tablas (vínculo de procedencia explícito)
+      const dupId = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 2,
+      });
+      await ctx.db.insert("armyUnits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 2,
+        isSpy: true,
+        migratedFromLegacyId: String(dupId),
+        migratedFromLegacyIds: [String(dupId)],
+      });
+
+      // 2. Unidad legítima distinta en Armyunits (nivel 2, sin representación en armyUnits)
+      const distId = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "espia",
+        level: 2,
+        count: 1,
+      });
+
+      // 3. Registro heredado ambiguo: mismo tipo y nivel 1 que el canónico pero SIN vínculo de procedencia
+      const ambId = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 1,
+      });
+
+      return { dupLegacyId: dupId, distinctLegacyId: distId, ambiguousLegacyId: ambId };
+    });
+
+    // Lectura previa (solo consulta): debe contar 2 (canónico) + 1 (distinto nv2) + 1 (ambiguo nv1) = 4, NO 6
+    const beforeState = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(beforeState.spies.active).toBe(4);
+
+    // Ejecutar migración
+    const after = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    const legacyRemaining = await t.run(async (ctx) =>
+      (ctx.db as any).query("Armyunits").filter((q: any) => q.eq(q.field("kingdomId"), kingdomId)).collect()
+    );
+    expect(legacyRemaining).toHaveLength(0);
+
+    // El registro duplicado NO se sumó dos veces; el canónico original sigue con count=2
+    const origCanonical = after.find((d) => d.migratedFromLegacyId === String(dupLegacyId));
+    expect(origCanonical?.count).toBe(2);
+    expect(origCanonical?.migrationAmbiguous).toBeUndefined();
+
+    // La unidad legítima distinta de nivel 2 se conserva íntegra
+    const distinctCanonical = after.find((d) => d.migratedFromLegacyId === String(distinctLegacyId));
+    expect(distinctCanonical?.level).toBe(2);
+    expect(distinctCanonical?.count).toBe(1);
+    expect(distinctCanonical?.isSpy).toBe(true);
+    expect(distinctCanonical?.migrationAmbiguous).toBeUndefined();
+
+    // El registro ambiguo sin vínculo se preserva marcado explícitamente sin borrar ni fusionar a ciegas
+    const ambiguousCanonical = after.find((d) => d.migratedFromLegacyId === String(ambiguousLegacyId));
+    expect(ambiguousCanonical?.level).toBe(1);
+    expect(ambiguousCanonical?.count).toBe(1);
+    expect(ambiguousCanonical?.isSpy).toBe(true);
+    expect(ambiguousCanonical?.migrationAmbiguous).toBe(true);
+
+    // Total coherente antes y después de la migración
+    const afterState = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(afterState.spies.active).toBe(4);
+  });
+
+  test("Caso D — Diferentes niveles: espías de distintos niveles permanecen separados con sus cantidades exactas", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "mig-caso-d", "Reino Niveles");
+
+    await t.run(async (ctx) => {
+      await (ctx.db as any).insert("Armyunits", { kingdomId, unitType: "espia", level: 1, count: 2 });
+      await (ctx.db as any).insert("Armyunits", { kingdomId, unitType: "espia", level: 2, count: 3 });
+      await (ctx.db as any).insert("Armyunits", { kingdomId, unitType: "espia", level: 3, count: 1 });
+    });
+
+    const migrated = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    expect(migrated).toHaveLength(3);
+
+    const byLevel = new Map(migrated.map((d) => [d.level, d]));
+    expect(byLevel.get(1)?.count).toBe(2);
+    expect(byLevel.get(2)?.count).toBe(3);
+    expect(byLevel.get(3)?.count).toBe(1);
+    for (const d of migrated) {
+      expect(d.unitType).toBe("espia");
+      expect(d.isSpy).toBe(true);
+    }
+
+    const state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies.active).toBe(6);
+  });
+
+  test("Caso E — Tipos y atributos: mezcla de tropas ordinarias, mercenarios, heridos y espías sin mezclar tipos", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "mig-caso-e", "Reino Atributos");
+
+    await t.run(async (ctx) => {
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "regular",
+        level: 2,
+        count: 15,
+        wounded: 3,
+      });
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "caballeria",
+        level: 3,
+        count: 8,
+        isMercenary: true,
+        mercenaryTypeId: "jinetes",
+        contractEndsAt: T0 + 86400_000,
+      });
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 2,
+      });
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "regular",
+        isSpy: true,
+        level: 2,
+        count: 1,
+      });
+    });
+
+    const migrated = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    const spies = migrated.filter((d) => isSpyUnitDoc(d));
+    const regulars = migrated.filter((d) => !isSpyUnitDoc(d));
+
+    expect(spies).toHaveLength(2);
+    expect(spies.reduce((s, d) => s + d.count, 0)).toBe(3);
+    expect(spies.every((d) => d.unitType === "espia" && d.isSpy === true)).toBe(true);
+
+    expect(regulars).toHaveLength(2);
+    const inf = regulars.find((d) => d.unitType === "infanteria");
+    const cav = regulars.find((d) => d.unitType === "caballeria");
+    expect(inf?.isSpy).toBe(false);
+    expect(inf?.level).toBe(2);
+    expect(inf?.count).toBe(15);
+    expect(inf?.wounded).toBe(3);
+    expect(cav?.isSpy).toBe(false);
+    expect(cav?.isMercenary).toBe(true);
+    expect(cav?.mercenaryTypeId).toBe("jinetes");
+    expect(cav?.contractEndsAt).toBe(T0 + 86400_000);
+
+    const state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies.active).toBe(3);
+    expect(state.summary.totalActive).toBe(23);
+    expect(state.summary.totalWounded).toBe(3);
+  });
+
+  test("Caso F — Idempotencia: ejecutar la migración dos veces no modifica cantidades, documentos ni resultados", async () => {
+    const t = createTestBackend();
+    const { kingdomId } = await foundKingdom(t, "mig-caso-f", "Reino Idempotencia");
+
+    await t.run(async (ctx) => {
+      await (ctx.db as any).insert("Armyunits", { kingdomId, unitType: "espia", level: 1, count: 2 });
+      await (ctx.db as any).insert("Armyunits", { kingdomId, unitType: "infanteria", level: 1, count: 10 });
+    });
+
+    const firstPass = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    const secondPass = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+
+    expect(secondPass).toHaveLength(firstPass.length);
+    expect(secondPass.map((d) => ({ _id: d._id, unitType: d.unitType, count: d.count, level: d.level, isSpy: d.isSpy }))).toEqual(
+      firstPass.map((d) => ({ _id: d._id, unitType: d.unitType, count: d.count, level: d.level, isSpy: d.isSpy }))
+    );
+  });
+
+  test("Caso G — Lecturas posteriores: getArmyState devuelve valores coherentes antes y después sin doble conteo", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "mig-caso-g", "Reino Coherente");
+    await setBuildingLevel(t, kingdomId, "cuartel", 6); // capacidad = 3
+
+    await t.run(async (ctx) => {
+      const legacyId = await (ctx.db as any).insert("Armyunits", { kingdomId, unitType: "espia", level: 1, count: 1 });
+      await ctx.db.insert("armyUnits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 1,
+        isSpy: true,
+        migratedFromLegacyId: String(legacyId),
+      });
+      await (ctx.db as any).insert("Armyunits", { kingdomId, unitType: "espia", level: 2, count: 1 });
+    });
+
+    const stateBefore = await asUser.query(api.army.getArmyState, { kingdomId });
+    await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    const stateAfter = await asUser.query(api.army.getArmyState, { kingdomId });
+
+    expect(stateBefore.spies.active).toBe(2);
+    expect(stateAfter.spies.active).toBe(2);
+    expect(stateAfter.spies.capacity).toBe(3);
+    expect(stateAfter.spies.busy).toBe(0);
+    expect(stateAfter.spies.inQueue).toBe(0);
+  });
+});
+
+describe("Concurrencia real y transacciones del ciclo completo de espías", () => {
+  test("Concurrencia en recruitSpy: no supera capacidad ni descuenta población dos veces", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "conc-recruit", "Reino Conc Recluta");
+    await setBuildingLevel(t, kingdomId, "cuartel", 2); // capacidad = 1
+    await setResourcesAndPop(t, kingdomId, { available: 10 });
+
+    const results = await Promise.allSettled([
+      asUser.mutation(api.army.recruitSpy, { kingdomId, count: 1 }),
+      asUser.mutation(api.army.recruitSpy, { kingdomId, count: 1 }),
+      asUser.mutation(api.army.recruitSpy, { kingdomId, count: 1 }),
+    ]);
+
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected")).toHaveLength(2);
+
+    const popAfter = await t.run(async (ctx) =>
+      ctx.db.query("population").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).first()
+    );
+    expect(popAfter!.available).toBe(9); // Solo se descontó 1 ciudadano, no 3
+
+    const queue = await t.run(async (ctx) =>
+      ctx.db.query("trainingQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).collect()
+    );
+    expect(queue).toHaveLength(1);
+  });
+
+  test("Concurrencia en completeTraining y cancelTraining: sin duplicación de espías ni doble reembolso", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "conc-train-lifecycle", "Reino Conc Cola");
+    await setBuildingLevel(t, kingdomId, "cuartel", 4); // capacidad = 2
+    await setResourcesAndPop(t, kingdomId, { available: 10 });
+
+    // Caso 1: dos cancelTraining simultáneos sobre el mismo lote
+    const batchA = await asUser.mutation(api.army.recruitSpy, { kingdomId, count: 1 });
+    const cancelRace = await Promise.allSettled([
+      asUser.mutation(api.army.cancelTraining, { kingdomId, trainingId: batchA.trainingId }),
+      asUser.mutation(api.army.cancelTraining, { kingdomId, trainingId: batchA.trainingId }),
+    ]);
+    expect(cancelRace.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(cancelRace.filter((r) => r.status === "rejected")).toHaveLength(1);
+
+    const popAfterCancel = await t.run(async (ctx) =>
+      ctx.db.query("population").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).first()
+    );
+    expect(popAfterCancel!.available).toBe(10); // Devuelto exactamente 1 vez
+
+    // Caso 2: dos completeTraining simultáneos sobre un lote vencido -> sin duplicar espías
+    const batchB = await asUser.mutation(api.army.recruitSpy, { kingdomId, count: 1 });
+    vi.setSystemTime(batchB.completesAt + 1000);
+    const completeRace = await Promise.allSettled([
+      t.mutation(internal.army.completeTraining, { trainingId: batchB.trainingId }),
+      t.mutation(internal.army.completeTraining, { trainingId: batchB.trainingId }),
+    ]);
+    expect(completeRace.every((r) => r.status === "fulfilled")).toBe(true);
+    const completedFlags = completeRace.map((r) => (r as PromiseFulfilledResult<any>).value.completed);
+    expect(completedFlags.filter(Boolean)).toHaveLength(1);
+
+    const stateAfter = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(stateAfter.spies.active).toBe(1);
+    expect(stateAfter.spies.inQueue).toBe(0);
+  });
+
+  test("Concurrencia entre cancelExploration y completeExplorationScheduled: nunca devuelve los mismos espías dos veces", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "conc-exp-race", "Reino Conc Exp");
+    await setResourcesAndPop(t, kingdomId, { gold: 10000, food: 10000 });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 2, isSpy: true });
+    });
+    const [cell1, cell2] = await findUnexploredFrontierCells(t, kingdomId, 2);
+
+    // 1. Carrera real cancelExploration vs completeExplorationScheduled sobre la misma expedición
+    const exp1 = await asUser.mutation(api.territories.startExploration, {
+      kingdomId,
+      cellId: cell1,
+      spiesCount: 2,
+    });
+    const raceCancelVsComplete = await Promise.allSettled([
+      asUser.mutation(api.territories.cancelExploration, { kingdomId, expeditionId: exp1.expeditionId }),
+      t.mutation(internal.territories.completeExplorationScheduled, { expeditionId: exp1.expeditionId }),
+    ]);
+    // Solo una de las dos operaciones debe devolver los 2 espías; la otra no modifica inventario
+    expect(raceCancelVsComplete.filter((r) => r.status === "fulfilled").length).toBeGreaterThanOrEqual(1);
+    const stateMid = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(stateMid.spies.active).toBe(2);
+    expect(stateMid.spies.busy).toBe(0);
+
+    // 2. Carrera real de doble completeExplorationScheduled sobre expedición vencida
+    const exp2 = await asUser.mutation(api.territories.startSpyExploration, {
+      kingdomId,
+      cellId: cell2,
+      spiesCount: 2,
+    });
+    vi.setSystemTime(exp2.completesAt + 1000);
+    const doubleComplete = await Promise.allSettled([
+      t.mutation(internal.territories.completeExplorationScheduled, { expeditionId: exp2.expeditionId }),
+      t.mutation(internal.territories.completeExplorationScheduled, { expeditionId: exp2.expeditionId }),
+    ]);
+    const nonNullCompletions = doubleComplete
+      .filter((r) => r.status === "fulfilled")
+      .map((r) => (r as PromiseFulfilledResult<any>).value)
+      .filter((val) => val !== null);
+    expect(nonNullCompletions).toHaveLength(1);
+
+    const stateFinal = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(stateFinal.spies.active).toBe(2);
+    expect(stateFinal.spies.busy).toBe(0);
+  });
+
+  test("Ausencia de participación de espías en combates ordinarios (launchAttack rechaza espías)", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "spy-no-combat", "Reino Sin Espías En Combate");
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 2, isSpy: true });
+    });
+
+    // Celda adyacente a la capital (ya conocida por visión inicial radio 1)
+    const adjacentCellId = await t.run(async (ctx) => {
+      const k = await ctx.db.get(kingdomId);
+      const home = k?.homeTerritoryId ? parseCellId(k.homeTerritoryId) : { q: 0, r: 0 };
+      const neighbor = hexNeighbors(home ?? { q: 0, r: 0 }, MAP.RADIUS)[0];
+      return cellId(neighbor.q, neighbor.r);
+    });
+
+    await expect(
+      asUser.mutation(api.army.launchAttack, {
+        kingdomId,
+        cellId: adjacentCellId,
+        units: [{ unitType: "espia", level: 1, count: 1 }],
+      })
+    ).rejects.toThrow(/espías no participan en marchas de ataque/i);
+  });
+});
+
