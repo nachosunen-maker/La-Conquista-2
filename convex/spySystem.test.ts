@@ -19,6 +19,8 @@ import {
   createSpyRecruitmentPlan,
   isLegacyDocRepresentedInCanonical,
   isSpyUnitDoc,
+  planArmyUnitsMigration,
+  reconcileArmyUnitDocs,
   summarizeArmy,
 } from "./armyRules";
 import { readArmyUnitsWithMigration } from "./army";
@@ -1327,4 +1329,409 @@ describe("Defecto 2 — Cuarentena y preservación de registros heredados con ti
   });
 });
 
+// =============================================================================
+// DEFECTO RESIDUAL 1: COMPROBACIÓN ESTRICTA DE REINO EN PROCEDENCIA DE MIGRACIÓN
+// =============================================================================
 
+describe("Defecto residual 1: comprobación estricta de kingdomId y existencia real en procedencia", () => {
+  test("1. Legacy sin kingdomId + canónico con kingdomId: rechazado y no eliminado como duplicado", () => {
+    const legacyDoc = {
+      _id: "leg-no-kingdom",
+      unitType: "espia",
+      count: 3,
+      migratedToId: "can-k1",
+    };
+    const canonical = [
+      {
+        _id: "can-k1",
+        kingdomId: "k-1",
+        unitType: "espia",
+        level: 1,
+        count: 3,
+        isSpy: true,
+        migratedFromLegacyId: "leg-no-kingdom",
+      },
+    ];
+
+    expect(isLegacyDocRepresentedInCanonical(legacyDoc, canonical)).toBe(false);
+
+    const actions = planArmyUnitsMigration(canonical, [legacyDoc]);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].kind).not.toBe("delete_duplicate_legacy");
+    expect(actions[0].kind).toBe("insert_canonical");
+
+    const reconciled = reconcileArmyUnitDocs(canonical, [legacyDoc]);
+    expect(reconciled).toHaveLength(2);
+  });
+
+  test("2. Canónico sin kingdomId + legacy con kingdomId: rechazado y no eliminado como duplicado", () => {
+    const legacyDoc = {
+      _id: "leg-k1",
+      kingdomId: "k-1",
+      unitType: "espia",
+      count: 2,
+      migratedToId: "can-no-kingdom",
+    };
+    const canonical = [
+      {
+        _id: "can-no-kingdom",
+        unitType: "espia",
+        level: 1,
+        count: 2,
+        isSpy: true,
+        migratedFromLegacyId: "leg-k1",
+      },
+    ];
+
+    expect(isLegacyDocRepresentedInCanonical(legacyDoc, canonical)).toBe(false);
+
+    const actions = planArmyUnitsMigration(canonical, [legacyDoc]);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].kind).not.toBe("delete_duplicate_legacy");
+    expect(actions[0].kind).toBe("insert_canonical");
+  });
+
+  test("3. Ambos sin kingdomId: rechazado y no eliminado como duplicado", () => {
+    const legacyDoc = {
+      _id: "leg-both-missing",
+      unitType: "infanteria",
+      count: 5,
+      migratedToId: "can-both-missing",
+      canonicalId: "can-both-missing",
+    };
+    const canonical = [
+      {
+        _id: "can-both-missing",
+        unitType: "infanteria",
+        level: 1,
+        count: 5,
+        migratedFromLegacyId: "leg-both-missing",
+        migratedFromLegacyIds: ["leg-both-missing"],
+      },
+    ];
+
+    expect(isLegacyDocRepresentedInCanonical(legacyDoc, canonical)).toBe(false);
+
+    const actions = planArmyUnitsMigration(canonical, [legacyDoc]);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].kind).not.toBe("delete_duplicate_legacy");
+    expect(actions[0].kind).toBe("insert_canonical");
+  });
+
+  test("4 y 8. Ambos con el mismo kingdomId y vínculo válido (migratedFromLegacyId, migratedFromLegacyIds, migratedToId, canonicalId): aceptado y deduplicado", () => {
+    const canonical = [
+      {
+        _id: "can-1",
+        kingdomId: "k-1",
+        unitType: "espia",
+        level: 1,
+        count: 4,
+        isSpy: true,
+        migratedFromLegacyId: "leg-single",
+      },
+      {
+        _id: "can-2",
+        kingdomId: "k-1",
+        unitType: "infanteria",
+        level: 1,
+        count: 10,
+        migratedFromLegacyIds: ["leg-arr-a", "leg-arr-b"],
+      },
+      {
+        _id: "can-3",
+        kingdomId: "k-1",
+        unitType: "arqueria",
+        level: 1,
+        count: 6,
+      },
+    ];
+
+    const legSingle = { _id: "leg-single", kingdomId: "k-1", unitType: "espia", count: 4 };
+    const legArrA = { _id: "leg-arr-a", kingdomId: "k-1", unitType: "infanteria", count: 5 };
+    const legArrB = { _id: "leg-arr-b", kingdomId: "k-1", unitType: "infanteria", count: 5 };
+    const legMigratedTo = { _id: "leg-to", kingdomId: "k-1", unitType: "arqueria", count: 6, migratedToId: "can-3" };
+    const legCanonicalId = { _id: "leg-cid", kingdomId: "k-1", unitType: "arqueria", count: 6, canonicalId: "can-3" };
+
+    for (const leg of [legSingle, legArrA, legArrB, legMigratedTo, legCanonicalId]) {
+      expect(isLegacyDocRepresentedInCanonical(leg, canonical)).toBe(true);
+    }
+
+    const actions = planArmyUnitsMigration(canonical, [legSingle, legArrA, legArrB, legMigratedTo, legCanonicalId]);
+    expect(actions.every((a) => a.kind === "delete_duplicate_legacy")).toBe(true);
+
+    const reconciled = reconcileArmyUnitDocs(canonical, [legSingle, legArrA, legArrB, legMigratedTo, legCanonicalId]);
+    expect(reconciled).toHaveLength(3);
+  });
+
+  test("5. Ambos con kingdomId distinto: rechazado aunque coincidan los vínculos", () => {
+    const legacyDoc = {
+      _id: "leg-k1",
+      kingdomId: "k-1",
+      unitType: "espia",
+      count: 3,
+      migratedToId: "can-k2",
+      canonicalId: "can-k2",
+    };
+    const canonical = [
+      {
+        _id: "can-k2",
+        kingdomId: "k-2",
+        unitType: "espia",
+        level: 1,
+        count: 3,
+        isSpy: true,
+        migratedFromLegacyId: "leg-k1",
+        migratedFromLegacyIds: ["leg-k1"],
+      },
+    ];
+
+    expect(isLegacyDocRepresentedInCanonical(legacyDoc, canonical)).toBe(false);
+
+    const actions = planArmyUnitsMigration(canonical, [legacyDoc]);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].kind).toBe("insert_canonical");
+  });
+
+  test("6 y 7. migratedToId o canonicalId apuntando a documento canónico inexistente: rechazado y el legacy se migra sin pérdida", async () => {
+    const canonical = [
+      {
+        _id: "can-real",
+        kingdomId: "k-1",
+        unitType: "infanteria",
+        level: 1,
+        count: 5,
+      },
+    ];
+    const legDanglingMigratedTo = {
+      _id: "leg-dangling-1",
+      kingdomId: "k-1",
+      unitType: "espia",
+      count: 2,
+      migrated: true,
+      migratedToId: "can-inexistente-1",
+    };
+    const legDanglingCanonicalId = {
+      _id: "leg-dangling-2",
+      kingdomId: "k-1",
+      unitType: "caballeria",
+      count: 4,
+      migrated: true,
+      canonicalId: "can-inexistente-2",
+    };
+
+    expect(isLegacyDocRepresentedInCanonical(legDanglingMigratedTo, canonical)).toBe(false);
+    expect(isLegacyDocRepresentedInCanonical(legDanglingCanonicalId, canonical)).toBe(false);
+
+    const actions = planArmyUnitsMigration(canonical, [legDanglingMigratedTo, legDanglingCanonicalId]);
+    expect(actions.map((a) => a.kind)).toEqual(["insert_canonical", "insert_canonical"]);
+
+    // Verificación transaccional real en Convex: ninguno se descarta como duplicado
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "res1-dangling", "Reino Vínculo Roto");
+    await t.run(async (ctx) => {
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 2,
+        migrated: true,
+        migratedToId: "can-no-existe-tx",
+      });
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "caballeria",
+        level: 1,
+        count: 4,
+        migrated: true,
+        canonicalId: "can-no-existe-tx-2",
+      });
+    });
+
+    const migrated = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    expect(migrated).toHaveLength(2);
+    const state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies.active).toBe(2);
+    expect(state.summary.totalActive).toBe(4);
+  });
+});
+
+// =============================================================================
+// DEFECTO RESIDUAL 2: NUNCA ELIMINAR REGISTROS HEREDADOS CON DATOS INVÁLIDOS
+// =============================================================================
+
+describe("Defecto residual 2: clasificación conservadora y preservación de registros heredados inválidos o parciales", () => {
+  test("Clasificador puro: decimales, cadenas, negativos, atributos relevantes sin cantidad e inválidos combinados van a cuarentena; count=0 con wounded>0 es válido", () => {
+    // 1. count decimal -> cuarentena (nunca 0 / empty)
+    expect(classifyLegacyArmyUnitDoc({ unitType: "infanteria", count: 1.5 }).status).toBe("unrecognized");
+    // 2. count cadena numérica -> cuarentena
+    expect(classifyLegacyArmyUnitDoc({ unitType: "infanteria", count: "7" as any }).status).toBe("unrecognized");
+    // 3. count negativo -> cuarentena
+    expect(classifyLegacyArmyUnitDoc({ unitType: "espia", count: -3 }).status).toBe("unrecognized");
+    // 4. count NaN -> cuarentena
+    expect(classifyLegacyArmyUnitDoc({ unitType: "infanteria", count: Number.NaN }).status).toBe("unrecognized");
+    // 5. count ausente con atributos relevantes (mercenario / espía / campo extra) -> cuarentena
+    expect(
+      classifyLegacyArmyUnitDoc({
+        unitType: "infanteria",
+        isMercenary: true,
+        mercenaryTypeId: "guardia_real",
+      }).status
+    ).toBe("unrecognized");
+    expect(
+      classifyLegacyArmyUnitDoc({
+        unitType: "infanteria",
+        legacyCustomMeta: "conservar",
+      } as any).status
+    ).toBe("unrecognized");
+    // 6. wounded inválido (decimal / cadena / negativo) -> cuarentena
+    expect(classifyLegacyArmyUnitDoc({ unitType: "infanteria", count: 0, wounded: 1.5 }).status).toBe("unrecognized");
+    expect(classifyLegacyArmyUnitDoc({ unitType: "infanteria", count: 2, wounded: "2" as any }).status).toBe("unrecognized");
+    expect(classifyLegacyArmyUnitDoc({ unitType: "infanteria", count: 2, wounded: -1 }).status).toBe("unrecognized");
+    // 7. count: 0 con wounded > 0 entero válido -> válido (preserva heridos)
+    const woundedOnly = classifyLegacyArmyUnitDoc({ unitType: "infanteria", level: 2, count: 0, wounded: 4 });
+    expect(woundedOnly.status).toBe("valid");
+    if (woundedOnly.status === "valid") {
+      expect(woundedOnly.payload).toMatchObject({
+        unitType: "infanteria",
+        level: 2,
+        count: 0,
+        wounded: 4,
+        isSpy: false,
+      });
+    }
+    // 8. count y wounded ausentes con atributos relevantes -> cuarentena
+    expect(classifyLegacyArmyUnitDoc({ isSpy: true }).status).toBe("unrecognized");
+    expect(classifyLegacyArmyUnitDoc({ unitType: "infanteria", recoveryProgress: 0.4 }).status).toBe("unrecognized");
+    // 9. unitType desconocido con count / wounded / isMercenary / isSpy -> cuarentena
+    expect(classifyLegacyArmyUnitDoc({ unitType: "alabardero_v0", count: 5 }).status).toBe("unrecognized");
+    expect(classifyLegacyArmyUnitDoc({ unitType: "alabardero_v0", count: 0, wounded: 3 }).status).toBe("unrecognized");
+    expect(classifyLegacyArmyUnitDoc({ unitType: "alabardero_v0", count: 0, isMercenary: true }).status).toBe("unrecognized");
+    expect(classifyLegacyArmyUnitDoc({ unitType: "alabardero_v0", count: 0, isSpy: true }).status).toBe("unrecognized");
+    // 10. Combinación de campos válidos e inválidos (ej. count válido + level fuera de rango o contractEndsAt inválido) -> cuarentena
+    expect(classifyLegacyArmyUnitDoc({ unitType: "espia", count: 2, level: 9 }).status).toBe("unrecognized");
+    expect(
+      classifyLegacyArmyUnitDoc({ unitType: "infanteria", count: 3, contractEndsAt: "2026-12-01" as any }).status
+    ).toBe("unrecognized");
+    // 11. Realmente vacío sin atributos relevantes -> empty
+    expect(classifyLegacyArmyUnitDoc({ unitType: "infanteria", count: 0, wounded: 0 }).status).toBe("empty");
+    expect(classifyLegacyArmyUnitDoc({ count: 0 }).status).toBe("empty");
+  });
+
+  test("Migración transaccional real: preserva intactos en Armyunits los registros inválidos, migra count=0 con wounded>0 y es idempotente", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "res2-tx", "Reino Cuarentena Estricta");
+
+    const inserted = await t.run(async (ctx) => {
+      const idDecimal = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "infanteria",
+        count: 1.5,
+      });
+      const idStringCount = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "espia",
+        count: "7",
+      });
+      const idNegative = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "arqueria",
+        count: -3,
+      });
+      const idNoCountMerc = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "infanteria",
+        isMercenary: true,
+        mercenaryTypeId: "guardia_legacy",
+      });
+      const idInvalidWounded = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "infanteria",
+        count: 2,
+        wounded: "3",
+      });
+      const idAbsentBothSpy = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        isSpy: true,
+      });
+      const idUnknownAttr = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "piquero_antiguo",
+        count: 0,
+        isMercenary: true,
+      });
+      const idMixedInvalid = await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "espia",
+        count: 2,
+        level: 9,
+      });
+      // Registro válido solo con heridos (count: 0, wounded: 4) -> DEBE migrar conservando heridos
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "infanteria",
+        level: 1,
+        count: 0,
+        wounded: 4,
+      });
+      // Registro válido de espías -> DEBE migrar
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 3,
+      });
+      // Registro genuinamente vacío -> único elegible para borrado
+      await (ctx.db as any).insert("Armyunits", {
+        kingdomId,
+        unitType: "infanteria",
+        count: 0,
+        wounded: 0,
+      });
+
+      return {
+        quarantinedIds: [
+          idDecimal,
+          idStringCount,
+          idNegative,
+          idNoCountMerc,
+          idInvalidWounded,
+          idAbsentBothSpy,
+          idUnknownAttr,
+          idMixedInvalid,
+        ],
+      };
+    });
+
+    // Primera pasada transaccional
+    const pass1 = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    expect(pass1).toHaveLength(2);
+    const woundedDoc = pass1.find((d) => d.unitType === "infanteria");
+    const spyDoc = pass1.find((d) => isSpyUnitDoc(d));
+    expect(woundedDoc).toMatchObject({ unitType: "infanteria", count: 0, wounded: 4, isSpy: false });
+    expect(spyDoc).toMatchObject({ unitType: "espia", count: 3, isSpy: true });
+
+    // Los 8 registros inválidos/sospechosos deben permanecer intactos en Armyunits
+    const legacyAfterPass1 = await t.run(async (ctx) =>
+      (ctx.db as any).query("Armyunits").filter((q: any) => q.eq(q.field("kingdomId"), kingdomId)).collect()
+    );
+    expect(legacyAfterPass1).toHaveLength(8);
+    expect(new Set(legacyAfterPass1.map((d: any) => d._id))).toEqual(new Set(inserted.quarantinedIds));
+
+    // Segunda pasada: idempotencia total (ni duplica válidos ni borra los 8 registros en cuarentena)
+    const pass2 = await t.run(async (ctx) => readArmyUnitsWithMigration(ctx as any, kingdomId));
+    expect(pass2).toHaveLength(2);
+    expect(pass2.map((d) => ({ _id: d._id, count: d.count, wounded: d.wounded }))).toEqual(
+      pass1.map((d) => ({ _id: d._id, count: d.count, wounded: d.wounded }))
+    );
+    const legacyAfterPass2 = await t.run(async (ctx) =>
+      (ctx.db as any).query("Armyunits").filter((q: any) => q.eq(q.field("kingdomId"), kingdomId)).collect()
+    );
+    expect(legacyAfterPass2).toHaveLength(8);
+
+    // Consulta real getArmyState: solo cuenta los 3 espías y los 4 heridos válidos; jamás los 8 en cuarentena
+    const state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies.active).toBe(3);
+    expect(state.summary.totalActive).toBe(0);
+    expect(state.summary.totalWounded).toBe(4);
+  });
+});
