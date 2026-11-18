@@ -11,7 +11,8 @@ import { v } from "convex/values";
 import { isKingdomOwner } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
 import { settleRelationalKingdomEconomy } from "./economy";
-import { readArmyUnitDocs, readArmyUnitsWithMigration, addUnits } from "./army";
+import { readArmyUnitDocs, readArmyUnitsWithMigration, addUnits, applyCasualtiesToArmy } from "./army";
+export { applyCasualtiesToArmy };
 import { isSpyUnitDoc, normalizeUnitType, summarizeArmy, unitLevelOf } from "./armyRules";
 import { validateBuildingCollection } from "./buildingRules";
 import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
@@ -498,28 +499,6 @@ export const freezeChallenge = internalMutation({
   },
 });
 
-export async function applyCasualtiesToArmy(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
-  const units = await readArmyUnitsWithMigration(ctx, kingdomId);
-  for (const type of UNIT_TYPES as readonly UnitType[]) {
-    let remaining = casualties[type];
-    const docs = units.filter((doc) => normalizeUnitType(doc.unitType) === type).sort((a, b) => b.count - a.count);
-    for (const doc of docs) {
-      if (remaining <= 0) break;
-      const removed = Math.min(doc.count, remaining);
-      await ctx.db.patch(doc._id, { count: doc.count - removed });
-      remaining -= removed;
-    }
-    const woundedCount = wounded[type];
-    if (woundedCount > 0) {
-      const host = docs[0];
-      if (host) {
-        await ctx.db.patch(host._id, { wounded: (host.wounded ?? 0) + woundedCount });
-      } else {
-        await ctx.db.insert("armyUnits", { kingdomId, unitType: type, level: 1, count: 0, wounded: woundedCount });
-      }
-    }
-  }
-}
 
 export async function removeDeadFromPopulation(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
   let deadPersons = 0;

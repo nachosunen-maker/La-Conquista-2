@@ -5,7 +5,7 @@
  */
 import { internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v, ConvexError } from "convex/values";
 import { isKingdomOwner } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
@@ -143,7 +143,7 @@ export async function readArmyUnitsWithMigration(ctx: MutationCtx, kingdomId: Id
 
 /** Suma unidades al documento (tipo, nivel) correspondiente, creándolo si no existe. Conserva niveles distintos también en espías. */
 export async function addUnits(ctx: MutationCtx, kingdomId: Id<"kingdoms">, unitType: string, level: number, count: number): Promise<void> {
-  if (count <= 0) return;
+  if (!Number.isInteger(count) || count <= 0) return;
   const normalizedType = normalizeUnitType(unitType) ?? unitType;
   const isSpy = normalizedType === "espia";
   const effectiveLevel = unitLevelOf({ level });
@@ -718,23 +718,193 @@ function activeComposition(units: any[]): Composition {
   return composition;
 }
 
-export async function refundMarchUnitsToGarrison(ctx: MutationCtx, kingdomId: Id<"kingdoms">, units: any[]): Promise<void> {
-  if (!Array.isArray(units)) return;
-  for (const u of units) {
-    if (!u || typeof u !== "object") continue;
-    if (isSpyUnitDoc(u) || normalizeUnitType(u.unitType) === "espia" || u.isSpy === true) {
-      continue;
-    }
-    const norm = normalizeUnitType(u.unitType);
-    if (!norm || norm === "espia") continue;
-    const count = Number(u.count);
-    if (!Number.isInteger(count) || count <= 0) continue;
-    const level = Number.isInteger(u.level) && u.level >= 1 && u.level <= 5 ? u.level : 1;
-    await addUnits(ctx, kingdomId, norm, level, count);
-  }
+export type RegularMilitaryUnitType = Exclude<UnitType, "espia">;
+
+export type MarchUnitInput = Doc<"armyMarches">["units"][number];
+
+export interface ValidatedMarchUnit {
+  unitType: RegularMilitaryUnitType;
+  level: number;
+  count: number;
 }
 
-async function applyCasualtiesToArmy(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
+export type MarchUnitRejectionReason =
+  | "invalid_entry"
+  | "spy_not_allowed"
+  | "unknown_unit_type"
+  | "invalid_count"
+  | "invalid_level";
+
+export interface RejectedMarchUnit {
+  unit: MarchUnitInput;
+  reason: MarchUnitRejectionReason;
+}
+
+export interface ParsedMarchUnitsResult {
+  validUnits: ValidatedMarchUnit[];
+  rejectedUnits: RejectedMarchUnit[];
+  totalValidCount: number;
+}
+
+export interface RefundMarchUnitsOptions {
+  /**
+   * Política ante composiciones heredadas inválidas:
+   * - "strict" (por defecto): rechaza con ConvexError antes de escribir en BD si existe cualquier entrada inválida (sin devoluciones parciales).
+   * - "quarantine_legacy": devuelve únicamente las unidades militares válidas consolidadas y registra explícitamente las entradas rechazadas.
+   */
+  invalidEntryPolicy?: "strict" | "quarantine_legacy";
+}
+
+export interface RefundMarchUnitsResult {
+  refundedUnits: ValidatedMarchUnit[];
+  rejectedUnits: RejectedMarchUnit[];
+  totalRefunded: number;
+}
+
+export interface MarchRefundPatch {
+  status: "completada" | "cancelada";
+  cancelledAt?: number;
+  cancelReason?: string;
+  battleResult?: unknown;
+}
+
+export interface RefundMarchOnceResult extends RefundMarchUnitsResult {
+  alreadyRefunded: boolean;
+}
+
+/**
+ * Valida y consolida una composición de marcha sin modificar la base de datos.
+ * - Rechaza expresamente espías (tanto unitType "espia" como documentos con isSpy: true).
+ * - Rechaza tipos desconocidos, cantidades no enteras o <= 0, y niveles explícitamente fuera de [1, 5].
+ * - Nunca transforma un nivel inválido en nivel 1 (solo la ausencia del campo opcional `level` en registros heredados equivale a nivel 1).
+ */
+export function parseMarchUnits(units: ReadonlyArray<MarchUnitInput>): ParsedMarchUnitsResult {
+  const consolidated = new Map<string, ValidatedMarchUnit>();
+  const rejectedUnits: RejectedMarchUnit[] = [];
+
+  for (const u of units) {
+    if (!u || typeof u !== "object") {
+      rejectedUnits.push({ unit: u, reason: "invalid_entry" });
+      continue;
+    }
+    if (isSpyUnitDoc(u)) {
+      rejectedUnits.push({ unit: u, reason: "spy_not_allowed" });
+      continue;
+    }
+    const normalized = normalizeUnitType(u.unitType);
+    if (!normalized) {
+      rejectedUnits.push({ unit: u, reason: "unknown_unit_type" });
+      continue;
+    }
+    if (normalized === "espia") {
+      rejectedUnits.push({ unit: u, reason: "spy_not_allowed" });
+      continue;
+    }
+    if (typeof u.count !== "number" || !Number.isInteger(u.count) || u.count <= 0) {
+      rejectedUnits.push({ unit: u, reason: "invalid_count" });
+      continue;
+    }
+    const level = u.level === undefined ? 1 : u.level;
+    if (typeof level !== "number" || !Number.isInteger(level) || level < 1 || level > 5) {
+      rejectedUnits.push({ unit: u, reason: "invalid_level" });
+      continue;
+    }
+
+    const key = `${normalized}:${level}`;
+    const existing = consolidated.get(key);
+    if (existing) {
+      existing.count += u.count;
+    } else {
+      consolidated.set(key, {
+        unitType: normalized,
+        level,
+        count: u.count,
+      });
+    }
+  }
+
+  const validUnits = Array.from(consolidated.values());
+  const totalValidCount = validUnits.reduce((sum, u) => sum + u.count, 0);
+  return { validUnits, rejectedUnits, totalValidCount };
+}
+
+export async function refundMarchUnitsToGarrison(
+  ctx: MutationCtx,
+  kingdomId: Id<"kingdoms">,
+  units: ReadonlyArray<MarchUnitInput>,
+  options: RefundMarchUnitsOptions = {}
+): Promise<RefundMarchUnitsResult> {
+  const policy = options.invalidEntryPolicy ?? "strict";
+  const parsed = parseMarchUnits(units);
+
+  if (parsed.rejectedUnits.length > 0) {
+    if (policy === "strict") {
+      const summary = parsed.rejectedUnits
+        .map((r) => `${String(r.unit?.unitType ?? "desconocido")}:${String(r.unit?.level ?? "?")}:${String(r.unit?.count ?? "?")}(${r.reason})`)
+        .join(", ");
+      throw new ConvexError(`Composición de marcha inválida para devolución a guarnición: ${summary}`);
+    }
+    console.warn("[DEVOLUCIÓN MARCHA] Entradas inválidas o de espía rechazadas sin conversión:", {
+      kingdomId,
+      rejectedUnits: parsed.rejectedUnits,
+    });
+  }
+
+  for (const unit of parsed.validUnits) {
+    await addUnits(ctx, kingdomId, unit.unitType, unit.level, unit.count);
+  }
+
+  return {
+    refundedUnits: parsed.validUnits,
+    rejectedUnits: parsed.rejectedUnits,
+    totalRefunded: parsed.totalValidCount,
+  };
+}
+
+/**
+ * Devuelve las tropas de una marcha a la guarnición exactamente una vez dentro de la transacción de Convex.
+ * - Comprueba atómicamente `status === "marchando"` y `unitsRefundedAt == null`.
+ * - Si la validación o restauración falla, la mutación hace rollback sin marcar `unitsRefundedAt`.
+ */
+export async function refundMarchToGarrisonOnce(
+  ctx: MutationCtx,
+  marchId: Id<"armyMarches">,
+  patchOnRefund: MarchRefundPatch,
+  options: RefundMarchUnitsOptions = { invalidEntryPolicy: "quarantine_legacy" }
+): Promise<RefundMarchOnceResult> {
+  const freshMarch = await ctx.db.get(marchId);
+  if (!freshMarch || freshMarch.status !== "marchando" || freshMarch.unitsRefundedAt != null) {
+    return {
+      alreadyRefunded: true,
+      refundedUnits: [],
+      rejectedUnits: [],
+      totalRefunded: 0,
+    };
+  }
+
+  const refundNow = Date.now();
+  const refundResult = await refundMarchUnitsToGarrison(
+    ctx,
+    freshMarch.kingdomId,
+    freshMarch.units,
+    options
+  );
+
+  await ctx.db.patch(marchId, {
+    status: patchOnRefund.status,
+    ...(patchOnRefund.cancelledAt !== undefined ? { cancelledAt: patchOnRefund.cancelledAt } : {}),
+    ...(patchOnRefund.cancelReason !== undefined ? { cancelReason: patchOnRefund.cancelReason } : {}),
+    ...(patchOnRefund.battleResult !== undefined ? { battleResult: patchOnRefund.battleResult } : {}),
+    unitsRefundedAt: refundNow,
+  });
+
+  return {
+    alreadyRefunded: false,
+    ...refundResult,
+  };
+}
+
+export async function applyCasualtiesToArmy(ctx: MutationCtx, kingdomId: Id<"kingdoms">, casualties: Composition, wounded: Composition): Promise<void> {
   const units = await readArmyUnitsWithMigration(ctx, kingdomId);
   for (const type of UNIT_TYPES as readonly UnitType[]) {
     if (type === "espia") continue;
@@ -754,7 +924,7 @@ async function applyCasualtiesToArmy(ctx: MutationCtx, kingdomId: Id<"kingdoms">
       if (host) {
         await ctx.db.patch(host._id, { wounded: (host.wounded ?? 0) + woundedCount });
       } else {
-        await ctx.db.insert("armyUnits", { kingdomId, unitType: type, level: 1, count: 0, wounded: woundedCount });
+        await ctx.db.insert("armyUnits", { kingdomId, unitType: type, level: 1, count: 0, wounded: woundedCount, isSpy: false });
       }
     }
   }
@@ -918,7 +1088,7 @@ export const launchAttack = mutation({
 
     const currentArmy = await readArmyUnitsWithMigration(ctx, args.kingdomId);
     const requestedComposition: Partial<Record<UnitType, number>> = {};
-    const requestedByTypeLevel = new Map<string, { unitType: UnitType; level: number; count: number }>();
+    const requestedByTypeLevel = new Map<string, ValidatedMarchUnit>();
 
     for (const req of args.units) {
       if (!Number.isInteger(req.count) || req.count <= 0) {
@@ -1001,6 +1171,14 @@ export const launchAttack = mutation({
 
     const isConquest = !target.ownerKingdomId;
 
+    const normalizedMarchUnits: ValidatedMarchUnit[] = Array.from(
+      requestedByTypeLevel.values()
+    ).map((unit) => ({
+      unitType: unit.unitType,
+      level: unit.level,
+      count: unit.count,
+    }));
+
     const marchId = await ctx.db.insert("armyMarches", {
       kingdomId: args.kingdomId,
       targetCellId: args.cellId,
@@ -1008,7 +1186,7 @@ export const launchAttack = mutation({
       targetR: target.r,
       distance,
       terrainMultiplier: terrainMul,
-      units: args.units,
+      units: normalizedMarchUnits,
       startedAt: now,
       durationMs,
       completesAt,
@@ -1039,11 +1217,15 @@ export const launchAttack = mutation({
 
 export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">) {
   const march = await ctx.db.get(marchId);
-  if (!march || march.status !== "marchando") return null;
+  if (!march || march.status !== "marchando" || march.unitsRefundedAt != null) return null;
 
   const attackerKingdom = await ctx.db.get(march.kingdomId);
   if (!attackerKingdom) {
-    await ctx.db.patch(marchId, { status: "cancelada" });
+    await ctx.db.patch(marchId, {
+      status: "cancelada",
+      cancelledAt: Date.now(),
+      cancelReason: "attacker_kingdom_missing",
+    });
     return null;
   }
 
@@ -1092,9 +1274,8 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
         }
       }
     }
-    await refundMarchUnitsToGarrison(ctx, march.kingdomId, march.units);
     const outcome = capBlocked ? "limite_territorios_alcanzado" : "conquista_neutral";
-    await ctx.db.patch(marchId, {
+    await refundMarchToGarrisonOnce(ctx, marchId, {
       status: "completada",
       battleResult: capBlocked
         ? {
@@ -1110,8 +1291,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   // Si la marcha fue enviada como conquista territorial sobre casilla neutral, pero al llegar ya tiene soberano (carrera entre jugadores):
   // La resolución atómica es retorno automático sin combate, sin bajas y liberando el cupo de tropas.
   if (march.isConquest && targetCell.ownerKingdomId && targetCell.ownerKingdomId !== march.kingdomId) {
-    await refundMarchUnitsToGarrison(ctx, march.kingdomId, march.units);
-    await ctx.db.patch(marchId, {
+    await refundMarchToGarrisonOnce(ctx, marchId, {
       status: "completada",
       battleResult: {
         outcome: "terreno_ya_reclamado",
@@ -1129,12 +1309,42 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   const defenderKingdomId = targetCell.ownerKingdomId;
   const defenderKingdom = await ctx.db.get(defenderKingdomId);
   if (!defenderKingdom) {
-    await refundMarchUnitsToGarrison(ctx, march.kingdomId, march.units);
-    await ctx.db.patch(marchId, { status: "completada" });
+    await refundMarchToGarrisonOnce(ctx, marchId, {
+      status: "completada",
+      battleResult: { outcome: "sin_oposicion" },
+    });
     return { success: true, outcome: "sin_oposicion" };
   }
 
-  const attackerUnitsDocs = march.units.map((u) => ({ unitType: u.unitType, level: u.level ?? 1, count: u.count }));
+  const parsedAttackerUnits = parseMarchUnits(march.units);
+  if (parsedAttackerUnits.rejectedUnits.length > 0) {
+    console.warn("[RESOLUCIÓN MARCHA] Entradas inválidas o de espía excluidas antes de combate:", {
+      marchId,
+      kingdomId: march.kingdomId,
+      rejectedUnits: parsedAttackerUnits.rejectedUnits,
+    });
+  }
+  if (parsedAttackerUnits.validUnits.length === 0) {
+    const cancelNow = Date.now();
+    await ctx.db.patch(marchId, {
+      status: "cancelada",
+      cancelledAt: cancelNow,
+      cancelReason: "invalid_march_composition",
+      unitsRefundedAt: cancelNow,
+      battleResult: {
+        outcome: "composicion_invalida",
+        note: "La marcha no contenía tropas militares válidas; se canceló sin combate ni conversión de espías.",
+      },
+    });
+    return { success: false, outcome: "composicion_invalida" };
+  }
+
+  const attackerUnitsDocs = parsedAttackerUnits.validUnits.map((u) => ({
+    unitType: u.unitType,
+    level: u.level,
+    count: u.count,
+    isSpy: false,
+  }));
   const attackerComposition = activeComposition(attackerUnitsDocs);
   const attackerSummary = summarizeArmy(attackerUnitsDocs);
 
@@ -1220,20 +1430,15 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
 
     if (invalidChallengeState) {
       const cancelNow = Date.now();
-      await ctx.db.patch(marchId, {
+      await refundMarchToGarrisonOnce(ctx, marchId, {
         status: "cancelada",
         cancelledAt: cancelNow,
         cancelReason: "challenge_already_resolved_or_cancelled",
-        unitsRefundedAt: march.unitsRefundedAt ?? cancelNow,
         battleResult: {
           outcome: "desafio_no_vigente",
           note: "El desafío parlamentario ya fue resuelto o cancelado antes de la llegada de la marcha; las tropas regresan sin bajas.",
         },
       });
-      if (march.unitsRefundedAt == null) {
-        await refundMarchUnitsToGarrison(ctx, march.kingdomId, march.units);
-        await ctx.db.patch(marchId, { unitsRefundedAt: cancelNow });
-      }
       return { success: false, outcome: "desafio_no_vigente" };
     }
   }
@@ -1264,18 +1469,15 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     }
   }
 
-  const unitsByType: Record<string, Array<{ unitType: string; level: number; count: number }>> = {};
-  for (const u of march.units) {
-    if (isSpyUnitDoc(u) || normalizeUnitType(u.unitType) === "espia" || (u as any).isSpy === true) continue;
-    const norm = normalizeUnitType(u.unitType);
-    if (!norm || norm === "espia") continue;
-    const lvl = typeof u.level === "number" && Number.isInteger(u.level) && u.level >= 1 && u.level <= 5 ? u.level : 1;
-    if (!unitsByType[norm]) unitsByType[norm] = [];
-    unitsByType[norm].push({ unitType: norm, level: lvl, count: u.count });
+  const unitsByType: Partial<Record<RegularMilitaryUnitType, ValidatedMarchUnit[]>> = {};
+  for (const u of parsedAttackerUnits.validUnits) {
+    const existingList = unitsByType[u.unitType] ?? [];
+    existingList.push({ unitType: u.unitType, level: u.level, count: u.count });
+    unitsByType[u.unitType] = existingList;
   }
 
   for (const [type, survivorsTotal] of Object.entries(report.attacker.survivorsComposition) as [UnitType, number][]) {
-    if (survivorsTotal <= 0) continue;
+    if (type === "espia" || survivorsTotal <= 0) continue;
     const groups = unitsByType[type];
     if (!groups || groups.length === 0) {
       await addUnits(ctx, march.kingdomId, type, 1, survivorsTotal);
@@ -1295,18 +1497,18 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   }
 
   for (const [type, woundedTotal] of Object.entries(report.attacker.woundedComposition) as [UnitType, number][]) {
-    if (woundedTotal <= 0) continue;
+    if (type === "espia" || woundedTotal <= 0) continue;
     const groups = unitsByType[type];
     if (!groups || groups.length === 0) {
       const docs = await ctx.db
         .query("armyUnits")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", march.kingdomId))
         .collect();
-      const host = docs.find((d) => normalizeUnitType(d.unitType) === type) ?? docs[0];
+      const host = docs.find((d) => !isSpyUnitDoc(d) && normalizeUnitType(d.unitType) === type);
       if (host) {
         await ctx.db.patch(host._id, { wounded: (host.wounded ?? 0) + woundedTotal });
       } else {
-        await ctx.db.insert("armyUnits", { kingdomId: march.kingdomId, unitType: type, level: 1, count: 0, wounded: woundedTotal });
+        await ctx.db.insert("armyUnits", { kingdomId: march.kingdomId, unitType: type, level: 1, count: 0, wounded: woundedTotal, isSpy: false });
       }
       continue;
     }
@@ -1321,11 +1523,11 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
           .query("armyUnits")
           .withIndex("by_kingdom", (q) => q.eq("kingdomId", march.kingdomId))
           .collect();
-        const host = docs.find((d) => normalizeUnitType(d.unitType) === type && unitLevelOf(d) === g.level);
+        const host = docs.find((d) => !isSpyUnitDoc(d) && normalizeUnitType(d.unitType) === type && unitLevelOf(d) === g.level);
         if (host) {
           await ctx.db.patch(host._id, { wounded: (host.wounded ?? 0) + countToAdd });
         } else {
-          await ctx.db.insert("armyUnits", { kingdomId: march.kingdomId, unitType: type, level: g.level, count: 0, wounded: countToAdd });
+          await ctx.db.insert("armyUnits", { kingdomId: march.kingdomId, unitType: type, level: g.level, count: 0, wounded: countToAdd, isSpy: false });
         }
         remainingWounded -= countToAdd;
       }
@@ -1371,6 +1573,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
 
   await ctx.db.patch(marchId, {
     status: "completada",
+    unitsRefundedAt: now,
     battleResult: {
       outcome: report.outcome,
       crushingVictory: report.crushingVictory,

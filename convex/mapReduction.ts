@@ -2,8 +2,7 @@ import { internalMutation, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { MAP } from "./balanceConfig";
 import { hexDistance } from "./territoryRules";
-import { addUnits } from "./army";
-import { normalizeUnitType } from "./armyRules";
+import { addUnits, parseMarchUnits, refundMarchToGarrisonOnce } from "./army";
 import { calculateExplorationRefund } from "./explorationRules";
 import { settleRelationalKingdomEconomy } from "./economy";
 
@@ -88,11 +87,7 @@ export async function runMapReduction(
     let previewUnitsToRefund = 0;
 
     for (const march of activeExteriorMarches) {
-      for (const unit of march.units) {
-        if (unit.count > 0 && normalizeUnitType(unit.unitType)) {
-          previewUnitsToRefund += unit.count;
-        }
-      }
+      previewUnitsToRefund += parseMarchUnits(march.units).totalValidCount;
       if (march.challengeId && !seenChallengeIds.has(String(march.challengeId))) {
         const linked = await ctx.db.get(march.challengeId);
         if (
@@ -156,32 +151,21 @@ export async function runMapReduction(
   let unitsRefunded = 0;
 
   for (const march of activeExteriorMarches) {
-    const freshMarch = await ctx.db.get(march._id);
-    if (!freshMarch || freshMarch.status !== "marchando" || freshMarch.unitsRefundedAt != null) {
-      continue;
-    }
-
-    // Marcar estado y sello de devolución atómicamente antes de acreditar unidades
-    await ctx.db.patch(freshMarch._id, {
+    const refundRes = await refundMarchToGarrisonOnce(ctx, march._id, {
       status: "cancelada",
       cancelledAt: now,
       cancelReason: "map_reduction",
-      unitsRefundedAt: now,
     });
-
-    for (const unit of freshMarch.units) {
-      const normalized = normalizeUnitType(unit.unitType);
-      if (normalized && unit.count > 0) {
-        await addUnits(ctx, freshMarch.kingdomId, normalized, unit.level || 1, unit.count);
-        unitsRefunded += unit.count;
-      }
+    if (refundRes.alreadyRefunded) {
+      continue;
     }
+    unitsRefunded += refundRes.totalRefunded;
     marchesCancelled++;
 
     // Si la marcha estaba vinculada a un desafío parlamentario abierto (no resuelto), cancelarlo
     // para que el scheduler no resuelva posteriormente un combate cuya marcha fue cancelada.
-    if (freshMarch.challengeId) {
-      const linkedChallenge = await ctx.db.get(freshMarch.challengeId);
+    if (march.challengeId) {
+      const linkedChallenge = await ctx.db.get(march.challengeId);
       if (
         linkedChallenge &&
         (linkedChallenge.status === "ACCEPTED" || linkedChallenge.status === "FROZEN") &&
