@@ -105,6 +105,15 @@ export async function readArmyUnitsWithMigration(ctx: MutationCtx, kingdomId: Id
 
   const actions = planArmyUnitsMigration(canonical, legacy);
   for (const action of actions) {
+    if (action.kind === "quarantine_unrecognized_legacy") {
+      console.warn("[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado:", {
+        kingdomId,
+        legacyId: action.legacyId,
+        rawUnitType: action.rawUnitType,
+        reason: action.reason,
+      });
+      continue;
+    }
     if (action.kind === "insert_canonical") {
       const legacyIdStr = String(action.legacyId);
       await ctx.db.insert("armyUnits", {
