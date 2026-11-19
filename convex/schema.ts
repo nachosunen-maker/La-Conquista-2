@@ -391,6 +391,34 @@ export default defineSchema({
     })
       .index("by_user", ["userId"])
       .index("by_user_and_campaign", ["userId", "campaignId"]),
+
+    // Registro persistente e inmutable para usuarios normales de saneamientos del límite de 100 territorios (Punto 2).
+    territoryCapAuditLogs: defineTable({
+      operationId: v.string(),
+      executedAt: v.number(),
+      adminIdentity: v.string(),
+      mode: v.union(v.literal("dryRun"), v.literal("effective")),
+      kingdomId: v.id("kingdoms"),
+      kingdomName: v.string(),
+      initialTerritoryCount: v.number(),
+      capitalCellId: v.string(),
+      keptCellIds: v.array(v.string()),
+      releasedCellIds: v.array(v.string()),
+      releasedCount: v.number(),
+      referentialIntegrityBefore: v.any(),
+      referentialIntegrityAfter: v.any(),
+      outcome: v.union(
+        v.literal("simulated"),
+        v.literal("cleaned"),
+        v.literal("noop"),
+        v.literal("skipped_demo"),
+        v.literal("blocked")
+      ),
+      errors: v.array(v.string()),
+    })
+      .index("by_operation", ["operationId"])
+      .index("by_operation_and_kingdom", ["operationId", "kingdomId"])
+      .index("by_kingdom", ["kingdomId"]),
   },
   {
     schemaValidation: false,

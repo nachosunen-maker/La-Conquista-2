@@ -100,12 +100,25 @@ describe("Paquete A: Seguridad y control de acceso", () => {
     const k = await foundKingdom(t, "user-clean-dry", "Reino DryRun");
     await k.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: k.kingdomId });
 
-    // Llamada sin dryRun debe operar en modo simulación (no modificar BD)
-    const dryRes: any = await t.mutation(internal.territories.cleanupExcessTerritories, {});
-    expect(dryRes.dryRun).toBe(true);
-    expect(dryRes.referentialIntegrity.intact).toBe(true);
-    expect(dryRes.referentialIntegrity.orphanedHomes).toBe(0);
-    expect(dryRes.referentialIntegrity.kingdomsOverCapAfter).toBe(0);
+    // Llamada sin sesión administrativa debe rechazarse
+    await expect(
+      t.mutation(internal.territories.cleanupExcessTerritories, {})
+    ).rejects.toThrow(/No autorizado/i);
+
+    const prevAdmins = process.env.ADMIN_USER_IDS;
+    process.env.ADMIN_USER_IDS = "admin-compliance-dry";
+    try {
+      const asAdmin = t.withIdentity({ subject: "admin-compliance-dry" });
+      // Llamada sin dryRun debe operar en modo simulación (no modificar BD)
+      const dryRes: any = await asAdmin.mutation(internal.territories.cleanupExcessTerritories, {});
+      expect(dryRes.dryRun).toBe(true);
+      expect(dryRes.referentialIntegrity.intact).toBe(true);
+      expect(dryRes.referentialIntegrity.orphanedHomes).toBe(0);
+      expect(dryRes.referentialIntegrity.kingdomsOverCapAfter).toBe(0);
+    } finally {
+      if (prevAdmins === undefined) delete process.env.ADMIN_USER_IDS;
+      else process.env.ADMIN_USER_IDS = prevAdmins;
+    }
   });
 });
 

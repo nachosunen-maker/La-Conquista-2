@@ -1416,25 +1416,36 @@ describe("Bloque 1: Espías, tope de 100 territorios y saneamiento", () => {
       }
     });
 
-    const dry = await t.mutation(internal.territories.cleanupExcessTerritories, { dryRun: true });
-    expect(dry.dryRun).toBe(true);
-    expect(dry.territoriesReleased).toBe(8);
+    const prevAdminEnv = process.env.ADMIN_USER_IDS;
+    process.env.ADMIN_USER_IDS = "admin-integration-cap";
+    const asAdmin = t.withIdentity(identity("admin-integration-cap"));
+    try {
+      const dry = await asAdmin.mutation(internal.territories.cleanupExcessTerritories, { dryRun: true });
+      expect(dry.dryRun).toBe(true);
+      expect(dry.territoriesReleased).toBe(8);
 
-    const real1 = await t.mutation(internal.territories.cleanupExcessTerritories, { dryRun: false });
-    expect(real1.success).toBe(true);
-    expect(real1.territoriesReleased).toBe(8);
-    expect(real1.referentialIntegrity.intact).toBe(true);
-    expect(real1.details.find((d) => d.kingdomId === String(demoKingdomId))?.skippedDemo).toBe(true);
+      const real1 = await asAdmin.mutation(internal.territories.cleanupExcessTerritories, { dryRun: false });
+      expect(real1.success).toBe(true);
+      expect(real1.territoriesReleased).toBe(8);
+      expect(real1.referentialIntegrity.intact).toBe(true);
+      expect(real1.details.find((d) => d.kingdomId === String(demoKingdomId))?.skippedDemo).toBe(true);
 
-    const ownedAfter = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
-    expect(ownedAfter.territories).toHaveLength(100);
-    expect(ownedAfter.homeTerritoryId).toBe("10,0");
-    expect(ownedAfter.territories.some((c) => c.cellId === "10,0" && c.isHome)).toBe(true);
+      const ownedAfter = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
+      expect(ownedAfter.territories).toHaveLength(100);
+      expect(ownedAfter.homeTerritoryId).toBe("10,0");
+      expect(ownedAfter.territories.some((c) => c.cellId === "10,0" && c.isHome)).toBe(true);
 
-    // Segunda ejecución estrictamente idempotente
-    const real2 = await t.mutation(internal.territories.cleanupExcessTerritories, { dryRun: false });
-    expect(real2.territoriesReleased).toBe(0);
-    expect(real2.kingdomsModified).toBe(0);
+      // Segunda ejecución estrictamente idempotente
+      const real2 = await asAdmin.mutation(internal.territories.cleanupExcessTerritories, { dryRun: false });
+      expect(real2.territoriesReleased).toBe(0);
+      expect(real2.kingdomsModified).toBe(0);
+    } finally {
+      if (prevAdminEnv === undefined) {
+        delete process.env.ADMIN_USER_IDS;
+      } else {
+        process.env.ADMIN_USER_IDS = prevAdminEnv;
+      }
+    }
   });
 });
 

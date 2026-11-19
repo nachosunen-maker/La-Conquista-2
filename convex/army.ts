@@ -1288,7 +1288,12 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
         }
       }
     }
-    const outcome = capBlocked ? "limite_territorios_alcanzado" : "conquista_neutral";
+    const alreadyOwnedBySelf = Boolean(targetCell && targetCell.ownerKingdomId === march.kingdomId);
+    const outcome = capBlocked
+      ? "limite_territorios_alcanzado"
+      : alreadyOwnedBySelf
+        ? "terreno_ya_propio"
+        : "conquista_neutral";
     await refundMarchToGarrisonOnce(ctx, marchId, {
       status: "completada",
       battleResult: capBlocked
@@ -1297,7 +1302,13 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
             crushingVictory: false,
             note: `Límite máximo de ${TERRITORIES.MAX_PER_KINGDOM} territorios alcanzado; el territorio neutral no se ha anexionado.`,
           }
-        : { outcome, crushingVictory: false },
+        : alreadyOwnedBySelf
+          ? {
+              outcome,
+              crushingVictory: false,
+              note: "El territorio objetivo ya pertenecía a tu reino al llegar la marcha; tropas devueltas sin duplicar recompensas.",
+            }
+          : { outcome, crushingVictory: false },
     });
     return { success: true, outcome, cellId: march.targetCellId, territoryCapBlocked: capBlocked };
   }

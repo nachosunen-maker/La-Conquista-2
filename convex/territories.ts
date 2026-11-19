@@ -20,7 +20,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v, ConvexError } from "convex/values";
 import { recordMissionEvent } from "./missions";
-import { isKingdomOwner, DEMO_USER_ID } from "./kingdomAccess";
+import { isKingdomOwner, DEMO_USER_ID, isDemoAccountUserId, requireAuthorizedAdmin } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
 import { ensureAllKingdomsHaveColors } from "./kingdomColors";
 import { addUnits, readArmyUnitDocs, readArmyUnitsWithMigration } from "./army";
@@ -1461,150 +1461,749 @@ export async function releaseTerritories(ctx: MutationCtx, kingdomId: Id<"kingdo
   }
 }
 
-/**
- * Saneamiento idempotente del tope de 100 territorios por reino (incluyendo capital).
- * No altera recursos, ejércitos, edificios, progreso ni el reino de demostración Iberia.
- */
-export const cleanupExcessTerritories = internalMutation({
-  args: {
-    dryRun: v.optional(v.boolean()),
-    kingdomId: v.optional(v.id("kingdoms")),
-  },
-  handler: async (ctx, args) => {
-    const dryRun = args.dryRun ?? true;
-    const targetKingdoms = args.kingdomId
-      ? [await ctx.db.get(args.kingdomId)].filter((k): k is Doc<"kingdoms"> => Boolean(k))
-      : await ctx.db.query("kingdoms").collect();
+export interface ReferentialIntegrityIssue {
+  relation:
+    | "kingdomHome"
+    | "territories"
+    | "activeMarches"
+    | "historicalMarches"
+    | "explorationQueue"
+    | "exploredTerritories"
+    | "battles"
+    | "challenges"
+    | "buildings";
+  documentId: string;
+  kingdomId?: string;
+  cellId?: string;
+  severity: "blocking" | "warning";
+  reason: string;
+}
 
-    const details: Array<{
-      kingdomId: string;
-      kingdomName: string;
-      capitalCellId: string;
-      totalOwnedBefore: number;
-      keptCount: number;
-      releasedCount: number;
-      releasedCellIds: string[];
-      homeRepaired: boolean;
-      skippedDemo: boolean;
-    }> = [];
+export interface ReferentialIntegrityAudit {
+  examinedCount: number;
+  validCount: number;
+  inconsistentCount: number;
+  requiresInterventionCount: number;
+  orphanedHomes: number;
+  kingdomsOverCap: number;
+  examinedByRelation: {
+    kingdomHome: number;
+    territories: number;
+    activeMarches: number;
+    historicalMarches: number;
+    explorationQueue: number;
+    exploredTerritories: number;
+    battles: number;
+    challenges: number;
+    buildings: number;
+  };
+  inconsistencies: ReferentialIntegrityIssue[];
+  intact: boolean;
+}
 
-    let kingdomsModified = 0;
-    let territoriesReleased = 0;
+async function auditKingdomTerritoryReferentialIntegrity(
+  ctx: MutationCtx,
+  kingdom: Doc<"kingdoms">,
+  plannedReleaseCellIds: Set<string>,
+  phase: "before" | "after",
+  allActiveMarches: Doc<"armyMarches">[],
+  allTerritoriesForDuplicates: Doc<"territories">[]
+): Promise<ReferentialIntegrityAudit> {
+  const [
+    owned,
+    kingdomMarches,
+    explorations,
+    explored,
+    battlesAsAttacker,
+    battlesAsDefender,
+    challengesAsChallenger,
+    challengesAsTarget,
+    buildings,
+  ] = await Promise.all([
+    ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("armyMarches")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("explorationQueue")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("exploredTerritories")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("Battle")
+      .withIndex("by_attacker", (q) => q.eq("attackerKingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("Battle")
+      .withIndex("by_defender", (q) => q.eq("defenderKingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("challenges")
+      .withIndex("by_challenger", (q) => q.eq("challengerKingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("challenges")
+      .withIndex("by_target", (q) => q.eq("targetKingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("buildings")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+      .collect(),
+  ]);
 
-    for (const kingdom of targetKingdoms) {
-      if (kingdom.userId === DEMO_USER_ID || kingdom.userId === "guest_g9ai8cz") {
-        details.push({
-          kingdomId: String(kingdom._id),
-          kingdomName: kingdom.name,
-          capitalCellId: kingdom.homeTerritoryId ?? "",
-          totalOwnedBefore: 0,
-          keptCount: 0,
-          releasedCount: 0,
-          releasedCellIds: [],
-          homeRepaired: false,
-          skippedDemo: true,
-        });
-        continue;
-      }
+  const examinedByRelation = {
+    kingdomHome: 0,
+    territories: 0,
+    activeMarches: 0,
+    historicalMarches: 0,
+    explorationQueue: 0,
+    exploredTerritories: 0,
+    battles: 0,
+    challenges: 0,
+    buildings: 0,
+  };
+  const inconsistencies: ReferentialIntegrityIssue[] = [];
+  let validCount = 0;
+  let orphanedHomes = 0;
+  let kingdomsOverCap = 0;
 
-      const owned = await ctx.db
+  // 1. Capital del reino (kingdoms.homeTerritoryId y territories.isHome)
+  examinedByRelation.kingdomHome += 1;
+  const markedHomes = owned.filter((c) => c.isHome === true);
+  const homeById = kingdom.homeTerritoryId
+    ? owned.find((c) => c.cellId === kingdom.homeTerritoryId)
+    : undefined;
+
+  if (owned.length === 0) {
+    if (kingdom.homeTerritoryId) {
+      orphanedHomes += 1;
+      inconsistencies.push({
+        relation: "kingdomHome",
+        documentId: String(kingdom._id),
+        kingdomId: String(kingdom._id),
+        cellId: kingdom.homeTerritoryId,
+        severity: "blocking",
+        reason: `homeTerritoryId '${kingdom.homeTerritoryId}' apunta a una celda no poseída por el reino.`,
+      });
+    } else {
+      validCount += 1;
+    }
+  } else if (homeById) {
+    validCount += 1;
+  } else if (markedHomes.length === 1) {
+    if (phase === "after") {
+      orphanedHomes += 1;
+      inconsistencies.push({
+        relation: "kingdomHome",
+        documentId: String(kingdom._id),
+        kingdomId: String(kingdom._id),
+        cellId: kingdom.homeTerritoryId ?? markedHomes[0].cellId,
+        severity: "blocking",
+        reason: "homeTerritoryId no coincide con la capital marcada con isHome tras el saneamiento.",
+      });
+    } else {
+      // Recuperable de forma segura mediante prioridad 2 (isHome único)
+      inconsistencies.push({
+        relation: "kingdomHome",
+        documentId: String(kingdom._id),
+        kingdomId: String(kingdom._id),
+        cellId: markedHomes[0].cellId,
+        severity: "warning",
+        reason: `homeTerritoryId ausente o inconsistente; recuperable desde isHome único '${markedHomes[0].cellId}'.`,
+      });
+    }
+  } else {
+    orphanedHomes += 1;
+    inconsistencies.push({
+      relation: "kingdomHome",
+      documentId: String(kingdom._id),
+      kingdomId: String(kingdom._id),
+      cellId: kingdom.homeTerritoryId ?? undefined,
+      severity: "blocking",
+      reason:
+        markedHomes.length > 1
+          ? `Capital histórica ambigua: ${markedHomes.length} territorios marcados con isHome sin homeTerritoryId válido.`
+          : "No existe capital histórica identificable (homeTerritoryId ausente/inválido y sin isHome).",
+    });
+  }
+
+  // 2. Territorios poseídos: unicidad de cellId y tope posterior
+  const cellCounts = new Map<string, number>();
+  for (const t of allTerritoriesForDuplicates) {
+    cellCounts.set(t.cellId, (cellCounts.get(t.cellId) ?? 0) + 1);
+  }
+  for (const cell of owned) {
+    examinedByRelation.territories += 1;
+    const dupCount = cellCounts.get(cell.cellId) ?? 0;
+    if (dupCount > 1) {
+      inconsistencies.push({
+        relation: "territories",
+        documentId: String(cell._id),
+        kingdomId: String(kingdom._id),
+        cellId: cell.cellId,
+        severity: "blocking",
+        reason: `Existen ${dupCount} documentos duplicados en territories para cellId '${cell.cellId}'.`,
+      });
+    } else {
+      validCount += 1;
+    }
+  }
+  if (phase === "after" && owned.length > TERRITORIES.MAX_PER_KINGDOM) {
+    kingdomsOverCap += 1;
+    inconsistencies.push({
+      relation: "territories",
+      documentId: String(kingdom._id),
+      kingdomId: String(kingdom._id),
+      severity: "blocking",
+      reason: `El reino sigue superando el tope máximo (${owned.length}/${TERRITORIES.MAX_PER_KINGDOM}).`,
+    });
+  }
+
+  // 3. Marchas activas (cualquier reino hacia celdas a liberar + marchas activas propias) y marchas históricas
+  const activeTargetingRelease = allActiveMarches.filter((m) => plannedReleaseCellIds.has(m.targetCellId));
+  const examinedMarchIds = new Set<string>();
+  for (const m of activeTargetingRelease) {
+    examinedMarchIds.add(String(m._id));
+    examinedByRelation.activeMarches += 1;
+    inconsistencies.push({
+      relation: "activeMarches",
+      documentId: String(m._id),
+      kingdomId: String(m.kingdomId),
+      cellId: m.targetCellId,
+      severity: "blocking",
+      reason: `Marcha activa en curso hacia la celda '${m.targetCellId}' planificada para liberación; requiere resolución previa.`,
+    });
+  }
+  for (const m of kingdomMarches) {
+    if (examinedMarchIds.has(String(m._id))) continue;
+    if (m.status === "marchando") {
+      examinedByRelation.activeMarches += 1;
+      validCount += 1;
+    } else {
+      // Registro histórico: debe conservarse intacto
+      examinedByRelation.historicalMarches += 1;
+      validCount += 1;
+    }
+  }
+
+  // 4. Cola de exploraciones activas
+  for (const exp of explorations) {
+    examinedByRelation.explorationQueue += 1;
+    validCount += 1;
+  }
+
+  // 5. Territorios explorados (cartografía histórica: se conserva aunque se libere la propiedad)
+  for (const exp of explored) {
+    examinedByRelation.exploredTerritories += 1;
+    validCount += 1;
+  }
+
+  // 6. Informes de batalla históricos (se conservan intactos)
+  const seenBattles = new Set<string>();
+  for (const b of [...battlesAsAttacker, ...battlesAsDefender]) {
+    if (seenBattles.has(String(b._id))) continue;
+    seenBattles.add(String(b._id));
+    examinedByRelation.battles += 1;
+    validCount += 1;
+  }
+
+  // 7. Desafíos parlamentarios (activos vinculados a marchas hacia celdas a liberar vs históricos)
+  const seenChallenges = new Set<string>();
+  const blockingMarchIds = new Set(activeTargetingRelease.map((m) => String(m._id)));
+  for (const ch of [...challengesAsChallenger, ...challengesAsTarget]) {
+    if (seenChallenges.has(String(ch._id))) continue;
+    seenChallenges.add(String(ch._id));
+    examinedByRelation.challenges += 1;
+    if (ch.activeMarchId && blockingMarchIds.has(String(ch.activeMarchId))) {
+      inconsistencies.push({
+        relation: "challenges",
+        documentId: String(ch._id),
+        kingdomId: String(kingdom._id),
+        severity: "blocking",
+        reason: `Desafío activo '${String(ch._id)}' vinculado a una marcha en curso hacia una celda a liberar.`,
+      });
+    } else {
+      validCount += 1;
+    }
+  }
+
+  // 8. Edificios del reino (asociados al reino, se conservan intactos)
+  for (const b of buildings) {
+    examinedByRelation.buildings += 1;
+    validCount += 1;
+  }
+
+  const examinedCount = Object.values(examinedByRelation).reduce((acc, n) => acc + n, 0);
+  const inconsistentCount = inconsistencies.length;
+  const requiresInterventionCount = inconsistencies.filter((i) => i.severity === "blocking").length;
+
+  return {
+    examinedCount,
+    validCount,
+    inconsistentCount,
+    requiresInterventionCount,
+    orphanedHomes,
+    kingdomsOverCap,
+    examinedByRelation,
+    inconsistencies,
+    intact:
+      examinedCount > 0 &&
+      inconsistentCount === 0 &&
+      requiresInterventionCount === 0 &&
+      orphanedHomes === 0 &&
+      kingdomsOverCap === 0,
+  };
+}
+
+function aggregateIntegrityAudits(audits: ReferentialIntegrityAudit[]): ReferentialIntegrityAudit {
+  const examinedByRelation = {
+    kingdomHome: 0,
+    territories: 0,
+    activeMarches: 0,
+    historicalMarches: 0,
+    explorationQueue: 0,
+    exploredTerritories: 0,
+    battles: 0,
+    challenges: 0,
+    buildings: 0,
+  };
+  let examinedCount = 0;
+  let validCount = 0;
+  let inconsistentCount = 0;
+  let requiresInterventionCount = 0;
+  let orphanedHomes = 0;
+  let kingdomsOverCap = 0;
+  const inconsistencies: ReferentialIntegrityIssue[] = [];
+
+  for (const a of audits) {
+    examinedCount += a.examinedCount;
+    validCount += a.validCount;
+    inconsistentCount += a.inconsistentCount;
+    requiresInterventionCount += a.requiresInterventionCount;
+    orphanedHomes += a.orphanedHomes;
+    kingdomsOverCap += a.kingdomsOverCap;
+    for (const key of Object.keys(examinedByRelation) as Array<keyof typeof examinedByRelation>) {
+      examinedByRelation[key] += a.examinedByRelation[key];
+    }
+    inconsistencies.push(...a.inconsistencies);
+  }
+
+  return {
+    examinedCount,
+    validCount,
+    inconsistentCount,
+    requiresInterventionCount,
+    orphanedHomes,
+    kingdomsOverCap,
+    examinedByRelation,
+    inconsistencies,
+    intact:
+      (audits.length === 0 || examinedCount > 0) &&
+      inconsistentCount === 0 &&
+      requiresInterventionCount === 0 &&
+      orphanedHomes === 0 &&
+      kingdomsOverCap === 0,
+  };
+}
+
+async function runTerritoryCapCleanup(
+  ctx: MutationCtx,
+  args: { dryRun?: boolean; kingdomId?: Id<"kingdoms">; operationId?: string }
+) {
+  const { adminIdentity } = await requireAuthorizedAdmin(ctx);
+  const dryRun = args.dryRun ?? true;
+  const mode: "dryRun" | "effective" = dryRun ? "dryRun" : "effective";
+  const now = Date.now();
+  const operationId =
+    args.operationId && args.operationId.trim().length > 0
+      ? args.operationId.trim()
+      : `cap_cleanup_${mode}_${now}_${Math.random().toString(36).slice(2, 8)}`;
+
+  // Idempotencia de operación y registro de auditoría: si operationId ya fue procesado, devolver resultado persistido sin duplicar
+  const existingLogs = await ctx.db
+    .query("territoryCapAuditLogs")
+    .withIndex("by_operation", (q) => q.eq("operationId", operationId))
+    .collect();
+
+  if (existingLogs.length > 0) {
+    const beforeAudits = existingLogs
+      .map((l) => l.referentialIntegrityBefore as ReferentialIntegrityAudit | null)
+      .filter((a): a is ReferentialIntegrityAudit => Boolean(a));
+    const afterAudits = existingLogs
+      .map((l) => l.referentialIntegrityAfter as ReferentialIntegrityAudit | null)
+      .filter((a): a is ReferentialIntegrityAudit => Boolean(a));
+    const beforeSummary = aggregateIntegrityAudits(beforeAudits);
+    const afterSummary = aggregateIntegrityAudits(afterAudits);
+    const blockedCount = existingLogs.filter((l) => l.outcome === "blocked").length;
+
+    return {
+      success: blockedCount === 0,
+      idempotentReplay: true,
+      operationId,
+      adminIdentity: existingLogs[0].adminIdentity,
+      dryRun: existingLogs[0].mode === "dryRun",
+      mode: existingLogs[0].mode,
+      maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
+      kingdomsAudited: existingLogs.length,
+      kingdomsModified: existingLogs.filter((l) => l.outcome === "cleaned").length,
+      kingdomsBlocked: blockedCount,
+      territoriesReleased: existingLogs.reduce((acc, l) => acc + l.releasedCount, 0),
+      beforeIntegrity: beforeSummary,
+      afterIntegrity: afterSummary,
+      referentialIntegrity: {
+        examinedCount: afterSummary.examinedCount,
+        validCount: afterSummary.validCount,
+        inconsistentCount: afterSummary.inconsistentCount,
+        requiresInterventionCount: afterSummary.requiresInterventionCount,
+        orphanedHomes: afterSummary.orphanedHomes,
+        kingdomsOverCapAfter: afterSummary.kingdomsOverCap,
+        intact: afterSummary.intact && blockedCount === 0,
+      },
+      details: existingLogs.map((l) => ({
+        kingdomId: String(l.kingdomId),
+        kingdomName: l.kingdomName,
+        capitalCellId: l.capitalCellId,
+        totalOwnedBefore: l.initialTerritoryCount,
+        keptCount: l.keptCellIds.length,
+        keptCellIds: l.keptCellIds,
+        releasedCount: l.releasedCount,
+        releasedCellIds: l.releasedCellIds,
+        homeRepaired: false,
+        skippedDemo: l.outcome === "skipped_demo",
+        blocked: l.outcome === "blocked",
+        outcome: l.outcome,
+        errors: l.errors,
+      })),
+    };
+  }
+
+  const targetKingdoms = args.kingdomId
+    ? [await ctx.db.get(args.kingdomId)].filter((k): k is Doc<"kingdoms"> => Boolean(k))
+    : await ctx.db.query("kingdoms").collect();
+
+  const [allMarches, allTerritories] = await Promise.all([
+    ctx.db.query("armyMarches").collect(),
+    ctx.db.query("territories").collect(),
+  ]);
+  const allActiveMarches = allMarches.filter((m) => m.status === "marchando");
+
+  const details: Array<{
+    kingdomId: string;
+    kingdomName: string;
+    capitalCellId: string;
+    totalOwnedBefore: number;
+    keptCount: number;
+    keptCellIds: string[];
+    releasedCount: number;
+    releasedCellIds: string[];
+    homeRepaired: boolean;
+    skippedDemo: boolean;
+    blocked: boolean;
+    outcome: "simulated" | "cleaned" | "noop" | "skipped_demo" | "blocked";
+    errors: string[];
+  }> = [];
+
+  const beforeAudits: ReferentialIntegrityAudit[] = [];
+  const afterAudits: ReferentialIntegrityAudit[] = [];
+  let kingdomsModified = 0;
+  let kingdomsBlocked = 0;
+  let territoriesReleased = 0;
+
+  for (const kingdom of targetKingdoms) {
+    if (isDemoAccountUserId(kingdom.userId)) {
+      const demoOwned = await ctx.db
         .query("territories")
         .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
         .collect();
-
-      const plan = planTerritoryCapCleanup({
-        ownedCells: owned.map((c) => ({
-          id: String(c._id),
-          cellId: c.cellId,
-          q: c.q,
-          r: c.r,
-          isHome: c.isHome,
-          claimedAt: c.claimedAt,
-        })),
-        homeTerritoryId: kingdom.homeTerritoryId ?? null,
-        maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
+      const emptyDemoIntegrity: ReferentialIntegrityAudit = {
+        examinedCount: 1,
+        validCount: 1,
+        inconsistentCount: 0,
+        requiresInterventionCount: 0,
+        orphanedHomes: 0,
+        kingdomsOverCap: 0,
+        examinedByRelation: {
+          kingdomHome: 1,
+          territories: 0,
+          activeMarches: 0,
+          historicalMarches: 0,
+          explorationQueue: 0,
+          exploredTerritories: 0,
+          battles: 0,
+          challenges: 0,
+          buildings: 0,
+        },
+        inconsistencies: [],
+        intact: true,
+      };
+      await ctx.db.insert("territoryCapAuditLogs", {
+        operationId,
+        executedAt: now,
+        adminIdentity,
+        mode,
+        kingdomId: kingdom._id,
+        kingdomName: kingdom.name,
+        initialTerritoryCount: demoOwned.length,
+        capitalCellId: kingdom.homeTerritoryId ?? "",
+        keptCellIds: demoOwned.map((c) => c.cellId),
+        releasedCellIds: [],
+        releasedCount: 0,
+        referentialIntegrityBefore: emptyDemoIntegrity,
+        referentialIntegrityAfter: emptyDemoIntegrity,
+        outcome: "skipped_demo",
+        errors: [],
       });
+      details.push({
+        kingdomId: String(kingdom._id),
+        kingdomName: kingdom.name,
+        capitalCellId: kingdom.homeTerritoryId ?? "",
+        totalOwnedBefore: demoOwned.length,
+        keptCount: demoOwned.length,
+        keptCellIds: demoOwned.map((c) => c.cellId),
+        releasedCount: 0,
+        releasedCellIds: [],
+        homeRepaired: false,
+        skippedDemo: true,
+        blocked: false,
+        outcome: "skipped_demo",
+        errors: [],
+      });
+      continue;
+    }
 
-      let homeRepaired = false;
-      const capitalDoc = owned.find((c) => c.cellId === plan.capitalCellId);
+    const owned = await ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
+      .collect();
 
-      if (!dryRun) {
-        if (plan.capitalCellId && kingdom.homeTerritoryId !== plan.capitalCellId) {
-          await ctx.db.patch(kingdom._id, { homeTerritoryId: plan.capitalCellId });
-          homeRepaired = true;
-        }
-        if (capitalDoc && !capitalDoc.isHome) {
-          await ctx.db.patch(capitalDoc._id, { isHome: true });
-          homeRepaired = true;
-        }
-        for (const c of owned) {
-          if (c.cellId !== plan.capitalCellId && c.isHome) {
-            await ctx.db.patch(c._id, { isHome: false });
-          }
-        }
-        if (!plan.skipped && plan.releasedCells.length > 0) {
-          const releaseIds = new Set(plan.releasedCellIds);
-          for (const cellDoc of owned) {
-            if (releaseIds.has(cellDoc.cellId)) {
-              await ctx.db.patch(cellDoc._id, {
-                ownerKingdomId: undefined,
-                isHome: false,
-                claimedAt: undefined,
-              });
-            }
-          }
-        }
+    const plan = planTerritoryCapCleanup({
+      ownedCells: owned.map((c) => ({
+        id: String(c._id),
+        cellId: c.cellId,
+        q: c.q,
+        r: c.r,
+        isHome: c.isHome,
+        claimedAt: c.claimedAt,
+      })),
+      homeTerritoryId: kingdom.homeTerritoryId ?? null,
+      maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
+    });
+
+    const plannedReleaseSet = new Set(plan.releasedCellIds);
+    const beforeAudit = await auditKingdomTerritoryReferentialIntegrity(
+      ctx,
+      kingdom,
+      plannedReleaseSet,
+      "before",
+      allActiveMarches,
+      allTerritories
+    );
+    beforeAudits.push(beforeAudit);
+
+    const blockingErrors: string[] = [];
+    if (plan.blocked && plan.reason) {
+      blockingErrors.push(plan.reason);
+    }
+    for (const issue of beforeAudit.inconsistencies) {
+      if (issue.severity === "blocking") {
+        blockingErrors.push(`[${issue.relation}] ${issue.reason}`);
       }
+    }
 
-      if (!plan.skipped || homeRepaired) {
-        kingdomsModified++;
-      }
-      territoriesReleased += plan.releasedCellIds.length;
+    const isBlocked = plan.blocked || beforeAudit.requiresInterventionCount > 0;
+    let homeRepaired = false;
+
+    if (isBlocked) {
+      kingdomsBlocked += 1;
+      afterAudits.push(beforeAudit);
+
+      await ctx.db.insert("territoryCapAuditLogs", {
+        operationId,
+        executedAt: now,
+        adminIdentity,
+        mode,
+        kingdomId: kingdom._id,
+        kingdomName: kingdom.name,
+        initialTerritoryCount: owned.length,
+        capitalCellId: plan.capitalCellId,
+        keptCellIds: owned.map((c) => c.cellId),
+        releasedCellIds: [],
+        releasedCount: 0,
+        referentialIntegrityBefore: beforeAudit,
+        referentialIntegrityAfter: beforeAudit,
+        outcome: "blocked",
+        errors: blockingErrors,
+      });
 
       details.push({
         kingdomId: String(kingdom._id),
         kingdomName: kingdom.name,
         capitalCellId: plan.capitalCellId,
-        totalOwnedBefore: plan.totalOwned,
-        keptCount: plan.keptCellIds.length,
-        releasedCount: plan.releasedCellIds.length,
-        releasedCellIds: plan.releasedCellIds,
-        homeRepaired,
+        totalOwnedBefore: owned.length,
+        keptCount: owned.length,
+        keptCellIds: owned.map((c) => c.cellId),
+        releasedCount: 0,
+        releasedCellIds: [],
+        homeRepaired: false,
         skippedDemo: false,
+        blocked: true,
+        outcome: "blocked",
+        errors: blockingErrors,
       });
+      continue;
     }
 
-    // Verificación de integridad referencial posterior sobre los reinos inspeccionados
-    let orphanedHomes = 0;
-    let kingdomsOverCapAfter = 0;
-    for (const kingdom of targetKingdoms) {
-      if (kingdom.userId === DEMO_USER_ID || kingdom.userId === "guest_g9ai8cz") continue;
-      const freshKingdom = await ctx.db.get(kingdom._id);
-      const freshOwned = await ctx.db
-        .query("territories")
-        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
-        .collect();
-      if (freshOwned.length > TERRITORIES.MAX_PER_KINGDOM) kingdomsOverCapAfter++;
-      if (freshKingdom?.homeTerritoryId && !freshOwned.some((c) => c.cellId === freshKingdom.homeTerritoryId)) {
-        orphanedHomes++;
+    const capitalDoc = owned.find((c) => c.cellId === plan.capitalCellId);
+
+    if (!dryRun) {
+      if (plan.capitalCellId && kingdom.homeTerritoryId !== plan.capitalCellId) {
+        await ctx.db.patch(kingdom._id, { homeTerritoryId: plan.capitalCellId });
+        homeRepaired = true;
+      }
+      if (capitalDoc && !capitalDoc.isHome) {
+        await ctx.db.patch(capitalDoc._id, { isHome: true });
+        homeRepaired = true;
+      }
+      for (const c of owned) {
+        if (c.cellId !== plan.capitalCellId && c.isHome) {
+          await ctx.db.patch(c._id, { isHome: false });
+          homeRepaired = true;
+        }
+      }
+      if (!plan.skipped && plan.releasedCells.length > 0) {
+        for (const cellDoc of owned) {
+          if (plannedReleaseSet.has(cellDoc.cellId)) {
+            await ctx.db.patch(cellDoc._id, {
+              ownerKingdomId: undefined,
+              isHome: false,
+              claimedAt: undefined,
+            });
+          }
+        }
       }
     }
 
-    return {
-      success: true,
-      dryRun,
-      maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
-      kingdomsAudited: targetKingdoms.length,
-      kingdomsModified,
-      territoriesReleased,
-      referentialIntegrity: {
-        orphanedHomes,
-        kingdomsOverCapAfter,
-        intact: orphanedHomes === 0 && kingdomsOverCapAfter === 0,
-      },
-      details,
-    };
+    const freshKingdom = (await ctx.db.get(kingdom._id)) ?? kingdom;
+    const afterAudit = dryRun
+      ? beforeAudit
+      : await auditKingdomTerritoryReferentialIntegrity(
+          ctx,
+          freshKingdom,
+          new Set(),
+          "after",
+          allActiveMarches,
+          allTerritories
+        );
+    afterAudits.push(afterAudit);
+
+    const outcome: "simulated" | "cleaned" | "noop" = dryRun
+      ? "simulated"
+      : !plan.skipped || homeRepaired
+        ? "cleaned"
+        : "noop";
+
+    if (!plan.skipped || homeRepaired) {
+      kingdomsModified += 1;
+    }
+    territoriesReleased += plan.releasedCellIds.length;
+
+    await ctx.db.insert("territoryCapAuditLogs", {
+      operationId,
+      executedAt: now,
+      adminIdentity,
+      mode,
+      kingdomId: kingdom._id,
+      kingdomName: kingdom.name,
+      initialTerritoryCount: plan.totalOwned,
+      capitalCellId: plan.capitalCellId,
+      keptCellIds: plan.keptCellIds,
+      releasedCellIds: plan.releasedCellIds,
+      releasedCount: plan.releasedCellIds.length,
+      referentialIntegrityBefore: beforeAudit,
+      referentialIntegrityAfter: afterAudit,
+      outcome,
+      errors: [],
+    });
+
+    details.push({
+      kingdomId: String(kingdom._id),
+      kingdomName: kingdom.name,
+      capitalCellId: plan.capitalCellId,
+      totalOwnedBefore: plan.totalOwned,
+      keptCount: plan.keptCellIds.length,
+      keptCellIds: plan.keptCellIds,
+      releasedCount: plan.releasedCellIds.length,
+      releasedCellIds: plan.releasedCellIds,
+      homeRepaired,
+      skippedDemo: false,
+      blocked: false,
+      outcome,
+      errors: [],
+    });
+  }
+
+  const beforeSummary = aggregateIntegrityAudits(beforeAudits);
+  const afterSummary = aggregateIntegrityAudits(afterAudits);
+
+  return {
+    success: kingdomsBlocked === 0 && afterSummary.requiresInterventionCount === 0,
+    idempotentReplay: false,
+    operationId,
+    adminIdentity,
+    dryRun,
+    mode,
+    maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
+    kingdomsAudited: targetKingdoms.length,
+    kingdomsModified,
+    kingdomsBlocked,
+    territoriesReleased,
+    beforeIntegrity: beforeSummary,
+    afterIntegrity: afterSummary,
+    referentialIntegrity: {
+      examinedCount: afterSummary.examinedCount,
+      validCount: afterSummary.validCount,
+      inconsistentCount: afterSummary.inconsistentCount,
+      requiresInterventionCount: afterSummary.requiresInterventionCount,
+      orphanedHomes: afterSummary.orphanedHomes,
+      kingdomsOverCapAfter: afterSummary.kingdomsOverCap,
+      intact: afterSummary.intact && kingdomsBlocked === 0,
+    },
+    details,
+  };
+}
+
+/**
+ * Saneamiento administrativo, auditable e idempotente del tope de 100 territorios por reino (incluyendo capital).
+ * Requiere identidad administrativa autorizada en servidor (ADMIN_USER_IDS), incluso en dryRun.
+ * No altera recursos, ejércitos, edificios, historiales ni cuentas de demostración registradas.
+ */
+export const cleanupExcessTerritories = internalMutation({
+  args: {
+    dryRun: v.optional(v.boolean()),
+    kingdomId: v.optional(v.id("kingdoms")),
+    operationId: v.optional(v.string()),
   },
+  handler: async (ctx, args) => runTerritoryCapCleanup(ctx, args),
+});
+
+/**
+ * Punto de entrada público protegido por autorización administrativa real en servidor.
+ * Rechaza llamadas anónimas, cuentas de demostración y usuarios normales tanto en dryRun como en ejecución efectiva.
+ */
+export const executeTerritoryCapCleanup = mutation({
+  args: {
+    dryRun: v.optional(v.boolean()),
+    kingdomId: v.optional(v.id("kingdoms")),
+    operationId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => runTerritoryCapCleanup(ctx, args),
 });
 
 export const auditMapReduction = internalMutation({

@@ -531,8 +531,13 @@ export interface CleanupCandidateCell {
   claimedAt?: number;
 }
 
+export type CapitalResolutionSource = "homeTerritoryId" | "isHome" | "historical" | "missing" | "ambiguous";
+
 export interface TerritoryCapCleanupPlan {
   capitalCellId: string;
+  capitalSource: CapitalResolutionSource;
+  requiresReview: boolean;
+  blocked: boolean;
   totalOwned: number;
   maxAllowed: number;
   keptCellIds: string[];
@@ -544,11 +549,19 @@ export interface TerritoryCapCleanupPlan {
 
 /**
  * Planificador puro, determinista e idempotente para sanear reinos que excedan el tope de territorios.
- * Conserva la capital canónica y las (maxAllowed - 1) casillas más cercanas por distancia hexagonal.
+ * Conserva la capital histórica verificable y las (maxAllowed - 1) casillas más cercanas por distancia hexagonal.
+ *
+ * Orden estricto de identificación de la capital:
+ * 1. `homeTerritoryId` si apunta a un territorio propiedad del reino.
+ * 2. Registro territorial único marcado con `isHome: true` si la referencia principal falta o es inconsistente.
+ * 3. Recuperación segura mediante `historicalCapitalCellId` verificable si el reino dispone de ese dato.
+ * Nunca selecciona una capital por cercanía al centro del mapa si falta evidencia suficiente:
+ * en ese caso bloquea la liberación y marca `requiresReview: true`.
  */
 export function planTerritoryCapCleanup(input: {
   ownedCells: ReadonlyArray<CleanupCandidateCell>;
   homeTerritoryId?: string | null;
+  historicalCapitalCellId?: string | null;
   maxAllowed?: number;
 }): TerritoryCapCleanupPlan {
   const maxAllowed = input.maxAllowed ?? TERRITORIES.MAX_PER_KINGDOM;
@@ -556,6 +569,9 @@ export function planTerritoryCapCleanup(input: {
   if (cells.length === 0) {
     return {
       capitalCellId: input.homeTerritoryId ?? "",
+      capitalSource: "missing",
+      requiresReview: false,
+      blocked: false,
       totalOwned: 0,
       maxAllowed,
       keptCellIds: [],
@@ -566,26 +582,63 @@ export function planTerritoryCapCleanup(input: {
     };
   }
 
-  const sortedForCapital = [...cells].sort((a, b) => {
-    const aHomeId = input.homeTerritoryId && a.cellId === input.homeTerritoryId ? 0 : 1;
-    const bHomeId = input.homeTerritoryId && b.cellId === input.homeTerritoryId ? 0 : 1;
-    if (aHomeId !== bHomeId) return aHomeId - bHomeId;
-    const aIsHome = a.isHome ? 0 : 1;
-    const bIsHome = b.isHome ? 0 : 1;
-    if (aIsHome !== bIsHome) return aIsHome - bIsHome;
-    const distA = hexDistance(a, { q: 0, r: 0 });
-    const distB = hexDistance(b, { q: 0, r: 0 });
-    if (distA !== distB) return distA - distB;
-    const claimedA = typeof a.claimedAt === "number" ? a.claimedAt : Number.MAX_SAFE_INTEGER;
-    const claimedB = typeof b.claimedAt === "number" ? b.claimedAt : Number.MAX_SAFE_INTEGER;
-    if (claimedA !== claimedB) return claimedA - claimedB;
-    return a.cellId.localeCompare(b.cellId);
-  });
+  // 1. Prioridad 1: homeTerritoryId apuntando a una celda propiedad del reino
+  let capital: CleanupCandidateCell | undefined;
+  let capitalSource: CapitalResolutionSource = "missing";
+  if (input.homeTerritoryId) {
+    const byHomeId = cells.find((c) => c.cellId === input.homeTerritoryId);
+    if (byHomeId) {
+      capital = byHomeId;
+      capitalSource = "homeTerritoryId";
+    }
+  }
 
-  const capital = sortedForCapital[0];
+  // 2. Prioridad 2: registro territorial único marcado como isHome
+  if (!capital) {
+    const markedHomes = cells.filter((c) => c.isHome === true);
+    if (markedHomes.length === 1) {
+      capital = markedHomes[0];
+      capitalSource = "isHome";
+    } else if (markedHomes.length > 1) {
+      capitalSource = "ambiguous";
+    }
+  }
+
+  // 3. Prioridad 3: recuperación segura basada en dato histórico verificable (si no es ambiguo)
+  if (!capital && capitalSource !== "ambiguous" && input.historicalCapitalCellId) {
+    const byHistorical = cells.find((c) => c.cellId === input.historicalCapitalCellId);
+    if (byHistorical) {
+      capital = byHistorical;
+      capitalSource = "historical";
+    }
+  }
+
+  if (!capital) {
+    const reason =
+      capitalSource === "ambiguous"
+        ? "Capital histórica ambigua: existen múltiples territorios marcados con isHome sin homeTerritoryId válido; requiere revisión manual."
+        : "No se pudo identificar la capital histórica con seguridad (homeTerritoryId ausente o ajeno y sin marca isHome verificable); requiere revisión manual.";
+    return {
+      capitalCellId: "",
+      capitalSource,
+      requiresReview: true,
+      blocked: true,
+      totalOwned: cells.length,
+      maxAllowed,
+      keptCellIds: cells.map((c) => c.cellId),
+      releasedCellIds: [],
+      releasedCells: [],
+      skipped: true,
+      reason,
+    };
+  }
+
   if (cells.length <= maxAllowed) {
     return {
       capitalCellId: capital.cellId,
+      capitalSource,
+      requiresReview: false,
+      blocked: false,
       totalOwned: cells.length,
       maxAllowed,
       keptCellIds: cells.map((c) => c.cellId),
@@ -614,6 +667,9 @@ export function planTerritoryCapCleanup(input: {
 
   return {
     capitalCellId: capital.cellId,
+    capitalSource,
+    requiresReview: false,
+    blocked: false,
     totalOwned: cells.length,
     maxAllowed,
     keptCellIds: kept.map((c) => c.cellId),
