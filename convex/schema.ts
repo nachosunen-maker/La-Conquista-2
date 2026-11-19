@@ -415,6 +415,9 @@ export default defineSchema({
         v.literal("blocked")
       ),
       errors: v.array(v.string()),
+      requestedScope: v.optional(v.union(v.literal("single_kingdom"), v.literal("all_kingdoms"))),
+      requestedKingdomId: v.optional(v.string()),
+      targetKingdomIds: v.optional(v.array(v.string())),
     })
       .index("by_operation", ["operationId"])
       .index("by_operation_and_kingdom", ["operationId", "kingdomId"])

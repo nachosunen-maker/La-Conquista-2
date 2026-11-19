@@ -752,4 +752,445 @@ describe("Punto 2 — Tareas 2–5: Autorización administrativa, auditoría per
     expect(demoOwned).toHaveLength(105);
     expect(realOwned).toHaveLength(100);
   });
+
+  test("20. Auditoría referencial completa: explorationQueue, activeMarches, challenges y buildings bloquean referencias activas incompatibles", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+
+    // Caso 20A: explorationQueue activa hacia una celda planificada para liberación -> BLOQUEA
+    const kExp = await foundKingdom(t, "user-exp-block", "Reino Exploración Activa");
+    const seededExp = await seedKingdomTerritories(t, kExp.kingdomId, 102, {
+      capitalCellId: "0,0",
+      extraNeighborCount: 0,
+    });
+    const lastCell = seededExp.ownedCells[seededExp.ownedCells.length - 1];
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("explorationQueue", {
+        kingdomId: kExp.kingdomId,
+        cellId: lastCell.cellId,
+        targetQ: lastCell.q,
+        targetR: lastCell.r,
+        distance: 5,
+        startedAt: Date.now(),
+        durationMs: 3600_000,
+        completesAt: Date.now() + 3600_000,
+        scoutsCount: 1,
+        costs: { gold: 10, food: 10 },
+      });
+    });
+
+    const resExpBlock = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: kExp.kingdomId,
+      operationId: "op-ref-exp-release-block",
+    });
+    expect(resExpBlock.success).toBe(false);
+    expect(resExpBlock.kingdomsBlocked).toBe(1);
+    expect(resExpBlock.territoriesReleased).toBe(0);
+    expect(resExpBlock.referentialIntegrity.intact).toBe(false);
+    expect(resExpBlock.referentialIntegrity.blockingCount).toBeGreaterThan(0);
+    expect(resExpBlock.beforeIntegrity.byRelation.explorationQueue.examined).toBe(1);
+    expect(resExpBlock.beforeIntegrity.byRelation.explorationQueue.valid).toBe(0);
+    expect(resExpBlock.beforeIntegrity.byRelation.explorationQueue.inconsistent).toBe(1);
+    expect(resExpBlock.beforeIntegrity.byRelation.explorationQueue.blocking).toBe(1);
+
+    // Caso 20B: explorationQueue activa hacia celda inexistente -> BLOQUEA
+    const kExpGhost = await foundKingdom(t, "user-exp-ghost", "Reino Exploración Fantasma");
+    await seedKingdomTerritories(t, kExpGhost.kingdomId, 101, {
+      capitalCellId: "20,0",
+      extraNeighborCount: 0,
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("explorationQueue", {
+        kingdomId: kExpGhost.kingdomId,
+        cellId: "99,99",
+        targetQ: 99,
+        targetR: 99,
+        distance: 50,
+        startedAt: Date.now(),
+        durationMs: 3600_000,
+        completesAt: Date.now() + 3600_000,
+        scoutsCount: 1,
+        costs: { gold: 10, food: 10 },
+      });
+    });
+
+    const resExpGhost = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: kExpGhost.kingdomId,
+      operationId: "op-ref-exp-ghost-block",
+    });
+    expect(resExpGhost.success).toBe(false);
+    expect(resExpGhost.kingdomsBlocked).toBe(1);
+    expect(resExpGhost.beforeIntegrity.byRelation.explorationQueue.blocking).toBe(1);
+    expect(resExpGhost.referentialIntegrity.intact).toBe(false);
+
+    // Caso 20C: marcha activa hacia celda inexistente + desafío activo con activeMarchId huérfano -> BLOQUEA
+    const kBadActive = await foundKingdom(t, "user-bad-active", "Reino Activos Rotos");
+    await seedKingdomTerritories(t, kBadActive.kingdomId, 101, {
+      capitalCellId: "-20,0",
+      extraNeighborCount: 0,
+    });
+    await t.run(async (ctx) => {
+      const dummyMarchId = await ctx.db.insert("armyMarches", {
+        kingdomId: kBadActive.kingdomId,
+        targetCellId: "88,88",
+        targetQ: 88,
+        targetR: 88,
+        distance: 40,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now(),
+        durationMs: 3600_000,
+        completesAt: Date.now() + 3600_000,
+        status: "marchando",
+      });
+      await ctx.db.insert("challenges", {
+        challengerKingdomId: kBadActive.kingdomId,
+        targetKingdomId: kExp.kingdomId,
+        challengeType: "conquista",
+        status: "ACCEPTED",
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 86_400_000,
+        activeMarchId: dummyMarchId,
+      });
+    });
+
+    const resBadActive = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: kBadActive.kingdomId,
+      operationId: "op-ref-active-march-challenge-block",
+    });
+    expect(resBadActive.success).toBe(false);
+    expect(resBadActive.kingdomsBlocked).toBe(1);
+    expect(resBadActive.beforeIntegrity.byRelation.activeMarches.blocking).toBe(1);
+    expect(resBadActive.beforeIntegrity.byRelation.challenges.blocking).toBe(1);
+    expect(resBadActive.referentialIntegrity.intact).toBe(false);
+
+    // Caso 20D: edificio con metadatos inválidos (level negativo) -> BLOQUEA
+    const kBadBuilding = await foundKingdom(t, "user-bad-bldg", "Reino Edificio Roto");
+    await seedKingdomTerritories(t, kBadBuilding.kingdomId, 101, {
+      capitalCellId: "0,20",
+      extraNeighborCount: 0,
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("buildings", {
+        kingdomId: kBadBuilding.kingdomId,
+        buildingType: "castillo",
+        level: -1,
+      });
+    });
+
+    const resBadBuilding = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: kBadBuilding.kingdomId,
+      operationId: "op-ref-building-block",
+    });
+    expect(resBadBuilding.success).toBe(false);
+    expect(resBadBuilding.kingdomsBlocked).toBe(1);
+    expect(resBadBuilding.beforeIntegrity.byRelation.buildings.blocking).toBe(1);
+    expect(resBadBuilding.referentialIntegrity.intact).toBe(false);
+  });
+
+  test("21. Auditoría referencial histórica: detecta referencias rotas en exploredTerritories, historicalMarches, Battle y challenges sin borrar historiales y marca intact=false", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+
+    const kHist = await foundKingdom(t, "user-hist-audit", "Reino Histórico");
+    const kOther = await foundKingdom(t, "user-hist-other", "Reino Vecino Histórico");
+    const seeded = await seedKingdomTerritories(t, kHist.kingdomId, 102, {
+      capitalCellId: "0,0",
+      extraNeighborCount: 0,
+    });
+    const releasedTarget = seeded.ownedCells[seeded.ownedCells.length - 1];
+
+    const insertedIds = await t.run(async (ctx) => {
+      // 1. exploredTerritories: 1 válido (celda que será liberada) + 1 roto (celda inexistente)
+      const validExploredId = await ctx.db.insert("exploredTerritories", {
+        kingdomId: kHist.kingdomId,
+        cellId: releasedTarget.cellId,
+        discoveredAt: Date.now() - 5000,
+      });
+      const brokenExploredId = await ctx.db.insert("exploredTerritories", {
+        kingdomId: kHist.kingdomId,
+        cellId: "999,999",
+        discoveredAt: Date.now() - 4000,
+      });
+
+      // 2. historicalMarches: 1 válida (hacia celda liberada que sigue existiendo) + 1 rota (celda inexistente)
+      const validHistMarchId = await ctx.db.insert("armyMarches", {
+        kingdomId: kHist.kingdomId,
+        targetCellId: releasedTarget.cellId,
+        targetQ: releasedTarget.q,
+        targetR: releasedTarget.r,
+        distance: 4,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now() - 9000,
+        durationMs: 1000,
+        completesAt: Date.now() - 8000,
+        status: "completada",
+      });
+      const brokenHistMarchId = await ctx.db.insert("armyMarches", {
+        kingdomId: kHist.kingdomId,
+        targetCellId: "777,777",
+        targetQ: 777,
+        targetR: 777,
+        distance: 50,
+        units: [{ unitType: "infanteria", level: 1, count: 5 }],
+        startedAt: Date.now() - 9000,
+        durationMs: 1000,
+        completesAt: Date.now() - 8000,
+        status: "cancelada",
+      });
+
+      // 3. challenges + Battle: 1 desafío resuelto válido + 1 batalla con report apuntando a celda inexistente
+      const validChallengeId = await ctx.db.insert("challenges", {
+        challengerKingdomId: kHist.kingdomId,
+        targetKingdomId: kOther.kingdomId,
+        challengeType: "conquista",
+        status: "RESOLVED",
+        createdAt: Date.now() - 20_000,
+        expiresAt: Date.now() - 10_000,
+        resolvedAt: Date.now() - 15_000,
+      });
+      const brokenBattleId = await ctx.db.insert("Battle", {
+        challengeId: validChallengeId,
+        attackerKingdomId: kHist.kingdomId,
+        defenderKingdomId: kOther.kingdomId,
+        resolvedAt: Date.now() - 15_000,
+        outcome: "attacker_win",
+        winnerKingdomId: kHist.kingdomId,
+        crushingVictory: false,
+        report: { targetCellId: "888,888" },
+      });
+
+      // 4. challenges histórico con battleId inexistente (creamos y borramos una batalla para obtener ID válido inexistente)
+      const tempBattleId = await ctx.db.insert("Battle", {
+        challengeId: validChallengeId,
+        attackerKingdomId: kHist.kingdomId,
+        defenderKingdomId: kOther.kingdomId,
+        resolvedAt: Date.now() - 12_000,
+        outcome: "draw",
+        crushingVictory: false,
+        report: {},
+      });
+      await ctx.db.delete(tempBattleId);
+      const brokenHistChallengeId = await ctx.db.insert("challenges", {
+        challengerKingdomId: kHist.kingdomId,
+        targetKingdomId: kOther.kingdomId,
+        challengeType: "conquista",
+        status: "RESOLVED",
+        createdAt: Date.now() - 13_000,
+        expiresAt: Date.now() - 10_000,
+        resolvedAt: Date.now() - 12_000,
+        battleId: tempBattleId,
+      });
+
+      return {
+        validExploredId,
+        brokenExploredId,
+        validHistMarchId,
+        brokenHistMarchId,
+        validChallengeId,
+        brokenBattleId,
+        brokenHistChallengeId,
+      };
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: kHist.kingdomId,
+      operationId: "op-hist-warnings-preserved",
+    });
+
+    // Sin bloqueos activos: sanea a 100, pero NO declara intact=true porque existen inconsistencias históricas pendientes
+    expect(res.success).toBe(true);
+    expect(res.territoriesReleased).toBe(2);
+    expect(res.referentialIntegrity.blockingCount).toBe(0);
+    expect(res.referentialIntegrity.inconsistentCount).toBe(4);
+    expect(res.referentialIntegrity.intact).toBe(false);
+
+    // Desglose por relación verifica examinados, válidos, inconsistentes y bloqueos
+    expect(res.afterIntegrity.byRelation.exploredTerritories).toEqual({
+      examined: 2,
+      valid: 1,
+      inconsistent: 1,
+      blocking: 0,
+    });
+    expect(res.afterIntegrity.byRelation.historicalMarches).toEqual({
+      examined: 2,
+      valid: 1,
+      inconsistent: 1,
+      blocking: 0,
+    });
+    expect(res.afterIntegrity.byRelation.battles).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 0,
+    });
+    expect(res.afterIntegrity.byRelation.challenges).toEqual({
+      examined: 2,
+      valid: 1,
+      inconsistent: 1,
+      blocking: 0,
+    });
+
+    // Ningún historial fue eliminado
+    const preserved = await t.run(async (ctx) => ({
+      e1: await ctx.db.get(insertedIds.validExploredId),
+      e2: await ctx.db.get(insertedIds.brokenExploredId),
+      m1: await ctx.db.get(insertedIds.validHistMarchId),
+      m2: await ctx.db.get(insertedIds.brokenHistMarchId),
+      b1: await ctx.db.get(insertedIds.brokenBattleId),
+      c1: await ctx.db.get(insertedIds.validChallengeId),
+      c2: await ctx.db.get(insertedIds.brokenHistChallengeId),
+    }));
+    expect(preserved.e1).not.toBeNull();
+    expect(preserved.e2).not.toBeNull();
+    expect(preserved.m1).not.toBeNull();
+    expect(preserved.m2).not.toBeNull();
+    expect(preserved.b1).not.toBeNull();
+    expect(preserved.c1).not.toBeNull();
+    expect(preserved.c2).not.toBeNull();
+  });
+
+  test("22. Blindaje de idempotencia de operationId: rechaza distinto admin, distinto modo y distinto ámbito/reinos; reintentos concurrentes atómicos sin duplicados", async () => {
+    const t = createTestBackend();
+    const prevAdmins = process.env.ADMIN_USER_IDS;
+    process.env.ADMIN_USER_IDS = "admin-authorized-1,admin-authorized-2";
+
+    try {
+      const asAdmin1 = t.withIdentity(identity("admin-authorized-1"));
+      const asAdmin2 = t.withIdentity(identity("admin-authorized-2"));
+
+      const kA = await foundKingdom(t, "user-idem-a", "Reino Idem A");
+      const kB = await foundKingdom(t, "user-idem-b", "Reino Idem B");
+      await seedKingdomTerritories(t, kA.kingdomId, 104, { capitalCellId: "0,0", extraNeighborCount: 0 });
+      await seedKingdomTerritories(t, kB.kingdomId, 103, { capitalCellId: "20,0", extraNeighborCount: 0 });
+
+      const opId = "op-idempotency-strict-001";
+
+      // 1. Reintentos concurrentes idénticos con el mismo operationId, admin, modo y ámbito
+      const concurrentResults = await Promise.all([
+        asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+          dryRun: false,
+          kingdomId: kA.kingdomId,
+          operationId: opId,
+        }),
+        asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+          dryRun: false,
+          kingdomId: kA.kingdomId,
+          operationId: opId,
+        }),
+        asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+          dryRun: false,
+          kingdomId: kA.kingdomId,
+          operationId: opId,
+        }),
+      ]);
+
+      const freshRuns = concurrentResults.filter((r) => !r.idempotentReplay);
+      const replays = concurrentResults.filter((r) => r.idempotentReplay);
+      expect(freshRuns).toHaveLength(1);
+      expect(replays).toHaveLength(2);
+      for (const r of concurrentResults) {
+        expect(r.operationId).toBe(opId);
+        expect(r.territoriesReleased).toBe(4);
+        expect(r.kingdomsAudited).toBe(1);
+      }
+
+      // Verificar que solo existe 1 fila de auditoría para opId y exactamente 100 territorios en kA
+      const logsAfterConcurrent = await t.run(async (ctx) =>
+        ctx.db.query("territoryCapAuditLogs").withIndex("by_operation", (q) => q.eq("operationId", opId)).collect()
+      );
+      expect(logsAfterConcurrent).toHaveLength(1);
+      const kAOwned = await t.run(async (ctx) =>
+        ctx.db.query("territories").withIndex("by_owner", (q) => q.eq("ownerKingdomId", kA.kingdomId)).collect()
+      );
+      expect(kAOwned).toHaveLength(100);
+
+      // 2. Mismo operationId pero distinto administrador -> RECHAZADO
+      await expect(
+        asAdmin2.mutation(api.territories.executeTerritoryCapCleanup, {
+          dryRun: false,
+          kingdomId: kA.kingdomId,
+          operationId: opId,
+        })
+      ).rejects.toThrow(/Conflicto de idempotencia.*otro administrador/i);
+
+      // 3. Mismo operationId pero distinto modo (dryRun: true vs effective) -> RECHAZADO
+      await expect(
+        asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+          dryRun: true,
+          kingdomId: kA.kingdomId,
+          operationId: opId,
+        })
+      ).rejects.toThrow(/Conflicto de idempotencia.*modo/i);
+
+      // 4. Mismo operationId pero distinto reino (kB en lugar de kA) -> RECHAZADO
+      await expect(
+        asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+          dryRun: false,
+          kingdomId: kB.kingdomId,
+          operationId: opId,
+        })
+      ).rejects.toThrow(/Conflicto de idempotencia.*ámbito o conjunto de reinos/i);
+
+      // 5. Mismo operationId pero distinto ámbito (global sin kingdomId vs single_kingdom) -> RECHAZADO
+      await expect(
+        asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+          dryRun: false,
+          operationId: opId,
+        })
+      ).rejects.toThrow(/Conflicto de idempotencia.*ámbito o conjunto de reinos/i);
+
+      // 6. Ámbito global: si se crea un reino nuevo después de ejecutar opGlobal, reutilizar opGlobal debe rechazarse
+      const opGlobal = "op-idempotency-global-001";
+      const globalFirst = await asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+        dryRun: true,
+        operationId: opGlobal,
+      });
+      expect(globalFirst.idempotentReplay).toBe(false);
+
+      // Replay inmediato con el mismo conjunto de reinos funciona
+      const globalReplay = await asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+        dryRun: true,
+        operationId: opGlobal,
+      });
+      expect(globalReplay.idempotentReplay).toBe(true);
+
+      // Tras añadir un tercer reino, el conjunto de reinos del ámbito global cambia -> RECHAZADO
+      await foundKingdom(t, "user-idem-c", "Reino Idem C");
+      await expect(
+        asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+          dryRun: true,
+          operationId: opGlobal,
+        })
+      ).rejects.toThrow(/Conflicto de idempotencia.*ámbito o conjunto de reinos/i);
+
+      // 7. Reintentos concurrentes conflictivos (mismo operationId nuevo, distinto modo simultáneamente)
+      const opRace = "op-idempotency-concurrent-conflict";
+      const raceSettled = await Promise.allSettled([
+        asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+          dryRun: true,
+          kingdomId: kB.kingdomId,
+          operationId: opRace,
+        }),
+        asAdmin1.mutation(api.territories.executeTerritoryCapCleanup, {
+          dryRun: false,
+          kingdomId: kB.kingdomId,
+          operationId: opRace,
+        }),
+      ]);
+      const raceFulfilled = raceSettled.filter((r) => r.status === "fulfilled");
+      const raceRejected = raceSettled.filter((r) => r.status === "rejected");
+      expect(raceFulfilled).toHaveLength(1);
+      expect(raceRejected).toHaveLength(1);
+    } finally {
+      if (prevAdmins === undefined) delete process.env.ADMIN_USER_IDS;
+      else process.env.ADMIN_USER_IDS = prevAdmins;
+    }
+  });
 });
+

@@ -1461,17 +1461,19 @@ export async function releaseTerritories(ctx: MutationCtx, kingdomId: Id<"kingdo
   }
 }
 
+export type ReferentialRelationName =
+  | "kingdomHome"
+  | "territories"
+  | "activeMarches"
+  | "historicalMarches"
+  | "explorationQueue"
+  | "exploredTerritories"
+  | "battles"
+  | "challenges"
+  | "buildings";
+
 export interface ReferentialIntegrityIssue {
-  relation:
-    | "kingdomHome"
-    | "territories"
-    | "activeMarches"
-    | "historicalMarches"
-    | "explorationQueue"
-    | "exploredTerritories"
-    | "battles"
-    | "challenges"
-    | "buildings";
+  relation: ReferentialRelationName;
   documentId: string;
   kingdomId?: string;
   cellId?: string;
@@ -1479,26 +1481,82 @@ export interface ReferentialIntegrityIssue {
   reason: string;
 }
 
+export interface RelationAuditBreakdown {
+  examined: number;
+  valid: number;
+  inconsistent: number;
+  blocking: number;
+}
+
 export interface ReferentialIntegrityAudit {
   examinedCount: number;
   validCount: number;
   inconsistentCount: number;
+  blockingCount: number;
   requiresInterventionCount: number;
   orphanedHomes: number;
   kingdomsOverCap: number;
-  examinedByRelation: {
-    kingdomHome: number;
-    territories: number;
-    activeMarches: number;
-    historicalMarches: number;
-    explorationQueue: number;
-    exploredTerritories: number;
-    battles: number;
-    challenges: number;
-    buildings: number;
-  };
+  examinedByRelation: Record<ReferentialRelationName, number>;
+  byRelation: Record<ReferentialRelationName, RelationAuditBreakdown>;
   inconsistencies: ReferentialIntegrityIssue[];
   intact: boolean;
+}
+
+interface ReferentialAuditContext {
+  allKingdomIds: Set<string>;
+  allTerritoriesByCellId: Map<string, Doc<"territories">[]>;
+  allMarchesById: Map<string, Doc<"armyMarches">>;
+  allActiveMarches: Doc<"armyMarches">[];
+  allChallengesById: Map<string, Doc<"challenges">>;
+  allBattleIds: Set<string>;
+}
+
+const REFERENTIAL_RELATIONS: readonly ReferentialRelationName[] = [
+  "kingdomHome",
+  "territories",
+  "activeMarches",
+  "historicalMarches",
+  "explorationQueue",
+  "exploredTerritories",
+  "battles",
+  "challenges",
+  "buildings",
+] as const;
+
+function createEmptyRelationBreakdown(): Record<ReferentialRelationName, RelationAuditBreakdown> {
+  return {
+    kingdomHome: { examined: 0, valid: 0, inconsistent: 0, blocking: 0 },
+    territories: { examined: 0, valid: 0, inconsistent: 0, blocking: 0 },
+    activeMarches: { examined: 0, valid: 0, inconsistent: 0, blocking: 0 },
+    historicalMarches: { examined: 0, valid: 0, inconsistent: 0, blocking: 0 },
+    explorationQueue: { examined: 0, valid: 0, inconsistent: 0, blocking: 0 },
+    exploredTerritories: { examined: 0, valid: 0, inconsistent: 0, blocking: 0 },
+    battles: { examined: 0, valid: 0, inconsistent: 0, blocking: 0 },
+    challenges: { examined: 0, valid: 0, inconsistent: 0, blocking: 0 },
+    buildings: { examined: 0, valid: 0, inconsistent: 0, blocking: 0 },
+  };
+}
+
+function createEmptyExaminedByRelation(): Record<ReferentialRelationName, number> {
+  return {
+    kingdomHome: 0,
+    territories: 0,
+    activeMarches: 0,
+    historicalMarches: 0,
+    explorationQueue: 0,
+    exploredTerritories: 0,
+    battles: 0,
+    challenges: 0,
+    buildings: 0,
+  };
+}
+
+function extractReportCellId(report: unknown): string | null {
+  if (!report || typeof report !== "object") return null;
+  const r = report as Record<string, unknown>;
+  if (typeof r.targetCellId === "string" && r.targetCellId.trim().length > 0) return r.targetCellId.trim();
+  if (typeof r.cellId === "string" && r.cellId.trim().length > 0) return r.cellId.trim();
+  return null;
 }
 
 async function auditKingdomTerritoryReferentialIntegrity(
@@ -1506,8 +1564,7 @@ async function auditKingdomTerritoryReferentialIntegrity(
   kingdom: Doc<"kingdoms">,
   plannedReleaseCellIds: Set<string>,
   phase: "before" | "after",
-  allActiveMarches: Doc<"armyMarches">[],
-  allTerritoriesForDuplicates: Doc<"territories">[]
+  auditCtx: ReferentialAuditContext
 ): Promise<ReferentialIntegrityAudit> {
   const [
     owned,
@@ -1558,24 +1615,29 @@ async function auditKingdomTerritoryReferentialIntegrity(
       .collect(),
   ]);
 
-  const examinedByRelation = {
-    kingdomHome: 0,
-    territories: 0,
-    activeMarches: 0,
-    historicalMarches: 0,
-    explorationQueue: 0,
-    exploredTerritories: 0,
-    battles: 0,
-    challenges: 0,
-    buildings: 0,
-  };
+  const byRelation = createEmptyRelationBreakdown();
+  const examinedByRelation = createEmptyExaminedByRelation();
   const inconsistencies: ReferentialIntegrityIssue[] = [];
-  let validCount = 0;
   let orphanedHomes = 0;
   let kingdomsOverCap = 0;
 
+  const markExamined = (rel: ReferentialRelationName) => {
+    examinedByRelation[rel] += 1;
+    byRelation[rel].examined += 1;
+  };
+  const markValid = (rel: ReferentialRelationName) => {
+    byRelation[rel].valid += 1;
+  };
+  const recordIssue = (issue: ReferentialIntegrityIssue) => {
+    inconsistencies.push(issue);
+    byRelation[issue.relation].inconsistent += 1;
+    if (issue.severity === "blocking") {
+      byRelation[issue.relation].blocking += 1;
+    }
+  };
+
   // 1. Capital del reino (kingdoms.homeTerritoryId y territories.isHome)
-  examinedByRelation.kingdomHome += 1;
+  markExamined("kingdomHome");
   const markedHomes = owned.filter((c) => c.isHome === true);
   const homeById = kingdom.homeTerritoryId
     ? owned.find((c) => c.cellId === kingdom.homeTerritoryId)
@@ -1584,7 +1646,7 @@ async function auditKingdomTerritoryReferentialIntegrity(
   if (owned.length === 0) {
     if (kingdom.homeTerritoryId) {
       orphanedHomes += 1;
-      inconsistencies.push({
+      recordIssue({
         relation: "kingdomHome",
         documentId: String(kingdom._id),
         kingdomId: String(kingdom._id),
@@ -1593,14 +1655,26 @@ async function auditKingdomTerritoryReferentialIntegrity(
         reason: `homeTerritoryId '${kingdom.homeTerritoryId}' apunta a una celda no poseída por el reino.`,
       });
     } else {
-      validCount += 1;
+      markValid("kingdomHome");
     }
   } else if (homeById) {
-    validCount += 1;
+    if (plannedReleaseCellIds.has(homeById.cellId)) {
+      orphanedHomes += 1;
+      recordIssue({
+        relation: "kingdomHome",
+        documentId: String(kingdom._id),
+        kingdomId: String(kingdom._id),
+        cellId: homeById.cellId,
+        severity: "blocking",
+        reason: `La capital '${homeById.cellId}' no puede figurar entre las celdas planificadas para liberación.`,
+      });
+    } else {
+      markValid("kingdomHome");
+    }
   } else if (markedHomes.length === 1) {
     if (phase === "after") {
       orphanedHomes += 1;
-      inconsistencies.push({
+      recordIssue({
         relation: "kingdomHome",
         documentId: String(kingdom._id),
         kingdomId: String(kingdom._id),
@@ -1610,7 +1684,7 @@ async function auditKingdomTerritoryReferentialIntegrity(
       });
     } else {
       // Recuperable de forma segura mediante prioridad 2 (isHome único)
-      inconsistencies.push({
+      recordIssue({
         relation: "kingdomHome",
         documentId: String(kingdom._id),
         kingdomId: String(kingdom._id),
@@ -1621,7 +1695,7 @@ async function auditKingdomTerritoryReferentialIntegrity(
     }
   } else {
     orphanedHomes += 1;
-    inconsistencies.push({
+    recordIssue({
       relation: "kingdomHome",
       documentId: String(kingdom._id),
       kingdomId: String(kingdom._id),
@@ -1634,16 +1708,13 @@ async function auditKingdomTerritoryReferentialIntegrity(
     });
   }
 
-  // 2. Territorios poseídos: unicidad de cellId y tope posterior
-  const cellCounts = new Map<string, number>();
-  for (const t of allTerritoriesForDuplicates) {
-    cellCounts.set(t.cellId, (cellCounts.get(t.cellId) ?? 0) + 1);
-  }
+  // 2. Territorios poseídos: unicidad de cellId, coherencia de coordenadas (q,r) y tope posterior
   for (const cell of owned) {
-    examinedByRelation.territories += 1;
-    const dupCount = cellCounts.get(cell.cellId) ?? 0;
+    markExamined("territories");
+    const dupCount = auditCtx.allTerritoriesByCellId.get(cell.cellId)?.length ?? 0;
+    const expectedCellId = `${cell.q},${cell.r}`;
     if (dupCount > 1) {
-      inconsistencies.push({
+      recordIssue({
         relation: "territories",
         documentId: String(cell._id),
         kingdomId: String(kingdom._id),
@@ -1651,13 +1722,22 @@ async function auditKingdomTerritoryReferentialIntegrity(
         severity: "blocking",
         reason: `Existen ${dupCount} documentos duplicados en territories para cellId '${cell.cellId}'.`,
       });
+    } else if (cell.cellId !== expectedCellId) {
+      recordIssue({
+        relation: "territories",
+        documentId: String(cell._id),
+        kingdomId: String(kingdom._id),
+        cellId: cell.cellId,
+        severity: "blocking",
+        reason: `Coordenadas incoherentes en territories: cellId '${cell.cellId}' no coincide con (${cell.q},${cell.r}).`,
+      });
     } else {
-      validCount += 1;
+      markValid("territories");
     }
   }
   if (phase === "after" && owned.length > TERRITORIES.MAX_PER_KINGDOM) {
     kingdomsOverCap += 1;
-    inconsistencies.push({
+    recordIssue({
       relation: "territories",
       documentId: String(kingdom._id),
       kingdomId: String(kingdom._id),
@@ -1667,12 +1747,17 @@ async function auditKingdomTerritoryReferentialIntegrity(
   }
 
   // 3. Marchas activas (cualquier reino hacia celdas a liberar + marchas activas propias) y marchas históricas
-  const activeTargetingRelease = allActiveMarches.filter((m) => plannedReleaseCellIds.has(m.targetCellId));
+  const activeTargetingRelease = auditCtx.allActiveMarches.filter((m) =>
+    plannedReleaseCellIds.has(m.targetCellId)
+  );
   const examinedMarchIds = new Set<string>();
+  const blockingMarchIds = new Set<string>();
+
   for (const m of activeTargetingRelease) {
     examinedMarchIds.add(String(m._id));
-    examinedByRelation.activeMarches += 1;
-    inconsistencies.push({
+    blockingMarchIds.add(String(m._id));
+    markExamined("activeMarches");
+    recordIssue({
       relation: "activeMarches",
       documentId: String(m._id),
       kingdomId: String(m.kingdomId),
@@ -1681,81 +1766,360 @@ async function auditKingdomTerritoryReferentialIntegrity(
       reason: `Marcha activa en curso hacia la celda '${m.targetCellId}' planificada para liberación; requiere resolución previa.`,
     });
   }
+
   for (const m of kingdomMarches) {
     if (examinedMarchIds.has(String(m._id))) continue;
+    examinedMarchIds.add(String(m._id));
+    const expectedTargetCellId = `${m.targetQ},${m.targetR}`;
+    const targetExists = auditCtx.allTerritoriesByCellId.has(m.targetCellId);
+    const linkedChallenge = m.challengeId ? auditCtx.allChallengesById.get(String(m.challengeId)) : undefined;
+
     if (m.status === "marchando") {
-      examinedByRelation.activeMarches += 1;
-      validCount += 1;
+      markExamined("activeMarches");
+      if (!targetExists) {
+        blockingMarchIds.add(String(m._id));
+        recordIssue({
+          relation: "activeMarches",
+          documentId: String(m._id),
+          kingdomId: String(m.kingdomId),
+          cellId: m.targetCellId,
+          severity: "blocking",
+          reason: `Marcha activa apunta a una celda inexistente '${m.targetCellId}' en territories.`,
+        });
+      } else if (m.targetCellId !== expectedTargetCellId) {
+        blockingMarchIds.add(String(m._id));
+        recordIssue({
+          relation: "activeMarches",
+          documentId: String(m._id),
+          kingdomId: String(m.kingdomId),
+          cellId: m.targetCellId,
+          severity: "blocking",
+          reason: `Marcha activa con coordenadas incoherentes: targetCellId '${m.targetCellId}' != '${expectedTargetCellId}'.`,
+        });
+      } else if (m.challengeId && !linkedChallenge) {
+        blockingMarchIds.add(String(m._id));
+        recordIssue({
+          relation: "activeMarches",
+          documentId: String(m._id),
+          kingdomId: String(m.kingdomId),
+          cellId: m.targetCellId,
+          severity: "blocking",
+          reason: `Marcha activa referencia un desafío inexistente '${String(m.challengeId)}'.`,
+        });
+      } else if (
+        linkedChallenge &&
+        (linkedChallenge.status === "RESOLVED" ||
+          linkedChallenge.status === "CANCELLED" ||
+          linkedChallenge.status === "EXPIRED" ||
+          linkedChallenge.status === "REJECTED")
+      ) {
+        blockingMarchIds.add(String(m._id));
+        recordIssue({
+          relation: "activeMarches",
+          documentId: String(m._id),
+          kingdomId: String(m.kingdomId),
+          cellId: m.targetCellId,
+          severity: "blocking",
+          reason: `Marcha activa vinculada a un desafío en estado terminal incompatible '${linkedChallenge.status}'.`,
+        });
+      } else {
+        markValid("activeMarches");
+      }
     } else {
-      // Registro histórico: debe conservarse intacto
-      examinedByRelation.historicalMarches += 1;
-      validCount += 1;
+      // Registro histórico ("completada" | "cancelada"): conservar siempre, pero verificar referencias reales
+      markExamined("historicalMarches");
+      if (!targetExists) {
+        recordIssue({
+          relation: "historicalMarches",
+          documentId: String(m._id),
+          kingdomId: String(m.kingdomId),
+          cellId: m.targetCellId,
+          severity: "warning",
+          reason: `Marcha histórica referencia una celda inexistente '${m.targetCellId}' en territories.`,
+        });
+      } else if (m.targetCellId !== expectedTargetCellId) {
+        recordIssue({
+          relation: "historicalMarches",
+          documentId: String(m._id),
+          kingdomId: String(m.kingdomId),
+          cellId: m.targetCellId,
+          severity: "warning",
+          reason: `Marcha histórica con coordenadas incoherentes: targetCellId '${m.targetCellId}' != '${expectedTargetCellId}'.`,
+        });
+      } else if (m.challengeId && !linkedChallenge) {
+        recordIssue({
+          relation: "historicalMarches",
+          documentId: String(m._id),
+          kingdomId: String(m.kingdomId),
+          cellId: m.targetCellId,
+          severity: "warning",
+          reason: `Marcha histórica referencia un desafío inexistente '${String(m.challengeId)}'.`,
+        });
+      } else {
+        markValid("historicalMarches");
+      }
     }
   }
 
-  // 4. Cola de exploraciones activas
+  // 4. Cola de exploraciones activas (explorationQueue)
   for (const exp of explorations) {
-    examinedByRelation.explorationQueue += 1;
-    validCount += 1;
+    markExamined("explorationQueue");
+    const expectedCellId = `${exp.targetQ},${exp.targetR}`;
+    const targetExists = auditCtx.allTerritoriesByCellId.has(exp.cellId);
+    if (!targetExists) {
+      recordIssue({
+        relation: "explorationQueue",
+        documentId: String(exp._id),
+        kingdomId: String(exp.kingdomId),
+        cellId: exp.cellId,
+        severity: "blocking",
+        reason: `Expedición activa en explorationQueue apunta a una celda inexistente '${exp.cellId}'.`,
+      });
+    } else if (exp.cellId !== expectedCellId) {
+      recordIssue({
+        relation: "explorationQueue",
+        documentId: String(exp._id),
+        kingdomId: String(exp.kingdomId),
+        cellId: exp.cellId,
+        severity: "blocking",
+        reason: `Expedición activa con coordenadas incoherentes: cellId '${exp.cellId}' != '${expectedCellId}'.`,
+      });
+    } else if (plannedReleaseCellIds.has(exp.cellId)) {
+      recordIssue({
+        relation: "explorationQueue",
+        documentId: String(exp._id),
+        kingdomId: String(exp.kingdomId),
+        cellId: exp.cellId,
+        severity: "blocking",
+        reason: `Expedición activa del reino apunta a la celda '${exp.cellId}' planificada para liberación.`,
+      });
+    } else {
+      markValid("explorationQueue");
+    }
   }
 
-  // 5. Territorios explorados (cartografía histórica: se conserva aunque se libere la propiedad)
+  // 5. Territorios explorados (exploredTerritories: cartografía histórica conservada tras liberar propiedad)
+  const seenExploredCells = new Set<string>();
   for (const exp of explored) {
-    examinedByRelation.exploredTerritories += 1;
-    validCount += 1;
+    markExamined("exploredTerritories");
+    if (!auditCtx.allTerritoriesByCellId.has(exp.cellId)) {
+      recordIssue({
+        relation: "exploredTerritories",
+        documentId: String(exp._id),
+        kingdomId: String(exp.kingdomId),
+        cellId: exp.cellId,
+        severity: "warning",
+        reason: `Registro histórico de exploredTerritories apunta a una celda inexistente '${exp.cellId}'.`,
+      });
+    } else if (seenExploredCells.has(exp.cellId)) {
+      recordIssue({
+        relation: "exploredTerritories",
+        documentId: String(exp._id),
+        kingdomId: String(exp.kingdomId),
+        cellId: exp.cellId,
+        severity: "warning",
+        reason: `Registro duplicado en exploredTerritories para la celda '${exp.cellId}'.`,
+      });
+    } else {
+      seenExploredCells.add(exp.cellId);
+      markValid("exploredTerritories");
+    }
   }
 
-  // 6. Informes de batalla históricos (se conservan intactos)
+  // 6. Informes de batalla históricos (Battle: conservar siempre, verificando referencias reales)
   const seenBattles = new Set<string>();
   for (const b of [...battlesAsAttacker, ...battlesAsDefender]) {
     if (seenBattles.has(String(b._id))) continue;
     seenBattles.add(String(b._id));
-    examinedByRelation.battles += 1;
-    validCount += 1;
-  }
+    markExamined("battles");
 
-  // 7. Desafíos parlamentarios (activos vinculados a marchas hacia celdas a liberar vs históricos)
-  const seenChallenges = new Set<string>();
-  const blockingMarchIds = new Set(activeTargetingRelease.map((m) => String(m._id)));
-  for (const ch of [...challengesAsChallenger, ...challengesAsTarget]) {
-    if (seenChallenges.has(String(ch._id))) continue;
-    seenChallenges.add(String(ch._id));
-    examinedByRelation.challenges += 1;
-    if (ch.activeMarchId && blockingMarchIds.has(String(ch.activeMarchId))) {
-      inconsistencies.push({
-        relation: "challenges",
-        documentId: String(ch._id),
+    const attackerExists = auditCtx.allKingdomIds.has(String(b.attackerKingdomId));
+    const defenderExists = auditCtx.allKingdomIds.has(String(b.defenderKingdomId));
+    const challengeMissing = Boolean(b.challengeId) && !auditCtx.allChallengesById.has(String(b.challengeId));
+    const winnerInvalid =
+      Boolean(b.winnerKingdomId) &&
+      (!auditCtx.allKingdomIds.has(String(b.winnerKingdomId)) ||
+        (String(b.winnerKingdomId) !== String(b.attackerKingdomId) &&
+          String(b.winnerKingdomId) !== String(b.defenderKingdomId)));
+    const reportCellId = extractReportCellId(b.report);
+    const reportCellMissing = Boolean(reportCellId) && !auditCtx.allTerritoriesByCellId.has(reportCellId!);
+
+    if (!attackerExists || !defenderExists) {
+      recordIssue({
+        relation: "battles",
+        documentId: String(b._id),
         kingdomId: String(kingdom._id),
-        severity: "blocking",
-        reason: `Desafío activo '${String(ch._id)}' vinculado a una marcha en curso hacia una celda a liberar.`,
+        severity: "warning",
+        reason: `Informe de batalla histórico referencia un reino inexistente (atacante=${String(b.attackerKingdomId)}, defensor=${String(b.defenderKingdomId)}).`,
+      });
+    } else if (challengeMissing) {
+      recordIssue({
+        relation: "battles",
+        documentId: String(b._id),
+        kingdomId: String(kingdom._id),
+        severity: "warning",
+        reason: `Informe de batalla histórico referencia un desafío inexistente '${String(b.challengeId)}'.`,
+      });
+    } else if (winnerInvalid) {
+      recordIssue({
+        relation: "battles",
+        documentId: String(b._id),
+        kingdomId: String(kingdom._id),
+        severity: "warning",
+        reason: `Informe de batalla histórico tiene winnerKingdomId inválido '${String(b.winnerKingdomId)}'.`,
+      });
+    } else if (reportCellMissing) {
+      recordIssue({
+        relation: "battles",
+        documentId: String(b._id),
+        kingdomId: String(kingdom._id),
+        cellId: reportCellId!,
+        severity: "warning",
+        reason: `Informe de batalla histórico referencia en report una celda inexistente '${reportCellId}'.`,
       });
     } else {
-      validCount += 1;
+      markValid("battles");
     }
   }
 
-  // 8. Edificios del reino (asociados al reino, se conservan intactos)
-  for (const b of buildings) {
-    examinedByRelation.buildings += 1;
-    validCount += 1;
+  // 7. Desafíos parlamentarios (challenges: activos vs históricos, verificando reinos, activeMarchId y battleId)
+  const seenChallenges = new Set<string>();
+  for (const ch of [...challengesAsChallenger, ...challengesAsTarget]) {
+    if (seenChallenges.has(String(ch._id))) continue;
+    seenChallenges.add(String(ch._id));
+    markExamined("challenges");
+
+    const isActiveChallenge =
+      ch.status === "PENDING" || ch.status === "ACCEPTED" || ch.status === "FROZEN";
+    const severityForBrokenRef: "blocking" | "warning" = isActiveChallenge ? "blocking" : "warning";
+    const challengerExists = auditCtx.allKingdomIds.has(String(ch.challengerKingdomId));
+    const targetExists = auditCtx.allKingdomIds.has(String(ch.targetKingdomId));
+    const linkedMarch = ch.activeMarchId ? auditCtx.allMarchesById.get(String(ch.activeMarchId)) : undefined;
+
+    if (ch.activeMarchId && blockingMarchIds.has(String(ch.activeMarchId))) {
+      recordIssue({
+        relation: "challenges",
+        documentId: String(ch._id),
+        kingdomId: String(kingdom._id),
+        cellId: linkedMarch?.targetCellId,
+        severity: "blocking",
+        reason: `Desafío '${String(ch._id)}' vinculado a una marcha activa hacia una celda incompatible o planificada para liberación.`,
+      });
+    } else if (!challengerExists || !targetExists) {
+      recordIssue({
+        relation: "challenges",
+        documentId: String(ch._id),
+        kingdomId: String(kingdom._id),
+        severity: severityForBrokenRef,
+        reason: `Desafío '${String(ch._id)}' (${ch.status}) referencia un reino inexistente.`,
+      });
+    } else if (ch.activeMarchId && !linkedMarch) {
+      recordIssue({
+        relation: "challenges",
+        documentId: String(ch._id),
+        kingdomId: String(kingdom._id),
+        severity: severityForBrokenRef,
+        reason: `Desafío '${String(ch._id)}' (${ch.status}) referencia activeMarchId inexistente '${String(ch.activeMarchId)}'.`,
+      });
+    } else if (
+      linkedMarch &&
+      !auditCtx.allTerritoriesByCellId.has(linkedMarch.targetCellId)
+    ) {
+      recordIssue({
+        relation: "challenges",
+        documentId: String(ch._id),
+        kingdomId: String(kingdom._id),
+        cellId: linkedMarch.targetCellId,
+        severity: severityForBrokenRef,
+        reason: `Desafío '${String(ch._id)}' (${ch.status}) apunta vía activeMarchId a una celda inexistente '${linkedMarch.targetCellId}'.`,
+      });
+    } else if (ch.battleId && !auditCtx.allBattleIds.has(String(ch.battleId))) {
+      recordIssue({
+        relation: "challenges",
+        documentId: String(ch._id),
+        kingdomId: String(kingdom._id),
+        severity: severityForBrokenRef,
+        reason: `Desafío '${String(ch._id)}' (${ch.status}) referencia battleId inexistente '${String(ch.battleId)}'.`,
+      });
+    } else {
+      markValid("challenges");
+    }
   }
 
-  const examinedCount = Object.values(examinedByRelation).reduce((acc, n) => acc + n, 0);
+  // 8. Edificios del reino (buildings: pertenecen al asentamiento/capital del reino, no a celdas periféricas)
+  const capitalScheduledForRelease = Boolean(
+    kingdom.homeTerritoryId && plannedReleaseCellIds.has(kingdom.homeTerritoryId)
+  );
+  const capitalUnresolvable = owned.length > 0 && !homeById && markedHomes.length !== 1;
+  for (const b of buildings) {
+    markExamined("buildings");
+    const validKingdomRef =
+      auditCtx.allKingdomIds.has(String(b.kingdomId)) && String(b.kingdomId) === String(kingdom._id);
+    const validFields =
+      typeof b.buildingType === "string" &&
+      b.buildingType.trim().length > 0 &&
+      Number.isFinite(b.level) &&
+      b.level >= 0;
+
+    if (!validKingdomRef) {
+      recordIssue({
+        relation: "buildings",
+        documentId: String(b._id),
+        kingdomId: String(b.kingdomId),
+        severity: "blocking",
+        reason: `Edificio '${b.buildingType}' referencia un reino inválido '${String(b.kingdomId)}'.`,
+      });
+    } else if (!validFields) {
+      recordIssue({
+        relation: "buildings",
+        documentId: String(b._id),
+        kingdomId: String(kingdom._id),
+        severity: "blocking",
+        reason: `Edificio con metadatos inválidos (buildingType='${b.buildingType}', level=${String(b.level)}).`,
+      });
+    } else if (capitalScheduledForRelease) {
+      recordIssue({
+        relation: "buildings",
+        documentId: String(b._id),
+        kingdomId: String(kingdom._id),
+        cellId: kingdom.homeTerritoryId,
+        severity: "blocking",
+        reason: `Edificio '${b.buildingType}' quedaría sin soporte territorial al liberarse la capital '${kingdom.homeTerritoryId}'.`,
+      });
+    } else if (capitalUnresolvable) {
+      recordIssue({
+        relation: "buildings",
+        documentId: String(b._id),
+        kingdomId: String(kingdom._id),
+        severity: "warning",
+        reason: `Edificio '${b.buildingType}' asociado a un reino con capital histórica no identificable.`,
+      });
+    } else {
+      markValid("buildings");
+    }
+  }
+
+  const examinedCount = REFERENTIAL_RELATIONS.reduce((acc, rel) => acc + byRelation[rel].examined, 0);
+  const validCount = REFERENTIAL_RELATIONS.reduce((acc, rel) => acc + byRelation[rel].valid, 0);
   const inconsistentCount = inconsistencies.length;
-  const requiresInterventionCount = inconsistencies.filter((i) => i.severity === "blocking").length;
+  const blockingCount = inconsistencies.filter((i) => i.severity === "blocking").length;
+  const requiresInterventionCount = blockingCount;
 
   return {
     examinedCount,
     validCount,
     inconsistentCount,
+    blockingCount,
     requiresInterventionCount,
     orphanedHomes,
     kingdomsOverCap,
     examinedByRelation,
+    byRelation,
     inconsistencies,
     intact:
       examinedCount > 0 &&
       inconsistentCount === 0 &&
+      blockingCount === 0 &&
       requiresInterventionCount === 0 &&
       orphanedHomes === 0 &&
       kingdomsOverCap === 0,
@@ -1763,20 +2127,12 @@ async function auditKingdomTerritoryReferentialIntegrity(
 }
 
 function aggregateIntegrityAudits(audits: ReferentialIntegrityAudit[]): ReferentialIntegrityAudit {
-  const examinedByRelation = {
-    kingdomHome: 0,
-    territories: 0,
-    activeMarches: 0,
-    historicalMarches: 0,
-    explorationQueue: 0,
-    exploredTerritories: 0,
-    battles: 0,
-    challenges: 0,
-    buildings: 0,
-  };
+  const examinedByRelation = createEmptyExaminedByRelation();
+  const byRelation = createEmptyRelationBreakdown();
   let examinedCount = 0;
   let validCount = 0;
   let inconsistentCount = 0;
+  let blockingCount = 0;
   let requiresInterventionCount = 0;
   let orphanedHomes = 0;
   let kingdomsOverCap = 0;
@@ -1786,31 +2142,50 @@ function aggregateIntegrityAudits(audits: ReferentialIntegrityAudit[]): Referent
     examinedCount += a.examinedCount;
     validCount += a.validCount;
     inconsistentCount += a.inconsistentCount;
+    const auditBlocking = typeof a.blockingCount === "number" ? a.blockingCount : a.requiresInterventionCount;
+    blockingCount += auditBlocking;
     requiresInterventionCount += a.requiresInterventionCount;
     orphanedHomes += a.orphanedHomes;
     kingdomsOverCap += a.kingdomsOverCap;
-    for (const key of Object.keys(examinedByRelation) as Array<keyof typeof examinedByRelation>) {
-      examinedByRelation[key] += a.examinedByRelation[key];
+    for (const key of REFERENTIAL_RELATIONS) {
+      examinedByRelation[key] += a.examinedByRelation?.[key] ?? 0;
+      if (a.byRelation?.[key]) {
+        byRelation[key].examined += a.byRelation[key].examined;
+        byRelation[key].valid += a.byRelation[key].valid;
+        byRelation[key].inconsistent += a.byRelation[key].inconsistent;
+        byRelation[key].blocking += a.byRelation[key].blocking;
+      }
     }
-    inconsistencies.push(...a.inconsistencies);
+    inconsistencies.push(...(a.inconsistencies ?? []));
   }
 
   return {
     examinedCount,
     validCount,
     inconsistentCount,
+    blockingCount,
     requiresInterventionCount,
     orphanedHomes,
     kingdomsOverCap,
     examinedByRelation,
+    byRelation,
     inconsistencies,
     intact:
       (audits.length === 0 || examinedCount > 0) &&
       inconsistentCount === 0 &&
+      blockingCount === 0 &&
       requiresInterventionCount === 0 &&
       orphanedHomes === 0 &&
       kingdomsOverCap === 0,
   };
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 async function runTerritoryCapCleanup(
@@ -1826,13 +2201,52 @@ async function runTerritoryCapCleanup(
       ? args.operationId.trim()
       : `cap_cleanup_${mode}_${now}_${Math.random().toString(36).slice(2, 8)}`;
 
-  // Idempotencia de operación y registro de auditoría: si operationId ya fue procesado, devolver resultado persistido sin duplicar
+  const requestedScope: "single_kingdom" | "all_kingdoms" = args.kingdomId
+    ? "single_kingdom"
+    : "all_kingdoms";
+  const requestedKingdomId = args.kingdomId ? String(args.kingdomId) : undefined;
+
+  const targetKingdoms = args.kingdomId
+    ? [await ctx.db.get(args.kingdomId)].filter((k): k is Doc<"kingdoms"> => Boolean(k))
+    : await ctx.db.query("kingdoms").collect();
+  const currentTargetKingdomIds = targetKingdoms.map((k) => String(k._id)).sort();
+
+  // Idempotencia atómica de operación y registro de auditoría en Convex:
+  // si operationId ya fue procesado, exigir coincidencia exacta de admin, modo y ámbito/conjunto de reinos.
   const existingLogs = await ctx.db
     .query("territoryCapAuditLogs")
     .withIndex("by_operation", (q) => q.eq("operationId", operationId))
     .collect();
 
   if (existingLogs.length > 0) {
+    const firstLog = existingLogs[0];
+    if (firstLog.adminIdentity !== adminIdentity) {
+      throw new Error(
+        `Conflicto de idempotencia: operationId '${operationId}' ya fue registrado por otro administrador.`
+      );
+    }
+    if (firstLog.mode !== mode) {
+      throw new Error(
+        `Conflicto de idempotencia: operationId '${operationId}' ya fue registrado en modo '${firstLog.mode}' y no puede reutilizarse en modo '${mode}'.`
+      );
+    }
+
+    const storedScope = firstLog.requestedScope;
+    const storedRequestedKingdomId = firstLog.requestedKingdomId;
+    const storedTargetKingdomIds = firstLog.targetKingdomIds
+      ? [...firstLog.targetKingdomIds].sort()
+      : existingLogs.map((l) => String(l.kingdomId)).sort();
+
+    if (
+      (storedScope !== undefined && storedScope !== requestedScope) ||
+      storedRequestedKingdomId !== requestedKingdomId ||
+      !arraysEqual(storedTargetKingdomIds, currentTargetKingdomIds)
+    ) {
+      throw new Error(
+        `Conflicto de idempotencia: operationId '${operationId}' ya fue registrado con un ámbito o conjunto de reinos diferente.`
+      );
+    }
+
     const beforeAudits = existingLogs
       .map((l) => l.referentialIntegrityBefore as ReferentialIntegrityAudit | null)
       .filter((a): a is ReferentialIntegrityAudit => Boolean(a));
@@ -1844,12 +2258,12 @@ async function runTerritoryCapCleanup(
     const blockedCount = existingLogs.filter((l) => l.outcome === "blocked").length;
 
     return {
-      success: blockedCount === 0,
+      success: blockedCount === 0 && afterSummary.blockingCount === 0,
       idempotentReplay: true,
       operationId,
-      adminIdentity: existingLogs[0].adminIdentity,
-      dryRun: existingLogs[0].mode === "dryRun",
-      mode: existingLogs[0].mode,
+      adminIdentity: firstLog.adminIdentity,
+      dryRun: firstLog.mode === "dryRun",
+      mode: firstLog.mode,
       maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
       kingdomsAudited: existingLogs.length,
       kingdomsModified: existingLogs.filter((l) => l.outcome === "cleaned").length,
@@ -1861,6 +2275,7 @@ async function runTerritoryCapCleanup(
         examinedCount: afterSummary.examinedCount,
         validCount: afterSummary.validCount,
         inconsistentCount: afterSummary.inconsistentCount,
+        blockingCount: afterSummary.blockingCount,
         requiresInterventionCount: afterSummary.requiresInterventionCount,
         orphanedHomes: afterSummary.orphanedHomes,
         kingdomsOverCapAfter: afterSummary.kingdomsOverCap,
@@ -1884,15 +2299,29 @@ async function runTerritoryCapCleanup(
     };
   }
 
-  const targetKingdoms = args.kingdomId
-    ? [await ctx.db.get(args.kingdomId)].filter((k): k is Doc<"kingdoms"> => Boolean(k))
-    : await ctx.db.query("kingdoms").collect();
-
-  const [allMarches, allTerritories] = await Promise.all([
+  const [allKingdoms, allMarches, allTerritories, allChallenges, allBattles] = await Promise.all([
+    ctx.db.query("kingdoms").collect(),
     ctx.db.query("armyMarches").collect(),
     ctx.db.query("territories").collect(),
+    ctx.db.query("challenges").collect(),
+    ctx.db.query("Battle").collect(),
   ]);
-  const allActiveMarches = allMarches.filter((m) => m.status === "marchando");
+
+  const allTerritoriesByCellId = new Map<string, Doc<"territories">[]>();
+  for (const t of allTerritories) {
+    const list = allTerritoriesByCellId.get(t.cellId);
+    if (list) list.push(t);
+    else allTerritoriesByCellId.set(t.cellId, [t]);
+  }
+
+  const auditCtx: ReferentialAuditContext = {
+    allKingdomIds: new Set(allKingdoms.map((k) => String(k._id))),
+    allTerritoriesByCellId,
+    allMarchesById: new Map(allMarches.map((m) => [String(m._id), m])),
+    allActiveMarches: allMarches.filter((m) => m.status === "marchando"),
+    allChallengesById: new Map(allChallenges.map((c) => [String(c._id), c])),
+    allBattleIds: new Set(allBattles.map((b) => String(b._id))),
+  };
 
   const details: Array<{
     kingdomId: string;
@@ -1922,27 +2351,17 @@ async function runTerritoryCapCleanup(
         .query("territories")
         .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
         .collect();
-      const emptyDemoIntegrity: ReferentialIntegrityAudit = {
-        examinedCount: 1,
-        validCount: 1,
-        inconsistentCount: 0,
-        requiresInterventionCount: 0,
-        orphanedHomes: 0,
-        kingdomsOverCap: 0,
-        examinedByRelation: {
-          kingdomHome: 1,
-          territories: 0,
-          activeMarches: 0,
-          historicalMarches: 0,
-          explorationQueue: 0,
-          exploredTerritories: 0,
-          battles: 0,
-          challenges: 0,
-          buildings: 0,
-        },
-        inconsistencies: [],
-        intact: true,
-      };
+      // Auditoría real en modo solo lectura (sin mutar la cuenta demo)
+      const demoIntegrity = await auditKingdomTerritoryReferentialIntegrity(
+        ctx,
+        kingdom,
+        new Set(),
+        "before",
+        auditCtx
+      );
+      beforeAudits.push(demoIntegrity);
+      afterAudits.push(demoIntegrity);
+
       await ctx.db.insert("territoryCapAuditLogs", {
         operationId,
         executedAt: now,
@@ -1955,10 +2374,13 @@ async function runTerritoryCapCleanup(
         keptCellIds: demoOwned.map((c) => c.cellId),
         releasedCellIds: [],
         releasedCount: 0,
-        referentialIntegrityBefore: emptyDemoIntegrity,
-        referentialIntegrityAfter: emptyDemoIntegrity,
+        referentialIntegrityBefore: demoIntegrity,
+        referentialIntegrityAfter: demoIntegrity,
         outcome: "skipped_demo",
         errors: [],
+        requestedScope,
+        requestedKingdomId,
+        targetKingdomIds: currentTargetKingdomIds,
       });
       details.push({
         kingdomId: String(kingdom._id),
@@ -2002,8 +2424,7 @@ async function runTerritoryCapCleanup(
       kingdom,
       plannedReleaseSet,
       "before",
-      allActiveMarches,
-      allTerritories
+      auditCtx
     );
     beforeAudits.push(beforeAudit);
 
@@ -2017,7 +2438,7 @@ async function runTerritoryCapCleanup(
       }
     }
 
-    const isBlocked = plan.blocked || beforeAudit.requiresInterventionCount > 0;
+    const isBlocked = plan.blocked || beforeAudit.blockingCount > 0;
     let homeRepaired = false;
 
     if (isBlocked) {
@@ -2040,6 +2461,9 @@ async function runTerritoryCapCleanup(
         referentialIntegrityAfter: beforeAudit,
         outcome: "blocked",
         errors: blockingErrors,
+        requestedScope,
+        requestedKingdomId,
+        targetKingdomIds: currentTargetKingdomIds,
       });
 
       details.push({
@@ -2098,8 +2522,7 @@ async function runTerritoryCapCleanup(
           freshKingdom,
           new Set(),
           "after",
-          allActiveMarches,
-          allTerritories
+          auditCtx
         );
     afterAudits.push(afterAudit);
 
@@ -2130,6 +2553,9 @@ async function runTerritoryCapCleanup(
       referentialIntegrityAfter: afterAudit,
       outcome,
       errors: [],
+      requestedScope,
+      requestedKingdomId,
+      targetKingdomIds: currentTargetKingdomIds,
     });
 
     details.push({
@@ -2153,7 +2579,7 @@ async function runTerritoryCapCleanup(
   const afterSummary = aggregateIntegrityAudits(afterAudits);
 
   return {
-    success: kingdomsBlocked === 0 && afterSummary.requiresInterventionCount === 0,
+    success: kingdomsBlocked === 0 && afterSummary.blockingCount === 0,
     idempotentReplay: false,
     operationId,
     adminIdentity,
@@ -2170,6 +2596,7 @@ async function runTerritoryCapCleanup(
       examinedCount: afterSummary.examinedCount,
       validCount: afterSummary.validCount,
       inconsistentCount: afterSummary.inconsistentCount,
+      blockingCount: afterSummary.blockingCount,
       requiresInterventionCount: afterSummary.requiresInterventionCount,
       orphanedHomes: afterSummary.orphanedHomes,
       kingdomsOverCapAfter: afterSummary.kingdomsOverCap,
