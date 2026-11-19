@@ -408,7 +408,10 @@ export async function completeExpedition(ctx: MutationCtx, expeditionId: Id<"exp
   if (!expedition) return null;
 
   const kingdom = await ctx.db.get(expedition.kingdomId);
-  if (!kingdom) return null;
+  if (!kingdom) {
+    await ctx.db.delete(expeditionId);
+    return null;
+  }
 
   // 1. Obtener datos de la celda objetivo
   const targetCell = await ctx.db

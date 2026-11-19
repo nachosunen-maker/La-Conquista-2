@@ -20,11 +20,12 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { isKingdomOwner, DEMO_USER_ID } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
+import { addUnits } from "./army";
+import { normalizeUnitType } from "./armyRules";
 import {
   createTrainingPlan,
   isTrainingComplete,
   calculateTrainingProgressPercent,
-  resolveArmyUnitsIncorporation,
   calculateNextRegularSoldiers,
   isLivingRegularTroop,
   type TrainingQueueEntry,
@@ -104,7 +105,7 @@ export const trainUnits = mutation({
     const { kingdom, userId } = await requireMilitaryOwner(ctx, args.kingdomId);
 
     // 2. Comprobación de números enteros, positivos y exclusión de espías
-    if (args.unitType.toLowerCase().trim() === "espia") {
+    if (normalizeUnitType(args.unitType) === "espia") {
       throw new Error("Los espías no se reclutan mediante formación militar ordinaria; utiliza la sección de Espionaje.");
     }
     if (!Number.isInteger(args.count) || args.count <= 0) {
@@ -142,21 +143,9 @@ export const trainUnits = mutation({
     for (const task of storedTrainings) {
       if (isTrainingComplete(task.startedAt ?? 0, task.durationMs ?? 0, now)) {
         const count = task.count ?? 0;
-        const type = (task.unitType ?? "infanteria").trim().toLowerCase();
-        const existingUnits = await ctx.db
-          .query("armyUnits")
-          .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
-          .collect();
-        const inc = resolveArmyUnitsIncorporation(existingUnits, type, count);
-        if (inc.action === "update") {
-          await ctx.db.patch(inc.existingId, { count: inc.nextCount });
-        } else {
-          await ctx.db.insert("armyUnits", {
-            kingdomId: args.kingdomId,
-            unitType: type,
-            count: inc.nextCount,
-          });
-        }
+        const type = normalizeUnitType(task.unitType ?? "infanteria") ?? (task.unitType ?? "infanteria").trim().toLowerCase();
+        const level = type === "espia" ? 1 : (task.level ?? 1);
+        await addUnits(ctx, args.kingdomId, type, level, count);
         if (isLivingRegularTroop(type)) {
           livingTroopsToAdd += count;
         }
@@ -320,31 +309,12 @@ export const completeTraining = internalMutation({
     }
 
     const count = training.count ?? 0;
-    const unitType = (training.unitType ?? "infanteria").trim().toLowerCase();
+    const unitType = normalizeUnitType(training.unitType ?? "infanteria") ?? (training.unitType ?? "infanteria").trim().toLowerCase();
     const isSpy = unitType === "espia";
     const level = isSpy ? 1 : (training.level ?? 1);
 
-    // 1. Incorporación atómica en la tabla armyUnits
-    const existingUnits = await ctx.db
-      .query("armyUnits")
-      .withIndex("by_kingdom", (q) => q.eq("kingdomId", training.kingdomId))
-      .collect();
-
-    const inc = resolveArmyUnitsIncorporation(existingUnits, unitType, count);
-    if (inc.action === "update") {
-      await ctx.db.patch(inc.existingId, {
-        count: inc.nextCount,
-        ...(isSpy ? { unitType: "espia", isSpy: true, level: 1 } : {}),
-      });
-    } else {
-      await ctx.db.insert("armyUnits", {
-        kingdomId: training.kingdomId,
-        unitType,
-        level,
-        count: inc.nextCount,
-        isSpy,
-      });
-    }
+    // 1. Incorporación atómica en la tabla armyUnits mediante función canónica addUnits
+    await addUnits(ctx, training.kingdomId, unitType, level, count);
 
     // 2. Sincronización atómica de regularSoldiers (P18: solo combatientes vivos devengan raciones; excluye espías)
     const nextRegular = calculateNextRegularSoldiers(kingdom.regularSoldiers ?? 0, count, unitType);
@@ -387,40 +357,12 @@ export const resolveCompletedTrainings = mutation({
 
     let totalUnitsIncorporated = 0;
     let totalLivingSoldiersIncorporated = 0;
-    const existingUnits = await ctx.db
-      .query("armyUnits")
-      .withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId))
-      .collect();
-
-    const unitsMap = new Map<string, { id?: Id<"armyUnits">; count: number }>();
-    for (const u of existingUnits) {
-      unitsMap.set(u.unitType.trim().toLowerCase(), { id: u._id, count: u.count });
-    }
 
     for (const task of expired) {
       const count = task.count ?? 0;
-      const type = (task.unitType ?? "infanteria").trim().toLowerCase();
-      const isSpy = type === "espia";
-      const level = isSpy ? 1 : (task.level ?? 1);
-      const current = unitsMap.get(type);
-      if (current && current.id) {
-        const nextCount = current.count + count;
-        await ctx.db.patch(current.id, {
-          count: nextCount,
-          ...(isSpy ? { unitType: "espia", isSpy: true, level: 1 } : {}),
-        });
-        unitsMap.set(type, { id: current.id, count: nextCount });
-      } else {
-        const nextCount = (current?.count ?? 0) + count;
-        const newId = await ctx.db.insert("armyUnits", {
-          kingdomId: args.kingdomId,
-          unitType: type,
-          level,
-          count: nextCount,
-          isSpy,
-        });
-        unitsMap.set(type, { id: newId, count: nextCount });
-      }
+      const type = normalizeUnitType(task.unitType ?? "infanteria") ?? (task.unitType ?? "infanteria").trim().toLowerCase();
+      const level = type === "espia" ? 1 : (task.level ?? 1);
+      await addUnits(ctx, args.kingdomId, type, level, count);
 
       totalUnitsIncorporated += count;
       if (isLivingRegularTroop(type)) {

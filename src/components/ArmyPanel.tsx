@@ -144,9 +144,12 @@ interface ArmyState {
   };
   spies: {
     active: number;
+    wounded?: number;
     busy?: number;
     inQueue: number;
+    occupied?: number;
     capacity: number;
+    remaining?: number;
     cuartelLevel: number;
   };
 }
@@ -870,15 +873,23 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
                   <span className="text-amber-400 font-bold">{state.spies?.cuartelLevel ?? 0}</span>
                 </div>
                 <div className="flex justify-between items-center bg-[#0c0a08] p-2 rounded border border-[#2b2419]">
-                  <span className="text-[#8e816d]">Capacidad Máxima:</span>
-                  <span className="text-sky-400 font-bold">{state.spies?.capacity ?? 0}</span>
+                  <span className="text-[#8e816d]">Capacidad Máxima / Restante:</span>
+                  <span className="font-bold">
+                    <span className="text-sky-400">{state.spies?.capacity ?? 0} máx.</span>
+                    <span className="text-[#8e816d] mx-1.5">|</span>
+                    <span className="text-emerald-400">
+                      {state.spies?.remaining ?? Math.max(0, (state.spies?.capacity ?? 0) - ((state.spies?.active ?? 0) + (state.spies?.wounded ?? 0) + (state.spies?.busy ?? 0) + (state.spies?.inQueue ?? 0)))} libres
+                    </span>
+                  </span>
                 </div>
                 <div className="flex justify-between items-center bg-[#0c0a08] p-2 rounded border border-[#2b2419]">
-                  <span className="text-[#8e816d]">Disponibles / Ocupados:</span>
+                  <span className="text-[#8e816d]">Disponibles / Ocupados / En cola:</span>
                   <span className="font-bold">
-                    <span className="text-emerald-400">{state.spies?.active ?? 0} libres</span>
+                    <span className="text-emerald-400">{state.spies?.active ?? 0} disp.</span>
                     <span className="text-[#8e816d] mx-1.5">|</span>
                     <span className="text-amber-400">{state.spies?.busy ?? 0} en misión</span>
+                    <span className="text-[#8e816d] mx-1.5">|</span>
+                    <span className="text-sky-400">{state.spies?.inQueue ?? 0} en cola</span>
                   </span>
                 </div>
               </div>
@@ -891,14 +902,17 @@ export function ArmyPanel(props: { kingdomId: string; isOwner: boolean; building
               <h4 className="text-xs font-semibold text-[#a89b84] uppercase tracking-wider">Instrucción de Agentes</h4>
               {writable ? (
                 (() => {
-                  const spiesUsed = (state.spies?.active ?? 0) + (state.spies?.busy ?? 0) + (state.spies?.inQueue ?? 0);
-                  const spiesRoom = Math.max(0, (state.spies?.capacity ?? 0) - spiesUsed);
+                  const spiesUsed =
+                    state.spies?.occupied ??
+                    ((state.spies?.active ?? 0) + (state.spies?.wounded ?? 0) + (state.spies?.busy ?? 0) + (state.spies?.inQueue ?? 0));
+                  const spiesRoom =
+                    state.spies?.remaining ?? Math.max(0, (state.spies?.capacity ?? 0) - spiesUsed);
                   return (
                     <div className={`${cardClass} space-y-3 text-xs`}>
                       <div className="flex items-center gap-3">
                         <label className="flex-1 space-y-1">
                           <span className="text-[#a0937e] block text-[11px]">
-                            Cantidad (ocupados + libres + cola: {spiesUsed}/{state.spies?.capacity ?? 0})
+                            Cantidad (ocupados + disponibles + cola: {spiesUsed}/{state.spies?.capacity ?? 0}, restante: {spiesRoom})
                           </span>
                           <input
                             className={`${inputClass} w-full text-right`}

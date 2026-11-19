@@ -265,6 +265,7 @@ export function createSpyRecruitmentPlan(input: {
   buildingLevels: Readonly<Record<string, number>>;
   activeTraining: ReadonlyArray<TrainingQueueEntry>;
   activeSpies: number;
+  woundedSpies?: number;
   busySpies: number;
   inQueueSpies: number;
   now: number;
@@ -293,11 +294,12 @@ export function createSpyRecruitmentPlan(input: {
   }
 
   const capacity = Math.floor(cuartelLevel / 2);
-  const occupied = Math.max(0, input.activeSpies) + Math.max(0, input.busySpies) + Math.max(0, input.inQueueSpies);
+  const woundedSpies = Math.max(0, input.woundedSpies ?? 0);
+  const occupied = Math.max(0, input.activeSpies) + woundedSpies + Math.max(0, input.busySpies) + Math.max(0, input.inQueueSpies);
   if (occupied + input.count > capacity) {
     return {
       success: false,
-      error: `Capacidad de espías excedida (capacidad: ${capacity}, activos: ${input.activeSpies}, en misión: ${input.busySpies}, en cola: ${input.inQueueSpies}, solicitado: ${input.count}).`,
+      error: `Capacidad de espías excedida (capacidad: ${capacity}, activos: ${input.activeSpies}, heridos: ${woundedSpies}, en misión: ${input.busySpies}, en cola: ${input.inQueueSpies}, solicitado: ${input.count}).`,
     };
   }
 

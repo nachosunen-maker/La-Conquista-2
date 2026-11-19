@@ -2451,4 +2451,265 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
   });
 });
 
+// =============================================================================
+// CIERRE DEFINITIVO PUNTO 1 — RECLUTAMIENTO, MISIONES, CONCURRENCIA Y COHERENCIA
+// =============================================================================
+
+describe("Cierre definitivo Punto 1: reclutamiento, misiones, concurrencia y coherencia de estado", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("1. getArmyState.spies devuelve active, wounded, busy, inQueue, occupied, capacity y remaining coherentes en todo el ciclo y recruitSpy contabiliza heridos", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "p1-coherence", "Reino Coherencia");
+    await setBuildingLevel(t, kingdomId, "cuartel", 8); // capacidad = floor(8 / 2) = 4 espías
+    await setResourcesAndPop(t, kingdomId, { gold: 50000, food: 50000, wood: 50000, stone: 50000, iron: 50000, available: 100 });
+
+    // 1 espía activo + 1 espía herido en BD
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 1,
+        wounded: 1,
+        isSpy: true,
+      });
+    });
+
+    // Estado inicial: active=1, wounded=1, busy=0, inQueue=0, occupied=2, capacity=4, remaining=2
+    let state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies).toMatchObject({
+      active: 1,
+      wounded: 1,
+      busy: 0,
+      inQueue: 0,
+      occupied: 2,
+      capacity: 4,
+      remaining: 2,
+      cuartelLevel: 8,
+    });
+
+    // Intentar reclutar 3 debe fallar porque 1 activo + 1 herido + 3 = 5 > 4
+    await expect(
+      asUser.mutation(api.army.recruitSpy, { kingdomId, count: 3 })
+    ).rejects.toThrow(/Capacidad de espías excedida/i);
+
+    // Reclutar 2 encaja exactamente (occupied = 4, remaining = 0)
+    await asUser.mutation(api.army.recruitSpy, { kingdomId, count: 2 });
+    state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies).toMatchObject({
+      active: 1,
+      wounded: 1,
+      busy: 0,
+      inQueue: 2,
+      occupied: 4,
+      capacity: 4,
+      remaining: 0,
+    });
+
+    // Enviar el único espía activo a una expedición en celda no explorada (distancia 2) -> active=0, busy=1, occupied=4, remaining=0
+    const targetId = "2,0";
+    await t.run(async (ctx) => {
+      await ctx.db.insert("territories", { cellId: targetId, q: 2, r: 0, terrain: "llanura" });
+    });
+
+    const launchRes = await asUser.mutation(api.territories.startExploration, {
+      kingdomId,
+      cellId: targetId,
+      spiesCount: 1,
+    });
+    expect(launchRes.success).toBe(true);
+
+    state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies).toMatchObject({
+      active: 0,
+      wounded: 1,
+      busy: 1,
+      inQueue: 2,
+      occupied: 4,
+      capacity: 4,
+      remaining: 0,
+    });
+
+    // Cancelar la expedición devuelve el espía: active=1, busy=0, occupied=4, remaining=0
+    await asUser.mutation(api.territories.cancelExploration, {
+      kingdomId,
+      expeditionId: launchRes.expeditionId,
+    });
+    state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies).toMatchObject({
+      active: 1,
+      wounded: 1,
+      busy: 0,
+      inQueue: 2,
+      occupied: 4,
+      capacity: 4,
+      remaining: 0,
+    });
+  });
+
+  test("2. military:trainUnits rechaza payloads manipulados de espía y resolveCompletedTrainings conserva isSpy:true y level:1 al incorporar espías vencidos", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "p1-mil-iso", "Reino Aislamiento Militar");
+    await setBuildingLevel(t, kingdomId, "cuartel", 2);
+    await setResourcesAndPop(t, kingdomId, { gold: 50000, food: 50000, wood: 50000, stone: 50000, iron: 50000, available: 100 });
+
+    for (const manipulated of ["espia", "ESPIA", " espia ", "EspIa"]) {
+      await expect(
+        asUser.mutation(api.military.trainUnits, {
+          kingdomId,
+          unitType: manipulated,
+          count: 1,
+        })
+      ).rejects.toThrow(/espías/i);
+    }
+
+    // Si existe una entrada vencida de espía en trainingQueue, resolveCompletedTrainings debe incorporarla canónicamente con isSpy:true y level:1
+    await t.run(async (ctx) => {
+      await ctx.db.insert("trainingQueue", {
+        kingdomId,
+        unitType: "espia",
+        level: 3, // incluso si viniera con nivel alterado, addUnits canónico fuerza level: 1 e isSpy: true
+        count: 2,
+        startedAt: T0 - 60_000,
+        durationMs: 30_000,
+      });
+    });
+
+    const res = await asUser.mutation(api.military.resolveCompletedTrainings, { kingdomId });
+    expect(res.processedCount).toBe(1);
+
+    const units = await t.run(async (ctx) =>
+      ctx.db.query("armyUnits").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).collect()
+    );
+    const spyDocs = units.filter((u) => isSpyUnitDoc(u));
+    expect(spyDocs).toHaveLength(1);
+    expect(spyDocs[0]).toMatchObject({
+      unitType: "espia",
+      level: 1,
+      count: 2,
+      isSpy: true,
+    });
+
+    // Los espías NO se suman a regularSoldiers del reino
+    const kingdomDoc = await t.run(async (ctx) => ctx.db.get(kingdomId));
+    expect(kingdomDoc?.regularSoldiers ?? 0).toBe(0);
+  });
+
+  test("3. parliament:requestEspionageReport rechaza spiesCount inválido (0, negativo, decimal) sin truncar ni silenciar", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "p1-parl-atk", "Reino Parlamento A");
+    const { kingdomId: targetKingdomId } = await foundKingdom(t, "p1-parl-def", "Reino Parlamento B");
+    await setBuildingLevel(t, kingdomId, "cuartel", 2);
+    await setResourcesAndPop(t, kingdomId, { gold: 50000, food: 50000, wood: 50000, stone: 50000, iron: 50000, available: 50 });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("technologyProgress", {
+        kingdomId,
+        technologyId: "espionage_1",
+        status: "completed",
+      });
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 3, isSpy: true });
+    });
+
+    for (const invalidCount of [0, -1, 1.5]) {
+      await expect(
+        asUser.mutation(api.parliament.requestEspionageReport, {
+          kingdomId,
+          targetKingdomId,
+          spiesCount: invalidCount,
+        })
+      ).rejects.toThrow(/entero positivo/i);
+    }
+
+    // Los 3 espías siguen intactos
+    const state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies.active).toBe(3);
+  });
+
+  test("4. Carrera entre cancelExploration y completeExplorationScheduled devuelve el espía una sola vez sin duplicación ni pérdida", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "p1-race-cancel", "Reino Carrera Cancelación");
+    await setBuildingLevel(t, kingdomId, "cuartel", 4);
+    await setResourcesAndPop(t, kingdomId, { gold: 50000, food: 50000, wood: 50000, stone: 50000, iron: 50000, available: 50 });
+
+    const targetId = "2,0";
+    await t.run(async (ctx) => {
+      await ctx.db.insert("territories", { cellId: targetId, q: 2, r: 0, terrain: "llanura" });
+      await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 2, isSpy: true });
+    });
+
+    const launchRes = await asUser.mutation(api.territories.startExploration, {
+      kingdomId,
+      cellId: targetId,
+      spiesCount: 2,
+    });
+    expect(launchRes.success).toBe(true);
+
+    // Ejecutar cancelación y finalización programada concurrentemente
+    const settled = await Promise.allSettled([
+      asUser.mutation(api.territories.cancelExploration, {
+        kingdomId,
+        expeditionId: launchRes.expeditionId,
+      }),
+      t.mutation(internal.territories.completeExplorationScheduled, {
+        expeditionId: launchRes.expeditionId,
+      }),
+    ]);
+
+    // Al menos una ganó y la otra fue idempotente o rechazada limpiamente
+    expect(settled.some((r) => r.status === "fulfilled")).toBe(true);
+
+    // La expedición fue eliminada y los espías activos vuelven a ser EXACTAMENTE 2 (jamás 0 ni 4)
+    const remainingExp = await t.run(async (ctx) => ctx.db.get(launchRes.expeditionId));
+    expect(remainingExp).toBeNull();
+
+    const state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies.active).toBe(2);
+    expect(state.spies.busy).toBe(0);
+    expect(state.spies.occupied).toBe(2);
+  });
+
+  test("5. completeExplorationScheduled limpia una expedición huérfana si el reino ya no existe", async () => {
+    const t = createTestBackend();
+    const { kingdomId } = await foundKingdom(t, "p1-orphan-exp", "Reino Temporal");
+    const target = hexNeighbors({ q: 0, r: 0 })[0];
+    const targetId = cellId(target.q, target.r);
+
+    const expeditionId = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("explorationQueue", {
+        kingdomId,
+        cellId: targetId,
+        targetQ: target.q,
+        targetR: target.r,
+        distance: 1,
+        scoutsCount: 1,
+        startedAt: T0,
+        durationMs: 10_000,
+        completesAt: T0 + 10_000,
+        costs: { gold: 0, food: 0 },
+        isSpyMission: true,
+      });
+      // Eliminar el reino para simular expedición huérfana
+      await ctx.db.delete(kingdomId);
+      return id;
+    });
+
+    const result = await t.mutation(internal.territories.completeExplorationScheduled, { expeditionId });
+    expect(result).toBeNull();
+
+    // La entrada huérfana debe haberse limpiado de explorationQueue
+    const stillExists = await t.run(async (ctx) => ctx.db.get(expeditionId));
+    expect(stillExists).toBeNull();
+  });
+});
+
+
 

@@ -309,13 +309,23 @@ export const getArmyState = query({
         tacticalFormation: isTacticalFormation(kingdomAny.tacticalFormation ?? "") ? kingdomAny.tacticalFormation : DEFAULT_TACTICAL_FORMATION,
         tacticalFormationCatalog: TACTICAL_FORMATIONS,
       },
-      spies: {
-        active: units.filter((doc) => isSpyUnitDoc(doc)).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0),
-        busy: busySpies,
-        inQueue: queue.filter((doc) => doc.unitType === "espia").reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0),
-        capacity: Math.floor((buildingLevels.cuartel ?? 0) / 2),
-        cuartelLevel: buildingLevels.cuartel ?? 0,
-      },
+      spies: (() => {
+        const activeSpies = units.filter((doc) => isSpyUnitDoc(doc)).reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
+        const woundedSpies = units.filter((doc) => isSpyUnitDoc(doc)).reduce((sum, doc) => sum + Math.max(0, doc.wounded ?? 0), 0);
+        const inQueueSpies = queue.filter((doc) => normalizeUnitType(doc.unitType) === "espia").reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
+        const capacity = Math.floor((buildingLevels.cuartel ?? 0) / 2);
+        const occupied = activeSpies + woundedSpies + busySpies + inQueueSpies;
+        return {
+          active: activeSpies,
+          wounded: woundedSpies,
+          busy: busySpies,
+          inQueue: inQueueSpies,
+          occupied,
+          capacity,
+          remaining: Math.max(0, capacity - occupied),
+          cuartelLevel: buildingLevels.cuartel ?? 0,
+        };
+      })(),
     };
   },
 });
@@ -626,6 +636,9 @@ export const recruitSpy = mutation({
     const active = units
       .filter((doc) => isSpyUnitDoc(doc))
       .reduce((sum, doc) => sum + Math.max(0, doc.count ?? 0), 0);
+    const woundedSpies = units
+      .filter((doc) => isSpyUnitDoc(doc))
+      .reduce((sum, doc) => sum + Math.max(0, doc.wounded ?? 0), 0);
     const busySpies = explorationExpeditions
       .filter((exp) => exp.isSpyMission)
       .reduce((sum, exp) => sum + (exp.scoutsCount ?? 1), 0);
@@ -645,6 +658,7 @@ export const recruitSpy = mutation({
       buildingLevels: collection.levels,
       activeTraining: queue as TrainingQueueEntry[],
       activeSpies: active,
+      woundedSpies,
       busySpies,
       inQueueSpies: inQueue,
       now,

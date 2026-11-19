@@ -343,7 +343,10 @@ export const requestEspionageReport = mutation({
     const spyLevel = modifiers.espionageLevel;
     if (spyLevel < 1) throw new Error("Se necesita la tecnología Espionaje I para solicitar informes (P42).");
 
-    const spiesCount = Math.max(1, args.spiesCount ?? 1);
+    const spiesCount = args.spiesCount ?? 1;
+    if (!Number.isInteger(spiesCount) || spiesCount < 1) {
+      throw new Error("La cantidad de espías debe ser un número entero positivo.");
+    }
     const armyUnits = await readArmyUnitsWithMigration(ctx, args.kingdomId);
     const totalSpies = armyUnits.filter((u) => isSpyUnitDoc(u)).reduce((sum, u) => sum + Math.max(0, u.count ?? 0), 0);
     if (totalSpies < spiesCount) throw new Error(`No tienes suficientes espías disponibles para la misión (solicitados: ${spiesCount}, disponibles: ${totalSpies}).`);
