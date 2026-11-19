@@ -2634,47 +2634,113 @@ describe("Cierre definitivo Punto 1: reclutamiento, misiones, concurrencia y coh
     expect(state.spies.active).toBe(3);
   });
 
-  test("4. Carrera entre cancelExploration y completeExplorationScheduled devuelve el espía una sola vez sin duplicación ni pérdida", async () => {
+  test("4. Ciclo real de expedición con scheduler y completesAt: reserva, indisponibilidad, finalización programada, cancelación y carrera concurrente sin duplicación", async () => {
     const t = createTestBackend();
-    const { asUser, kingdomId } = await foundKingdom(t, "p1-race-cancel", "Reino Carrera Cancelación");
+    const { asUser, kingdomId } = await foundKingdom(t, "p1-exp-lifecycle", "Reino Ciclo Expedición");
     await setBuildingLevel(t, kingdomId, "cuartel", 4);
     await setResourcesAndPop(t, kingdomId, { gold: 50000, food: 50000, wood: 50000, stone: 50000, iron: 50000, available: 50 });
 
-    const targetId = "2,0";
+    const targetA = "2,0";
+    const targetB = "0,2";
+    const targetC = "-2,0";
     await t.run(async (ctx) => {
-      await ctx.db.insert("territories", { cellId: targetId, q: 2, r: 0, terrain: "llanura" });
+      await ctx.db.insert("territories", { cellId: targetA, q: 2, r: 0, terrain: "llanura" });
+      await ctx.db.insert("territories", { cellId: targetB, q: 0, r: 2, terrain: "llanura" });
+      await ctx.db.insert("territories", { cellId: targetC, q: -2, r: 0, terrain: "llanura" });
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 2, isSpy: true });
     });
 
-    const launchRes = await asUser.mutation(api.territories.startExploration, {
+    // A) Reserva de espías al iniciar e indisponibilidad mientras están ocupados
+    const launchA = await asUser.mutation(api.territories.startExploration, {
       kingdomId,
-      cellId: targetId,
+      cellId: targetA,
       spiesCount: 2,
     });
-    expect(launchRes.success).toBe(true);
+    expect(launchA.success).toBe(true);
+    expect(launchA.completesAt).toBeGreaterThan(T0);
 
-    // Ejecutar cancelación y finalización programada concurrentemente
-    const settled = await Promise.allSettled([
+    let state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies).toMatchObject({ active: 0, busy: 2, occupied: 2 });
+
+    // No puede volver a desplegar espías ocupados
+    await expect(
+      asUser.mutation(api.territories.startExploration, {
+        kingdomId,
+        cellId: targetB,
+        spiesCount: 1,
+      })
+    ).rejects.toThrow(/espías/i);
+
+    // B) Antes de completesAt: ni el scheduler ni una llamada prematura completan la expedición
+    vi.advanceTimersByTime(launchA.durationMs - 1_000);
+    await t.finishInProgressScheduledFunctions();
+    const premature = await t.mutation(internal.territories.completeExplorationScheduled, {
+      expeditionId: launchA.expeditionId,
+    });
+    expect(premature).toBeNull();
+    expect(await t.run(async (ctx) => ctx.db.get(launchA.expeditionId))).not.toBeNull();
+    state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies).toMatchObject({ active: 0, busy: 2, occupied: 2 });
+
+    // C) Al alcanzar completesAt: el scheduler real de Convex dispara la finalización y devuelve los espías
+    vi.advanceTimersByTime(1_000);
+    await t.finishInProgressScheduledFunctions();
+
+    expect(await t.run(async (ctx) => ctx.db.get(launchA.expeditionId))).toBeNull();
+    const exploredA = await t.run(async (ctx) =>
+      ctx.db
+        .query("exploredTerritories")
+        .withIndex("by_kingdom_and_cell", (q) => q.eq("kingdomId", kingdomId).eq("cellId", targetA))
+        .first()
+    );
+    expect(exploredA).not.toBeNull();
+
+    state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies).toMatchObject({ active: 2, busy: 0, occupied: 2 });
+
+    // D) Cancelación antes de completesAt devuelve espías y el disparo posterior del scheduler no duplica
+    const launchB = await asUser.mutation(api.territories.startExploration, {
+      kingdomId,
+      cellId: targetB,
+      spiesCount: 2,
+    });
+    const cancelRes = await asUser.mutation(api.territories.cancelExploration, {
+      kingdomId,
+      expeditionId: launchB.expeditionId,
+    });
+    expect(cancelRes.success).toBe(true);
+    expect(cancelRes.returnedSpies).toBe(2);
+
+    vi.advanceTimersByTime(launchB.durationMs + 1_000);
+    await t.finishInProgressScheduledFunctions();
+
+    state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies).toMatchObject({ active: 2, busy: 0, occupied: 2 });
+
+    // E) Concurrencia entre cancelación y finalización al vencimiento (completesAt): devuelve una sola vez
+    const launchC = await asUser.mutation(api.territories.startExploration, {
+      kingdomId,
+      cellId: targetC,
+      spiesCount: 2,
+    });
+    vi.setSystemTime(launchC.completesAt);
+    const [cancelOutcome, completeOutcome] = await Promise.allSettled([
       asUser.mutation(api.territories.cancelExploration, {
         kingdomId,
-        expeditionId: launchRes.expeditionId,
+        expeditionId: launchC.expeditionId,
       }),
       t.mutation(internal.territories.completeExplorationScheduled, {
-        expeditionId: launchRes.expeditionId,
+        expeditionId: launchC.expeditionId,
       }),
     ]);
 
-    // Al menos una ganó y la otra fue idempotente o rechazada limpiamente
-    expect(settled.some((r) => r.status === "fulfilled")).toBe(true);
+    expect(cancelOutcome.status).toBe("rejected");
+    expect(completeOutcome.status).toBe("fulfilled");
+    expect(await t.run(async (ctx) => ctx.db.get(launchC.expeditionId))).toBeNull();
 
-    // La expedición fue eliminada y los espías activos vuelven a ser EXACTAMENTE 2 (jamás 0 ni 4)
-    const remainingExp = await t.run(async (ctx) => ctx.db.get(launchRes.expeditionId));
-    expect(remainingExp).toBeNull();
-
-    const state = await asUser.query(api.army.getArmyState, { kingdomId });
-    expect(state.spies.active).toBe(2);
-    expect(state.spies.busy).toBe(0);
-    expect(state.spies.occupied).toBe(2);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies).toMatchObject({ active: 2, busy: 0, occupied: 2 });
   });
 
   test("5. completeExplorationScheduled limpia una expedición huérfana si el reino ya no existe", async () => {
@@ -2708,6 +2774,102 @@ describe("Cierre definitivo Punto 1: reclutamiento, misiones, concurrencia y coh
     // La entrada huérfana debe haberse limpiado de explorationQueue
     const stillExists = await t.run(async (ctx) => ctx.db.get(expeditionId));
     expect(stillExists).toBeNull();
+  });
+
+  test("6. Reclutamiento concurrente real (api.army.recruitSpy): con Cuartel nivel 2 (capacidad 1), solo una solicitud prospera, la otra falla por capacidad excedida y recursos/población se descuentan una sola vez", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "p1-concurrent-recruit", "Reino Reclutamiento Concurrente");
+    await setBuildingLevel(t, kingdomId, "cuartel", 2); // capacidad = floor(2 / 2) = 1 espía
+    await setResourcesAndPop(t, kingdomId, {
+      gold: 50000,
+      food: 50000,
+      wood: 50000,
+      stone: 50000,
+      iron: 50000,
+      available: 50,
+    });
+
+    const beforeSnapshot = await t.run(async (ctx) => {
+      const res = await ctx.db
+        .query("resources")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+        .first();
+      const pop = await ctx.db
+        .query("population")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+        .first();
+      return {
+        gold: res?.gold ?? 0,
+        wood: res?.wood ?? 0,
+        stone: res?.stone ?? 0,
+        iron: res?.iron ?? 0,
+        food: res?.food ?? 0,
+        available: pop?.available ?? 0,
+      };
+    });
+
+    // Ejecutar dos reclutamientos simultáneos de 1 espía cada uno mediante Promise.allSettled
+    const outcomes = await Promise.allSettled([
+      asUser.mutation(api.army.recruitSpy, { kingdomId, count: 1 }),
+      asUser.mutation(api.army.recruitSpy, { kingdomId, count: 1 }),
+    ]);
+
+    const fulfilled = outcomes.filter((o): o is PromiseFulfilledResult<any> => o.status === "fulfilled");
+    const rejected = outcomes.filter((o): o is PromiseRejectedResult => o.status === "rejected");
+
+    // Solo una solicitud prospera y la otra es rechazada específicamente por capacidad excedida
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(String(rejected[0].reason)).toMatch(/Capacidad de espías excedida/i);
+
+    // Verificar estado autoritativo en api.army.getArmyState
+    const state = await asUser.query(api.army.getArmyState, { kingdomId });
+    expect(state.spies).toMatchObject({
+      active: 0,
+      wounded: 0,
+      busy: 0,
+      inQueue: 1,
+      occupied: 1,
+      capacity: 1,
+      remaining: 0,
+      cuartelLevel: 2,
+    });
+
+    // Verificar ausencia de duplicación en trainingQueue
+    const queueEntries = await t.run(async (ctx) =>
+      ctx.db.query("trainingQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).collect()
+    );
+    expect(queueEntries).toHaveLength(1);
+    expect(queueEntries[0].unitType).toBe("espia");
+    expect(queueEntries[0].count).toBe(1);
+
+    // Verificar que recursos y población se descontaron exactamente una vez (coinciden con el plan de la única solicitud exitosa)
+    const winner = fulfilled[0].value;
+    const afterSnapshot = await t.run(async (ctx) => {
+      const res = await ctx.db
+        .query("resources")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+        .first();
+      const pop = await ctx.db
+        .query("population")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+        .first();
+      return {
+        gold: res?.gold ?? 0,
+        wood: res?.wood ?? 0,
+        stone: res?.stone ?? 0,
+        iron: res?.iron ?? 0,
+        food: res?.food ?? 0,
+        available: pop?.available ?? 0,
+      };
+    });
+
+    expect(beforeSnapshot.gold - afterSnapshot.gold).toBe(winner.costs.gold ?? 0);
+    expect(beforeSnapshot.wood - afterSnapshot.wood).toBe(winner.costs.wood ?? 0);
+    expect(beforeSnapshot.stone - afterSnapshot.stone).toBe(winner.costs.stone ?? 0);
+    expect(beforeSnapshot.iron - afterSnapshot.iron).toBe(winner.costs.iron ?? 0);
+    expect(beforeSnapshot.food - afterSnapshot.food).toBe(winner.costs.food ?? 0);
+    expect(beforeSnapshot.available - afterSnapshot.available).toBe(winner.populationReserved);
   });
 });
 

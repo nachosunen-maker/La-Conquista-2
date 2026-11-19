@@ -413,6 +413,10 @@ export async function completeExpedition(ctx: MutationCtx, expeditionId: Id<"exp
     return null;
   }
 
+  if (Date.now() < expedition.completesAt) {
+    return null;
+  }
+
   // 1. Obtener datos de la celda objetivo
   const targetCell = await ctx.db
     .query("territories")

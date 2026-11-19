@@ -288,11 +288,6 @@ export function createSpyRecruitmentPlan(input: {
   if (!reqCheck.satisfied) {
     return { success: false, error: `Los espías requieren Cuartel nivel ${UNITS.espia.requirements.cuartel ?? 2}: ${reqCheck.error}` };
   }
-  const slots = trainingQueueSlots(cuartelLevel);
-  if (slots === 0 || input.activeTraining.length >= slots) {
-    return { success: false, error: `Todas las colas de entrenamiento están ocupadas (${slots} con Cuartel nivel ${cuartelLevel}).` };
-  }
-
   const capacity = Math.floor(cuartelLevel / 2);
   const woundedSpies = Math.max(0, input.woundedSpies ?? 0);
   const occupied = Math.max(0, input.activeSpies) + woundedSpies + Math.max(0, input.busySpies) + Math.max(0, input.inQueueSpies);
@@ -301,6 +296,11 @@ export function createSpyRecruitmentPlan(input: {
       success: false,
       error: `Capacidad de espías excedida (capacidad: ${capacity}, activos: ${input.activeSpies}, heridos: ${woundedSpies}, en misión: ${input.busySpies}, en cola: ${input.inQueueSpies}, solicitado: ${input.count}).`,
     };
+  }
+
+  const slots = trainingQueueSlots(cuartelLevel);
+  if (slots === 0 || input.activeTraining.length >= slots) {
+    return { success: false, error: `Todas las colas de entrenamiento están ocupadas (${slots} con Cuartel nivel ${cuartelLevel}).` };
   }
 
   const populationReserved = UNITS.espia.populationPerUnit * input.count;
