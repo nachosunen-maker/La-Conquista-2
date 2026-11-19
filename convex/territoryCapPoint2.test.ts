@@ -475,6 +475,7 @@ describe("Punto 2 — Tareas 2–5: Autorización administrativa, auditoría per
         crushingVictory: false,
         report: { summary: "Histórico preservado" },
       });
+      await ctx.db.patch(chId, { battleId });
       const marchId = await ctx.db.insert("armyMarches", {
         kingdomId: k106.kingdomId,
         targetCellId: seeded106.ownedCells[105].cellId,
@@ -1193,4 +1194,753 @@ describe("Punto 2 — Tareas 2–5: Autorización administrativa, auditoría per
     }
   });
 });
+
+describe("Punto 2 — Relaciones referenciales bidireccionales (armyMarches <-> challenges y Battle <-> challenges)", () => {
+  const originalAdminIds = process.env.ADMIN_USER_IDS;
+
+  beforeEach(() => {
+    process.env.ADMIN_USER_IDS = "admin-authorized-1";
+  });
+
+  afterEach(() => {
+    if (originalAdminIds === undefined) delete process.env.ADMIN_USER_IDS;
+    else process.env.ADMIN_USER_IDS = originalAdminIds;
+  });
+
+  test("1. Marcha activa con challengeId inexistente bloquea el saneamiento", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-1a", "Reino Bidir 1A");
+    const k2 = await foundKingdom(t, "user-bidir-1b", "Reino Bidir 1B");
+    await seedKingdomTerritories(t, k1.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await seedKingdomTerritories(t, k2.kingdomId, 5, { capitalCellId: "20,0", extraNeighborCount: 0 });
+
+    await t.run(async (ctx) => {
+      const ghostChallengeId = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "ACCEPTED",
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 86_400_000,
+      });
+      await ctx.db.delete(ghostChallengeId);
+      await ctx.db.insert("armyMarches", {
+        kingdomId: k1.kingdomId,
+        targetCellId: "20,0",
+        targetQ: 20,
+        targetR: 0,
+        distance: 20,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now(),
+        durationMs: 3600_000,
+        completesAt: Date.now() + 3600_000,
+        status: "marchando",
+        challengeId: ghostChallengeId,
+      });
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-1",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.kingdomsBlocked).toBe(1);
+    expect(res.territoriesReleased).toBe(0);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.beforeIntegrity.byRelation.activeMarches).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 1,
+    });
+  });
+
+  test("2. Desafío activo con activeMarchId inexistente bloquea el saneamiento", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-2a", "Reino Bidir 2A");
+    const k2 = await foundKingdom(t, "user-bidir-2b", "Reino Bidir 2B");
+    await seedKingdomTerritories(t, k1.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await seedKingdomTerritories(t, k2.kingdomId, 5, { capitalCellId: "20,0", extraNeighborCount: 0 });
+
+    await t.run(async (ctx) => {
+      const ghostMarchId = await ctx.db.insert("armyMarches", {
+        kingdomId: k1.kingdomId,
+        targetCellId: "20,0",
+        targetQ: 20,
+        targetR: 0,
+        distance: 20,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now(),
+        durationMs: 3600_000,
+        completesAt: Date.now() + 3600_000,
+        status: "marchando",
+      });
+      await ctx.db.delete(ghostMarchId);
+      await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "ACCEPTED",
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 86_400_000,
+        activeMarchId: ghostMarchId,
+      });
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-2",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.kingdomsBlocked).toBe(1);
+    expect(res.territoriesReleased).toBe(0);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.beforeIntegrity.byRelation.challenges).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 1,
+    });
+  });
+
+  test("3. Marcha activa cuyo challengeId no coincide con el activeMarchId del desafío bloquea el saneamiento", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-3a", "Reino Bidir 3A");
+    const k2 = await foundKingdom(t, "user-bidir-3b", "Reino Bidir 3B");
+    await seedKingdomTerritories(t, k1.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await seedKingdomTerritories(t, k2.kingdomId, 5, { capitalCellId: "20,0", extraNeighborCount: 0 });
+
+    await t.run(async (ctx) => {
+      const chId = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "ACCEPTED",
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 86_400_000,
+      });
+      const marchA = await ctx.db.insert("armyMarches", {
+        kingdomId: k1.kingdomId,
+        targetCellId: "20,0",
+        targetQ: 20,
+        targetR: 0,
+        distance: 20,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now(),
+        durationMs: 3600_000,
+        completesAt: Date.now() + 3600_000,
+        status: "marchando",
+        challengeId: chId,
+      });
+      const marchB = await ctx.db.insert("armyMarches", {
+        kingdomId: k1.kingdomId,
+        targetCellId: "20,0",
+        targetQ: 20,
+        targetR: 0,
+        distance: 20,
+        units: [{ unitType: "infanteria", level: 1, count: 5 }],
+        startedAt: Date.now(),
+        durationMs: 3600_000,
+        completesAt: Date.now() + 3600_000,
+        status: "marchando",
+        challengeId: chId,
+      });
+      // El desafío solo apunta a marchA; marchB rompe la reciprocidad
+      await ctx.db.patch(chId, { activeMarchId: marchA });
+      expect(marchB).toBeTruthy();
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-3",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.kingdomsBlocked).toBe(1);
+    expect(res.territoriesReleased).toBe(0);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.beforeIntegrity.byRelation.activeMarches).toEqual({
+      examined: 2,
+      valid: 1,
+      inconsistent: 1,
+      blocking: 1,
+    });
+  });
+
+  test("4. Marcha activa perteneciente a un reino distinto del reino desafiante bloquea el saneamiento", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-4a", "Reino Bidir 4A");
+    const k2 = await foundKingdom(t, "user-bidir-4b", "Reino Bidir 4B");
+    const k3 = await foundKingdom(t, "user-bidir-4c", "Reino Bidir 4C");
+    await seedKingdomTerritories(t, k1.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await seedKingdomTerritories(t, k2.kingdomId, 5, { capitalCellId: "20,0", extraNeighborCount: 0 });
+
+    await t.run(async (ctx) => {
+      const chId = await ctx.db.insert("challenges", {
+        challengerKingdomId: k3.kingdomId, // Desafiante es k3, NO k1
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "ACCEPTED",
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 86_400_000,
+      });
+      const marchId = await ctx.db.insert("armyMarches", {
+        kingdomId: k1.kingdomId,
+        targetCellId: "20,0",
+        targetQ: 20,
+        targetR: 0,
+        distance: 20,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now(),
+        durationMs: 3600_000,
+        completesAt: Date.now() + 3600_000,
+        status: "marchando",
+        challengeId: chId,
+      });
+      await ctx.db.patch(chId, { activeMarchId: marchId });
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-4",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.kingdomsBlocked).toBe(1);
+    expect(res.territoriesReleased).toBe(0);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.beforeIntegrity.byRelation.activeMarches).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 1,
+    });
+  });
+
+  test("5. Marcha activa asociada a un desafío terminal bloquea el saneamiento en ambos sentidos", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-5a", "Reino Bidir 5A");
+    const k2 = await foundKingdom(t, "user-bidir-5b", "Reino Bidir 5B");
+    await seedKingdomTerritories(t, k1.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await seedKingdomTerritories(t, k2.kingdomId, 5, { capitalCellId: "20,0", extraNeighborCount: 0 });
+
+    await t.run(async (ctx) => {
+      const chId = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "CANCELLED",
+        createdAt: Date.now() - 10_000,
+        expiresAt: Date.now() + 86_400_000,
+      });
+      const marchId = await ctx.db.insert("armyMarches", {
+        kingdomId: k1.kingdomId,
+        targetCellId: "20,0",
+        targetQ: 20,
+        targetR: 0,
+        distance: 20,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now(),
+        durationMs: 3600_000,
+        completesAt: Date.now() + 3600_000,
+        status: "marchando",
+        challengeId: chId,
+      });
+      await ctx.db.patch(chId, { activeMarchId: marchId });
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-5",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.kingdomsBlocked).toBe(1);
+    expect(res.territoriesReleased).toBe(0);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.beforeIntegrity.byRelation.activeMarches.blocking).toBe(1);
+    expect(res.beforeIntegrity.byRelation.challenges.blocking).toBe(1);
+  });
+
+  test("6. Desafío con battleId inexistente genera advertencia en histórico sin borrar ni bloquear", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-6a", "Reino Bidir 6A");
+    const k2 = await foundKingdom(t, "user-bidir-6b", "Reino Bidir 6B");
+    await seedKingdomTerritories(t, k1.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+
+    const chId = await t.run(async (ctx) => {
+      const dummyCh = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "RESOLVED",
+        createdAt: Date.now() - 20_000,
+        expiresAt: Date.now() - 10_000,
+      });
+      const ghostBattle = await ctx.db.insert("Battle", {
+        challengeId: dummyCh,
+        attackerKingdomId: k1.kingdomId,
+        defenderKingdomId: k2.kingdomId,
+        resolvedAt: Date.now() - 15_000,
+        outcome: "attacker_win",
+        winnerKingdomId: k1.kingdomId,
+        crushingVictory: false,
+        report: {},
+      });
+      await ctx.db.delete(ghostBattle);
+      await ctx.db.patch(dummyCh, { battleId: ghostBattle });
+      return dummyCh;
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-6",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.territoriesReleased).toBe(2);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.afterIntegrity.byRelation.challenges).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 0,
+    });
+    const preserved = await t.run(async (ctx) => ctx.db.get(chId));
+    expect(preserved).not.toBeNull();
+  });
+
+  test("7. Batalla cuyo challengeId no tiene un battleId recíproco genera advertencia y conserva documentos", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-7a", "Reino Bidir 7A");
+    const k2 = await foundKingdom(t, "user-bidir-7b", "Reino Bidir 7B");
+    await seedKingdomTerritories(t, k1.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+
+    const ids = await t.run(async (ctx) => {
+      const chId = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "RESOLVED",
+        createdAt: Date.now() - 20_000,
+        expiresAt: Date.now() - 10_000,
+        // battleId ausente -> falta reciprocidad
+      });
+      const battleId = await ctx.db.insert("Battle", {
+        challengeId: chId,
+        attackerKingdomId: k1.kingdomId,
+        defenderKingdomId: k2.kingdomId,
+        resolvedAt: Date.now() - 15_000,
+        outcome: "attacker_win",
+        winnerKingdomId: k1.kingdomId,
+        crushingVictory: false,
+        report: {},
+      });
+      return { chId, battleId };
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-7",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.territoriesReleased).toBe(2);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.afterIntegrity.byRelation.battles).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 0,
+    });
+    const persisted = await t.run(async (ctx) => ({
+      ch: await ctx.db.get(ids.chId),
+      b: await ctx.db.get(ids.battleId),
+    }));
+    expect(persisted.ch).not.toBeNull();
+    expect(persisted.b).not.toBeNull();
+  });
+
+  test("8. Desafío cuyo battleId apunta a una batalla vinculada a otro desafío genera advertencia sin borrar", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-8a", "Reino Bidir 8A");
+    const k2 = await foundKingdom(t, "user-bidir-8b", "Reino Bidir 8B");
+    await seedKingdomTerritories(t, k1.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+
+    const ids = await t.run(async (ctx) => {
+      const ch1 = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "RESOLVED",
+        createdAt: Date.now() - 30_000,
+        expiresAt: Date.now() - 20_000,
+      });
+      const ch2 = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "RESOLVED",
+        createdAt: Date.now() - 25_000,
+        expiresAt: Date.now() - 15_000,
+      });
+      const battleForCh1 = await ctx.db.insert("Battle", {
+        challengeId: ch1,
+        attackerKingdomId: k1.kingdomId,
+        defenderKingdomId: k2.kingdomId,
+        resolvedAt: Date.now() - 22_000,
+        outcome: "attacker_win",
+        winnerKingdomId: k1.kingdomId,
+        crushingVictory: false,
+        report: {},
+      });
+      await ctx.db.patch(ch1, { battleId: battleForCh1 });
+      // ch2 apunta erróneamente a battleForCh1 (que pertenece a ch1)
+      await ctx.db.patch(ch2, { battleId: battleForCh1 });
+      return { ch1, ch2, battleForCh1 };
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-8",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.territoriesReleased).toBe(2);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.afterIntegrity.byRelation.battles).toEqual({
+      examined: 1,
+      valid: 1,
+      inconsistent: 0,
+      blocking: 0,
+    });
+    expect(res.afterIntegrity.byRelation.challenges).toEqual({
+      examined: 2,
+      valid: 1,
+      inconsistent: 1,
+      blocking: 0,
+    });
+    const persisted = await t.run(async (ctx) => ({
+      ch1: await ctx.db.get(ids.ch1),
+      ch2: await ctx.db.get(ids.ch2),
+      b: await ctx.db.get(ids.battleForCh1),
+    }));
+    expect(persisted.ch1).not.toBeNull();
+    expect(persisted.ch2).not.toBeNull();
+    expect(persisted.b).not.toBeNull();
+  });
+
+  test("9. Batalla con participantes que no corresponden a los reinos del desafío genera advertencia en ambos sentidos", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-9a", "Reino Bidir 9A");
+    const k2 = await foundKingdom(t, "user-bidir-9b", "Reino Bidir 9B");
+    const k3 = await foundKingdom(t, "user-bidir-9c", "Reino Bidir 9C");
+    await seedKingdomTerritories(t, k1.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+
+    const ids = await t.run(async (ctx) => {
+      const chId = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "RESOLVED",
+        createdAt: Date.now() - 20_000,
+        expiresAt: Date.now() - 10_000,
+      });
+      const battleId = await ctx.db.insert("Battle", {
+        challengeId: chId,
+        attackerKingdomId: k1.kingdomId,
+        defenderKingdomId: k3.kingdomId, // k3 en lugar de k2
+        resolvedAt: Date.now() - 15_000,
+        outcome: "attacker_win",
+        winnerKingdomId: k1.kingdomId,
+        crushingVictory: false,
+        report: {},
+      });
+      await ctx.db.patch(chId, { battleId });
+      return { chId, battleId };
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-9",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.territoriesReleased).toBe(2);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.afterIntegrity.byRelation.battles).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 0,
+    });
+    expect(res.afterIntegrity.byRelation.challenges).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 0,
+    });
+    const persisted = await t.run(async (ctx) => ({
+      ch: await ctx.db.get(ids.chId),
+      b: await ctx.db.get(ids.battleId),
+    }));
+    expect(persisted.ch).not.toBeNull();
+    expect(persisted.b).not.toBeNull();
+  });
+
+  test("10. Relaciones históricas incoherentes generan advertencias, conservan documentos y no bloquean el saneamiento", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-10a", "Reino Bidir 10A");
+    const k2 = await foundKingdom(t, "user-bidir-10b", "Reino Bidir 10B");
+    await seedKingdomTerritories(t, k1.kingdomId, 103, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await seedKingdomTerritories(t, k2.kingdomId, 5, { capitalCellId: "20,0", extraNeighborCount: 0 });
+
+    const ids = await t.run(async (ctx) => {
+      const chHist = await ctx.db.insert("challenges", {
+        challengerKingdomId: k2.kingdomId,
+        targetKingdomId: k1.kingdomId,
+        challengeType: "conquista",
+        status: "RESOLVED",
+        createdAt: Date.now() - 30_000,
+        expiresAt: Date.now() - 20_000,
+      });
+      // Marcha histórica de k1 apuntando a desafío cuyo challenger es k2 -> advertencia no bloqueante
+      const marchHist = await ctx.db.insert("armyMarches", {
+        kingdomId: k1.kingdomId,
+        targetCellId: "20,0",
+        targetQ: 20,
+        targetR: 0,
+        distance: 20,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now() - 25_000,
+        durationMs: 1000,
+        completesAt: Date.now() - 24_000,
+        status: "completada",
+        challengeId: chHist,
+      });
+      // Batalla histórica sin battleId recíproco en chHist -> advertencia no bloqueante
+      const battleHist = await ctx.db.insert("Battle", {
+        challengeId: chHist,
+        attackerKingdomId: k2.kingdomId,
+        defenderKingdomId: k1.kingdomId,
+        resolvedAt: Date.now() - 22_000,
+        outcome: "defender_win",
+        winnerKingdomId: k1.kingdomId,
+        crushingVictory: false,
+        report: {},
+      });
+      return { chHist, marchHist, battleHist };
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-10",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.kingdomsBlocked).toBe(0);
+    expect(res.territoriesReleased).toBe(3);
+    expect(res.referentialIntegrity.blockingCount).toBe(0);
+    expect(res.referentialIntegrity.inconsistentCount).toBe(2);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.afterIntegrity.byRelation.historicalMarches).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 0,
+    });
+    expect(res.afterIntegrity.byRelation.battles).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 0,
+    });
+
+    // Todos los documentos históricos se conservan intactos y el reino queda en 100
+    const check = await t.run(async (ctx) => ({
+      owned: await ctx.db.query("territories").withIndex("by_owner", (q) => q.eq("ownerKingdomId", k1.kingdomId)).collect(),
+      ch: await ctx.db.get(ids.chHist),
+      m: await ctx.db.get(ids.marchHist),
+      b: await ctx.db.get(ids.battleHist),
+    }));
+    expect(check.owned).toHaveLength(100);
+    expect(check.ch).not.toBeNull();
+    expect(check.m).not.toBeNull();
+    expect(check.b).not.toBeNull();
+  });
+
+  test("11. Relaciones correctas en ambos sentidos (marcha<->desafío activo y batalla<->desafío con orden invertido) se contabilizan como válidas e intact=true", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-11a", "Reino Bidir 11A");
+    const k2 = await foundKingdom(t, "user-bidir-11b", "Reino Bidir 11B");
+    await seedKingdomTerritories(t, k1.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await seedKingdomTerritories(t, k2.kingdomId, 5, { capitalCellId: "20,0", extraNeighborCount: 0 });
+
+    await t.run(async (ctx) => {
+      // Relación activa 100% recíproca: marcha activa hacia k2 (no en liberación) <-> desafío ACCEPTED
+      const activeChId = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "ACCEPTED",
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 86_400_000,
+      });
+      const activeMarchId = await ctx.db.insert("armyMarches", {
+        kingdomId: k1.kingdomId,
+        targetCellId: "20,0",
+        targetQ: 20,
+        targetR: 0,
+        distance: 20,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now(),
+        durationMs: 3600_000,
+        completesAt: Date.now() + 3600_000,
+        status: "marchando",
+        challengeId: activeChId,
+      });
+      await ctx.db.patch(activeChId, { activeMarchId });
+
+      // Relación histórica 100% recíproca: desafío RESOLVED <-> batalla con orden atacante/defensor invertido (k2 vs k1)
+      const resolvedChId = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "duelo",
+        status: "RESOLVED",
+        createdAt: Date.now() - 20_000,
+        expiresAt: Date.now() - 10_000,
+        resolvedAt: Date.now() - 15_000,
+      });
+      const validBattleId = await ctx.db.insert("Battle", {
+        challengeId: resolvedChId,
+        attackerKingdomId: k2.kingdomId,
+        defenderKingdomId: k1.kingdomId,
+        resolvedAt: Date.now() - 15_000,
+        outcome: "defender_win",
+        winnerKingdomId: k1.kingdomId,
+        crushingVictory: false,
+        report: { targetCellId: "20,0" },
+      });
+      await ctx.db.patch(resolvedChId, { battleId: validBattleId });
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-11",
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.territoriesReleased).toBe(2);
+    expect(res.referentialIntegrity.intact).toBe(true);
+    expect(res.referentialIntegrity.inconsistentCount).toBe(0);
+    expect(res.referentialIntegrity.blockingCount).toBe(0);
+    expect(res.afterIntegrity.byRelation.activeMarches).toEqual({
+      examined: 1,
+      valid: 1,
+      inconsistent: 0,
+      blocking: 0,
+    });
+    expect(res.afterIntegrity.byRelation.battles).toEqual({
+      examined: 1,
+      valid: 1,
+      inconsistent: 0,
+      blocking: 0,
+    });
+    expect(res.afterIntegrity.byRelation.challenges).toEqual({
+      examined: 2,
+      valid: 2,
+      inconsistent: 0,
+      blocking: 0,
+    });
+  });
+
+  test("12. Saneamiento efectivo bloqueado por referencia activa incompatible no libera territorios ni altera registros relacionados", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-authorized-1"));
+    const k1 = await foundKingdom(t, "user-bidir-12a", "Reino Bidir 12A");
+    const k2 = await foundKingdom(t, "user-bidir-12b", "Reino Bidir 12B");
+    await seedKingdomTerritories(t, k1.kingdomId, 105, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await seedKingdomTerritories(t, k2.kingdomId, 5, { capitalCellId: "20,0", extraNeighborCount: 0 });
+
+    const ids = await t.run(async (ctx) => {
+      // Desafío activo FROZEN apunta a una marcha completada (no está marchando) -> bloqueo activo
+      const completedMarchId = await ctx.db.insert("armyMarches", {
+        kingdomId: k1.kingdomId,
+        targetCellId: "20,0",
+        targetQ: 20,
+        targetR: 0,
+        distance: 20,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now() - 10_000,
+        durationMs: 1000,
+        completesAt: Date.now() - 9_000,
+        status: "completada",
+      });
+      const activeChId = await ctx.db.insert("challenges", {
+        challengerKingdomId: k1.kingdomId,
+        targetKingdomId: k2.kingdomId,
+        challengeType: "conquista",
+        status: "FROZEN",
+        createdAt: Date.now() - 5_000,
+        expiresAt: Date.now() + 86_400_000,
+        activeMarchId: completedMarchId,
+      });
+      await ctx.db.patch(completedMarchId, { challengeId: activeChId });
+      return { completedMarchId, activeChId };
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k1.kingdomId,
+      operationId: "op-bidir-12",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.kingdomsBlocked).toBe(1);
+    expect(res.territoriesReleased).toBe(0);
+    expect(res.referentialIntegrity.intact).toBe(false);
+    expect(res.beforeIntegrity.byRelation.challenges).toEqual({
+      examined: 1,
+      valid: 0,
+      inconsistent: 1,
+      blocking: 1,
+    });
+
+    // Verificar que ningún territorio fue liberado y los documentos relacionados siguen intactos
+    const afterState = await t.run(async (ctx) => ({
+      owned: await ctx.db.query("territories").withIndex("by_owner", (q) => q.eq("ownerKingdomId", k1.kingdomId)).collect(),
+      march: await ctx.db.get(ids.completedMarchId),
+      challenge: await ctx.db.get(ids.activeChId),
+    }));
+    expect(afterState.owned).toHaveLength(105);
+    expect(afterState.march?.status).toBe("completada");
+    expect(afterState.challenge?.status).toBe("FROZEN");
+    expect(afterState.challenge?.activeMarchId).toBe(ids.completedMarchId);
+  });
+});
+
 

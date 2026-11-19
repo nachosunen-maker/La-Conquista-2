@@ -1508,7 +1508,18 @@ interface ReferentialAuditContext {
   allMarchesById: Map<string, Doc<"armyMarches">>;
   allActiveMarches: Doc<"armyMarches">[];
   allChallengesById: Map<string, Doc<"challenges">>;
-  allBattleIds: Set<string>;
+  allBattlesById: Map<string, Doc<"Battle">>;
+}
+
+function battleParticipantsMatchChallenge(
+  battle: { attackerKingdomId: Id<"kingdoms">; defenderKingdomId: Id<"kingdoms"> },
+  challenge: { challengerKingdomId: Id<"kingdoms">; targetKingdomId: Id<"kingdoms"> }
+): boolean {
+  const a = String(battle.attackerKingdomId);
+  const d = String(battle.defenderKingdomId);
+  const c = String(challenge.challengerKingdomId);
+  const t = String(challenge.targetKingdomId);
+  return (a === c && d === t) || (a === t && d === c);
 }
 
 const REFERENTIAL_RELATIONS: readonly ReferentialRelationName[] = [
@@ -1822,6 +1833,32 @@ async function auditKingdomTerritoryReferentialIntegrity(
           severity: "blocking",
           reason: `Marcha activa vinculada a un desafío en estado terminal incompatible '${linkedChallenge.status}'.`,
         });
+      } else if (
+        linkedChallenge &&
+        (!linkedChallenge.activeMarchId || String(linkedChallenge.activeMarchId) !== String(m._id))
+      ) {
+        blockingMarchIds.add(String(m._id));
+        recordIssue({
+          relation: "activeMarches",
+          documentId: String(m._id),
+          kingdomId: String(m.kingdomId),
+          cellId: m.targetCellId,
+          severity: "blocking",
+          reason: `Marcha activa referencia el desafío '${String(linkedChallenge._id)}', pero su activeMarchId ('${String(linkedChallenge.activeMarchId ?? "")}') no coincide con esta marcha.`,
+        });
+      } else if (
+        linkedChallenge &&
+        String(linkedChallenge.challengerKingdomId) !== String(m.kingdomId)
+      ) {
+        blockingMarchIds.add(String(m._id));
+        recordIssue({
+          relation: "activeMarches",
+          documentId: String(m._id),
+          kingdomId: String(m.kingdomId),
+          cellId: m.targetCellId,
+          severity: "blocking",
+          reason: `Marcha activa del reino '${String(m.kingdomId)}' no coincide con el challengerKingdomId '${String(linkedChallenge.challengerKingdomId)}' del desafío.`,
+        });
       } else {
         markValid("activeMarches");
       }
@@ -1854,6 +1891,18 @@ async function auditKingdomTerritoryReferentialIntegrity(
           cellId: m.targetCellId,
           severity: "warning",
           reason: `Marcha histórica referencia un desafío inexistente '${String(m.challengeId)}'.`,
+        });
+      } else if (
+        linkedChallenge &&
+        String(linkedChallenge.challengerKingdomId) !== String(m.kingdomId)
+      ) {
+        recordIssue({
+          relation: "historicalMarches",
+          documentId: String(m._id),
+          kingdomId: String(m.kingdomId),
+          cellId: m.targetCellId,
+          severity: "warning",
+          reason: `Marcha histórica del reino '${String(m.kingdomId)}' no coincide con el challengerKingdomId '${String(linkedChallenge.challengerKingdomId)}' del desafío.`,
         });
       } else {
         markValid("historicalMarches");
@@ -1926,7 +1975,7 @@ async function auditKingdomTerritoryReferentialIntegrity(
     }
   }
 
-  // 6. Informes de batalla históricos (Battle: conservar siempre, verificando referencias reales)
+  // 6. Informes de batalla históricos (Battle: conservar siempre, verificando relación bidireccional con challenges)
   const seenBattles = new Set<string>();
   for (const b of [...battlesAsAttacker, ...battlesAsDefender]) {
     if (seenBattles.has(String(b._id))) continue;
@@ -1935,7 +1984,7 @@ async function auditKingdomTerritoryReferentialIntegrity(
 
     const attackerExists = auditCtx.allKingdomIds.has(String(b.attackerKingdomId));
     const defenderExists = auditCtx.allKingdomIds.has(String(b.defenderKingdomId));
-    const challengeMissing = Boolean(b.challengeId) && !auditCtx.allChallengesById.has(String(b.challengeId));
+    const linkedChallenge = b.challengeId ? auditCtx.allChallengesById.get(String(b.challengeId)) : undefined;
     const winnerInvalid =
       Boolean(b.winnerKingdomId) &&
       (!auditCtx.allKingdomIds.has(String(b.winnerKingdomId)) ||
@@ -1952,13 +2001,29 @@ async function auditKingdomTerritoryReferentialIntegrity(
         severity: "warning",
         reason: `Informe de batalla histórico referencia un reino inexistente (atacante=${String(b.attackerKingdomId)}, defensor=${String(b.defenderKingdomId)}).`,
       });
-    } else if (challengeMissing) {
+    } else if (!b.challengeId || !linkedChallenge) {
       recordIssue({
         relation: "battles",
         documentId: String(b._id),
         kingdomId: String(kingdom._id),
         severity: "warning",
-        reason: `Informe de batalla histórico referencia un desafío inexistente '${String(b.challengeId)}'.`,
+        reason: `Informe de batalla histórico referencia un desafío inexistente '${String(b.challengeId ?? "")}'.`,
+      });
+    } else if (!linkedChallenge.battleId || String(linkedChallenge.battleId) !== String(b._id)) {
+      recordIssue({
+        relation: "battles",
+        documentId: String(b._id),
+        kingdomId: String(kingdom._id),
+        severity: "warning",
+        reason: `Informe de batalla histórico sin reciprocidad: el desafío '${String(linkedChallenge._id)}' tiene battleId='${String(linkedChallenge.battleId ?? "")}' en lugar de '${String(b._id)}'.`,
+      });
+    } else if (!battleParticipantsMatchChallenge(b, linkedChallenge)) {
+      recordIssue({
+        relation: "battles",
+        documentId: String(b._id),
+        kingdomId: String(kingdom._id),
+        severity: "warning",
+        reason: `Participantes de la batalla (${String(b.attackerKingdomId)} vs ${String(b.defenderKingdomId)}) no coinciden con los reinos del desafío (${String(linkedChallenge.challengerKingdomId)} vs ${String(linkedChallenge.targetKingdomId)}).`,
       });
     } else if (winnerInvalid) {
       recordIssue({
@@ -1982,7 +2047,7 @@ async function auditKingdomTerritoryReferentialIntegrity(
     }
   }
 
-  // 7. Desafíos parlamentarios (challenges: activos vs históricos, verificando reinos, activeMarchId y battleId)
+  // 7. Desafíos parlamentarios (challenges: verificación bidireccional con armyMarches y Battle)
   const seenChallenges = new Set<string>();
   for (const ch of [...challengesAsChallenger, ...challengesAsTarget]) {
     if (seenChallenges.has(String(ch._id))) continue;
@@ -1995,52 +2060,132 @@ async function auditKingdomTerritoryReferentialIntegrity(
     const challengerExists = auditCtx.allKingdomIds.has(String(ch.challengerKingdomId));
     const targetExists = auditCtx.allKingdomIds.has(String(ch.targetKingdomId));
     const linkedMarch = ch.activeMarchId ? auditCtx.allMarchesById.get(String(ch.activeMarchId)) : undefined;
+    const linkedBattle = ch.battleId ? auditCtx.allBattlesById.get(String(ch.battleId)) : undefined;
 
-    if (ch.activeMarchId && blockingMarchIds.has(String(ch.activeMarchId))) {
-      recordIssue({
-        relation: "challenges",
-        documentId: String(ch._id),
-        kingdomId: String(kingdom._id),
-        cellId: linkedMarch?.targetCellId,
-        severity: "blocking",
-        reason: `Desafío '${String(ch._id)}' vinculado a una marcha activa hacia una celda incompatible o planificada para liberación.`,
-      });
-    } else if (!challengerExists || !targetExists) {
-      recordIssue({
+    let challengeIssue: ReferentialIntegrityIssue | null = null;
+
+    if (!challengerExists || !targetExists) {
+      challengeIssue = {
         relation: "challenges",
         documentId: String(ch._id),
         kingdomId: String(kingdom._id),
         severity: severityForBrokenRef,
         reason: `Desafío '${String(ch._id)}' (${ch.status}) referencia un reino inexistente.`,
-      });
-    } else if (ch.activeMarchId && !linkedMarch) {
-      recordIssue({
-        relation: "challenges",
-        documentId: String(ch._id),
-        kingdomId: String(kingdom._id),
-        severity: severityForBrokenRef,
-        reason: `Desafío '${String(ch._id)}' (${ch.status}) referencia activeMarchId inexistente '${String(ch.activeMarchId)}'.`,
-      });
-    } else if (
-      linkedMarch &&
-      !auditCtx.allTerritoriesByCellId.has(linkedMarch.targetCellId)
-    ) {
-      recordIssue({
-        relation: "challenges",
-        documentId: String(ch._id),
-        kingdomId: String(kingdom._id),
-        cellId: linkedMarch.targetCellId,
-        severity: severityForBrokenRef,
-        reason: `Desafío '${String(ch._id)}' (${ch.status}) apunta vía activeMarchId a una celda inexistente '${linkedMarch.targetCellId}'.`,
-      });
-    } else if (ch.battleId && !auditCtx.allBattleIds.has(String(ch.battleId))) {
-      recordIssue({
-        relation: "challenges",
-        documentId: String(ch._id),
-        kingdomId: String(kingdom._id),
-        severity: severityForBrokenRef,
-        reason: `Desafío '${String(ch._id)}' (${ch.status}) referencia battleId inexistente '${String(ch.battleId)}'.`,
-      });
+      };
+    } else if (ch.activeMarchId) {
+      if (!linkedMarch) {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          severity: severityForBrokenRef,
+          reason: `Desafío '${String(ch._id)}' (${ch.status}) referencia activeMarchId inexistente '${String(ch.activeMarchId)}'.`,
+        };
+      } else if (blockingMarchIds.has(String(ch.activeMarchId))) {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          cellId: linkedMarch.targetCellId,
+          severity: "blocking",
+          reason: `Desafío '${String(ch._id)}' vinculado a una marcha activa incompatible o hacia una celda planificada para liberación.`,
+        };
+      } else if (isActiveChallenge && linkedMarch.status !== "marchando") {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          cellId: linkedMarch.targetCellId,
+          severity: "blocking",
+          reason: `Desafío activo '${String(ch._id)}' apunta a activeMarchId '${String(linkedMarch._id)}' cuyo estado es '${linkedMarch.status}' en lugar de 'marchando'.`,
+        };
+      } else if (!isActiveChallenge && linkedMarch.status === "marchando") {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          cellId: linkedMarch.targetCellId,
+          severity: "blocking",
+          reason: `Desafío terminal '${String(ch._id)}' (${ch.status}) sigue vinculado a una marcha activa en estado 'marchando'.`,
+        };
+      } else if (!linkedMarch.challengeId || String(linkedMarch.challengeId) !== String(ch._id)) {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          cellId: linkedMarch.targetCellId,
+          severity: severityForBrokenRef,
+          reason: `Desafío '${String(ch._id)}' sin reciprocidad: la marcha '${String(linkedMarch._id)}' tiene challengeId='${String(linkedMarch.challengeId ?? "")}'.`,
+        };
+      } else if (String(linkedMarch.kingdomId) !== String(ch.challengerKingdomId)) {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          cellId: linkedMarch.targetCellId,
+          severity: severityForBrokenRef,
+          reason: `Desafío '${String(ch._id)}' apunta a marcha '${String(linkedMarch._id)}' perteneciente al reino '${String(linkedMarch.kingdomId)}' en lugar del desafiante '${String(ch.challengerKingdomId)}'.`,
+        };
+      } else if (!auditCtx.allTerritoriesByCellId.has(linkedMarch.targetCellId)) {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          cellId: linkedMarch.targetCellId,
+          severity: severityForBrokenRef,
+          reason: `Desafío '${String(ch._id)}' (${ch.status}) apunta vía activeMarchId a una celda inexistente '${linkedMarch.targetCellId}'.`,
+        };
+      } else if (linkedMarch.targetCellId !== `${linkedMarch.targetQ},${linkedMarch.targetR}`) {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          cellId: linkedMarch.targetCellId,
+          severity: severityForBrokenRef,
+          reason: `Desafío '${String(ch._id)}' apunta a marcha '${String(linkedMarch._id)}' con coordenadas incoherentes.`,
+        };
+      } else if (isActiveChallenge && plannedReleaseCellIds.has(linkedMarch.targetCellId)) {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          cellId: linkedMarch.targetCellId,
+          severity: "blocking",
+          reason: `Desafío activo '${String(ch._id)}' apunta vía activeMarchId a la celda '${linkedMarch.targetCellId}' planificada para liberación.`,
+        };
+      }
+    }
+
+    if (!challengeIssue && ch.battleId) {
+      if (!linkedBattle) {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          severity: severityForBrokenRef,
+          reason: `Desafío '${String(ch._id)}' (${ch.status}) referencia battleId inexistente '${String(ch.battleId)}'.`,
+        };
+      } else if (!linkedBattle.challengeId || String(linkedBattle.challengeId) !== String(ch._id)) {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          severity: severityForBrokenRef,
+          reason: `Desafío '${String(ch._id)}' sin reciprocidad: la batalla '${String(linkedBattle._id)}' apunta a challengeId='${String(linkedBattle.challengeId ?? "")}'.`,
+        };
+      } else if (!battleParticipantsMatchChallenge(linkedBattle, ch)) {
+        challengeIssue = {
+          relation: "challenges",
+          documentId: String(ch._id),
+          kingdomId: String(kingdom._id),
+          severity: severityForBrokenRef,
+          reason: `Desafío '${String(ch._id)}' (${String(ch.challengerKingdomId)} vs ${String(ch.targetKingdomId)}) apunta a batalla '${String(linkedBattle._id)}' con participantes incompatibles (${String(linkedBattle.attackerKingdomId)} vs ${String(linkedBattle.defenderKingdomId)}).`,
+        };
+      }
+    }
+
+    if (challengeIssue) {
+      recordIssue(challengeIssue);
     } else {
       markValid("challenges");
     }
@@ -2320,7 +2465,7 @@ async function runTerritoryCapCleanup(
     allMarchesById: new Map(allMarches.map((m) => [String(m._id), m])),
     allActiveMarches: allMarches.filter((m) => m.status === "marchando"),
     allChallengesById: new Map(allChallenges.map((c) => [String(c._id), c])),
-    allBattleIds: new Set(allBattles.map((b) => String(b._id))),
+    allBattlesById: new Map(allBattles.map((b) => [String(b._id), b])),
   };
 
   const details: Array<{
