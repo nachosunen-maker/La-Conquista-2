@@ -207,7 +207,8 @@ export default defineSchema({
       claimedAt: v.optional(v.number()),
     })
       .index("by_cell", ["cellId"])
-      .index("by_owner", ["ownerKingdomId"]),
+      .index("by_owner", ["ownerKingdomId"])
+      .index("by_q_r", ["q", "r"]),
 
     // Territorios explorados y visibilidad por reino (P22, P49)
     exploredTerritories: defineTable({

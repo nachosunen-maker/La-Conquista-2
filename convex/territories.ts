@@ -781,10 +781,62 @@ export const getWorldMap = query({
   },
 });
 
+export interface AxialRangeSegment {
+  readonly q: number;
+  readonly rStart: number;
+  readonly rEnd: number;
+}
+
+/**
+ * Agrupa coordenadas conocidas (q, r) en intervalos contiguos `[rStart, rEnd]` por columna `q`,
+ * emitiendo únicamente los segmentos que contienen al menos una celda aún no cargada (`missingKnownSet`).
+ * Garantiza 0 lecturas de celdas bajo niebla, 0 duplicados y escala O(sqrt(K)) <= 101 consultas
+ * incluso con las 7.651 celdas conocidas.
+ */
+export function buildKnownAxialRangeSegments(
+  knownRsByQ: ReadonlyMap<number, number[]>,
+  missingKnownSet: ReadonlySet<string>
+): AxialRangeSegment[] {
+  if (missingKnownSet.size === 0) return [];
+  const segments: AxialRangeSegment[] = [];
+
+  for (const [q, rs] of knownRsByQ.entries()) {
+    if (rs.length === 0) continue;
+    rs.sort((a, b) => a - b);
+
+    let segStart = rs[0];
+    let segEnd = rs[0];
+    let segHasMissing = missingKnownSet.has(cellId(q, rs[0]));
+
+    for (let i = 1; i < rs.length; i++) {
+      const r = rs[i];
+      if (r === segEnd) continue; // Deduplicar si hubiese repetidos
+      if (r === segEnd + 1) {
+        segEnd = r;
+        if (!segHasMissing && missingKnownSet.has(cellId(q, r))) {
+          segHasMissing = true;
+        }
+      } else {
+        if (segHasMissing) {
+          segments.push({ q, rStart: segStart, rEnd: segEnd });
+        }
+        segStart = r;
+        segEnd = r;
+        segHasMissing = missingKnownSet.has(cellId(q, r));
+      }
+    }
+    if (segHasMissing) {
+      segments.push({ q, rStart: segStart, rEnd: segEnd });
+    }
+  }
+
+  return segments;
+}
+
 /**
  * Consulta compacta del mapa mundial: evita leer las 7.651 filas de `territories` en Convex.
- * Solo consulta territorios poseídos por reinos (`by_owner`), más las tablas del reino activo;
- * el terreno determinista del disco completo se reconstruye en el cliente a partir de `WORLD_SEED`.
+ * Solo consulta territorios poseídos por reinos (`by_owner`) e intervalos contiguos conocidos (`by_q_r`),
+ * más las tablas del reino activo; el terreno determinista se reconstruye en cliente desde `WORLD_SEED`.
  */
 export const getWorldMapCompact = query({
   args: {
@@ -891,24 +943,44 @@ export const getWorldMapCompact = query({
       }
     }
 
-    // Leer de `territories` ÚNICAMENTE las celdas conocidas que no sean ya propias (nunca bajo niebla)
-    const missingKnownIds: string[] = [];
+    // Agrupar celdas conocidas en intervalos contiguos (q, [rStart, rEnd]) para eliminar el patrón N+1.
+    // Cada (q, r) dentro de cada intervalo pertenece estrictamente a `knownIds`, por lo que NUNCA
+    // se lee de la base de datos ninguna celda bajo niebla de guerra ni se escanea el mundo completo.
+    const missingKnownSet = new Set<string>();
+    const knownRsByQ = new Map<number, number[]>();
     for (const id of knownIds) {
-      if (knownTerritoryByCellId.has(id)) continue;
-      if (getValidCoord(id) !== null) {
-        missingKnownIds.push(id);
+      const coord = getValidCoord(id);
+      if (!coord) continue;
+      let col = knownRsByQ.get(coord.q);
+      if (!col) {
+        col = [];
+        knownRsByQ.set(coord.q, col);
+      }
+      col.push(coord.r);
+      if (!knownTerritoryByCellId.has(id)) {
+        missingKnownSet.add(id);
       }
     }
-    const fetchedKnownDocs = await Promise.all(
-      missingKnownIds.map((cid) =>
-        ctx.db
-          .query("territories")
-          .withIndex("by_cell", (q) => q.eq("cellId", cid))
-          .first()
-      )
-    );
-    for (const doc of fetchedKnownDocs) {
-      if (doc) knownTerritoryByCellId.set(doc.cellId, doc);
+
+    const queryRanges = buildKnownAxialRangeSegments(knownRsByQ, missingKnownSet);
+    if (queryRanges.length > 0) {
+      const rangeResults = await Promise.all(
+        queryRanges.map((seg) =>
+          ctx.db
+            .query("territories")
+            .withIndex("by_q_r", (q) => q.eq("q", seg.q).gte("r", seg.rStart).lte("r", seg.rEnd))
+            .collect()
+        )
+      );
+      for (let i = 0; i < rangeResults.length; i++) {
+        const docs = rangeResults[i];
+        for (let j = 0; j < docs.length; j++) {
+          const doc = docs[j];
+          if (knownIds.has(doc.cellId) && !knownTerritoryByCellId.has(doc.cellId)) {
+            knownTerritoryByCellId.set(doc.cellId, doc);
+          }
+        }
+      }
     }
 
     // Cargar ÚNICAMENTE los reinos propietarios de celdas conocidas

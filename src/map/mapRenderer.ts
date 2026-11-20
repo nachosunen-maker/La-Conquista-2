@@ -86,21 +86,42 @@ export interface MapRenderInput {
 
 export interface MapRendererPerfSnapshot {
   lastFrameMs: number;
+  lastPrepMs: number;
+  lastCameraMs: number;
   lastBaseRenderMs: number;
   lastOverlayRenderMs: number;
   lastVisibleHexCount: number;
+  lastTerrainDrawnCount: number;
+  lastFogDrawnCount: number;
+  lastExpeditionsInspected: number;
+  lastExpeditionsDrawn: number;
   baseRenderCount: number;
   overlayRenderCount: number;
+  panReuseHitCount: number;
+  invalidationsBySelection: number;
+  invalidationsByHover: number;
+  invalidationsByCamera: number;
+  invalidationsByData: number;
   dpr: number;
   stampCacheEntries: number;
   stampCacheBytes: number;
 }
+
+interface ActiveExpeditionRenderItem {
+  readonly flatIndex: number;
+  readonly progressPercent: number;
+  readonly isSpyMission: boolean;
+}
+
+const DEFAULT_PAN_OVERSCAN_CSS = 128;
 
 export class MedievalMapRenderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private baseCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
   private baseCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
+  private overscanCss = DEFAULT_PAN_OVERSCAN_CSS;
+  private baseCamera: CameraState | null = null;
 
   private readonly stampCache = new TerrainStampCache(128, 12 * 1024 * 1024);
 
@@ -108,6 +129,21 @@ export class MedievalMapRenderer {
   private visibleByFlatIndex = new Map<number, RenderableMapCell>();
   private ownerByFlatIndex = new Map<number, string>();
   private homeCoord: { q: number; r: number } | null = null;
+
+  // Índices dinámicos compactos (actualizados solo cuando cambian los datos, nunca al mover cámara)
+  private activeExpeditionsIndex: ActiveExpeditionRenderItem[] = [];
+  private claimableFlatIndices: Int32Array = new Int32Array(0);
+  private lastBaseSignature = "";
+
+  // Buffers reutilizables para evitar asignaciones por fotograma en renderBaseLayer()
+  private scratchOwnedSx: number[] = [];
+  private scratchOwnedSy: number[] = [];
+  private scratchOwnedCell: RenderableMapCell[] = [];
+  private scratchCapitalSx: number[] = [];
+  private scratchCapitalSy: number[] = [];
+  private scratchCapitalCell: RenderableMapCell[] = [];
+  private scratchExplorableSx: number[] = [];
+  private scratchExplorableSy: number[] = [];
 
   private input: MapRenderInput | null = null;
   private camera: CameraState = { x: 0, y: 0, zoom: 1.25 };
@@ -124,18 +160,37 @@ export class MedievalMapRenderer {
 
   private perf: MapRendererPerfSnapshot = {
     lastFrameMs: 0,
+    lastPrepMs: 0,
+    lastCameraMs: 0,
     lastBaseRenderMs: 0,
     lastOverlayRenderMs: 0,
     lastVisibleHexCount: 0,
+    lastTerrainDrawnCount: 0,
+    lastFogDrawnCount: 0,
+    lastExpeditionsInspected: 0,
+    lastExpeditionsDrawn: 0,
     baseRenderCount: 0,
     overlayRenderCount: 0,
+    panReuseHitCount: 0,
+    invalidationsBySelection: 0,
+    invalidationsByHover: 0,
+    invalidationsByCamera: 0,
+    invalidationsByData: 0,
     dpr: 1,
     stampCacheEntries: 0,
     stampCacheBytes: 0,
   };
 
-  constructor(canvas: HTMLCanvasElement, radius: number = 50, worldSeed: number = 20261017) {
+  private readonly offscreenFactory?: (width: number, height: number) => HTMLCanvasElement | OffscreenCanvas | null;
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    radius: number = 50,
+    worldSeed: number = 20261017,
+    offscreenFactory?: (width: number, height: number) => HTMLCanvasElement | OffscreenCanvas | null
+  ) {
     this.canvas = canvas;
+    this.offscreenFactory = offscreenFactory;
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) {
       throw new Error("No se pudo inicializar el contexto Canvas 2D del mapa.");
@@ -144,7 +199,7 @@ export class MedievalMapRenderer {
     this.staticWorld = getCachedStaticWorld(radius, worldSeed, BASE_HEX_SIZE);
   }
 
-  setViewport(width: number, height: number, devicePixelRatio: number = window.devicePixelRatio || 1): void {
+  setViewport(width: number, height: number, devicePixelRatio: number = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1): void {
     const safeW = Math.max(1, Math.floor(width));
     const safeH = Math.max(1, Math.floor(height));
     const nextDpr = computeAdaptiveDpr(safeW, safeH, devicePixelRatio);
@@ -155,55 +210,140 @@ export class MedievalMapRenderer {
 
     this.viewport = { width: safeW, height: safeH };
     this.dpr = nextDpr;
+    this.overscanCss = Math.min(DEFAULT_PAN_OVERSCAN_CSS, Math.max(48, Math.floor(Math.min(safeW, safeH) * 0.22)));
 
     const backingW = Math.max(1, Math.floor(safeW * nextDpr));
     const backingH = Math.max(1, Math.floor(safeH * nextDpr));
 
     this.canvas.width = backingW;
     this.canvas.height = backingH;
-    this.canvas.style.width = `${safeW}px`;
-    this.canvas.style.height = `${safeH}px`;
+    if (this.canvas.style) {
+      this.canvas.style.width = `${safeW}px`;
+      this.canvas.style.height = `${safeH}px`;
+    }
 
-    this.ensureBaseSurface(backingW, backingH);
+    const baseBackingW = Math.max(1, Math.floor((safeW + this.overscanCss * 2) * nextDpr));
+    const baseBackingH = Math.max(1, Math.floor((safeH + this.overscanCss * 2) * nextDpr));
+    this.ensureBaseSurface(baseBackingW, baseBackingH);
+    this.baseCamera = null;
     this.scheduleRender(true);
   }
 
   setData(input: MapRenderInput): void {
+    const prepStart = performance.now();
     this.input = input;
     if (this.staticWorld.radius !== input.radius || this.staticWorld.seed !== input.worldSeed) {
       this.staticWorld = getCachedStaticWorld(input.radius, input.worldSeed, BASE_HEX_SIZE);
+      this.lastBaseSignature = "";
     }
 
     this.visibleByFlatIndex.clear();
     this.ownerByFlatIndex.clear();
     this.homeCoord = null;
 
+    const nextExpeditions: ActiveExpeditionRenderItem[] = [];
     const r = this.staticWorld.radius;
+
+    // Firma estructural ligera para detectar si realmente cambió la capa base
+    // (terrenos revelados, propietarios, fronteras, capitales o frontera explorable).
+    // Si solo cambió el progreso de expediciones/marchas o reclamos, NO se redibuja la capa base.
+    let baseHash = (input.radius * 31 + input.worldSeed) | 0;
+    let baseCellCount = 0;
+
     for (let i = 0; i < input.visibleCells.length; i++) {
       const cell = input.visibleCells[i];
       const idx = axialToFlatIndex(cell.q, cell.r, r);
       this.visibleByFlatIndex.set(idx, cell);
+
       if (cell.ownerKingdomId) {
         this.ownerByFlatIndex.set(idx, cell.ownerKingdomId);
       }
       if (cell.cellId === input.homeTerritoryId || (cell.isHome && cell.ownerKingdomId === input.kingdomId)) {
         this.homeCoord = { q: cell.q, r: cell.r };
       }
+
+      // Índice compacto de expediciones activas (solo las celdas con expedición)
+      if (cell.expedition) {
+        nextExpeditions.push({
+          flatIndex: idx,
+          progressPercent: cell.expedition.progressPercent,
+          isSpyMission: cell.expedition.isSpyMission,
+        });
+      }
+
+      // Acumular firma únicamente de atributos que afectan la capa base
+      const stateCode = cell.state === "owned" ? 3 : cell.state === "explored" ? 2 : cell.canExplore ? 1 : 0;
+      if (stateCode !== 0) {
+        baseCellCount++;
+        const ownerHash = cell.ownerKingdomId ? hashSmallString(cell.ownerKingdomId) : 0;
+        const colorHash = cell.ownerColor ? hashSmallString(cell.ownerColor) : 0;
+        const terrainHash = cell.terrain !== "desconocido" && cell.terrain in TERRAIN_TO_CODE
+          ? TERRAIN_TO_CODE[cell.terrain as TerrainType] + 1
+          : 0;
+        const cellSig = Math.imul(idx + 1, 2654435761) ^ (stateCode << 4) ^ (cell.isHome ? 8 : 0) ^ terrainHash ^ ownerHash ^ colorHash;
+        baseHash = (baseHash + cellSig) | 0;
+      }
     }
 
-    this.scheduleRender(true);
+    this.activeExpeditionsIndex = nextExpeditions;
+
+    // Pre-indexar reclamables una sola vez (elimina split(",") por fotograma en el overlay)
+    if (input.pendingClaims > 0 && input.claimableAdjacentIds.size > 0) {
+      const arr = new Int32Array(input.claimableAdjacentIds.size);
+      let k = 0;
+      for (const id of input.claimableAdjacentIds) {
+        const comma = id.indexOf(",");
+        if (comma > 0) {
+          const cq = Number(id.slice(0, comma));
+          const cr = Number(id.slice(comma + 1));
+          arr[k++] = axialToFlatIndex(cq, cr, r);
+        }
+      }
+      this.claimableFlatIndices = k === arr.length ? arr : arr.subarray(0, k);
+    } else if (this.claimableFlatIndices.length > 0) {
+      this.claimableFlatIndices = new Int32Array(0);
+    }
+
+    const nextBaseSig = `${input.kingdomId}:${input.homeTerritoryId ?? ""}:${baseCellCount}:${baseHash}`;
+    const baseChanged = nextBaseSig !== this.lastBaseSignature;
+    this.lastBaseSignature = nextBaseSig;
+
+    this.perf.lastPrepMs = performance.now() - prepStart;
+    this.perf.invalidationsByData++;
+    if (baseChanged) {
+      this.baseCamera = null;
+    }
+    this.scheduleRender(baseChanged);
   }
 
   setCamera(camera: CameraState): void {
+    const camStart = performance.now();
     if (
       this.camera.x === camera.x &&
       this.camera.y === camera.y &&
       this.camera.zoom === camera.zoom
     ) {
+      this.perf.lastCameraMs = performance.now() - camStart;
       return;
     }
-    this.camera = { ...camera };
-    this.scheduleRender(true);
+    this.camera = { x: camera.x, y: camera.y, zoom: camera.zoom };
+    this.perf.invalidationsByCamera++;
+
+    // Si es pan puro (mismo zoom) dentro del margen overscan de la capa base ya renderizada,
+    // reutilizamos la superficie base mediante desplazamiento 1:1 exacto sin redibujar terrenos.
+    let needsBaseRedraw = true;
+    if (this.baseCamera && !this.dirtyBase && this.baseCanvas && this.baseCamera.zoom === camera.zoom) {
+      const deltaSx = (camera.x - this.baseCamera.x) * camera.zoom;
+      const deltaSy = (camera.y - this.baseCamera.y) * camera.zoom;
+      const limit = this.overscanCss - 2;
+      if (Math.abs(deltaSx) <= limit && Math.abs(deltaSy) <= limit) {
+        needsBaseRedraw = false;
+        this.perf.panReuseHitCount++;
+      }
+    }
+
+    this.perf.lastCameraMs = performance.now() - camStart;
+    this.scheduleRender(needsBaseRedraw);
   }
 
   getCamera(): CameraState {
@@ -214,6 +354,7 @@ export class MedievalMapRenderer {
     const next = q !== null && r !== null ? axialToFlatIndex(q, r, this.staticWorld.radius) : null;
     if (next === this.selectedFlatIndex) return;
     this.selectedFlatIndex = next;
+    this.perf.invalidationsBySelection++;
     // Selección solo ensucia la capa dinámica: O(1), sin redibujar el mapa base
     this.scheduleRender(false);
   }
@@ -222,6 +363,7 @@ export class MedievalMapRenderer {
     const next = q !== null && r !== null ? axialToFlatIndex(q, r, this.staticWorld.radius) : null;
     if (next === this.hoveredFlatIndex) return;
     this.hoveredFlatIndex = next;
+    this.perf.invalidationsByHover++;
     // Hover solo ensucia la capa dinámica: O(1), sin redibujar el mapa base
     this.scheduleRender(false);
   }
@@ -253,12 +395,14 @@ export class MedievalMapRenderer {
     if (this.destroyed) return;
     const frameStart = performance.now();
 
-    if (this.dirtyBase || !this.baseCanvas) {
+    if (this.dirtyBase || !this.baseCanvas || !this.baseCamera) {
       const baseStart = performance.now();
       this.renderBaseLayer();
       this.perf.lastBaseRenderMs = performance.now() - baseStart;
       this.perf.baseRenderCount++;
       this.dirtyBase = false;
+    } else {
+      this.perf.lastBaseRenderMs = 0;
     }
 
     const overlayStart = performance.now();
@@ -276,26 +420,50 @@ export class MedievalMapRenderer {
     this.dirtyOverlay = true;
 
     if (this.rafId !== null) return;
-    this.rafId = window.requestAnimationFrame(() => {
-      this.rafId = null;
-      this.renderNow();
-    });
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      this.rafId = window.requestAnimationFrame(() => {
+        this.rafId = null;
+        this.renderNow();
+      });
+    }
   }
 
   destroy(): void {
     this.destroyed = true;
-    if (this.rafId !== null) {
+    if (this.rafId !== null && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
       window.cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
     this.stampCache.clear();
     this.visibleByFlatIndex.clear();
     this.ownerByFlatIndex.clear();
+    this.activeExpeditionsIndex = [];
+    this.claimableFlatIndices = new Int32Array(0);
+    this.scratchOwnedSx.length = 0;
+    this.scratchOwnedSy.length = 0;
+    this.scratchOwnedCell.length = 0;
+    this.scratchCapitalSx.length = 0;
+    this.scratchCapitalSy.length = 0;
+    this.scratchCapitalCell.length = 0;
+    this.scratchExplorableSx.length = 0;
+    this.scratchExplorableSy.length = 0;
     this.baseCanvas = null;
     this.baseCtx = null;
+    this.baseCamera = null;
   }
 
   private ensureBaseSurface(backingW: number, backingH: number): void {
+    if (this.offscreenFactory) {
+      const custom = this.offscreenFactory(backingW, backingH);
+      if (custom) {
+        const ctx = custom.getContext("2d", { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+        if (ctx) {
+          this.baseCanvas = custom;
+          this.baseCtx = ctx;
+          return;
+        }
+      }
+    }
     if (typeof OffscreenCanvas !== "undefined") {
       const oc = new OffscreenCanvas(backingW, backingH);
       const ctx = oc.getContext("2d", { alpha: false });
@@ -305,17 +473,23 @@ export class MedievalMapRenderer {
         return;
       }
     }
-    const c = document.createElement("canvas");
-    c.width = backingW;
-    c.height = backingH;
-    const ctx = c.getContext("2d", { alpha: false });
-    this.baseCanvas = c;
-    this.baseCtx = ctx;
+    if (typeof document !== "undefined") {
+      const c = document.createElement("canvas");
+      c.width = backingW;
+      c.height = backingH;
+      const ctx = c.getContext("2d", { alpha: false });
+      this.baseCanvas = c;
+      this.baseCtx = ctx;
+    }
   }
 
   private renderBaseLayer(): void {
     const targetCtx = (this.baseCtx ?? this.ctx) as CanvasRenderingContext2D;
     const { width, height } = this.viewport;
+    const overscan = this.baseCtx ? this.overscanCss : 0;
+    const surfW = width + overscan * 2;
+    const surfH = height + overscan * 2;
+
     const world = this.staticWorld;
     const radius = world.radius;
     const stride = world.stride;
@@ -324,40 +498,49 @@ export class MedievalMapRenderer {
     const pixelRadius = hexSize * zoom;
     const lod = selectLodLevel(pixelRadius);
 
+    this.baseCamera = { x: this.camera.x, y: this.camera.y, zoom };
+
     targetCtx.save();
     targetCtx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     // Fondo de océano profundo / pergamino cartográfico fuera del disco
     const bgGrad = targetCtx.createRadialGradient(
-      width * 0.5,
-      height * 0.5,
-      Math.min(width, height) * 0.1,
-      width * 0.5,
-      height * 0.5,
-      Math.max(width, height) * 0.85
+      surfW * 0.5,
+      surfH * 0.5,
+      Math.min(surfW, surfH) * 0.1,
+      surfW * 0.5,
+      surfH * 0.5,
+      Math.max(surfW, surfH) * 0.85
     );
     bgGrad.addColorStop(0, "#151a1f");
     bgGrad.addColorStop(1, "#0b0e11");
     targetCtx.fillStyle = bgGrad;
-    targetCtx.fillRect(0, 0, width, height);
+    targetCtx.fillRect(0, 0, surfW, surfH);
 
-    const bounds = computeVisibleAxialBounds(this.camera, this.viewport, hexSize, radius, 1.5);
-    const screenHalfW = width * 0.5;
-    const screenHalfH = height * 0.5;
+    const bounds = computeVisibleAxialBounds(
+      this.camera,
+      { width: surfW, height: surfH },
+      hexSize,
+      radius,
+      1.5
+    );
+    const screenHalfW = surfW * 0.5;
+    const screenHalfH = surfH * 0.5;
     const camX = this.camera.x;
     const camY = this.camera.y;
 
     const stampW = pixelRadius * SQRT3 + 1.2;
     const stampH = pixelRadius * 2 + 1.2;
 
-    // Colecciones ligeras de elementos que se dibujan encima de la capa de terreno
-    const visibleOwned: Array<{ idx: number; sx: number; sy: number; cell: RenderableMapCell }> = [];
-    const visibleCapitals: Array<{ sx: number; sy: number; cell: RenderableMapCell }> = [];
-    const visibleExplorable: Array<{ sx: number; sy: number }> = [];
-
+    // Reutilizar buffers scratch sin asignar objetos nuevos en cada fotograma
+    let ownedCount = 0;
+    let capitalCount = 0;
+    let explorableCount = 0;
     let processedHexes = 0;
+    let terrainDrawn = 0;
+    let fogDrawn = 0;
 
-    // PASADA 1: Terreno ilustrado y niebla de guerra (solo hexágonos en viewport: O(V))
+    // PASADA 1: Terreno ilustrado y niebla de guerra (solo hexágonos en superficie visible: O(V))
     for (let r = bounds.rMin; r <= bounds.rMax; r++) {
       const { qMin, qMax } = bounds.qRangeForRow(r);
       for (let q = qMin; q <= qMax; q++) {
@@ -366,7 +549,7 @@ export class MedievalMapRenderer {
 
         const sx = (world.worldX[idx] + camX) * zoom + screenHalfW;
         const sy = (world.worldY[idx] + camY) * zoom + screenHalfH;
-        if (sx < -pixelRadius * 2 || sx > width + pixelRadius * 2 || sy < -pixelRadius * 2 || sy > height + pixelRadius * 2) {
+        if (sx < -pixelRadius * 2 || sx > surfW + pixelRadius * 2 || sy < -pixelRadius * 2 || sy > surfH + pixelRadius * 2) {
           continue;
         }
 
@@ -375,6 +558,7 @@ export class MedievalMapRenderer {
         const variant = world.variant[idx];
 
         if (!dyn || dyn.state === "fog" || dyn.state === "exploring") {
+          fogDrawn++;
           const fogStamp = this.stampCache.getFogStamp(variant, lod);
           if (fogStamp) {
             targetCtx.drawImage(fogStamp.canvas, sx - stampW * 0.5, sy - stampH * 0.5, stampW, stampH);
@@ -382,11 +566,14 @@ export class MedievalMapRenderer {
             drawFogHex(targetCtx, sx, sy, pixelRadius, variant, lod);
           }
           if (dyn?.canExplore) {
-            visibleExplorable.push({ sx, sy });
+            this.scratchExplorableSx[explorableCount] = sx;
+            this.scratchExplorableSy[explorableCount] = sy;
+            explorableCount++;
           }
           continue;
         }
 
+        terrainDrawn++;
         const tCode =
           dyn.terrain !== "desconocido" && dyn.terrain in TERRAIN_TO_CODE
             ? TERRAIN_TO_CODE[dyn.terrain as TerrainType]
@@ -400,48 +587,56 @@ export class MedievalMapRenderer {
         }
 
         if (dyn.ownerKingdomId) {
-          visibleOwned.push({ idx, sx, sy, cell: dyn });
+          this.scratchOwnedSx[ownedCount] = sx;
+          this.scratchOwnedSy[ownedCount] = sy;
+          this.scratchOwnedCell[ownedCount] = dyn;
+          ownedCount++;
           if (dyn.isHome) {
-            visibleCapitals.push({ sx, sy, cell: dyn });
+            this.scratchCapitalSx[capitalCount] = sx;
+            this.scratchCapitalSy[capitalCount] = sy;
+            this.scratchCapitalCell[capitalCount] = dyn;
+            capitalCount++;
           }
         }
       }
     }
 
     // PASADA 2: Frontera explorable sutil
-    if (visibleExplorable.length > 0) {
+    if (explorableCount > 0) {
       targetCtx.fillStyle = FOG_PALETTE.explorableTint;
       targetCtx.strokeStyle = FOG_PALETTE.explorableStroke;
       targetCtx.lineWidth = Math.max(0.8, Math.min(1.5, pixelRadius * 0.05));
-      for (let i = 0; i < visibleExplorable.length; i++) {
-        const pt = visibleExplorable[i];
-        traceHexPath(targetCtx, pt.sx, pt.sy, pixelRadius - 0.6);
+      for (let i = 0; i < explorableCount; i++) {
+        traceHexPath(targetCtx, this.scratchExplorableSx[i], this.scratchExplorableSy[i], pixelRadius - 0.6);
         targetCtx.fill();
         targetCtx.stroke();
       }
     }
 
     // PASADA 3: Velo heráldico translúcido + fronteras exteriores de reinos (aristas compartidas)
-    if (visibleOwned.length > 0) {
+    if (ownedCount > 0) {
       const borderWidth = Math.max(1.8, Math.min(4.2, pixelRadius * 0.12));
-      for (let i = 0; i < visibleOwned.length; i++) {
-        const { sx, sy, cell } = visibleOwned[i];
-        const color = cell.ownerColor ?? "#d4af37";
-        targetCtx.save();
-        targetCtx.globalAlpha = 0.22;
-        targetCtx.fillStyle = color;
-        traceHexPath(targetCtx, sx, sy, pixelRadius - 0.3);
+
+      targetCtx.save();
+      targetCtx.globalAlpha = 0.22;
+      for (let i = 0; i < ownedCount; i++) {
+        const cell = this.scratchOwnedCell[i];
+        targetCtx.fillStyle = cell.ownerColor ?? "#d4af37";
+        traceHexPath(targetCtx, this.scratchOwnedSx[i], this.scratchOwnedSy[i], pixelRadius - 0.3);
         targetCtx.fill();
-        targetCtx.restore();
       }
+      targetCtx.restore();
 
-      // Aristas exteriores (solo bordes cuyo vecino NO pertenece al mismo reino)
+      // Aristas exteriores: perfilado oscuro agrupado en un solo trazado
       targetCtx.lineCap = "round";
-      for (let i = 0; i < visibleOwned.length; i++) {
-        const { sx, sy, cell } = visibleOwned[i];
+      targetCtx.strokeStyle = "rgba(18, 13, 8, 0.85)";
+      targetCtx.lineWidth = borderWidth + 2;
+      targetCtx.beginPath();
+      for (let i = 0; i < ownedCount; i++) {
+        const cell = this.scratchOwnedCell[i];
+        const sx = this.scratchOwnedSx[i];
+        const sy = this.scratchOwnedSy[i];
         const ownerId = cell.ownerKingdomId!;
-        const color = cell.ownerColor ?? "#d4af37";
-
         for (let edge = 0; edge < 6; edge++) {
           const dir = HEX_EDGE_NEIGHBORS[edge];
           const nq = cell.q + dir.q;
@@ -450,51 +645,63 @@ export class MedievalMapRenderer {
           const neighborOwner = inside
             ? this.ownerByFlatIndex.get((nq + radius) * stride + (nr + radius))
             : undefined;
-
           if (neighborOwner === ownerId) continue;
 
           const v1 = HEX_UNIT_VERTICES[edge];
           const v2 = HEX_UNIT_VERTICES[(edge + 1) % 6];
-          const x1 = sx + v1.x * (pixelRadius - 0.5);
-          const y1 = sy + v1.y * (pixelRadius - 0.5);
-          const x2 = sx + v2.x * (pixelRadius - 0.5);
-          const y2 = sy + v2.y * (pixelRadius - 0.5);
-
-          // Perfilado oscuro para máximo contraste sobre cualquier terreno
-          targetCtx.strokeStyle = "rgba(18, 13, 8, 0.85)";
-          targetCtx.lineWidth = borderWidth + 2;
-          targetCtx.beginPath();
-          targetCtx.moveTo(x1, y1);
-          targetCtx.lineTo(x2, y2);
-          targetCtx.stroke();
-
-          // Línea principal en el color del reino
-          targetCtx.strokeStyle = color;
-          targetCtx.lineWidth = borderWidth;
-          targetCtx.beginPath();
-          targetCtx.moveTo(x1, y1);
-          targetCtx.lineTo(x2, y2);
-          targetCtx.stroke();
+          targetCtx.moveTo(sx + v1.x * (pixelRadius - 0.5), sy + v1.y * (pixelRadius - 0.5));
+          targetCtx.lineTo(sx + v2.x * (pixelRadius - 0.5), sy + v2.y * (pixelRadius - 0.5));
         }
+      }
+      targetCtx.stroke();
+
+      // Aristas exteriores en color de cada reino
+      targetCtx.lineWidth = borderWidth;
+      for (let i = 0; i < ownedCount; i++) {
+        const cell = this.scratchOwnedCell[i];
+        const sx = this.scratchOwnedSx[i];
+        const sy = this.scratchOwnedSy[i];
+        const ownerId = cell.ownerKingdomId!;
+        targetCtx.strokeStyle = cell.ownerColor ?? "#d4af37";
+        targetCtx.beginPath();
+        let hasEdge = false;
+        for (let edge = 0; edge < 6; edge++) {
+          const dir = HEX_EDGE_NEIGHBORS[edge];
+          const nq = cell.q + dir.q;
+          const nr = cell.r + dir.r;
+          const inside = Math.abs(nq) <= radius && Math.abs(nr) <= radius && Math.abs(nq + nr) <= radius;
+          const neighborOwner = inside
+            ? this.ownerByFlatIndex.get((nq + radius) * stride + (nr + radius))
+            : undefined;
+          if (neighborOwner === ownerId) continue;
+
+          const v1 = HEX_UNIT_VERTICES[edge];
+          const v2 = HEX_UNIT_VERTICES[(edge + 1) % 6];
+          targetCtx.moveTo(sx + v1.x * (pixelRadius - 0.5), sy + v1.y * (pixelRadius - 0.5));
+          targetCtx.lineTo(sx + v2.x * (pixelRadius - 0.5), sy + v2.y * (pixelRadius - 0.5));
+          hasEdge = true;
+        }
+        if (hasEdge) targetCtx.stroke();
       }
 
       // Blasón discreto en provincias no capitales
-      for (let i = 0; i < visibleOwned.length; i++) {
-        const { sx, sy, cell } = visibleOwned[i];
+      for (let i = 0; i < ownedCount; i++) {
+        const cell = this.scratchOwnedCell[i];
         if (!cell.isHome) {
-          drawProvinceBanner(targetCtx, sx, sy, pixelRadius, cell.ownerColor ?? "#d4af37");
+          drawProvinceBanner(targetCtx, this.scratchOwnedSx[i], this.scratchOwnedSy[i], pixelRadius, cell.ownerColor ?? "#d4af37");
         }
       }
     }
 
     // PASADA 4: Fortalezas medievales de las capitales (siempre prominentes)
     const ownKingdomId = this.input?.kingdomId;
-    for (let i = 0; i < visibleCapitals.length; i++) {
-      const { sx, sy, cell } = visibleCapitals[i];
+    for (let i = 0; i < capitalCount; i++) {
+      const cell = this.scratchCapitalCell[i];
+      const sx = this.scratchCapitalSx[i];
+      const sy = this.scratchCapitalSy[i];
       const isOwn = cell.ownerKingdomId === ownKingdomId;
       drawMedievalCapitalFortress(targetCtx, sx, sy, pixelRadius, cell.ownerColor ?? "#fbbf24", isOwn);
 
-      // Etiqueta de capital cuando hay suficiente zoom
       if (pixelRadius >= 18 && cell.ownerName) {
         targetCtx.save();
         targetCtx.font = `700 ${Math.max(10, Math.min(13, Math.round(pixelRadius * 0.42)))}px Georgia, serif`;
@@ -512,6 +719,8 @@ export class MedievalMapRenderer {
 
     targetCtx.restore();
     this.perf.lastVisibleHexCount = processedHexes;
+    this.perf.lastTerrainDrawnCount = terrainDrawn;
+    this.perf.lastFogDrawnCount = fogDrawn;
   }
 
   private composeAndRenderOverlay(): void {
@@ -521,11 +730,16 @@ export class MedievalMapRenderer {
     const zoom = this.camera.zoom;
     const pixelRadius = world.hexSize * zoom;
 
-    // 1. Blit 1:1 de la capa base cacheada (coste O(1))
+    // 1. Blit 1:1 de la capa base cacheada con desplazamiento exacto de pan si aplica (coste O(1))
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (this.baseCanvas) {
-      ctx.drawImage(this.baseCanvas, 0, 0);
+      const overscan = this.baseCtx ? this.overscanCss : 0;
+      const deltaSx = this.baseCamera ? (this.camera.x - this.baseCamera.x) * zoom : 0;
+      const deltaSy = this.baseCamera ? (this.camera.y - this.baseCamera.y) * zoom : 0;
+      const drawX = Math.round((-overscan + deltaSx) * this.dpr);
+      const drawY = Math.round((-overscan + deltaSy) * this.dpr);
+      ctx.drawImage(this.baseCanvas, drawX, drawY);
     }
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
@@ -534,17 +748,14 @@ export class MedievalMapRenderer {
     const camX = this.camera.x;
     const camY = this.camera.y;
 
-    // 2. Territorios reclamables gratuitamente (si hay reclamos pendientes)
-    if (this.input && this.input.pendingClaims > 0 && this.input.claimableAdjacentIds.size > 0) {
+    // 2. Territorios reclamables gratuitamente (índice compacto pre-calculado, sin split por frame)
+    if (this.claimableFlatIndices.length > 0) {
       ctx.save();
       ctx.strokeStyle = "rgba(251, 191, 36, 0.85)";
       ctx.lineWidth = Math.max(1.5, pixelRadius * 0.08);
       ctx.setLineDash([4, 3]);
-      for (const id of this.input.claimableAdjacentIds) {
-        const parts = id.split(",");
-        const q = Number(parts[0]);
-        const r = Number(parts[1]);
-        const idx = axialToFlatIndex(q, r, world.radius);
+      for (let i = 0; i < this.claimableFlatIndices.length; i++) {
+        const idx = this.claimableFlatIndices[i];
         const sx = (world.worldX[idx] + camX) * zoom + screenHalfW;
         const sy = (world.worldY[idx] + camY) * zoom + screenHalfH;
         if (sx < -pixelRadius || sx > width + pixelRadius || sy < -pixelRadius || sy > height + pixelRadius) continue;
@@ -554,86 +765,90 @@ export class MedievalMapRenderer {
       ctx.restore();
     }
 
-    // 3. Expediciones activas (anillo de progreso)
-    if (this.input) {
-      for (let i = 0; i < this.input.visibleCells.length; i++) {
-        const cell = this.input.visibleCells[i];
-        if (!cell.expedition) continue;
-        const idx = axialToFlatIndex(cell.q, cell.r, world.radius);
+    // 3. Expediciones activas: recorre EXCLUSIVAMENTE el índice compacto con culling espacial
+    let expeditionsInspected = 0;
+    let expeditionsDrawn = 0;
+    if (this.activeExpeditionsIndex.length > 0) {
+      const ringR = Math.max(6, pixelRadius * 0.48);
+      const dotR = Math.max(2, ringR * 0.28);
+      const lineW = Math.max(2, pixelRadius * 0.09);
+
+      for (let i = 0; i < this.activeExpeditionsIndex.length; i++) {
+        expeditionsInspected++;
+        const exp = this.activeExpeditionsIndex[i];
+        const idx = exp.flatIndex;
         const sx = (world.worldX[idx] + camX) * zoom + screenHalfW;
         const sy = (world.worldY[idx] + camY) * zoom + screenHalfH;
         if (sx < -pixelRadius || sx > width + pixelRadius || sy < -pixelRadius || sy > height + pixelRadius) continue;
 
-        const ringR = Math.max(6, pixelRadius * 0.48);
-        ctx.save();
+        expeditionsDrawn++;
         ctx.fillStyle = "rgba(18, 22, 34, 0.78)";
         ctx.beginPath();
         ctx.arc(sx, sy, ringR, 0, Math.PI * 2);
         ctx.fill();
 
-        const pct = Math.max(0.05, Math.min(1, cell.expedition.progressPercent / 100));
-        ctx.strokeStyle = cell.expedition.isSpyMission ? "#c084fc" : "#38bdf8";
-        ctx.lineWidth = Math.max(2, pixelRadius * 0.09);
+        const pct = Math.max(0.05, Math.min(1, exp.progressPercent / 100));
+        ctx.strokeStyle = exp.isSpyMission ? "#c084fc" : "#38bdf8";
+        ctx.lineWidth = lineW;
         ctx.beginPath();
         ctx.arc(sx, sy, ringR, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * pct);
         ctx.stroke();
 
         ctx.fillStyle = "#f8fafc";
         ctx.beginPath();
-        ctx.arc(sx, sy, Math.max(2, ringR * 0.28), 0, Math.PI * 2);
+        ctx.arc(sx, sy, dotR, 0, Math.PI * 2);
         ctx.fill();
-        ctx.restore();
       }
+    }
+    this.perf.lastExpeditionsInspected = expeditionsInspected;
+    this.perf.lastExpeditionsDrawn = expeditionsDrawn;
 
-      // 4. Marchas militares activas (trayectoria + marcador de progreso)
-      if (this.input.activeMarches.length > 0) {
-        const originScreen = this.homeCoord
-          ? worldToScreen(
-              world.worldX[axialToFlatIndex(this.homeCoord.q, this.homeCoord.r, world.radius)],
-              world.worldY[axialToFlatIndex(this.homeCoord.q, this.homeCoord.r, world.radius)],
-              this.camera,
-              this.viewport
-            )
-          : null;
+    // 4. Marchas militares activas (trayectoria + marcador de progreso)
+    if (this.input && this.input.activeMarches.length > 0) {
+      const originScreen = this.homeCoord
+        ? worldToScreen(
+            world.worldX[axialToFlatIndex(this.homeCoord.q, this.homeCoord.r, world.radius)],
+            world.worldY[axialToFlatIndex(this.homeCoord.q, this.homeCoord.r, world.radius)],
+            this.camera,
+            this.viewport
+          )
+        : null;
 
-        for (let i = 0; i < this.input.activeMarches.length; i++) {
-          const m = this.input.activeMarches[i];
-          const targetIdx = axialToFlatIndex(m.targetQ, m.targetR, world.radius);
-          const tx = (world.worldX[targetIdx] + camX) * zoom + screenHalfW;
-          const ty = (world.worldY[targetIdx] + camY) * zoom + screenHalfH;
+      for (let i = 0; i < this.input.activeMarches.length; i++) {
+        const m = this.input.activeMarches[i];
+        const targetIdx = axialToFlatIndex(m.targetQ, m.targetR, world.radius);
+        const tx = (world.worldX[targetIdx] + camX) * zoom + screenHalfW;
+        const ty = (world.worldY[targetIdx] + camY) * zoom + screenHalfH;
 
-          ctx.save();
-          if (originScreen) {
-            ctx.strokeStyle = m.isConquest ? "rgba(248, 113, 113, 0.82)" : "rgba(251, 191, 36, 0.8)";
-            ctx.lineWidth = Math.max(1.8, Math.min(3, pixelRadius * 0.09));
-            ctx.setLineDash([6, 4]);
-            ctx.beginPath();
-            ctx.moveTo(originScreen.x, originScreen.y);
-            ctx.lineTo(tx, ty);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // Posición actual de la columna militar en ruta
-            const frac = Math.max(0.05, Math.min(0.95, m.progressPercent / 100));
-            const mx = originScreen.x + (tx - originScreen.x) * frac;
-            const my = originScreen.y + (ty - originScreen.y) * frac;
-            ctx.fillStyle = "#140c0a";
-            ctx.beginPath();
-            ctx.arc(mx, my, Math.max(5.5, pixelRadius * 0.26), 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = m.isConquest ? "#ef4444" : "#f59e0b";
-            ctx.beginPath();
-            ctx.arc(mx, my, Math.max(3.8, pixelRadius * 0.18), 0, Math.PI * 2);
-            ctx.fill();
-          }
-
-          // Dianas sobre destino de marcha
-          traceHexPath(ctx, tx, ty, pixelRadius - 1.5);
-          ctx.strokeStyle = "#f87171";
-          ctx.lineWidth = Math.max(2, pixelRadius * 0.1);
+        ctx.save();
+        if (originScreen) {
+          ctx.strokeStyle = m.isConquest ? "rgba(248, 113, 113, 0.82)" : "rgba(251, 191, 36, 0.8)";
+          ctx.lineWidth = Math.max(1.8, Math.min(3, pixelRadius * 0.09));
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.moveTo(originScreen.x, originScreen.y);
+          ctx.lineTo(tx, ty);
           ctx.stroke();
-          ctx.restore();
+          ctx.setLineDash([]);
+
+          const frac = Math.max(0.05, Math.min(0.95, m.progressPercent / 100));
+          const mx = originScreen.x + (tx - originScreen.x) * frac;
+          const my = originScreen.y + (ty - originScreen.y) * frac;
+          ctx.fillStyle = "#140c0a";
+          ctx.beginPath();
+          ctx.arc(mx, my, Math.max(5.5, pixelRadius * 0.26), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = m.isConquest ? "#ef4444" : "#f59e0b";
+          ctx.beginPath();
+          ctx.arc(mx, my, Math.max(3.8, pixelRadius * 0.18), 0, Math.PI * 2);
+          ctx.fill();
         }
+
+        traceHexPath(ctx, tx, ty, pixelRadius - 1.5);
+        ctx.strokeStyle = "#f87171";
+        ctx.lineWidth = Math.max(2, pixelRadius * 0.1);
+        ctx.stroke();
+        ctx.restore();
       }
     }
 
@@ -670,4 +885,13 @@ export class MedievalMapRenderer {
 
     ctx.restore();
   }
+}
+
+function hashSmallString(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h | 0;
 }
