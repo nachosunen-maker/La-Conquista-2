@@ -1390,14 +1390,28 @@ export const getWorldMapCompactWithDiagnostics = internalQuery({
 });
 
 /**
- * Auditoría geográfica de solo lectura para todos los reinos persistidos (Bloque A.4).
- * Genera un plan determinista de recolocación sin modificar ningún registro en base de datos.
+ * Auditoría geográfica de solo lectura para todos los reinos persistidos.
+ * Recopila integridad territorial (duplicados, marcas isHome, tope de 100), actividades en curso
+ * (marchas salientes y entrantes, expediciones, desafíos) y genera un plan global determinista
+ * sin modificar ningún registro en base de datos.
  */
-async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx) {
-  const allKingdoms = await ctx.db.query("kingdoms").collect();
+async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx | MutationCtx) {
+  const [allKingdoms, allActiveMarches] = await Promise.all([
+    ctx.db.query("kingdoms").collect(),
+    ctx.db
+      .query("armyMarches")
+      .filter((q) => q.eq(q.field("status"), "marchando"))
+      .collect(),
+  ]);
+
+  const incomingMarchTargetCells = new Map<string, number>();
+  for (const m of allActiveMarches) {
+    incomingMarchTargetCells.set(m.targetCellId, (incomingMarchTargetCells.get(m.targetCellId) ?? 0) + 1);
+  }
+
   const inputs: ExistingKingdomAuditInput[] = await Promise.all(
     allKingdoms.map(async (k) => {
-      const [owned, marches, challengesAsChallenger, challengesAsTarget, explorations] = await Promise.all([
+      const [owned, outgoingMarches, challengesAsChallenger, challengesAsTarget, explorations] = await Promise.all([
         ctx.db.query("territories").withIndex("by_owner", (q) => q.eq("ownerKingdomId", k._id)).collect(),
         ctx.db
           .query("armyMarches")
@@ -1409,11 +1423,33 @@ async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx) {
         ctx.db.query("explorationQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", k._id)).collect(),
       ]);
 
+      const seenOwnedIds = new Set<string>();
+      const duplicateOwnedIds: string[] = [];
+      let markedHomeCount = 0;
+      for (const cell of owned) {
+        if (seenOwnedIds.has(cell.cellId)) {
+          duplicateOwnedIds.push(cell.cellId);
+        } else {
+          seenOwnedIds.add(cell.cellId);
+        }
+        if (cell.isHome === true) {
+          markedHomeCount++;
+        }
+      }
+
       const homeDoc =
         (k.homeTerritoryId ? owned.find((c) => c.cellId === k.homeTerritoryId) : undefined) ??
         owned.find((c) => c.isHome) ??
         owned[0] ??
         null;
+
+      // Contar marchas entrantes dirigidas a la capital o celdas poseídas por este reino
+      let incomingMarchesCount = 0;
+      if (k.homeTerritoryId) {
+        incomingMarchesCount += incomingMarchTargetCells.get(k.homeTerritoryId) ?? 0;
+      } else if (homeDoc) {
+        incomingMarchesCount += incomingMarchTargetCells.get(homeDoc.cellId) ?? 0;
+      }
 
       const activeChallenges = [...challengesAsChallenger, ...challengesAsTarget].filter(
         (ch) => ch.status !== "RESOLVED" && ch.status !== "CANCELLED" && ch.status !== "EXPIRED" && ch.status !== "REJECTED"
@@ -1434,7 +1470,10 @@ async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx) {
             }
           : null,
         ownedTerritoryCount: owned.length,
-        activeMarchesCount: marches.length,
+        ownedCellIds: owned.map((c) => c.cellId),
+        markedHomeCount,
+        duplicateTerritoryCellIds: Array.from(new Set(duplicateOwnedIds)).sort(),
+        activeMarchesCount: outgoingMarches.length + incomingMarchesCount,
         activeChallengesCount: activeChallenges.length,
         activeExplorationsCount: explorations.length,
       };
@@ -1456,6 +1495,443 @@ export const auditKingdomSpawnDistribution = query({
   handler: async (ctx) => {
     await requireAuthorizedAdmin(ctx);
     return await runKingdomSpawnAuditReadOnly(ctx);
+  },
+});
+
+export interface KingdomRelocationOutcome {
+  kingdomId: string;
+  name: string;
+  previousHomeCellId: string | null;
+  newHomeCellId: string | null;
+  outcome:
+    | "relocated"
+    | "already_aligned"
+    | "pending_activity"
+    | "blocked_integrity"
+    | "geometrically_infeasible"
+    | "search_exhausted"
+    | "deferred_batch";
+  preservedOwnedTerritoriesCount: number;
+  finalOwnedTerritoriesCount: number;
+  reason: string;
+}
+
+async function executeKingdomSpawnRelocation(
+  ctx: MutationCtx,
+  args: {
+    expectedPlanFingerprint?: string;
+    plannedRelocations?: ReadonlyArray<{
+      kingdomId: Id<"kingdoms">;
+      fromCellId?: string | null;
+      toCellId: string;
+    }>;
+    kingdomIds?: ReadonlyArray<Id<"kingdoms">>;
+    batchSize?: number;
+  }
+) {
+  const now = Date.now();
+  const batchLimit = Math.max(1, Math.min(100, Math.floor(args.batchSize ?? 25)));
+
+  // 1. Re-ejecutar auditoría en vivo dentro de la mutación atómica
+  const liveAudit = await runKingdomSpawnAuditReadOnly(ctx);
+
+  // 2. Verificar que los datos no han cambiado desde la simulación
+  if (
+    args.expectedPlanFingerprint !== undefined &&
+    liveAudit.planFingerprint !== args.expectedPlanFingerprint
+  ) {
+    throw new Error(
+      `Plan desactualizado: los datos cambiaron desde la simulación (esperado='${args.expectedPlanFingerprint}', actual='${liveAudit.planFingerprint}'). Vuelve a ejecutar la auditoría.`
+    );
+  }
+
+  const entryById = new Map(liveAudit.entries.map((e) => [e.kingdomId, e]));
+  const filterIdSet = args.kingdomIds ? new Set(args.kingdomIds.map((id) => String(id))) : null;
+
+  // 3. Construir la lista de recolocaciones a ejecutar y validarla antes de mutar
+  type ValidatedMove = {
+    kingdomId: Id<"kingdoms">;
+    name: string;
+    fromCellId: string | null;
+    toCellId: string;
+  };
+
+  const toExecute: ValidatedMove[] = [];
+  const outcomes: KingdomRelocationOutcome[] = [];
+  const seenTargets = new Set<string>();
+
+  if (args.plannedRelocations && args.plannedRelocations.length > 0) {
+    // Validar cada recolocación explícita contra el estado real actual
+    const sortedPlan = [...args.plannedRelocations].sort((a, b) =>
+      String(a.kingdomId).localeCompare(String(b.kingdomId))
+    );
+    for (const item of sortedPlan) {
+      const kIdStr = String(item.kingdomId);
+      if (filterIdSet && !filterIdSet.has(kIdStr)) continue;
+
+      const kingdom = await ctx.db.get(item.kingdomId);
+      if (!kingdom) {
+        throw new Error(`Reino '${kIdStr}' no encontrado en base de datos; operación abortada sin cambios.`);
+      }
+      const auditEntry = entryById.get(kIdStr);
+      if (!auditEntry) {
+        throw new Error(`Reino '${kIdStr}' ausente en la auditoría en vivo; operación abortada sin cambios.`);
+      }
+      if (item.fromCellId !== undefined && (kingdom.homeTerritoryId ?? null) !== (item.fromCellId ?? null)) {
+        throw new Error(
+          `El reino '${kIdStr}' cambió de posición desde la simulación (esperado='${item.fromCellId ?? ""}', actual='${kingdom.homeTerritoryId ?? ""}'); operación abortada sin cambios.`
+        );
+      }
+      if (auditEntry.status === "pending_activity") {
+        outcomes.push({
+          kingdomId: kIdStr,
+          name: kingdom.name,
+          previousHomeCellId: kingdom.homeTerritoryId ?? null,
+          newHomeCellId: kingdom.homeTerritoryId ?? null,
+          outcome: "pending_activity",
+          preservedOwnedTerritoriesCount: 0,
+          finalOwnedTerritoriesCount: 0,
+          reason: auditEntry.pendingActivityReasons.join(" "),
+        });
+        continue;
+      }
+      if (auditEntry.status === "blocked_integrity") {
+        throw new Error(
+          `Incompatibilidad de integridad en reino '${kIdStr}': ${auditEntry.integrityBlockReasons.join(" ")}`
+        );
+      }
+      const parsedTarget = parseCellId(item.toCellId);
+      if (!parsedTarget || !isInsideWorld(parsedTarget, MAP.RADIUS)) {
+        throw new Error(
+          `Celda destino '${item.toCellId}' inválida o fuera del mapa de radio ${MAP.RADIUS}; operación abortada sin cambios.`
+        );
+      }
+      if (seenTargets.has(item.toCellId)) {
+        throw new Error(
+          `Conflicto en el plan: múltiples reinos apuntan a la misma celda destino '${item.toCellId}'; operación abortada sin cambios.`
+        );
+      }
+      seenTargets.add(item.toCellId);
+
+      // Comprobar ocupación en BD real
+      const targetDocs = await ctx.db
+        .query("territories")
+        .withIndex("by_cell", (q) => q.eq("cellId", item.toCellId))
+        .collect();
+      if (targetDocs.length > 1) {
+        throw new Error(
+          `Registros duplicados en celda destino '${item.toCellId}'; operación abortada sin cambios.`
+        );
+      }
+      if (targetDocs[0]?.ownerKingdomId && String(targetDocs[0].ownerKingdomId) !== kIdStr) {
+        throw new Error(
+          `La celda de destino '${item.toCellId}' está ocupada por otro reino ('${String(targetDocs[0].ownerKingdomId)}'); operación abortada sin cambios.`
+        );
+      }
+
+      if (toExecute.length >= batchLimit) {
+        outcomes.push({
+          kingdomId: kIdStr,
+          name: kingdom.name,
+          previousHomeCellId: kingdom.homeTerritoryId ?? null,
+          newHomeCellId: null,
+          outcome: "deferred_batch",
+          preservedOwnedTerritoriesCount: 0,
+          finalOwnedTerritoriesCount: 0,
+          reason: `Diferido al siguiente lote (límite de lote = ${batchLimit}).`,
+        });
+        continue;
+      }
+
+      toExecute.push({
+        kingdomId: item.kingdomId,
+        name: kingdom.name,
+        fromCellId: kingdom.homeTerritoryId ?? null,
+        toCellId: item.toCellId,
+      });
+    }
+  } else {
+    // Generar y ejecutar directamente desde el plan global verificado de la auditoría en vivo
+    for (const entry of liveAudit.entries) {
+      if (filterIdSet && !filterIdSet.has(entry.kingdomId)) continue;
+      if (entry.status === "correctly_positioned") {
+        outcomes.push({
+          kingdomId: entry.kingdomId,
+          name: entry.name,
+          previousHomeCellId: entry.persistedHomeTerritoryId,
+          newHomeCellId: entry.persistedHomeTerritoryId,
+          outcome: "already_aligned",
+          preservedOwnedTerritoriesCount: 0,
+          finalOwnedTerritoriesCount: 0,
+          reason: "Correctamente situado; sin cambios.",
+        });
+        continue;
+      }
+      if (entry.status === "pending_activity") {
+        outcomes.push({
+          kingdomId: entry.kingdomId,
+          name: entry.name,
+          previousHomeCellId: entry.persistedHomeTerritoryId,
+          newHomeCellId: entry.persistedHomeTerritoryId,
+          outcome: "pending_activity",
+          preservedOwnedTerritoriesCount: 0,
+          finalOwnedTerritoriesCount: 0,
+          reason: entry.pendingActivityReasons.join(" "),
+        });
+        continue;
+      }
+      if (
+        entry.status === "blocked_integrity" ||
+        entry.status === "geometrically_infeasible" ||
+        entry.status === "search_exhausted"
+      ) {
+        outcomes.push({
+          kingdomId: entry.kingdomId,
+          name: entry.name,
+          previousHomeCellId: entry.persistedHomeTerritoryId,
+          newHomeCellId: entry.persistedHomeTerritoryId,
+          outcome: entry.status,
+          preservedOwnedTerritoriesCount: 0,
+          finalOwnedTerritoriesCount: 0,
+          reason: entry.blockedReasons.join(" "),
+        });
+        continue;
+      }
+
+      if (!entry.proposedHomeCellId) continue;
+      if (toExecute.length >= batchLimit) {
+        outcomes.push({
+          kingdomId: entry.kingdomId,
+          name: entry.name,
+          previousHomeCellId: entry.persistedHomeTerritoryId,
+          newHomeCellId: null,
+          outcome: "deferred_batch",
+          preservedOwnedTerritoriesCount: 0,
+          finalOwnedTerritoriesCount: 0,
+          reason: `Diferido al siguiente lote (límite de lote = ${batchLimit}).`,
+        });
+        continue;
+      }
+
+      toExecute.push({
+        kingdomId: entry.kingdomId as Id<"kingdoms">,
+        name: entry.name,
+        fromCellId: entry.persistedHomeTerritoryId,
+        toCellId: entry.proposedHomeCellId,
+      });
+    }
+  }
+
+  // 4. Ejecución atómica por cada reino del lote con verificación de invariantes
+  for (const move of toExecute) {
+    const kingdom = await ctx.db.get(move.kingdomId);
+    if (!kingdom) {
+      throw new Error(`Reino '${String(move.kingdomId)}' desapareció durante la mutación; rollback atómico.`);
+    }
+
+    const ownedBefore = await ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", move.kingdomId))
+      .collect();
+
+    // Verificar ausencia de duplicados y respeto estricto del tope de 100 territorios
+    const ownedCellIdSet = new Set(ownedBefore.map((c) => c.cellId));
+    if (ownedCellIdSet.size !== ownedBefore.length) {
+      throw new Error(
+        `El reino '${String(move.kingdomId)}' contiene documentos de territorio duplicados; rollback atómico.`
+      );
+    }
+    if (ownedBefore.length > TERRITORIES.MAX_PER_KINGDOM) {
+      throw new Error(
+        `El reino '${String(move.kingdomId)}' supera el límite de ${TERRITORIES.MAX_PER_KINGDOM} territorios (${ownedBefore.length}); rollback atómico.`
+      );
+    }
+
+    // Comprobar celda destino en vivo (sin duplicados ni ocupación ajena)
+    const targetDocs = await ctx.db
+      .query("territories")
+      .withIndex("by_cell", (q) => q.eq("cellId", move.toCellId))
+      .collect();
+    if (targetDocs.length > 1) {
+      throw new Error(`Celda destino '${move.toCellId}' duplicada en BD; rollback atómico.`);
+    }
+    if (targetDocs[0]?.ownerKingdomId && targetDocs[0].ownerKingdomId !== move.kingdomId) {
+      throw new Error(
+        `Celda destino '${move.toCellId}' ocupada por otro reino ('${String(targetDocs[0].ownerKingdomId)}'); rollback atómico.`
+      );
+    }
+
+    const oldHomeDoc =
+      (kingdom.homeTerritoryId ? ownedBefore.find((c) => c.cellId === kingdom.homeTerritoryId) : undefined) ??
+      ownedBefore.find((c) => c.isHome === true) ??
+      null;
+
+    const alreadyOwnsTarget = targetDocs[0]?.ownerKingdomId === move.kingdomId;
+    let targetDoc: Doc<"territories"> | null = targetDocs[0] ?? null;
+
+    if (!targetDoc) {
+      targetDoc = await getOrCreateTerritoryCell(ctx, move.toCellId);
+      if (!targetDoc) {
+        throw new Error(`No se pudo materializar la celda destino '${move.toCellId}'; rollback atómico.`);
+      }
+    }
+
+    let preservedNonCapitalCount = 0;
+
+    if (alreadyOwnsTarget) {
+      // El reino ya posee la celda destino: solo se transfiere la marca isHome y homeTerritoryId sin perder ningún territorio
+      for (const cell of ownedBefore) {
+        if (cell._id === targetDoc._id) {
+          if (!cell.isHome) await ctx.db.patch(cell._id, { isHome: true });
+        } else {
+          if (cell.isHome) await ctx.db.patch(cell._id, { isHome: false });
+          preservedNonCapitalCount++;
+        }
+      }
+      await ctx.db.patch(move.kingdomId, { homeTerritoryId: move.toCellId });
+    } else {
+      // Celda destino libre:
+      // - Si el reino solo tiene 1 territorio (su antigua capital), se libera la antigua capital y se asigna la nueva (total = 1).
+      // - Si el reino tiene 2..99 territorios, se conserva la antigua capital como territorio propio normal (isHome: false) y se añade la nueva capital (total = N + 1 <= 100), preservando el 100 % de la propiedad.
+      // - Si el reino tiene exactamente 100 territorios, se sustituye la antigua capital por la nueva (se libera la antigua capital) para no violar jamás el tope de 100, conservando los otros 99 territorios.
+      const mustReleaseOldHome =
+        oldHomeDoc !== null &&
+        oldHomeDoc._id !== targetDoc._id &&
+        (ownedBefore.length <= 1 || ownedBefore.length >= TERRITORIES.MAX_PER_KINGDOM);
+
+      for (const cell of ownedBefore) {
+        if (mustReleaseOldHome && oldHomeDoc && cell._id === oldHomeDoc._id) {
+          await ctx.db.patch(cell._id, {
+            ownerKingdomId: undefined,
+            isHome: false,
+            claimedAt: undefined,
+          });
+        } else {
+          if (cell.isHome) {
+            await ctx.db.patch(cell._id, { isHome: false });
+          }
+          preservedNonCapitalCount++;
+        }
+      }
+
+      await ctx.db.patch(targetDoc._id, {
+        ownerKingdomId: move.kingdomId,
+        isHome: true,
+        claimedAt: oldHomeDoc?.claimedAt ?? now,
+      });
+      await ctx.db.patch(move.kingdomId, { homeTerritoryId: move.toCellId });
+    }
+
+    // 5. Verificación estricta de post-condiciones (cualquier incoherencia dispara rollback atómico)
+    const [freshKingdom, freshOwned, freshTargetDocs] = await Promise.all([
+      ctx.db.get(move.kingdomId),
+      ctx.db.query("territories").withIndex("by_owner", (q) => q.eq("ownerKingdomId", move.kingdomId)).collect(),
+      ctx.db.query("territories").withIndex("by_cell", (q) => q.eq("cellId", move.toCellId)).collect(),
+    ]);
+
+    if (!freshKingdom || freshKingdom.homeTerritoryId !== move.toCellId) {
+      throw new Error(`Post-verificación fallida: homeTerritoryId no coincide con '${move.toCellId}'.`);
+    }
+    if (freshOwned.length > TERRITORIES.MAX_PER_KINGDOM) {
+      throw new Error(
+        `Post-verificación fallida: el reino superó el límite de ${TERRITORIES.MAX_PER_KINGDOM} territorios (${freshOwned.length}).`
+      );
+    }
+    if (new Set(freshOwned.map((c) => c.cellId)).size !== freshOwned.length) {
+      throw new Error("Post-verificación fallida: se detectaron cellIds duplicados tras la recolocación.");
+    }
+    const freshMarkedHomes = freshOwned.filter((c) => c.isHome === true);
+    if (freshMarkedHomes.length !== 1 || freshMarkedHomes[0].cellId !== move.toCellId) {
+      throw new Error(
+        `Post-verificación fallida: marca isHome incoherente (marcadas=${freshMarkedHomes.length}, esperada='${move.toCellId}').`
+      );
+    }
+    if (freshTargetDocs.length !== 1 || freshTargetDocs[0].ownerKingdomId !== move.kingdomId) {
+      throw new Error(`Post-verificación fallida: celda destino '${move.toCellId}' inconsistente.`);
+    }
+
+    outcomes.push({
+      kingdomId: String(move.kingdomId),
+      name: move.name,
+      previousHomeCellId: move.fromCellId,
+      newHomeCellId: move.toCellId,
+      outcome: "relocated",
+      preservedOwnedTerritoriesCount: preservedNonCapitalCount,
+      finalOwnedTerritoriesCount: freshOwned.length,
+      reason: `Capital recolocada de '${move.fromCellId ?? "ausente"}' a '${move.toCellId}' conservando ${preservedNonCapitalCount} territorios adicionales (total=${freshOwned.length}).`,
+    });
+  }
+
+  // 6. Re-auditar estado posterior para informar huella actualizada y pendientes restantes
+  const postAudit = await runKingdomSpawnAuditReadOnly(ctx);
+
+  return {
+    success: true,
+    executedAt: now,
+    previousPlanFingerprint: liveAudit.planFingerprint,
+    newPlanFingerprint: postAudit.planFingerprint,
+    relocatedCount: outcomes.filter((o) => o.outcome === "relocated").length,
+    alreadyAlignedCount: outcomes.filter((o) => o.outcome === "already_aligned").length,
+    pendingActivityCount: outcomes.filter((o) => o.outcome === "pending_activity").length,
+    deferredBatchCount: outcomes.filter((o) => o.outcome === "deferred_batch").length,
+    remainingPlannedCount: postAudit.plannedRelocations,
+    postAuditSummary: {
+      totalKingdoms: postAudit.totalKingdoms,
+      correctlyPositionedCount: postAudit.correctlyPositionedCount,
+      plannedRelocations: postAudit.plannedRelocations,
+      pendingActivityRelocations: postAudit.pendingActivityRelocations,
+      blockedIntegrityRelocations: postAudit.blockedIntegrityRelocations,
+      globalPlanStatus: postAudit.globalPlanStatus,
+    },
+    outcomes,
+  };
+}
+
+/**
+ * Aplicación administrativa atómica, validada e idempotente del plan de recolocación de capitales.
+ * Protegida por autorización administrativa real en servidor (ADMIN_USER_IDS).
+ */
+export const applyKingdomSpawnRelocation = mutation({
+  args: {
+    expectedPlanFingerprint: v.optional(v.string()),
+    plannedRelocations: v.optional(
+      v.array(
+        v.object({
+          kingdomId: v.id("kingdoms"),
+          fromCellId: v.optional(v.union(v.string(), v.null())),
+          toCellId: v.string(),
+        })
+      )
+    ),
+    kingdomIds: v.optional(v.array(v.id("kingdoms"))),
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireAuthorizedAdmin(ctx);
+    return await executeKingdomSpawnRelocation(ctx, args);
+  },
+});
+
+/**
+ * Variante interna para pruebas y tareas autorizadas de servidor.
+ */
+export const applyKingdomSpawnRelocationInternal = internalMutation({
+  args: {
+    expectedPlanFingerprint: v.optional(v.string()),
+    plannedRelocations: v.optional(
+      v.array(
+        v.object({
+          kingdomId: v.id("kingdoms"),
+          fromCellId: v.optional(v.union(v.string(), v.null())),
+          toCellId: v.string(),
+        })
+      )
+    ),
+    kingdomIds: v.optional(v.array(v.id("kingdoms"))),
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await executeKingdomSpawnRelocation(ctx, args);
   },
 });
 

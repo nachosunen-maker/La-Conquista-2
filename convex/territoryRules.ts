@@ -758,11 +758,13 @@ export interface MultiKingdomDistributionResult {
     readonly r: number;
     readonly distanceToAnchor: number | null;
     readonly nearestCapitalDistance: number | null;
+    readonly nearestSameCivDistance: number | null;
     readonly withinTargetBand: boolean;
   }>;
   readonly minPairwiseDistance: number | null;
   readonly allMeetMinSeparation: boolean;
   readonly allMeetTargetBand: boolean;
+  readonly outOfTargetBandKingdomIds: ReadonlyArray<string>;
   readonly verifiedAllPairwiseDistances: boolean;
   readonly attemptsUsed: number;
   readonly maxAttempts: number;
@@ -772,10 +774,12 @@ export interface MultiKingdomDistributionResult {
 
 /**
  * Optimizador determinista acotado para distribuir un conjunto de reinos sobre el mapa canónico.
+ * Soporta capitales fijas (`fixedKingdoms`) y celdas ocupadas (`occupiedCellIds`) que se reservan
+ * durante todo el cálculo para distribución global de reinos existentes.
  * Separa explícitamente:
  * - solución en banda objetivo [20, 30]
  * - solución que respeta únicamente separación mínima (>= 20)
- * - inviabilidad demostrada (cuando N supera la cota superior geométrica real)
+ * - inviabilidad demostrada (cuando N supera la cota superior geométrica real o búsqueda exhaustiva de 1 reino)
  * - búsqueda agotada sin demostrar inviabilidad (cuando se alcanza el límite de intentos)
  * Valida posteriormente TODAS las distancias por parejas.
  */
@@ -787,26 +791,48 @@ export function optimizeKingdomDistribution(
     separationMax?: number;
     maxAttempts?: number;
     seed?: number;
+    fixedKingdoms?: ReadonlyArray<ExistingKingdomSpawn>;
+    occupiedCellIds?: ReadonlySet<string>;
   }
 ): MultiKingdomDistributionResult {
   const minSep = options?.separationMin ?? TERRITORIES.SPAWN_SEPARATION_MIN;
   const maxSep = options?.separationMax ?? TERRITORIES.SPAWN_SEPARATION_MAX;
   const maxAttempts = Math.max(1, options?.maxAttempts ?? 6);
   const seed = options?.seed ?? MAP.WORLD_SEED;
+  const fixedKingdoms = options?.fixedKingdoms ?? [];
+  const extraOccupied = options?.occupiedCellIds ?? new Set<string>();
 
   const geometry = analyzeWorldSpawnGeometry(radius, minSep, maxSep);
-  if (requests.length > geometry.conservativeIntersectionUpperBound) {
+  if (requests.length === 0) {
+    return {
+      status: "solution_in_target_band",
+      assignments: [],
+      minPairwiseDistance: null,
+      allMeetMinSeparation: true,
+      allMeetTargetBand: true,
+      outOfTargetBandKingdomIds: [],
+      verifiedAllPairwiseDistances: true,
+      attemptsUsed: 0,
+      maxAttempts,
+      upperBoundAtMinSeparation: geometry.conservativeIntersectionUpperBound,
+      notes: "No hay reinos pendientes de asignación.",
+    };
+  }
+
+  const totalCapitals = fixedKingdoms.length + requests.length;
+  if (totalCapitals > geometry.conservativeIntersectionUpperBound) {
     return {
       status: "proven_infeasible",
       assignments: [],
       minPairwiseDistance: null,
       allMeetMinSeparation: false,
       allMeetTargetBand: false,
+      outOfTargetBandKingdomIds: requests.map((r) => r.kingdomId),
       verifiedAllPairwiseDistances: true,
       attemptsUsed: 0,
       maxAttempts,
       upperBoundAtMinSeparation: geometry.conservativeIntersectionUpperBound,
-      notes: `Inviabilidad demostrada: se solicitan ${requests.length} capitales y la cota superior geométrica conservadora para R=${radius}, d>=${minSep} es ${geometry.conservativeIntersectionUpperBound}.`,
+      notes: `Inviabilidad demostrada: se solicitan ${totalCapitals} capitales (${fixedKingdoms.length} fijas + ${requests.length} a recolocar) y la cota superior geométrica conservadora para R=${radius}, d>=${minSep} es ${geometry.conservativeIntersectionUpperBound}.`,
     };
   }
 
@@ -860,13 +886,21 @@ export function optimizeKingdomDistribution(
   } | null = null;
 
   let attemptsUsed = 0;
+  let singleRequestProvenInfeasible = false;
 
   for (let a = 0; a < Math.min(orderings.length, maxAttempts); a++) {
     attemptsUsed++;
     const order = orderings[a];
-    const occupied = new Set<string>();
+    const occupied = new Set<string>(extraOccupied);
     const placedHomes: HexCoord[] = [];
     const placedKingdoms: ExistingKingdomSpawn[] = [];
+
+    for (const fk of fixedKingdoms) {
+      occupied.add(cellId(fk.q, fk.r));
+      placedHomes.push({ q: fk.q, r: fk.r });
+      placedKingdoms.push(fk);
+    }
+
     const current: Array<{
       kingdomId: string;
       civilization: string | null;
@@ -884,7 +918,10 @@ export function optimizeKingdomDistribution(
         separationMin: minSep,
         separationMax: maxSep,
       });
-      if (!diag.cell) {
+      if (!diag.cell || !diag.meetsMinSeparation) {
+        if (order.length === 1 && diag.provenInfeasible) {
+          singleRequestProvenInfeasible = true;
+        }
         failedPlacement = true;
         break;
       }
@@ -908,20 +945,48 @@ export function optimizeKingdomDistribution(
 
     if (failedPlacement) continue;
 
-    // Verificación exacta de TODAS las distancias por parejas
+    // Verificación exacta de TODAS las distancias por parejas (asignadas contra asignadas y fijas)
+    const allCapitals: Array<{ kingdomId: string; civilization: string | null; q: number; r: number }> = [
+      ...fixedKingdoms.map((fk, idx) => ({
+        kingdomId: fk.kingdomId ?? `__fixed_${idx}`,
+        civilization: normalizeCivilizationId(fk.civilization),
+        q: fk.q,
+        r: fk.r,
+      })),
+      ...current.map((c) => ({
+        kingdomId: c.kingdomId,
+        civilization: c.civilization,
+        q: c.q,
+        r: c.r,
+      })),
+    ];
+
     let minPairwise: number | null = null;
     let allMin = true;
     let bandCount = 0;
-    for (let i = 0; i < current.length; i++) {
+
+    for (const assigned of current) {
       let nearest = Infinity;
-      for (let j = 0; j < current.length; j++) {
-        if (i === j) continue;
-        const d = hexDistance(current[i], current[j]);
+      let nearestSame = Infinity;
+      let sameCivCount = 0;
+      for (const other of allCapitals) {
+        if (other.kingdomId === assigned.kingdomId) continue;
+        const d = hexDistance(assigned, other);
         if (d < nearest) nearest = d;
         if (minPairwise === null || d < minPairwise) minPairwise = d;
+        if (assigned.civilization && other.civilization === assigned.civilization) {
+          sameCivCount++;
+          if (d < nearestSame) nearestSame = d;
+        }
       }
-      if (current.length > 1 && nearest < minSep) allMin = false;
-      if (current.length <= 1 || (nearest >= minSep && nearest <= maxSep)) bandCount++;
+      if (allCapitals.length > 1 && nearest < minSep) allMin = false;
+      const inBand =
+        allCapitals.length <= 1
+          ? true
+          : sameCivCount > 0
+            ? nearest >= minSep && nearestSame >= minSep && nearestSame <= maxSep
+            : nearest >= minSep && (assigned.distanceToAnchor === 0 || nearest <= maxSep);
+      if (inBand) bandCount++;
     }
     const allBand = allMin && bandCount === current.length;
 
@@ -941,36 +1006,82 @@ export function optimizeKingdomDistribution(
   }
 
   if (!bestSolution) {
+    if (singleRequestProvenInfeasible) {
+      return {
+        status: "proven_infeasible",
+        assignments: [],
+        minPairwiseDistance: null,
+        allMeetMinSeparation: false,
+        allMeetTargetBand: false,
+        outOfTargetBandKingdomIds: requests.map((r) => r.kingdomId),
+        verifiedAllPairwiseDistances: true,
+        attemptsUsed,
+        maxAttempts,
+        upperBoundAtMinSeparation: geometry.conservativeIntersectionUpperBound,
+        notes: `Inviabilidad demostrada por búsqueda exhaustiva sobre las celdas libres restantes para separación >= ${minSep}.`,
+      };
+    }
     return {
       status: "search_exhausted",
       assignments: [],
       minPairwiseDistance: null,
       allMeetMinSeparation: false,
       allMeetTargetBand: false,
+      outOfTargetBandKingdomIds: requests.map((r) => r.kingdomId),
       verifiedAllPairwiseDistances: true,
       attemptsUsed,
       maxAttempts,
       upperBoundAtMinSeparation: geometry.conservativeIntersectionUpperBound,
-      notes: `Búsqueda acotada agotada (${attemptsUsed}/${maxAttempts} intentos) sin hallar asignación completa; esto NO demuestra inviabilidad.`,
+      notes: `Búsqueda acotada agotada (${attemptsUsed}/${maxAttempts} intentos) sin hallar asignación completa con d >= ${minSep}; esto NO demuestra inviabilidad matemática.`,
     };
   }
 
-  // Enriquecer con distancia real al reino más próximo y ordenar deterministamente por kingdomId
+  // Enriquecer con distancia real al reino más próximo (global y misma civilización) y ordenar deterministamente por kingdomId
+  const combinedCapitals: Array<{ kingdomId: string; civilization: string | null; q: number; r: number }> = [
+    ...fixedKingdoms.map((fk, idx) => ({
+      kingdomId: fk.kingdomId ?? `__fixed_${idx}`,
+      civilization: normalizeCivilizationId(fk.civilization),
+      q: fk.q,
+      r: fk.r,
+    })),
+    ...bestSolution.assignments.map((c) => ({
+      kingdomId: c.kingdomId,
+      civilization: c.civilization,
+      q: c.q,
+      r: c.r,
+    })),
+  ];
+
   const finalAssignments = bestSolution.assignments
     .map((item) => {
       let nearest: number | null = null;
-      for (const other of bestSolution!.assignments) {
+      let nearestSame: number | null = null;
+      for (const other of combinedCapitals) {
         if (other.kingdomId === item.kingdomId) continue;
         const d = hexDistance(item, other);
         if (nearest === null || d < nearest) nearest = d;
+        if (item.civilization && other.civilization === item.civilization) {
+          if (nearestSame === null || d < nearestSame) nearestSame = d;
+        }
       }
+      const withinTargetBand =
+        nearest === null
+          ? true
+          : nearestSame !== null
+            ? nearest >= minSep && nearestSame >= minSep && nearestSame <= maxSep
+            : nearest >= minSep && (item.distanceToAnchor === 0 || nearest <= maxSep);
       return {
         ...item,
         nearestCapitalDistance: nearest,
-        withinTargetBand: nearest === null || (nearest >= minSep && nearest <= maxSep),
+        nearestSameCivDistance: nearestSame,
+        withinTargetBand,
       };
     })
     .sort((a, b) => a.kingdomId.localeCompare(b.kingdomId));
+
+  const outOfTargetBandKingdomIds = finalAssignments
+    .filter((a) => !a.withinTargetBand)
+    .map((a) => a.kingdomId);
 
   const status: MultiKingdomDistributionResult["status"] = bestSolution.allBand
     ? "solution_in_target_band"
@@ -984,6 +1095,7 @@ export function optimizeKingdomDistribution(
     minPairwiseDistance: bestSolution.minPairwise,
     allMeetMinSeparation: bestSolution.allMin,
     allMeetTargetBand: bestSolution.allBand,
+    outOfTargetBandKingdomIds,
     verifiedAllPairwiseDistances: true,
     attemptsUsed,
     maxAttempts,
@@ -992,10 +1104,18 @@ export function optimizeKingdomDistribution(
       status === "solution_in_target_band"
         ? `Solución determinista verificada en banda [${minSep}, ${maxSep}] para ${finalAssignments.length} reinos.`
         : status === "solution_min_separation_only"
-          ? `Solución determinista verificada respetando separación mínima >= ${minSep} (d_min = ${bestSolution.minPairwise}) para ${finalAssignments.length} reinos; no todos alcanzan <= ${maxSep}.`
+          ? `Solución determinista verificada respetando separación mínima >= ${minSep} (d_min = ${bestSolution.minPairwise}) para ${finalAssignments.length} reinos; fuera de banda [${minSep}, ${maxSep}]: ${outOfTargetBandKingdomIds.join(", ")}.`
           : `Búsqueda agotada (${attemptsUsed}/${maxAttempts} intentos) sin cumplir separación mínima >= ${minSep} (d_min = ${bestSolution.minPairwise}); no demuestra inviabilidad matemática.`,
   };
 }
+
+export type KingdomSpawnAuditStatus =
+  | "correctly_positioned"
+  | "planned"
+  | "pending_activity"
+  | "blocked_integrity"
+  | "geometrically_infeasible"
+  | "search_exhausted";
 
 export interface ExistingKingdomAuditInput {
   readonly kingdomId: string;
@@ -1010,6 +1130,9 @@ export interface ExistingKingdomAuditInput {
     readonly isHome?: boolean;
   } | null;
   readonly ownedTerritoryCount: number;
+  readonly ownedCellIds?: ReadonlyArray<string>;
+  readonly markedHomeCount?: number;
+  readonly duplicateTerritoryCellIds?: ReadonlyArray<string>;
   readonly activeMarchesCount: number;
   readonly activeChallengesCount: number;
   readonly activeExplorationsCount: number;
@@ -1022,7 +1145,9 @@ export interface KingdomSpawnAuditEntry {
   readonly persistedHomeTerritoryId: string | null;
   readonly coord: HexCoord | null;
   readonly regionalAnchor: HexCoord | null;
+  readonly nearestAnchorCivilization: string | null;
   readonly distanceToAnchor: number | null;
+  readonly matchesCivilizationRegion: boolean;
   readonly nearestCapitalDistance: number | null;
   readonly nearestCapitalKingdomId: string | null;
   readonly nearestSameCivDistance: number | null;
@@ -1032,9 +1157,15 @@ export interface KingdomSpawnAuditEntry {
   readonly meetsMinSeparation: boolean;
   readonly meetsTargetBand: boolean;
   readonly requiresRelocation: boolean;
-  readonly relocationAction: "none" | "planned" | "blocked";
+  readonly relocationReasons: string[];
+  readonly status: KingdomSpawnAuditStatus;
+  readonly relocationAction: "none" | "planned" | "pending_activity" | "blocked";
   readonly proposedHomeCellId: string | null;
   readonly proposedCoord: HexCoord | null;
+  readonly proposedDistanceToAnchor: number | null;
+  readonly proposedWithinTargetBand: boolean | null;
+  readonly pendingActivityReasons: string[];
+  readonly integrityBlockReasons: string[];
   readonly blockedReasons: string[];
 }
 
@@ -1042,31 +1173,100 @@ export interface ExistingKingdomsSpawnAuditReport {
   readonly radius: number;
   readonly separationMin: number;
   readonly separationMax: number;
+  readonly planFingerprint: string;
+  readonly anchorsValid: boolean;
   readonly totalKingdoms: number;
+  readonly correctlyPositionedCount: number;
   readonly kingdomsMeetingMinSeparation: number;
   readonly kingdomsMeetingTargetBand: number;
   readonly kingdomsWithConflicts: number;
   readonly kingdomsRequiringRelocation: number;
   readonly plannedRelocations: number;
+  readonly pendingActivityRelocations: number;
+  readonly blockedIntegrityRelocations: number;
+  readonly geometricallyInfeasibleRelocations: number;
+  readonly searchExhaustedRelocations: number;
   readonly blockedRelocations: number;
+  readonly globalPlanStatus: MultiKingdomDistributionResult["status"] | "noop";
+  readonly globalPlanMinPairwiseDistance: number | null;
+  readonly globalPlanVerifiedAllPairwise: boolean;
+  readonly outOfTargetBandKingdomIds: ReadonlyArray<string>;
   readonly readOnlyPlan: true;
   readonly entries: ReadonlyArray<KingdomSpawnAuditEntry>;
 }
 
+/** Hash determinista FNV-1a (doble 32 bits -> 16 hex) para detectar cambios entre simulación y aplicación. */
+function computeDeterministicPlanFingerprint(payload: string): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < payload.length; i++) {
+    const c = payload.charCodeAt(i);
+    h1 ^= c;
+    h1 = Math.imul(h1, 0x01000193) >>> 0;
+    h2 ^= (c + i) & 0xff;
+    h2 = Math.imul(h2, 0x01000193) >>> 0;
+  }
+  return `${h1.toString(16).padStart(8, "0")}${h2.toString(16).padStart(8, "0")}`;
+}
+
 /**
- * Auditoría geográfica y plan determinista de recolocación para reinos existentes.
- * NO modifica datos persistidos. Identifica conflictos, distancias reales, agrupación por
- * civilización, cumplimiento de la banda 20-30 y bloqueos de integridad si recolocar
- * rompería propiedad territorial, marchas, desafíos o expediciones activas.
+ * Auditoría geográfica y plan global determinista de recolocación para reinos existentes.
+ * NO modifica datos persistidos.
+ *
+ * Criterios de correcta ubicación:
+ * 1. Dentro del mapa de radio 50.
+ * 2. Capital coherente con la región de su civilización (`CIVILIZATION_ZONES`).
+ * 3. Separación mínima >= 20 hexágonos respecto a todas las demás capitales.
+ * 4. Banda objetivo [20, 30] entre reinos de la misma civilización cuando es geométricamente posible.
+ * 5. Sin conflictos de ocupación ni inconsistencias entre `homeTerritoryId` e `isHome`.
+ *
+ * Distingue explícitamente:
+ * - `correctly_positioned`
+ * - `planned` (recolocación global verificada)
+ * - `pending_activity` (marchas, expediciones o desafíos activos: no se interrumpen)
+ * - `blocked_integrity` (incompatibilidad real demostrada: p. ej. duplicados o >100 territorios)
+ * - `geometrically_infeasible` (imposibilidad geométrica demostrada)
+ * - `search_exhausted` (búsqueda acotada agotada sin demostrar imposibilidad matemática)
  */
 export function auditExistingKingdomSpawns(
   kingdoms: ReadonlyArray<ExistingKingdomAuditInput>,
   radius: number = MAP.RADIUS,
-  options?: { separationMin?: number; separationMax?: number }
+  options?: {
+    separationMin?: number;
+    separationMax?: number;
+    maxAttempts?: number;
+    occupiedCellIds?: ReadonlySet<string>;
+  }
 ): ExistingKingdomsSpawnAuditReport {
   const minSep = options?.separationMin ?? TERRITORIES.SPAWN_SEPARATION_MIN;
   const maxSep = options?.separationMax ?? TERRITORIES.SPAWN_SEPARATION_MAX;
+  const anchorCheck = verifyCivilizationAnchors(radius);
   const sorted = [...kingdoms].sort((a, b) => a.kingdomId.localeCompare(b.kingdomId));
+
+  // Huella determinista del estado de entrada (detecta cualquier cambio entre simulación y ejecución)
+  const fingerprintParts = sorted.map((k) =>
+    [
+      k.kingdomId,
+      normalizeCivilizationId(k.civilization) ?? "",
+      k.homeTerritoryId ?? "",
+      k.persistedHomeCell
+        ? `${k.persistedHomeCell.cellId}:${k.persistedHomeCell.ownerKingdomId ?? ""}:${k.persistedHomeCell.isHome ? 1 : 0}`
+        : "none",
+      String(k.ownedTerritoryCount),
+      String(k.markedHomeCount ?? -1),
+      (k.duplicateTerritoryCellIds ?? []).join("|"),
+      String(k.activeMarchesCount),
+      String(k.activeChallengesCount),
+      String(k.activeExplorationsCount),
+      (k.ownedCellIds ? [...k.ownedCellIds].sort().join("|") : ""),
+    ].join(";")
+  );
+  if (options?.occupiedCellIds && options.occupiedCellIds.size > 0) {
+    fingerprintParts.push(`__occ:${Array.from(options.occupiedCellIds).sort().join("|")}`);
+  }
+  const planFingerprint = computeDeterministicPlanFingerprint(
+    `R=${radius};min=${minSep};max=${maxSep}::${fingerprintParts.join("\n")}`
+  );
 
   // Detectar colisiones de coordenadas de capital entre reinos
   const kingdomsByCell = new Map<string, string[]>();
@@ -1087,36 +1287,84 @@ export function auditExistingKingdomSpawns(
     return { k, normCiv, anchor, coord, effectiveCellId };
   });
 
-  const world = generateWorldCells(radius, MAP.WORLD_SEED);
-  const reservedCells = new Set<string>();
-  const keptHomes: ExistingKingdomSpawn[] = [];
+  // Contar cuántos reinos existen por civilización
+  const countByCiv = new Map<string, number>();
+  for (const r of resolved) {
+    if (r.normCiv) countByCiv.set(r.normCiv, (countByCiv.get(r.normCiv) ?? 0) + 1);
+  }
 
-  // Primera pasada: métricas reales y detección de qué reinos requieren recolocación
+  // Primera pasada: evaluar los 5 criterios de correcta ubicación y clasificar conflictos / actividades / bloqueos
   const preliminary = resolved.map((item) => {
     const conflictDetails: string[] = [];
-    if (!item.coord || !isInsideWorld(item.coord, radius)) {
-      conflictDetails.push("Capital ausente o fuera del radio canónico del mapa.");
+    const relocationReasons: string[] = [];
+    const integrityBlockReasons: string[] = [];
+    const pendingActivityReasons: string[] = [];
+
+    const insideMap = item.coord !== null && isInsideWorld(item.coord, radius);
+    if (!insideMap) {
+      const msg = "Capital ausente o fuera del radio canónico de 50 hexágonos.";
+      conflictDetails.push(msg);
+      relocationReasons.push(msg);
     }
+
+    if (!item.k.homeTerritoryId) {
+      const msg = "homeTerritoryId ausente en el documento del reino.";
+      conflictDetails.push(msg);
+      relocationReasons.push(msg);
+    } else if (!parseCellId(item.k.homeTerritoryId)) {
+      const msg = `homeTerritoryId '${item.k.homeTerritoryId}' tiene formato axial inválido.`;
+      conflictDetails.push(msg);
+      relocationReasons.push(msg);
+    }
+
     if (
       item.k.homeTerritoryId &&
       item.k.persistedHomeCell &&
       item.k.homeTerritoryId !== item.k.persistedHomeCell.cellId
     ) {
-      conflictDetails.push(
-        `Incoherencia entre homeTerritoryId (${item.k.homeTerritoryId}) y territorio persistido (${item.k.persistedHomeCell.cellId}).`
-      );
+      const msg = `Incoherencia entre homeTerritoryId (${item.k.homeTerritoryId}) y territorio persistido (${item.k.persistedHomeCell.cellId}).`;
+      conflictDetails.push(msg);
+      relocationReasons.push(msg);
     }
+
+    if (item.k.persistedHomeCell && item.k.persistedHomeCell.isHome !== true) {
+      const msg = `La celda de capital (${item.k.persistedHomeCell.cellId}) no está marcada con isHome: true.`;
+      conflictDetails.push(msg);
+      relocationReasons.push(msg);
+    }
+
+    if (item.k.markedHomeCount !== undefined && item.k.markedHomeCount !== 1 && item.k.ownedTerritoryCount > 0) {
+      const msg = `Inconsistencia en marcas isHome: existen ${item.k.markedHomeCount} territorios marcados como capital (debe ser exactamente 1).`;
+      conflictDetails.push(msg);
+      relocationReasons.push(msg);
+    }
+
     if (
       item.k.persistedHomeCell &&
       item.k.persistedHomeCell.ownerKingdomId &&
       item.k.persistedHomeCell.ownerKingdomId !== item.k.kingdomId
     ) {
-      conflictDetails.push(
-        `La casilla de capital pertenece a otro reino (${item.k.persistedHomeCell.ownerKingdomId}).`
-      );
+      const msg = `La casilla de capital pertenece a otro reino (${item.k.persistedHomeCell.ownerKingdomId}).`;
+      conflictDetails.push(msg);
+      relocationReasons.push(msg);
     }
+
     if (item.effectiveCellId && (kingdomsByCell.get(item.effectiveCellId)?.length ?? 0) > 1) {
-      conflictDetails.push(`Colisión de capital en ${item.effectiveCellId} con otro reino.`);
+      const msg = `Colisión de capital en ${item.effectiveCellId} con otro reino.`;
+      conflictDetails.push(msg);
+      relocationReasons.push(msg);
+    }
+
+    if ((item.k.duplicateTerritoryCellIds?.length ?? 0) > 0) {
+      const msg = `Registros de territorio duplicados detectados (${item.k.duplicateTerritoryCellIds!.join(", ")}); requiere saneamiento de integridad previo.`;
+      conflictDetails.push(msg);
+      relocationReasons.push(msg);
+      integrityBlockReasons.push(msg);
+    }
+
+    if (item.k.ownedTerritoryCount > TERRITORIES.MAX_PER_KINGDOM) {
+      const msg = `El reino posee ${item.k.ownedTerritoryCount} territorios (> ${TERRITORIES.MAX_PER_KINGDOM}); requiere saneamiento del límite territorial (Punto 2) antes de recolocar.`;
+      integrityBlockReasons.push(msg);
     }
 
     let nearestDist: number | null = null;
@@ -1139,34 +1387,108 @@ export function auditExistingKingdomSpawns(
       }
     }
 
+    // Evaluar correspondencia con la región geográfica de la civilización
     const distanceToAnchor = item.coord && item.anchor ? hexDistance(item.coord, item.anchor) : null;
-    const hasOccupationConflict = conflictDetails.length > 0;
-    const meetsMinSeparation = !hasOccupationConflict && (nearestDist === null || nearestDist >= minSep);
-    const meetsTargetBand =
-      meetsMinSeparation && (nearestDist === null || (nearestDist >= minSep && nearestDist <= maxSep));
+    let nearestAnchorCiv: string | null = null;
+    let nearestAnchorDist: number | null = null;
+    if (item.coord) {
+      for (const [civKey, zone] of Object.entries(CIVILIZATION_ZONES)) {
+        const d = hexDistance(item.coord, zone);
+        if (
+          nearestAnchorDist === null ||
+          d < nearestAnchorDist ||
+          (d === nearestAnchorDist && civKey === item.normCiv)
+        ) {
+          nearestAnchorDist = d;
+          nearestAnchorCiv = civKey;
+        }
+      }
+    }
+
+    const sameCivCount = item.normCiv ? (countByCiv.get(item.normCiv) ?? 1) : 1;
     const sameCivGroupedWithinBand =
       nearestSameDist === null ? null : nearestSameDist >= minSep && nearestSameDist <= maxSep;
 
-    // Requiere recolocación si tiene conflicto de ocupación o incumple separación mínima < 20
-    const requiresRelocation = hasOccupationConflict || !meetsMinSeparation;
-    if (!requiresRelocation && item.coord && item.effectiveCellId) {
-      reservedCells.add(item.effectiveCellId);
-      keptHomes.push({
-        q: item.coord.q,
-        r: item.coord.r,
-        civilization: item.normCiv,
-        kingdomId: item.k.kingdomId,
-      });
+    let matchesCivilizationRegion = true;
+    if (item.anchor) {
+      if (!item.coord || distanceToAnchor === null || nearestAnchorDist === null) {
+        matchesCivilizationRegion = false;
+      } else if (distanceToAnchor > maxSep) {
+        matchesCivilizationRegion = false;
+      } else if (
+        distanceToAnchor > nearestAnchorDist &&
+        sameCivGroupedWithinBand !== true
+      ) {
+        matchesCivilizationRegion = false;
+      }
     }
+
+    if (!matchesCivilizationRegion && item.anchor) {
+      relocationReasons.push(
+        `Capital fuera de la región de ${item.normCiv} (ancla en ${item.anchor.q},${item.anchor.r}, distancia=${distanceToAnchor ?? "N/A"}, ancla más cercana=${nearestAnchorCiv ?? "N/A"} a ${nearestAnchorDist ?? "N/A"}).`
+      );
+    }
+
+    const hasOccupationConflict = conflictDetails.length > 0;
+    const meetsMinSeparation = !hasOccupationConflict && (nearestDist === null || nearestDist >= minSep);
+    if (nearestDist !== null && nearestDist < minSep) {
+      relocationReasons.push(
+        `Separación mínima incumplida: distancia ${nearestDist} < ${minSep} respecto al reino '${nearestId}'.`
+      );
+    }
+
+    const sameCivOutsideTargetBand =
+      sameCivCount >= 2 && nearestSameDist !== null && nearestSameDist > maxSep;
+    if (sameCivOutsideTargetBand) {
+      relocationReasons.push(
+        `Distancia entre reinos de la misma civilización (${item.normCiv}) fuera de la banda [${minSep}, ${maxSep}]: ${nearestSameDist} > ${maxSep}.`
+      );
+    }
+
+    const meetsTargetBand =
+      meetsMinSeparation &&
+      matchesCivilizationRegion &&
+      !sameCivOutsideTargetBand &&
+      (nearestSameDist === null ? true : nearestSameDist >= minSep && nearestSameDist <= maxSep);
+
+    // Actividades en curso que dependen de la posición actual: NO se interrumpen, quedan pendientes
+    if (item.k.activeMarchesCount > 0) {
+      pendingActivityReasons.push(
+        `Existen ${item.k.activeMarchesCount} marchas militares activas vinculadas a la posición actual.`
+      );
+    }
+    if (item.k.activeExplorationsCount > 0) {
+      pendingActivityReasons.push(
+        `Existen ${item.k.activeExplorationsCount} expediciones de exploración activas desde la posición actual.`
+      );
+    }
+    if (item.k.activeChallengesCount > 0) {
+      pendingActivityReasons.push(
+        `Existen ${item.k.activeChallengesCount} desafíos activos vinculados a las coordenadas actuales.`
+      );
+    }
+
+    const requiresRelocation =
+      !insideMap ||
+      hasOccupationConflict ||
+      !meetsMinSeparation ||
+      !matchesCivilizationRegion ||
+      sameCivOutsideTargetBand;
 
     return {
       ...item,
+      insideMap,
       conflictDetails,
+      relocationReasons,
+      integrityBlockReasons,
+      pendingActivityReasons,
       hasOccupationConflict,
       nearestDist,
       nearestId,
       nearestSameDist,
       distanceToAnchor,
+      nearestAnchorCiv,
+      matchesCivilizationRegion,
       meetsMinSeparation,
       meetsTargetBand,
       sameCivGroupedWithinBand,
@@ -1174,7 +1496,64 @@ export function auditExistingKingdomSpawns(
     };
   });
 
-  // Segunda pasada: construir plan determinista para los reinos que requieren recolocación
+  // Segunda pasada: separar reinos fijos (correctos, pendientes por actividad o bloqueados por integridad)
+  // de los reinos movibles que se distribuirán CONJUNTAMENTE mediante el optimizador determinista global.
+  const fixedKingdoms: ExistingKingdomSpawn[] = [];
+  const reservedOccupied = new Set<string>(options?.occupiedCellIds ?? []);
+  const movableRequests: MultiKingdomSpawnRequest[] = [];
+  const movableById = new Map<string, (typeof preliminary)[number]>();
+
+  for (const p of preliminary) {
+    // Reservar todas las celdas no-capitales poseídas por cualquier reino (nunca se pisan territorios ajenos)
+    if (p.k.ownedCellIds) {
+      for (const cid of p.k.ownedCellIds) {
+        if (cid !== p.effectiveCellId) {
+          reservedOccupied.add(cid);
+        }
+      }
+    }
+
+    const isFixed =
+      !p.requiresRelocation ||
+      p.integrityBlockReasons.length > 0 ||
+      p.pendingActivityReasons.length > 0;
+
+    if (isFixed) {
+      if (p.coord && p.insideMap) {
+        reservedOccupied.add(cellId(p.coord.q, p.coord.r));
+        fixedKingdoms.push({
+          q: p.coord.q,
+          r: p.coord.r,
+          civilization: p.normCiv,
+          kingdomId: p.k.kingdomId,
+        });
+      }
+    } else {
+      movableRequests.push({
+        kingdomId: p.k.kingdomId,
+        civilization: p.normCiv,
+      });
+      movableById.set(p.k.kingdomId, p);
+    }
+  }
+
+  // Distribución global conjunta de todos los reinos movibles respetando los fijos y las celdas ocupadas
+  let globalOpt: MultiKingdomDistributionResult | null = null;
+  if (movableRequests.length > 0) {
+    globalOpt = optimizeKingdomDistribution(movableRequests, radius, {
+      separationMin: minSep,
+      separationMax: maxSep,
+      maxAttempts: options?.maxAttempts ?? 8,
+      fixedKingdoms,
+      occupiedCellIds: reservedOccupied,
+    });
+  }
+
+  const assignmentById = new Map(
+    (globalOpt?.assignments ?? []).map((a) => [a.kingdomId, a])
+  );
+
+  // Construir informe final por reino
   const entries: KingdomSpawnAuditEntry[] = preliminary.map((p) => {
     if (!p.requiresRelocation) {
       return {
@@ -1184,7 +1563,9 @@ export function auditExistingKingdomSpawns(
         persistedHomeTerritoryId: p.k.homeTerritoryId ?? null,
         coord: p.coord,
         regionalAnchor: p.anchor,
+        nearestAnchorCivilization: p.nearestAnchorCiv,
         distanceToAnchor: p.distanceToAnchor,
+        matchesCivilizationRegion: p.matchesCivilizationRegion,
         nearestCapitalDistance: p.nearestDist,
         nearestCapitalKingdomId: p.nearestId,
         nearestSameCivDistance: p.nearestSameDist,
@@ -1194,63 +1575,130 @@ export function auditExistingKingdomSpawns(
         meetsMinSeparation: true,
         meetsTargetBand: p.meetsTargetBand,
         requiresRelocation: false,
+        relocationReasons: [],
+        status: "correctly_positioned",
         relocationAction: "none",
         proposedHomeCellId: null,
         proposedCoord: null,
+        proposedDistanceToAnchor: null,
+        proposedWithinTargetBand: null,
+        pendingActivityReasons: [],
+        integrityBlockReasons: [],
         blockedReasons: [],
       };
     }
 
-    const blockedReasons: string[] = [];
-    if (p.k.ownedTerritoryCount > 1) {
-      blockedReasons.push(
-        `El reino posee ${p.k.ownedTerritoryCount} territorios; mover solo la capital rompería la contigüidad y propiedad territorial.`
-      );
-    }
-    if (p.k.activeMarchesCount > 0) {
-      blockedReasons.push(
-        `Existen ${p.k.activeMarchesCount} marchas militares activas referenciando las coordenadas actuales.`
-      );
-    }
-    if (p.k.activeChallengesCount > 0) {
-      blockedReasons.push(
-        `Existen ${p.k.activeChallengesCount} desafíos activos vinculados al reino.`
-      );
-    }
-    if (p.k.activeExplorationsCount > 0) {
-      blockedReasons.push(
-        `Existen ${p.k.activeExplorationsCount} expediciones de exploración activas desde la posición actual.`
-      );
-    }
-
-    const planned = chooseHomeCellWithDiagnostics(
-      world,
-      reservedCells,
-      keptHomes.map((h) => ({ q: h.q, r: h.r })),
-      {
-        civilization: p.normCiv,
-        existingKingdoms: keptHomes,
-        separationMin: minSep,
-        separationMax: maxSep,
-      }
-    );
-
-    if (!planned.cell || !planned.meetsMinSeparation) {
-      blockedReasons.push(
-        `No existe destino determinista disponible que garantice separación >= ${minSep} sin conflictos.`
-      );
-    }
-
-    const isBlocked = blockedReasons.length > 0;
-    if (!isBlocked && planned.cell) {
-      reservedCells.add(planned.cell.cellId);
-      keptHomes.push({
-        q: planned.cell.q,
-        r: planned.cell.r,
-        civilization: p.normCiv,
+    if (p.integrityBlockReasons.length > 0) {
+      return {
         kingdomId: p.k.kingdomId,
-      });
+        name: p.k.name,
+        civilization: p.normCiv,
+        persistedHomeTerritoryId: p.k.homeTerritoryId ?? null,
+        coord: p.coord,
+        regionalAnchor: p.anchor,
+        nearestAnchorCivilization: p.nearestAnchorCiv,
+        distanceToAnchor: p.distanceToAnchor,
+        matchesCivilizationRegion: p.matchesCivilizationRegion,
+        nearestCapitalDistance: p.nearestDist,
+        nearestCapitalKingdomId: p.nearestId,
+        nearestSameCivDistance: p.nearestSameDist,
+        sameCivGroupedWithinBand: p.sameCivGroupedWithinBand,
+        hasOccupationConflict: p.hasOccupationConflict,
+        conflictDetails: p.conflictDetails,
+        meetsMinSeparation: p.meetsMinSeparation,
+        meetsTargetBand: p.meetsTargetBand,
+        requiresRelocation: true,
+        relocationReasons: p.relocationReasons,
+        status: "blocked_integrity",
+        relocationAction: "blocked",
+        proposedHomeCellId: null,
+        proposedCoord: null,
+        proposedDistanceToAnchor: null,
+        proposedWithinTargetBand: null,
+        pendingActivityReasons: p.pendingActivityReasons,
+        integrityBlockReasons: p.integrityBlockReasons,
+        blockedReasons: [...p.integrityBlockReasons, ...p.pendingActivityReasons],
+      };
     }
+
+    if (p.pendingActivityReasons.length > 0) {
+      return {
+        kingdomId: p.k.kingdomId,
+        name: p.k.name,
+        civilization: p.normCiv,
+        persistedHomeTerritoryId: p.k.homeTerritoryId ?? null,
+        coord: p.coord,
+        regionalAnchor: p.anchor,
+        nearestAnchorCivilization: p.nearestAnchorCiv,
+        distanceToAnchor: p.distanceToAnchor,
+        matchesCivilizationRegion: p.matchesCivilizationRegion,
+        nearestCapitalDistance: p.nearestDist,
+        nearestCapitalKingdomId: p.nearestId,
+        nearestSameCivDistance: p.nearestSameDist,
+        sameCivGroupedWithinBand: p.sameCivGroupedWithinBand,
+        hasOccupationConflict: p.hasOccupationConflict,
+        conflictDetails: p.conflictDetails,
+        meetsMinSeparation: p.meetsMinSeparation,
+        meetsTargetBand: p.meetsTargetBand,
+        requiresRelocation: true,
+        relocationReasons: p.relocationReasons,
+        status: "pending_activity",
+        relocationAction: "pending_activity",
+        proposedHomeCellId: null,
+        proposedCoord: null,
+        proposedDistanceToAnchor: null,
+        proposedWithinTargetBand: null,
+        pendingActivityReasons: p.pendingActivityReasons,
+        integrityBlockReasons: [],
+        blockedReasons: p.pendingActivityReasons,
+      };
+    }
+
+    const assigned = assignmentById.get(p.k.kingdomId);
+    if (
+      assigned &&
+      globalOpt &&
+      (globalOpt.status === "solution_in_target_band" || globalOpt.status === "solution_min_separation_only")
+    ) {
+      return {
+        kingdomId: p.k.kingdomId,
+        name: p.k.name,
+        civilization: p.normCiv,
+        persistedHomeTerritoryId: p.k.homeTerritoryId ?? null,
+        coord: p.coord,
+        regionalAnchor: p.anchor,
+        nearestAnchorCivilization: p.nearestAnchorCiv,
+        distanceToAnchor: p.distanceToAnchor,
+        matchesCivilizationRegion: p.matchesCivilizationRegion,
+        nearestCapitalDistance: p.nearestDist,
+        nearestCapitalKingdomId: p.nearestId,
+        nearestSameCivDistance: p.nearestSameDist,
+        sameCivGroupedWithinBand: p.sameCivGroupedWithinBand,
+        hasOccupationConflict: p.hasOccupationConflict,
+        conflictDetails: p.conflictDetails,
+        meetsMinSeparation: p.meetsMinSeparation,
+        meetsTargetBand: p.meetsTargetBand,
+        requiresRelocation: true,
+        relocationReasons: p.relocationReasons,
+        status: "planned",
+        relocationAction: "planned",
+        proposedHomeCellId: assigned.cellId,
+        proposedCoord: { q: assigned.q, r: assigned.r },
+        proposedDistanceToAnchor: assigned.distanceToAnchor,
+        proposedWithinTargetBand: assigned.withinTargetBand,
+        pendingActivityReasons: [],
+        integrityBlockReasons: [],
+        blockedReasons: [],
+      };
+    }
+
+    const isProvenInfeasible = globalOpt?.status === "proven_infeasible";
+    const status: KingdomSpawnAuditStatus = isProvenInfeasible
+      ? "geometrically_infeasible"
+      : "search_exhausted";
+    const reason = isProvenInfeasible
+      ? (globalOpt?.notes ?? `Imposibilidad geométrica demostrada para separación >= ${minSep}.`)
+      : (globalOpt?.notes ?? "Búsqueda acotada agotada sin hallar solución completa; no demuestra imposibilidad matemática.");
 
     return {
       kingdomId: p.k.kingdomId,
@@ -1259,7 +1707,9 @@ export function auditExistingKingdomSpawns(
       persistedHomeTerritoryId: p.k.homeTerritoryId ?? null,
       coord: p.coord,
       regionalAnchor: p.anchor,
+      nearestAnchorCivilization: p.nearestAnchorCiv,
       distanceToAnchor: p.distanceToAnchor,
+      matchesCivilizationRegion: p.matchesCivilizationRegion,
       nearestCapitalDistance: p.nearestDist,
       nearestCapitalKingdomId: p.nearestId,
       nearestSameCivDistance: p.nearestSameDist,
@@ -1269,10 +1719,16 @@ export function auditExistingKingdomSpawns(
       meetsMinSeparation: p.meetsMinSeparation,
       meetsTargetBand: p.meetsTargetBand,
       requiresRelocation: true,
-      relocationAction: isBlocked ? "blocked" : "planned",
-      proposedHomeCellId: !isBlocked && planned.cell ? planned.cell.cellId : null,
-      proposedCoord: !isBlocked && planned.cell ? { q: planned.cell.q, r: planned.cell.r } : null,
-      blockedReasons,
+      relocationReasons: p.relocationReasons,
+      status,
+      relocationAction: "blocked",
+      proposedHomeCellId: null,
+      proposedCoord: null,
+      proposedDistanceToAnchor: null,
+      proposedWithinTargetBand: null,
+      pendingActivityReasons: [],
+      integrityBlockReasons: [],
+      blockedReasons: [reason],
     };
   });
 
@@ -1280,13 +1736,24 @@ export function auditExistingKingdomSpawns(
     radius,
     separationMin: minSep,
     separationMax: maxSep,
+    planFingerprint,
+    anchorsValid: anchorCheck.isValid,
     totalKingdoms: entries.length,
+    correctlyPositionedCount: entries.filter((e) => e.status === "correctly_positioned").length,
     kingdomsMeetingMinSeparation: entries.filter((e) => e.meetsMinSeparation).length,
     kingdomsMeetingTargetBand: entries.filter((e) => e.meetsTargetBand).length,
     kingdomsWithConflicts: entries.filter((e) => e.hasOccupationConflict).length,
     kingdomsRequiringRelocation: entries.filter((e) => e.requiresRelocation).length,
-    plannedRelocations: entries.filter((e) => e.relocationAction === "planned").length,
+    plannedRelocations: entries.filter((e) => e.status === "planned").length,
+    pendingActivityRelocations: entries.filter((e) => e.status === "pending_activity").length,
+    blockedIntegrityRelocations: entries.filter((e) => e.status === "blocked_integrity").length,
+    geometricallyInfeasibleRelocations: entries.filter((e) => e.status === "geometrically_infeasible").length,
+    searchExhaustedRelocations: entries.filter((e) => e.status === "search_exhausted").length,
     blockedRelocations: entries.filter((e) => e.relocationAction === "blocked").length,
+    globalPlanStatus: globalOpt ? globalOpt.status : "noop",
+    globalPlanMinPairwiseDistance: globalOpt ? globalOpt.minPairwiseDistance : null,
+    globalPlanVerifiedAllPairwise: globalOpt ? globalOpt.verifiedAllPairwiseDistances : true,
+    outOfTargetBandKingdomIds: globalOpt ? globalOpt.outOfTargetBandKingdomIds : [],
     readOnlyPlan: true,
     entries,
   };

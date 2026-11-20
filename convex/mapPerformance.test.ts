@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { CIVILIZATION_ZONES, MAP } from "./balanceConfig";
 import {
   analyzeWorldSpawnGeometry,
@@ -513,10 +514,11 @@ describe("Bloque A — Distribución geográfica, anclas, geometría por interse
     expect(pureAudit.readOnlyPlan).toBe(true);
     expect(pureAudit.totalKingdoms).toBe(3);
     expect(pureAudit.kingdomsRequiringRelocation).toBe(3);
-    expect(pureAudit.blockedRelocations).toBe(1);
-    const blockedEntry = pureAudit.entries.find((e) => e.kingdomId === "k3")!;
-    expect(blockedEntry.relocationAction).toBe("blocked");
-    expect(blockedEntry.blockedReasons.length).toBeGreaterThanOrEqual(2);
+    expect(pureAudit.pendingActivityRelocations).toBe(1);
+    const pendingEntry = pureAudit.entries.find((e) => e.kingdomId === "k3")!;
+    expect(pendingEntry.status).toBe("pending_activity");
+    expect(pendingEntry.relocationAction).toBe("pending_activity");
+    expect(pendingEntry.pendingActivityReasons.length).toBeGreaterThanOrEqual(1);
 
     // Verificar consulta interna de solo lectura en Convex
     const t = convexTest(schema, modules);
@@ -625,5 +627,585 @@ describe("Bloque 2 — Pruebas unitarias simuladas (Canvas headless, NO benchmar
     const overlayCountBefore = afterDestroy.overlayRenderCount;
     renderer.renderNow();
     expect(renderer.getPerfSnapshot().overlayRenderCount).toBe(overlayCountBefore);
+  });
+});
+
+describe("Redistribución quirúrgica de reinos existentes — 15 pruebas obligatorias", () => {
+  const createTestInstance = () => convexTest(schema, modules);
+  type TestBackend = ReturnType<typeof createTestInstance>;
+
+  async function createKingdomAt(
+    t: TestBackend,
+    subject: string,
+    name: string,
+    civilization: string,
+    q: number,
+    r: number
+  ) {
+    const asUser = t.withIdentity(identity(subject));
+    const k = await asUser.mutation(api.economy.getOrInitializeKingdom, {
+      name,
+      civilization,
+      castleName: `Castillo ${name}`,
+      monarchName: `Monarca ${name}`,
+    });
+    const targetCellId = `${q},${r}`;
+    await t.run(async (ctx) => {
+      // Mover manualmente su capital a la posición heredada deseada para simular estado preexistente en BD
+      const owned = await ctx.db
+        .query("territories")
+        .withIndex("by_owner", (qb) => qb.eq("ownerKingdomId", k._id))
+        .collect();
+      for (const c of owned) {
+        await ctx.db.patch(c._id, { ownerKingdomId: undefined, isHome: false, claimedAt: undefined });
+      }
+      const existingTarget = await ctx.db
+        .query("territories")
+        .withIndex("by_cell", (qb) => qb.eq("cellId", targetCellId))
+        .first();
+      if (existingTarget) {
+        await ctx.db.patch(existingTarget._id, {
+          ownerKingdomId: k._id,
+          isHome: true,
+          claimedAt: Date.now(),
+        });
+      } else {
+        await ctx.db.insert("territories", {
+          cellId: targetCellId,
+          q,
+          r,
+          terrain: "llanura",
+          ownerKingdomId: k._id,
+          isHome: true,
+          claimedAt: Date.now(),
+        });
+      }
+      await ctx.db.patch(k._id, { homeTerritoryId: targetCellId });
+    });
+    return { asUser, kingdomId: k._id as Id<"kingdoms"> };
+  }
+
+  test("1. Reino correctamente situado: no se recoloca", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAt(t, "redist-ok-1", "Roma Fiel", "romanos", 0, 34);
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(audit.totalKingdoms).toBe(1);
+    expect(audit.correctlyPositionedCount).toBe(1);
+    expect(audit.plannedRelocations).toBe(0);
+    expect(audit.entries[0].status).toBe("correctly_positioned");
+    expect(audit.entries[0].requiresRelocation).toBe(false);
+
+    const applied = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: audit.planFingerprint,
+    });
+    expect(applied.relocatedCount).toBe(0);
+    expect(applied.alreadyAlignedCount).toBe(1);
+    const kDoc = await t.run((ctx) => ctx.db.get(kingdomId));
+    expect(kDoc?.homeTerritoryId).toBe("0,34");
+  });
+
+  test("2. Reino de civilización incorrecta para su región: se detecta y se recoloca en su región", async () => {
+    const t = convexTest(schema, modules);
+    // Romanos situado en el centro heredado (0,0) y Vikingos situado en el ancla de Árabes (34,-34)
+    const { kingdomId: kRom } = await createKingdomAt(t, "redist-wrong-1", "Roma Perdida", "romanos", 0, 0);
+    const { kingdomId: kVik } = await createKingdomAt(t, "redist-wrong-2", "Vikingo Perdido", "vikingos", 34, -34);
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(audit.kingdomsRequiringRelocation).toBe(2);
+    expect(audit.plannedRelocations).toBe(2);
+    for (const e of audit.entries) {
+      expect(e.matchesCivilizationRegion).toBe(false);
+      expect(e.status).toBe("planned");
+    }
+
+    const applied = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: audit.planFingerprint,
+    });
+    expect(applied.relocatedCount).toBe(2);
+
+    const romDoc = await t.run((ctx) => ctx.db.get(kRom));
+    const vikDoc = await t.run((ctx) => ctx.db.get(kVik));
+    expect(romDoc?.homeTerritoryId).toBe("0,34");
+    expect(vikDoc?.homeTerritoryId).toBe("-34,0");
+  });
+
+  test("3. Reino a menos de 20 hexágonos: se detecta y se recoloca respetando d >= 20", async () => {
+    const t = convexTest(schema, modules);
+    await createKingdomAt(t, "redist-close-1", "Roma I", "romanos", 0, 34);
+    await createKingdomAt(t, "redist-close-2", "Roma II", "romanos", 0, 28); // d = 6 < 20
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(audit.kingdomsRequiringRelocation).toBe(2);
+    expect(audit.plannedRelocations).toBe(2);
+    expect(audit.entries.every((e) => !e.meetsMinSeparation)).toBe(true);
+
+    const applied = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: audit.planFingerprint,
+    });
+    expect(applied.relocatedCount).toBe(2);
+    expect(applied.postAuditSummary.correctlyPositionedCount).toBe(2);
+    expect(applied.postAuditSummary.plannedRelocations).toBe(0);
+  });
+
+  test("4. Reinos de la misma civilización separados por más de 30: se detectan y se agrupan en [20, 30]", async () => {
+    const t = convexTest(schema, modules);
+    // Dos reinos romanos a distancia 36 (> 30)
+    await createKingdomAt(t, "redist-far-1", "Roma Sur", "romanos", 0, 34);
+    await createKingdomAt(t, "redist-far-2", "Roma Norte", "romanos", 0, -2); // dist = 36 > 30
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(audit.kingdomsRequiringRelocation).toBe(2);
+    expect(audit.entries.every((e) => e.sameCivGroupedWithinBand === false)).toBe(true);
+
+    const applied = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: audit.planFingerprint,
+    });
+    expect(applied.relocatedCount).toBe(2);
+
+    const postAudit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(postAudit.correctlyPositionedCount).toBe(2);
+    for (const e of postAudit.entries) {
+      expect(e.nearestSameCivDistance).toBeGreaterThanOrEqual(20);
+      expect(e.nearestSameCivDistance).toBeLessThanOrEqual(30);
+    }
+  });
+
+  test("5. Varios reinos de una misma civilización y múltiples civilizaciones: distribución global correcta y determinista", async () => {
+    const t = convexTest(schema, modules);
+    // 3 romanos + 2 vikingos + 2 ingleses amontonados en el centro
+    await createKingdomAt(t, "glob-r1", "Roma 1", "romanos", 0, 0);
+    await createKingdomAt(t, "glob-r2", "Roma 2", "romanos", 1, 0);
+    await createKingdomAt(t, "glob-r3", "Roma 3", "romanos", 0, 1);
+    await createKingdomAt(t, "glob-v1", "Vikingo 1", "vikingos", -1, 0);
+    await createKingdomAt(t, "glob-v2", "Vikingo 2", "vikingos", 0, -1);
+    await createKingdomAt(t, "glob-i1", "Inglés 1", "ingleses", 1, -1);
+    await createKingdomAt(t, "glob-i2", "Inglés 2", "ingleses", -1, 1);
+
+    const audit1 = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    const audit2 = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(audit1.planFingerprint).toBe(audit2.planFingerprint);
+    expect(audit1.entries.map((e) => e.proposedHomeCellId)).toEqual(audit2.entries.map((e) => e.proposedHomeCellId));
+    expect(audit1.plannedRelocations).toBe(7);
+    expect(audit1.globalPlanVerifiedAllPairwise).toBe(true);
+    expect(audit1.globalPlanMinPairwiseDistance).toBeGreaterThanOrEqual(20);
+
+    const applied = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: audit1.planFingerprint,
+    });
+    expect(applied.relocatedCount).toBe(7);
+    expect(applied.postAuditSummary.correctlyPositionedCount).toBe(7);
+    expect(applied.postAuditSummary.plannedRelocations).toBe(0);
+  });
+
+  test("6. Reinos con varios territorios: conservación íntegra de la propiedad, recursos, edificios, colas e historial", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAt(t, "redist-multi-1", "Imperio Multi", "romanos", 0, 0);
+
+    // Añadir 4 territorios adicionales, recursos, tecnología y registro de exploración
+    await t.run(async (ctx) => {
+      for (const [q, r] of [[1, 0], [0, 1], [-1, 1], [-1, 0]] as const) {
+        await ctx.db.insert("territories", {
+          cellId: `${q},${r}`,
+          q,
+          r,
+          terrain: "bosque",
+          ownerKingdomId: kingdomId,
+          isHome: false,
+          claimedAt: 123456,
+        });
+      }
+      const res = await ctx.db
+        .query("resources")
+        .withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId))
+        .first();
+      if (res) await ctx.db.patch(res._id, { gold: 98765, wood: 54321 });
+      await ctx.db.insert("technologyProgress", {
+        kingdomId,
+        technologyId: "agri_1",
+        status: "completed",
+      });
+      await ctx.db.insert("exploredTerritories", {
+        kingdomId,
+        cellId: "2,0",
+        discoveredAt: 111111,
+        discoveryNote: "Hallazgo histórico",
+      });
+    });
+
+    const buildingsBefore = await t.run((ctx) =>
+      ctx.db.query("buildings").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect()
+    );
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(audit.entries[0].status).toBe("planned"); // NO bloqueado por tener varios territorios
+
+    const applied = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: audit.planFingerprint,
+    });
+    expect(applied.relocatedCount).toBe(1);
+    expect(applied.outcomes[0].preservedOwnedTerritoriesCount).toBe(5);
+    expect(applied.outcomes[0].finalOwnedTerritoriesCount).toBe(6);
+
+    const afterState = await t.run(async (ctx) => {
+      const k = await ctx.db.get(kingdomId);
+      const owned = await ctx.db.query("territories").withIndex("by_owner", (qb) => qb.eq("ownerKingdomId", kingdomId)).collect();
+      const res = await ctx.db.query("resources").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).first();
+      const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect();
+      const tech = await ctx.db.query("technologyProgress").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect();
+      const explored = await ctx.db.query("exploredTerritories").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect();
+      return { k, owned, res, buildings, tech, explored };
+    });
+
+    expect(afterState.k?.homeTerritoryId).toBe("0,34");
+    expect(afterState.owned.map((c) => c.cellId)).toEqual(
+      expect.arrayContaining(["0,0", "1,0", "0,1", "-1,1", "-1,0", "0,34"])
+    );
+    expect(afterState.owned.filter((c) => c.isHome)).toHaveLength(1);
+    expect(afterState.owned.find((c) => c.isHome)?.cellId).toBe("0,34");
+    expect(afterState.res?.gold).toBe(98765);
+    expect(afterState.res?.wood).toBe(54321);
+    expect(afterState.buildings).toHaveLength(buildingsBefore.length);
+    expect(afterState.tech).toHaveLength(1);
+    expect(afterState.explored.some((e) => e.cellId === "2,0")).toBe(true);
+  });
+
+  test("7. Reino con marcha activa: recolocación pendiente sin modificar datos; al finalizar se puede recolocar", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAt(t, "redist-march-1", "Roma en Campaña", "romanos", 0, 0);
+
+    const marchId = await t.run(async (ctx) =>
+      ctx.db.insert("armyMarches", {
+        kingdomId,
+        targetCellId: "1,0",
+        targetQ: 1,
+        targetR: 0,
+        distance: 1,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: Date.now(),
+        durationMs: 60_000,
+        completesAt: Date.now() + 60_000,
+        status: "marchando",
+      })
+    );
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(audit.pendingActivityRelocations).toBe(1);
+    expect(audit.entries[0].status).toBe("pending_activity");
+
+    const appliedPending = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: audit.planFingerprint,
+    });
+    expect(appliedPending.relocatedCount).toBe(0);
+    expect(appliedPending.pendingActivityCount).toBe(1);
+
+    const kStill = await t.run((ctx) => ctx.db.get(kingdomId));
+    const marchStill = await t.run((ctx) => ctx.db.get(marchId));
+    expect(kStill?.homeTerritoryId).toBe("0,0");
+    expect(marchStill?.status).toBe("marchando");
+    expect(marchStill?.targetCellId).toBe("1,0");
+
+    // Cuando la marcha termina, se re-evalúa y se recoloca limpiamente
+    await t.run(async (ctx) => ctx.db.patch(marchId, { status: "completada" }));
+    const auditAfter = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(auditAfter.plannedRelocations).toBe(1);
+    const appliedAfter = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: auditAfter.planFingerprint,
+    });
+    expect(appliedAfter.relocatedCount).toBe(1);
+    const kMoved = await t.run((ctx) => ctx.db.get(kingdomId));
+    expect(kMoved?.homeTerritoryId).toBe("0,34");
+  });
+
+  test("8. Reino con expedición activa: recolocación pendiente sin modificar datos ni expedición", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAt(t, "redist-exp-1", "Roma Explorando", "romanos", 0, 0);
+
+    const expId = await t.run(async (ctx) =>
+      ctx.db.insert("explorationQueue", {
+        kingdomId,
+        cellId: "2,0",
+        targetQ: 2,
+        targetR: 0,
+        distance: 2,
+        startedAt: Date.now(),
+        durationMs: 60_000,
+        completesAt: Date.now() + 60_000,
+        scoutsCount: 1,
+        costs: { gold: 30, food: 40 },
+      })
+    );
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(audit.pendingActivityRelocations).toBe(1);
+    expect(audit.entries[0].status).toBe("pending_activity");
+
+    const applied = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: audit.planFingerprint,
+    });
+    expect(applied.relocatedCount).toBe(0);
+    expect(applied.pendingActivityCount).toBe(1);
+
+    const kStill = await t.run((ctx) => ctx.db.get(kingdomId));
+    const expStill = await t.run((ctx) => ctx.db.get(expId));
+    expect(kStill?.homeTerritoryId).toBe("0,0");
+    expect(expStill?.cellId).toBe("2,0");
+  });
+
+  test("9. Celda de destino ocupada: operación rechazada sin cambios parciales", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId: k1 } = await createKingdomAt(t, "redist-occ-1", "Roma 1", "romanos", 0, 0);
+    const { kingdomId: k2 } = await createKingdomAt(t, "redist-occ-2", "Vikingo Dueño", "vikingos", -34, 0);
+
+    await expect(
+      t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+        plannedRelocations: [{ kingdomId: k1, fromCellId: "0,0", toCellId: "-34,0" }],
+      })
+    ).rejects.toThrow(/ocupada por otro reino/i);
+
+    const k1After = await t.run((ctx) => ctx.db.get(k1));
+    const k2After = await t.run((ctx) => ctx.db.get(k2));
+    expect(k1After?.homeTerritoryId).toBe("0,0");
+    expect(k2After?.homeTerritoryId).toBe("-34,0");
+  });
+
+  test("10. Límite de 100 territorios: nunca se supera (reino con 100 conserva 100; reino con >100 se bloquea)", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId: k100 } = await createKingdomAt(t, "redist-cap-100", "Imperio 100", "romanos", 0, 0);
+
+    // Añadir 99 territorios adicionales -> exactamente 100
+    await t.run(async (ctx) => {
+      const world = generateWorldCells(MAP.RADIUS, MAP.WORLD_SEED);
+      let added = 0;
+      for (const c of world) {
+        if (c.cellId === "0,0" || c.cellId === "0,34") continue;
+        await ctx.db.insert("territories", {
+          cellId: c.cellId,
+          q: c.q,
+          r: c.r,
+          terrain: c.terrain,
+          ownerKingdomId: k100,
+          isHome: false,
+          claimedAt: 1000,
+        });
+        added++;
+        if (added === 99) break;
+      }
+    });
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(audit.entries[0].status).toBe("planned");
+
+    const applied = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: audit.planFingerprint,
+    });
+    expect(applied.relocatedCount).toBe(1);
+    expect(applied.outcomes[0].finalOwnedTerritoriesCount).toBe(100);
+
+    const ownedAfter = await t.run((ctx) =>
+      ctx.db.query("territories").withIndex("by_owner", (qb) => qb.eq("ownerKingdomId", k100)).collect()
+    );
+    expect(ownedAfter).toHaveLength(100);
+    expect(ownedAfter.filter((c) => c.isHome)).toHaveLength(1);
+    expect(ownedAfter.find((c) => c.isHome)?.cellId).toBe("0,34");
+
+    // Un reino que ya supera 100 territorios se marca blocked_integrity
+    const overCapAudit = auditExistingKingdomSpawns([
+      {
+        kingdomId: "k-over",
+        name: "Excedido",
+        civilization: "romanos",
+        homeTerritoryId: "0,0",
+        persistedHomeCell: { cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k-over", isHome: true },
+        ownedTerritoryCount: 101,
+        markedHomeCount: 1,
+        activeMarchesCount: 0,
+        activeChallengesCount: 0,
+        activeExplorationsCount: 0,
+      },
+    ]);
+    expect(overCapAudit.entries[0].status).toBe("blocked_integrity");
+    expect(overCapAudit.blockedIntegrityRelocations).toBe(1);
+  });
+
+  test("11. Fallo durante la operación: rollback íntegro sin modificaciones parciales", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId: k1 } = await createKingdomAt(t, "redist-rb-1", "Roma Válida", "romanos", 0, 0);
+    const { kingdomId: k2 } = await createKingdomAt(t, "redist-rb-2", "Vikingo Fallido", "vikingos", 1, 0);
+    const { kingdomId: k3 } = await createKingdomAt(t, "redist-rb-3", "Inglés Ocupante", "ingleses", 34, 0);
+
+    // k1 tiene destino válido (0,34), pero k2 intenta moverse a (34,0) ocupado por k3 -> toda la mutación falla y hace rollback
+    await expect(
+      t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+        plannedRelocations: [
+          { kingdomId: k1, fromCellId: "0,0", toCellId: "0,34" },
+          { kingdomId: k2, fromCellId: "1,0", toCellId: "34,0" },
+        ],
+      })
+    ).rejects.toThrow(/ocupada por otro reino/i);
+
+    // Verificar que k1 NO cambió nada (rollback íntegro)
+    const [k1Doc, k2Doc, k3Doc, cell034] = await t.run(async (ctx) => [
+      await ctx.db.get(k1),
+      await ctx.db.get(k2),
+      await ctx.db.get(k3),
+      await ctx.db.query("territories").withIndex("by_cell", (qb) => qb.eq("cellId", "0,34")).first(),
+    ]);
+    expect(k1Doc?.homeTerritoryId).toBe("0,0");
+    expect(k2Doc?.homeTerritoryId).toBe("1,0");
+    expect(k3Doc?.homeTerritoryId).toBe("34,0");
+    expect(cell034?.ownerKingdomId).toBeUndefined();
+  });
+
+  test("12. Repetición de la operación (idempotencia): no duplica territorios ni altera resultados", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId: k1 } = await createKingdomAt(t, "redist-idem-1", "Roma Idem", "romanos", 0, 0);
+    const { kingdomId: k2 } = await createKingdomAt(t, "redist-idem-2", "Griegos Idem", "griegos", 1, 0);
+
+    const first = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {});
+    expect(first.relocatedCount).toBe(2);
+
+    const snapshotAfterFirst = await t.run(async (ctx) => ({
+      k1: (await ctx.db.get(k1))?.homeTerritoryId,
+      k2: (await ctx.db.get(k2))?.homeTerritoryId,
+      terrCount: (await ctx.db.query("territories").collect()).length,
+    }));
+
+    const second = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {});
+    expect(second.relocatedCount).toBe(0);
+    expect(second.alreadyAlignedCount).toBe(2);
+
+    const snapshotAfterSecond = await t.run(async (ctx) => ({
+      k1: (await ctx.db.get(k1))?.homeTerritoryId,
+      k2: (await ctx.db.get(k2))?.homeTerritoryId,
+      terrCount: (await ctx.db.query("territories").collect()).length,
+    }));
+
+    expect(snapshotAfterSecond).toEqual(snapshotAfterFirst);
+  });
+
+  test("13. Datos modificados después de la simulación: el plan antiguo se rechaza por huella desactualizada", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAt(t, "redist-stale-1", "Roma Stale", "romanos", 0, 0);
+
+    const simulation = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(simulation.plannedRelocations).toBe(1);
+
+    // Modificar datos en BD después de la simulación (p. ej. aparece otro reino o cambia una marcha)
+    await createKingdomAt(t, "redist-stale-2", "Nuevo Reino", "vikingos", -34, 0);
+
+    await expect(
+      t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+        expectedPlanFingerprint: simulation.planFingerprint,
+      })
+    ).rejects.toThrow(/Plan desactualizado/i);
+
+    const kDoc = await t.run((ctx) => ctx.db.get(kingdomId));
+    expect(kDoc?.homeTerritoryId).toBe("0,0");
+  });
+
+  test("14. Distribución completa multi-civilización: todas las distancias por parejas verificadas matemáticamente", async () => {
+    const t = convexTest(schema, modules);
+    const setup: Array<[string, string, number, number]> = [
+      ["k-rom-1", "romanos", 0, 0],
+      ["k-rom-2", "romanos", 1, 0],
+      ["k-vik-1", "vikingos", 0, 1],
+      ["k-vik-2", "vikingos", -1, 1],
+      ["k-ing-1", "ingleses", -1, 0],
+      ["k-gri-1", "griegos", 0, -1],
+      ["k-ara-1", "arabes", 1, -1],
+      ["k-chi-1", "chinos", 2, 0],
+    ];
+    for (const [id, civ, q, r] of setup) {
+      await createKingdomAt(t, id, `Reino ${id}`, civ, q, r);
+    }
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(audit.plannedRelocations).toBe(8);
+
+    // Ejecutar en lotes controlados de 4 hasta completar la convergencia global
+    const batch1 = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+      expectedPlanFingerprint: audit.planFingerprint,
+      batchSize: 4,
+    });
+    expect(batch1.relocatedCount).toBe(4);
+    expect(batch1.deferredBatchCount).toBe(4);
+
+    let lastFingerprint = batch1.newPlanFingerprint;
+    let remaining = batch1.remainingPlannedCount;
+    let extraBatches = 0;
+    while (remaining > 0 && extraBatches < 3) {
+      const next = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+        expectedPlanFingerprint: lastFingerprint,
+        batchSize: 4,
+      });
+      lastFingerprint = next.newPlanFingerprint;
+      remaining = next.remainingPlannedCount;
+      extraBatches++;
+    }
+    expect(remaining).toBe(0);
+    const finalAudit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    expect(finalAudit.correctlyPositionedCount).toBe(8);
+    expect(finalAudit.plannedRelocations).toBe(0);
+
+    // Verificación matemática exhaustiva de TODAS las distancias por parejas en BD real
+    const allKingdoms = await t.run((ctx) => ctx.db.query("kingdoms").collect());
+    const coords = allKingdoms.map((k) => {
+      const [q, r] = k.homeTerritoryId!.split(",").map(Number);
+      return { id: String(k._id), civ: k.civilization!, q, r };
+    });
+
+    for (let i = 0; i < coords.length; i++) {
+      // Dentro de radio 50
+      expect(hexDistance(coords[i], { q: 0, r: 0 })).toBeLessThanOrEqual(50);
+      let nearestSame = Infinity;
+      let sameCount = 0;
+      for (let j = 0; j < coords.length; j++) {
+        if (i === j) continue;
+        const d = hexDistance(coords[i], coords[j]);
+        expect(d).toBeGreaterThanOrEqual(20);
+        if (coords[i].civ === coords[j].civ) {
+          sameCount++;
+          if (d < nearestSame) nearestSame = d;
+        }
+      }
+      if (sameCount > 0) {
+        expect(nearestSame).toBeGreaterThanOrEqual(20);
+        expect(nearestSame).toBeLessThanOrEqual(30);
+      }
+    }
+  });
+
+  test("15. Autorización: un usuario no administrador ni anónimo puede auditar o ejecutar la recolocación; solo un admin autorizado", async () => {
+    const prevAdmins = process.env.ADMIN_USER_IDS;
+    process.env.ADMIN_USER_IDS = "admin-real-01";
+    try {
+      const t = convexTest(schema, modules);
+      await createKingdomAt(t, "normal-player-1", "Jugador Normal", "romanos", 0, 0);
+
+      // Anónimo rechazado
+      await expect(t.query(api.territories.auditKingdomSpawnDistribution, {})).rejects.toThrow(/No autorizado/i);
+      await expect(t.mutation(api.territories.applyKingdomSpawnRelocation, {})).rejects.toThrow(/No autorizado/i);
+
+      // Usuario normal rechazado
+      const normalUser = t.withIdentity(identity("normal-player-1"));
+      await expect(normalUser.query(api.territories.auditKingdomSpawnDistribution, {})).rejects.toThrow(/No autorizado/i);
+      await expect(normalUser.mutation(api.territories.applyKingdomSpawnRelocation, {})).rejects.toThrow(/No autorizado/i);
+
+      // Cuenta demo rechazada
+      const demoUser = t.withIdentity(identity("guest_g9ai8cz"));
+      await expect(demoUser.mutation(api.territories.applyKingdomSpawnRelocation, {})).rejects.toThrow(/No autorizado/i);
+
+      // Administrador autorizado puede auditar y ejecutar
+      const adminUser = t.withIdentity(identity("admin-real-01"));
+      const sim = await adminUser.query(api.territories.auditKingdomSpawnDistribution, {});
+      expect(sim.plannedRelocations).toBe(1);
+      const exec = await adminUser.mutation(api.territories.applyKingdomSpawnRelocation, {
+        expectedPlanFingerprint: sim.planFingerprint,
+      });
+      expect(exec.relocatedCount).toBe(1);
+    } finally {
+      if (prevAdmins === undefined) delete process.env.ADMIN_USER_IDS;
+      else process.env.ADMIN_USER_IDS = prevAdmins;
+    }
   });
 });
