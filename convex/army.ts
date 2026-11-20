@@ -43,6 +43,7 @@ import type { ResourceType } from "./economyCalculations";
 import { getOrCreateTerritoryCell, patchTerritoryCell, readHomeCoord, readKnownCellIds, readPathTerrainMultiplier, readTerritoryCell } from "./territories";
 import {
   armyMarchMultiplier,
+  validateTerritoryAcquisition,
   cellId,
   hexDistance,
   hexNeighbors,
@@ -1004,9 +1005,11 @@ export const launchAttack = mutation({
 
     // [VALIDACIÓN FRONTERA + TOPE 100]: Solo permitir conquistar si es neutral adyacente a territorio propio y < 100 territorios
     if (!target.ownerKingdomId) {
-      if (ownedCellIds.size >= TERRITORIES.MAX_PER_KINGDOM) {
+      const capValidation = validateTerritoryAcquisition(ownedCellIds.size, 1, TERRITORIES.MAX_PER_KINGDOM);
+      if (!capValidation.allowed) {
         throw new ConvexError(
-          `Has alcanzado el límite máximo de ${TERRITORIES.MAX_PER_KINGDOM} territorios por reino (actuales: ${ownedCellIds.size}).`
+          capValidation.error ??
+            `Has alcanzado el límite máximo de ${TERRITORIES.MAX_PER_KINGDOM} territorios por reino (actuales: ${ownedCellIds.size}).`
         );
       }
       const neighbors = hexNeighbors({ q: target.q, r: target.r }, MAP.RADIUS);
@@ -1268,7 +1271,8 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
       const liveOwnedIds = new Set(liveOwned.map((c) => c.cellId));
       if (attackerKingdom.homeTerritoryId) liveOwnedIds.add(attackerKingdom.homeTerritoryId);
 
-      if (liveOwnedIds.size >= TERRITORIES.MAX_PER_KINGDOM) {
+      const capValidation = validateTerritoryAcquisition(liveOwnedIds.size, 1, TERRITORIES.MAX_PER_KINGDOM);
+      if (!capValidation.allowed) {
         capBlocked = true;
       } else {
         await patchTerritoryCell(ctx, march.targetCellId, {
@@ -1578,7 +1582,8 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
       const liveOwnedIds = new Set(liveOwned.map((c) => c.cellId));
       if (attackerKingdom.homeTerritoryId) liveOwnedIds.add(attackerKingdom.homeTerritoryId);
 
-      if (liveOwnedIds.size >= TERRITORIES.MAX_PER_KINGDOM) {
+      const capValidation = validateTerritoryAcquisition(liveOwnedIds.size, 1, TERRITORIES.MAX_PER_KINGDOM);
+      if (!capValidation.allowed) {
         territoryCapBlocked = true;
       } else {
         await ctx.db.patch(targetCell._id, { ownerKingdomId: march.kingdomId, claimedAt: now, isHome: false });

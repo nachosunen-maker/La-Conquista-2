@@ -14,7 +14,13 @@ import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { DEMO_USER_ID, isDemoAccountUserId } from "./kingdomAccess";
-import { generateWorldCells, hexDistance } from "./territoryRules";
+import {
+  generateWorldCells,
+  hexDistance,
+  planTerritoryCapCleanup,
+  validateTerritoryAcquisition,
+  type CleanupCandidateCell,
+} from "./territoryRules";
 import { TERRITORIES } from "./balanceConfig";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -1942,5 +1948,451 @@ describe("Punto 2 — Relaciones referenciales bidireccionales (armyMarches <-> 
     expect(afterState.challenge?.activeMarchId).toBe(ids.completedMarchId);
   });
 });
+
+describe("Punto 2 — Cierre matemático definitivo (§3–§9)", () => {
+  const originalAdminIds = process.env.ADMIN_USER_IDS;
+
+  beforeEach(() => {
+    process.env.ADMIN_USER_IDS = "admin-math-closure";
+  });
+
+  afterEach(() => {
+    if (originalAdminIds === undefined) delete process.env.ADMIN_USER_IDS;
+    else process.env.ADMIN_USER_IDS = originalAdminIds;
+  });
+
+  test("M1 (§3.2). Tabla completa de validación de adquisiciones N_k + x ≤ 100 y rechazo de cantidades no válidas", () => {
+    expect(TERRITORIES.MAX_PER_KINGDOM).toBe(100);
+
+    // Tabla §3.2 exacta
+    const allowedCases: Array<[number, number, number]> = [
+      [98, 1, 99],
+      [98, 2, 100],
+      [99, 1, 100],
+    ];
+    for (const [owned, req, expectedTotal] of allowedCases) {
+      const res = validateTerritoryAcquisition(owned, req);
+      expect(res.allowed).toBe(true);
+      expect(res.resultingTotal).toBe(expectedTotal);
+      expect(res.remainingCapacity).toBe(100 - expectedTotal);
+    }
+
+    const rejectedCases: Array<[number, number]> = [
+      [98, 3],
+      [99, 2],
+      [100, 1],
+      [100, 0],
+      [50, 0],
+      [50, -1],
+      [50, -5],
+      [50, 1.5],
+      [50, Number.NaN],
+      [50, Number.POSITIVE_INFINITY],
+      [50, Number.NEGATIVE_INFINITY],
+      [-1, 1],
+      [1.2, 1],
+    ];
+    for (const [owned, req] of rejectedCases) {
+      const res = validateTerritoryAcquisition(owned, req);
+      expect(res.allowed).toBe(false);
+      expect(res.error).toBeTruthy();
+    }
+  });
+
+  test("M2 (§4.2). Distancia hexagonal axial exacta: tabla de referencia y axiomas métricos (identidad, simetría, no negatividad, desigualdad triangular)", () => {
+    // Tabla §4.2 exacta
+    const tableCases: Array<[{ q: number; r: number }, { q: number; r: number }, number]> = [
+      [{ q: 0, r: 0 }, { q: 0, r: 0 }, 0],
+      [{ q: 0, r: 0 }, { q: 1, r: 0 }, 1],
+      [{ q: 0, r: 0 }, { q: 1, r: -1 }, 1],
+      [{ q: 0, r: 0 }, { q: 2, r: 0 }, 2],
+      [{ q: 0, r: 0 }, { q: 2, r: -2 }, 2],
+      [{ q: 0, r: 0 }, { q: 3, r: 2 }, 5],
+      [{ q: 10, r: -5 }, { q: 12, r: -6 }, 2],
+    ];
+    for (const [a, b, expected] of tableCases) {
+      expect(hexDistance(a, b)).toBe(expected);
+      expect(hexDistance(b, a)).toBe(expected);
+    }
+
+    // Axiomas métricos sobre una muestra amplia de coordenadas del mapa (R = 50)
+    const sample = [
+      { q: 0, r: 0 },
+      { q: 3, r: -7 },
+      { q: -12, r: 8 },
+      { q: 25, r: -10 },
+      { q: -15, r: -15 },
+      { q: 10, r: 20 },
+    ];
+    for (const a of sample) {
+      expect(hexDistance(a, a)).toBe(0);
+      for (const b of sample) {
+        const dab = hexDistance(a, b);
+        const dba = hexDistance(b, a);
+        expect(dab).toBeGreaterThanOrEqual(0);
+        expect(Number.isInteger(dab)).toBe(true);
+        expect(dab).toBe(dba);
+        for (const c of sample) {
+          expect(hexDistance(a, c)).toBeLessThanOrEqual(dab + hexDistance(b, c));
+        }
+      }
+    }
+  });
+
+  test("M3 (§4.1 y §4.4). Saneamiento exacto para N ∈ {0, 1, 99, 100, 101, 105, 108, 150, 200}: K = min(N,100), R = max(0,N-100), partición exacta y verificación en BD", async () => {
+    const world = generateWorldCells(20, 42);
+    const orderedWorld = [...world].sort((a, b) => {
+      const da = hexDistance({ q: 0, r: 0 }, a);
+      const db = hexDistance({ q: 0, r: 0 }, b);
+      if (da !== db) return da - db;
+      return a.cellId < b.cellId ? -1 : a.cellId > b.cellId ? 1 : 0;
+    });
+
+    // Verificación pura para todos los valores N de §9.2
+    const allNs = [0, 1, 99, 100, 101, 105, 108, 150, 200];
+    for (const N of allNs) {
+      const cells: CleanupCandidateCell[] = orderedWorld.slice(0, N).map((c, idx) => ({
+        id: `doc_${idx}`,
+        cellId: c.cellId,
+        q: c.q,
+        r: c.r,
+        isHome: c.cellId === "0,0",
+        claimedAt: 10_000 - idx,
+      }));
+      const plan = planTerritoryCapCleanup({
+        ownedCells: cells,
+        homeTerritoryId: N > 0 ? "0,0" : null,
+        maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
+      });
+
+      const expectedK = Math.min(N, 100);
+      const expectedR = Math.max(0, N - 100);
+
+      expect(plan.blocked).toBe(false);
+      expect(plan.keptCellIds).toHaveLength(expectedK);
+      expect(plan.releasedCellIds).toHaveLength(expectedR);
+      expect(plan.keptCellIds.length + plan.releasedCellIds.length).toBe(N);
+      expect(plan.skipped).toBe(N <= 100);
+
+      const keptSet = new Set(plan.keptCellIds);
+      const releasedSet = new Set(plan.releasedCellIds);
+      const initialSet = new Set(cells.map((c) => c.cellId));
+
+      // K ∩ R = ∅
+      for (const id of releasedSet) {
+        expect(keptSet.has(id)).toBe(false);
+      }
+      // K ∪ R = T_inicial
+      const unionSet = new Set([...keptSet, ...releasedSet]);
+      expect(unionSet.size).toBe(initialSet.size);
+      for (const id of initialSet) {
+        expect(unionSet.has(id)).toBe(true);
+      }
+      // C ∈ K cuando N ≥ 1
+      if (N >= 1) {
+        expect(keptSet.has("0,0")).toBe(true);
+        expect(plan.capitalCellId).toBe("0,0");
+      }
+    }
+
+    // Verificación efectiva en backend real de Convex para N = 108 y N = 150 (incluyendo reconsulta BD y 2ª pasada idempotente)
+    for (const N of [108, 150]) {
+      const t = createTestBackend();
+      const asAdmin = t.withIdentity(identity("admin-math-closure"));
+      const k = await foundKingdom(t, `user-n-${N}`, `Reino N=${N}`);
+      await seedKingdomTerritories(t, k.kingdomId, N, { capitalCellId: "0,0", extraNeighborCount: 0 });
+
+      const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+        dryRun: false,
+        kingdomId: k.kingdomId,
+        operationId: `op-math-n-${N}`,
+      });
+
+      const expectedR = Math.max(0, N - 100);
+      expect(res.success).toBe(true);
+      expect(res.territoriesReleased).toBe(expectedR);
+      expect(res.details[0].totalOwnedBefore).toBe(N);
+      expect(res.details[0].keptCount).toBe(100);
+      expect(res.details[0].releasedCount).toBe(expectedR);
+      expect(res.referentialIntegrity.intact).toBe(true);
+      expect(res.referentialIntegrity.integrityPercentage).toBe(100);
+
+      const dbState = await t.run(async (ctx) => {
+        const kingdomDoc = await ctx.db.get(k.kingdomId);
+        const ownedAfter = await ctx.db
+          .query("territories")
+          .withIndex("by_owner", (q) => q.eq("ownerKingdomId", k.kingdomId))
+          .collect();
+        return { kingdomDoc, ownedAfter };
+      });
+      expect(dbState.ownedAfter).toHaveLength(100);
+      expect(dbState.kingdomDoc?.homeTerritoryId).toBe("0,0");
+      expect(dbState.ownedAfter.filter((c) => c.isHome)).toHaveLength(1);
+      expect(dbState.ownedAfter.find((c) => c.cellId === "0,0")?.isHome).toBe(true);
+    }
+  });
+
+  test("M4 (§4.3). Orden determinista estricto: desempate exclusivamente por cellId ascendente ignorando claimedAt, orden de entrada y claimedAt ausente", () => {
+    // Capital en (0,0); 6 vecinos a distancia exacta 1 con claimedAt intencionadamente inverso al orden lexicográfico de cellId
+    const ring1: CleanupCandidateCell[] = [
+      { id: "c_0", cellId: "0,0", q: 0, r: 0, isHome: true, claimedAt: 1 },
+      { id: "c_1", cellId: "1,0", q: 1, r: 0, isHome: false, claimedAt: 10 },
+      { id: "c_2", cellId: "1,-1", q: 1, r: -1, isHome: false, claimedAt: 20 },
+      { id: "c_3", cellId: "0,-1", q: 0, r: -1, isHome: false, claimedAt: 30 },
+      { id: "c_4", cellId: "-1,0", q: -1, r: 0, isHome: false, claimedAt: 40 },
+      { id: "c_5", cellId: "-1,1", q: -1, r: 1, isHome: false, claimedAt: 50 },
+      { id: "c_6", cellId: "0,1", q: 0, r: 1, isHome: false, claimedAt: undefined },
+    ];
+
+    // Orden lexicográfico esperado de los 6 vecinos a distancia 1:
+    // "-1,0" < "-1,1" < "0,-1" < "0,1" < "1,-1" < "1,0"
+    const expectedOrder = ["-1,0", "-1,1", "0,-1", "0,1", "1,-1", "1,0"];
+
+    const planNormal = planTerritoryCapCleanup({
+      ownedCells: ring1,
+      homeTerritoryId: "0,0",
+      maxAllowed: 4, // capital + 3 primeros por cellId
+    });
+    expect(planNormal.keptCellIds).toEqual(["0,0", ...expectedOrder.slice(0, 3)]);
+    expect(planNormal.releasedCellIds).toEqual(expectedOrder.slice(3));
+
+    // Mismo conjunto con orden invertido y sin claimedAt -> resultado idéntico
+    const reversedNoClaimed = [...ring1].reverse().map(({ claimedAt: _ignored, ...rest }) => rest);
+    const planReversed = planTerritoryCapCleanup({
+      ownedCells: reversedNoClaimed,
+      homeTerritoryId: "0,0",
+      maxAllowed: 4,
+    });
+    expect(planReversed.keptCellIds).toEqual(planNormal.keptCellIds);
+    expect(planReversed.releasedCellIds).toEqual(planNormal.releasedCellIds);
+
+    // Permutación arbitraria con claimedAt completamente distinto -> resultado idéntico
+    const shuffled = [ring1[4], ring1[2], ring1[0], ring1[6], ring1[1], ring1[5], ring1[3]].map((c, idx) => ({
+      ...c,
+      claimedAt: 999_999 - idx * 100,
+    }));
+    const planShuffled = planTerritoryCapCleanup({
+      ownedCells: shuffled,
+      homeTerritoryId: "0,0",
+      maxAllowed: 4,
+    });
+    expect(planShuffled.keptCellIds).toEqual(planNormal.keptCellIds);
+    expect(planShuffled.releasedCellIds).toEqual(planNormal.releasedCellIds);
+  });
+
+  test("M5 (§5 y §9.4). Protección exhaustiva de capital histórica en los 7 casos y bloqueo con R = 0 ante ambigüedad o ausencia", () => {
+    const baseCells: CleanupCandidateCell[] = [
+      { id: "d0", cellId: "0,0", q: 0, r: 0, isHome: false },
+      { id: "d1", cellId: "1,0", q: 1, r: 0, isHome: false },
+      { id: "d2", cellId: "2,0", q: 2, r: 0, isHome: false },
+      { id: "d3", cellId: "3,0", q: 3, r: 0, isHome: false },
+    ];
+
+    // Caso 1: homeTerritoryId válido propio
+    const p1 = planTerritoryCapCleanup({
+      ownedCells: baseCells.map((c) => ({ ...c, isHome: c.cellId === "2,0" })),
+      homeTerritoryId: "2,0",
+      maxAllowed: 2,
+    });
+    expect(p1.blocked).toBe(false);
+    expect(p1.capitalSource).toBe("homeTerritoryId");
+    expect(p1.capitalCellId).toBe("2,0");
+    expect(p1.keptCellIds).toContain("2,0");
+
+    // Caso 2: homeTerritoryId ausente pero isHome único
+    const p2 = planTerritoryCapCleanup({
+      ownedCells: baseCells.map((c) => ({ ...c, isHome: c.cellId === "3,0" })),
+      homeTerritoryId: null,
+      maxAllowed: 2,
+    });
+    expect(p2.blocked).toBe(false);
+    expect(p2.capitalSource).toBe("isHome");
+    expect(p2.capitalCellId).toBe("3,0");
+    expect(p2.keptCellIds).toContain("3,0");
+
+    // Caso 3: homeTerritoryId apunta a celda ajena/inexistente y sin isHome -> bloqueado, R = 0
+    const p3 = planTerritoryCapCleanup({
+      ownedCells: baseCells,
+      homeTerritoryId: "99,99",
+      maxAllowed: 2,
+    });
+    expect(p3.blocked).toBe(true);
+    expect(p3.requiresReview).toBe(true);
+    expect(p3.releasedCellIds).toHaveLength(0);
+
+    // Caso 4: sin homeTerritoryId y sin ningún isHome -> bloqueado, R = 0 (nunca elige 0,0 por cercanía al centro)
+    const p4 = planTerritoryCapCleanup({
+      ownedCells: baseCells,
+      homeTerritoryId: null,
+      maxAllowed: 2,
+    });
+    expect(p4.blocked).toBe(true);
+    expect(p4.requiresReview).toBe(true);
+    expect(p4.releasedCellIds).toHaveLength(0);
+
+    // Caso 5: sin homeTerritoryId y 2 territorios con isHome -> bloqueado (ambiguous), R = 0
+    const p5 = planTerritoryCapCleanup({
+      ownedCells: baseCells.map((c) => ({ ...c, isHome: c.cellId === "1,0" || c.cellId === "2,0" })),
+      homeTerritoryId: null,
+      maxAllowed: 2,
+    });
+    expect(p5.blocked).toBe(true);
+    expect(p5.capitalSource).toBe("ambiguous");
+    expect(p5.requiresReview).toBe(true);
+    expect(p5.releasedCellIds).toHaveLength(0);
+
+    // Caso 6: historicalCapitalCellId verificable cuando falta homeTerritoryId e isHome -> recuperado
+    const p6 = planTerritoryCapCleanup({
+      ownedCells: baseCells,
+      homeTerritoryId: null,
+      historicalCapitalCellId: "2,0",
+      maxAllowed: 2,
+    });
+    expect(p6.blocked).toBe(false);
+    expect(p6.capitalSource).toBe("historical");
+    expect(p6.capitalCellId).toBe("2,0");
+    expect(p6.keptCellIds).toContain("2,0");
+
+    // Caso 7: historicalCapitalCellId pero con isHome ambiguo (2 marcas) -> bloqueado, R = 0
+    const p7 = planTerritoryCapCleanup({
+      ownedCells: baseCells.map((c) => ({ ...c, isHome: c.cellId === "1,0" || c.cellId === "2,0" })),
+      homeTerritoryId: null,
+      historicalCapitalCellId: "2,0",
+      maxAllowed: 2,
+    });
+    expect(p7.blocked).toBe(true);
+    expect(p7.capitalSource).toBe("ambiguous");
+    expect(p7.releasedCellIds).toHaveLength(0);
+
+    // Caso extra: duplicados en ownedCells -> PlanMatemáticamenteVálido = false -> bloqueado, R = 0
+    const duplicatedCells: CleanupCandidateCell[] = [
+      { id: "d0", cellId: "0,0", q: 0, r: 0, isHome: true },
+      { id: "d1a", cellId: "1,0", q: 1, r: 0, isHome: false },
+      { id: "d1b", cellId: "1,0", q: 1, r: 0, isHome: false },
+      { id: "d2", cellId: "2,0", q: 2, r: 0, isHome: false },
+    ];
+    const pDup = planTerritoryCapCleanup({
+      ownedCells: duplicatedCells,
+      homeTerritoryId: "0,0",
+      maxAllowed: 2,
+    });
+    expect(pDup.blocked).toBe(true);
+    expect(pDup.releasedCellIds).toHaveLength(0);
+  });
+
+  test("M6 (§6.1–§6.2 y §9.5). Identidades exactas de auditoría: E_r = V_r + I_r, 0 ≤ B_r ≤ I_r, E = ΣE_r = V + I y P_integridad = 100·V/E (y null si E = 0)", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-math-closure"));
+
+    // 1. Cuando no hay reinos auditados (E = 0): no divide por cero y devuelve integrityPercentage = null
+    const emptyRes = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: true,
+      operationId: "op-math-empty-audit",
+    });
+    expect(emptyRes.afterIntegrity.examinedCount).toBe(0);
+    expect(emptyRes.afterIntegrity.validCount).toBe(0);
+    expect(emptyRes.afterIntegrity.inconsistentCount).toBe(0);
+    expect(emptyRes.afterIntegrity.integrityPercentage).toBeNull();
+    expect(emptyRes.referentialIntegrity.integrityPercentage).toBeNull();
+
+    // 2. Reino con mezcla de relaciones válidas e inconsistentes no bloqueantes
+    const k = await foundKingdom(t, "user-math-audit", "Reino Auditoría Exacta");
+    await seedKingdomTerritories(t, k.kingdomId, 102, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await t.run(async (ctx) => {
+      // 1 exploredTerritory válido + 1 inválido
+      await ctx.db.insert("exploredTerritories", {
+        kingdomId: k.kingdomId,
+        cellId: "0,0",
+        discoveredAt: Date.now() - 2000,
+      });
+      await ctx.db.insert("exploredTerritories", {
+        kingdomId: k.kingdomId,
+        cellId: "999,999",
+        discoveredAt: Date.now() - 1000,
+      });
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: k.kingdomId,
+      operationId: "op-math-audit-identities",
+    });
+
+    for (const audit of [res.beforeIntegrity, res.afterIntegrity]) {
+      let sumE = 0;
+      let sumV = 0;
+      let sumI = 0;
+      let sumB = 0;
+      for (const rel of Object.values(audit.byRelation)) {
+        expect(rel.examined).toBe(rel.valid + rel.inconsistent);
+        expect(rel.blocking).toBeGreaterThanOrEqual(0);
+        expect(rel.blocking).toBeLessThanOrEqual(rel.inconsistent);
+        expect(rel.valid).toBeGreaterThanOrEqual(0);
+        expect(rel.valid).toBeLessThanOrEqual(rel.examined);
+        sumE += rel.examined;
+        sumV += rel.valid;
+        sumI += rel.inconsistent;
+        sumB += rel.blocking;
+      }
+      expect(audit.examinedCount).toBe(sumE);
+      expect(audit.validCount).toBe(sumV);
+      expect(audit.inconsistentCount).toBe(sumI);
+      expect(audit.blockingCount).toBe(sumB);
+      expect(audit.examinedCount).toBe(audit.validCount + audit.inconsistentCount);
+      expect(audit.blockingCount).toBeLessThanOrEqual(audit.inconsistentCount);
+      expect(audit.integrityPercentage).toBeCloseTo((100 * audit.validCount) / audit.examinedCount, 12);
+    }
+
+    expect(res.referentialIntegrity.integrityPercentage).toBe(res.afterIntegrity.integrityPercentage);
+    expect(res.afterIntegrity.inconsistentCount).toBe(1);
+    expect(res.afterIntegrity.integrityPercentage!).toBeLessThan(100);
+    expect(res.referentialIntegrity.intact).toBe(false);
+  });
+
+  test("M7 (§8.2). Invariante estricto de dryRun = true: snapshot completo de la BD idéntico antes y después (excepto territoryCapAuditLogs)", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-math-closure"));
+
+    const k = await foundKingdom(t, "user-math-dryrun", "Reino DryRun Inmutable");
+    await seedKingdomTerritories(t, k.kingdomId, 112, { capitalCellId: "0,0", extraNeighborCount: 0 });
+
+    const takeSnapshot = async () =>
+      t.run(async (ctx) => ({
+        kingdoms: await ctx.db.query("kingdoms").collect(),
+        territories: await ctx.db.query("territories").collect(),
+        armyMarches: await ctx.db.query("armyMarches").collect(),
+        explorationQueue: await ctx.db.query("explorationQueue").collect(),
+        exploredTerritories: await ctx.db.query("exploredTerritories").collect(),
+        battles: await ctx.db.query("Battle").collect(),
+        challenges: await ctx.db.query("challenges").collect(),
+        buildings: await ctx.db.query("buildings").collect(),
+        auditLogCount: (await ctx.db.query("territoryCapAuditLogs").collect()).length,
+      }));
+
+    const before = await takeSnapshot();
+    const sim = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: true,
+      kingdomId: k.kingdomId,
+      operationId: "op-math-dryrun-snapshot",
+    });
+    const after = await takeSnapshot();
+
+    expect(sim.success).toBe(true);
+    expect(sim.dryRun).toBe(true);
+    expect(sim.territoriesReleased).toBe(12);
+    expect(after.auditLogCount).toBe(before.auditLogCount + 1);
+
+    // Todas las tablas de juego deben permanecer estrictamente idénticas
+    expect(after.kingdoms).toEqual(before.kingdoms);
+    expect(after.territories).toEqual(before.territories);
+    expect(after.armyMarches).toEqual(before.armyMarches);
+    expect(after.explorationQueue).toEqual(before.explorationQueue);
+    expect(after.exploredTerritories).toEqual(before.exploredTerritories);
+    expect(after.battles).toEqual(before.battles);
+    expect(after.challenges).toEqual(before.challenges);
+    expect(after.buildings).toEqual(before.buildings);
+  });
+});
+
 
 

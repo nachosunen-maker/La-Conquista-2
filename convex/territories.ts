@@ -1496,10 +1496,16 @@ export interface ReferentialIntegrityAudit {
   requiresInterventionCount: number;
   orphanedHomes: number;
   kingdomsOverCap: number;
+  integrityPercentage: number | null;
   examinedByRelation: Record<ReferentialRelationName, number>;
   byRelation: Record<ReferentialRelationName, RelationAuditBreakdown>;
   inconsistencies: ReferentialIntegrityIssue[];
   intact: boolean;
+}
+
+function computeIntegrityPercentage(validCount: number, examinedCount: number): number | null {
+  if (examinedCount <= 0) return null;
+  return (100 * validCount) / examinedCount;
 }
 
 interface ReferentialAuditContext {
@@ -1748,6 +1754,7 @@ async function auditKingdomTerritoryReferentialIntegrity(
   }
   if (phase === "after" && owned.length > TERRITORIES.MAX_PER_KINGDOM) {
     kingdomsOverCap += 1;
+    markExamined("territories");
     recordIssue({
       relation: "territories",
       documentId: String(kingdom._id),
@@ -2258,6 +2265,7 @@ async function auditKingdomTerritoryReferentialIntegrity(
     requiresInterventionCount,
     orphanedHomes,
     kingdomsOverCap,
+    integrityPercentage: computeIntegrityPercentage(validCount, examinedCount),
     examinedByRelation,
     byRelation,
     inconsistencies,
@@ -2312,6 +2320,7 @@ function aggregateIntegrityAudits(audits: ReferentialIntegrityAudit[]): Referent
     requiresInterventionCount,
     orphanedHomes,
     kingdomsOverCap,
+    integrityPercentage: computeIntegrityPercentage(validCount, examinedCount),
     examinedByRelation,
     byRelation,
     inconsistencies,
@@ -2424,6 +2433,7 @@ async function runTerritoryCapCleanup(
         requiresInterventionCount: afterSummary.requiresInterventionCount,
         orphanedHomes: afterSummary.orphanedHomes,
         kingdomsOverCapAfter: afterSummary.kingdomsOverCap,
+        integrityPercentage: afterSummary.integrityPercentage,
         intact: afterSummary.intact && blockedCount === 0,
       },
       details: existingLogs.map((l) => ({
@@ -2660,6 +2670,53 @@ async function runTerritoryCapCleanup(
     }
 
     const freshKingdom = (await ctx.db.get(kingdom._id)) ?? kingdom;
+    const postVerificationErrors: string[] = [];
+
+    if (!dryRun) {
+      const finalOwned = await ctx.db
+        .query("territories")
+        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
+        .collect();
+      const expectedReleased = Math.max(0, owned.length - TERRITORIES.MAX_PER_KINGDOM);
+      const expectedFinalCount = owned.length - plan.releasedCellIds.length;
+      if (finalOwned.length > TERRITORIES.MAX_PER_KINGDOM) {
+        postVerificationErrors.push(
+          `Invariante violado: N_final (${finalOwned.length}) > ${TERRITORIES.MAX_PER_KINGDOM}.`
+        );
+      }
+      if (finalOwned.length !== expectedFinalCount) {
+        postVerificationErrors.push(
+          `Invariante violado: N_final (${finalOwned.length}) != N_inicial - R (${expectedFinalCount}).`
+        );
+      }
+      if (plan.releasedCellIds.length !== expectedReleased) {
+        postVerificationErrors.push(
+          `Invariante violado: R (${plan.releasedCellIds.length}) != max(0, N_inicial - ${TERRITORIES.MAX_PER_KINGDOM}) (${expectedReleased}).`
+        );
+      }
+      if (plan.keptCellIds.length !== finalOwned.length) {
+        postVerificationErrors.push(
+          `Invariante violado: K_final (${plan.keptCellIds.length}) != N_final (${finalOwned.length}).`
+        );
+      }
+      if (finalOwned.length > 0) {
+        const finalMarkedHomes = finalOwned.filter((c) => c.isHome === true);
+        if (freshKingdom.homeTerritoryId !== plan.capitalCellId) {
+          postVerificationErrors.push(
+            `Invariante violado: C_final ('${freshKingdom.homeTerritoryId ?? ""}') != C_inicial ('${plan.capitalCellId}').`
+          );
+        }
+        if (
+          finalMarkedHomes.length !== 1 ||
+          finalMarkedHomes[0].cellId !== plan.capitalCellId
+        ) {
+          postVerificationErrors.push(
+            `Invariante violado: marca isHome incoherente tras saneamiento para capital '${plan.capitalCellId}'.`
+          );
+        }
+      }
+    }
+
     const afterAudit = dryRun
       ? beforeAudit
       : await auditKingdomTerritoryReferentialIntegrity(
@@ -2671,13 +2728,20 @@ async function runTerritoryCapCleanup(
         );
     afterAudits.push(afterAudit);
 
-    const outcome: "simulated" | "cleaned" | "noop" = dryRun
-      ? "simulated"
-      : !plan.skipped || homeRepaired
-        ? "cleaned"
-        : "noop";
+    const postVerificationFailed = postVerificationErrors.length > 0;
+    if (postVerificationFailed) {
+      kingdomsBlocked += 1;
+    }
 
-    if (!plan.skipped || homeRepaired) {
+    const outcome: "simulated" | "cleaned" | "noop" | "blocked" = postVerificationFailed
+      ? "blocked"
+      : dryRun
+        ? "simulated"
+        : !plan.skipped || homeRepaired
+          ? "cleaned"
+          : "noop";
+
+    if (!postVerificationFailed && (!plan.skipped || homeRepaired)) {
       kingdomsModified += 1;
     }
     territoriesReleased += plan.releasedCellIds.length;
@@ -2697,7 +2761,7 @@ async function runTerritoryCapCleanup(
       referentialIntegrityBefore: beforeAudit,
       referentialIntegrityAfter: afterAudit,
       outcome,
-      errors: [],
+      errors: postVerificationErrors,
       requestedScope,
       requestedKingdomId,
       targetKingdomIds: currentTargetKingdomIds,
@@ -2714,9 +2778,9 @@ async function runTerritoryCapCleanup(
       releasedCellIds: plan.releasedCellIds,
       homeRepaired,
       skippedDemo: false,
-      blocked: false,
+      blocked: postVerificationFailed,
       outcome,
-      errors: [],
+      errors: postVerificationErrors,
     });
   }
 
@@ -2745,6 +2809,7 @@ async function runTerritoryCapCleanup(
       requiresInterventionCount: afterSummary.requiresInterventionCount,
       orphanedHomes: afterSummary.orphanedHomes,
       kingdomsOverCapAfter: afterSummary.kingdomsOverCap,
+      integrityPercentage: afterSummary.integrityPercentage,
       intact: afterSummary.intact && kingdomsBlocked === 0,
     },
     details,

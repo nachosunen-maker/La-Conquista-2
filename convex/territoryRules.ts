@@ -487,6 +487,82 @@ export function chooseHomeCell(
 /** [MAESTRA P48] Tras una victoria aplastante se reclama un territorio libre CERCANO: a distancia ≤ 2 de uno propio ([DERIVADO]). */
 export const CLAIM_MAX_DISTANCE = 2;
 
+export interface TerritoryAcquisitionValidation {
+  allowed: boolean;
+  currentOwned: number;
+  requestedCount: number;
+  maxAllowed: number;
+  resultingTotal: number;
+  remainingCapacity: number;
+  error?: string;
+}
+
+/**
+ * Valida matemáticamente la adquisición de x territorios por un reino que posee N_k:
+ * - x ∈ ℤ, x ≥ 1 (rechaza 0, negativos, decimales, NaN e infinitos)
+ * - N_k ∈ ℤ, N_k ≥ 0
+ * - N_k + x ≤ M (por defecto M = TERRITORIES.MAX_PER_KINGDOM = 100)
+ */
+export function validateTerritoryAcquisition(
+  currentOwned: number,
+  requestedCount: number = 1,
+  maxAllowed: number = TERRITORIES.MAX_PER_KINGDOM
+): TerritoryAcquisitionValidation {
+  if (!Number.isInteger(maxAllowed) || maxAllowed < 1) {
+    return {
+      allowed: false,
+      currentOwned,
+      requestedCount,
+      maxAllowed,
+      resultingTotal: NaN,
+      remainingCapacity: 0,
+      error: `El límite máximo territorial debe ser un entero positivo (recibido: ${maxAllowed}).`,
+    };
+  }
+  if (!Number.isInteger(currentOwned) || currentOwned < 0) {
+    return {
+      allowed: false,
+      currentOwned,
+      requestedCount,
+      maxAllowed,
+      resultingTotal: NaN,
+      remainingCapacity: 0,
+      error: `El número actual de territorios debe ser un entero no negativo (recibido: ${currentOwned}).`,
+    };
+  }
+  if (!Number.isInteger(requestedCount) || requestedCount < 1) {
+    return {
+      allowed: false,
+      currentOwned,
+      requestedCount,
+      maxAllowed,
+      resultingTotal: currentOwned,
+      remainingCapacity: Math.max(0, maxAllowed - currentOwned),
+      error: `La cantidad de territorios solicitada debe ser un entero ≥ 1 (recibido: ${requestedCount}).`,
+    };
+  }
+  const resultingTotal = currentOwned + requestedCount;
+  if (resultingTotal > maxAllowed) {
+    return {
+      allowed: false,
+      currentOwned,
+      requestedCount,
+      maxAllowed,
+      resultingTotal,
+      remainingCapacity: Math.max(0, maxAllowed - currentOwned),
+      error: `Has alcanzado el límite máximo de ${maxAllowed} territorios por reino (actuales: ${currentOwned}, solicitados: ${requestedCount}).`,
+    };
+  }
+  return {
+    allowed: true,
+    currentOwned,
+    requestedCount,
+    maxAllowed,
+    resultingTotal,
+    remainingCapacity: maxAllowed - resultingTotal,
+  };
+}
+
 export function canClaimTerritory(input: {
   target: WorldCell & { ownerKingdomId?: string | null };
   ownedCells: ReadonlyArray<HexCoord>;
@@ -503,10 +579,11 @@ export function canClaimTerritory(input: {
   if (input.target.ownerKingdomId) {
     return { success: false, error: "El territorio ya tiene propietario; no se arrebatan territorios ocupados (P48)." };
   }
-  if (ownedCount >= maxTerritories) {
+  const capCheck = validateTerritoryAcquisition(ownedCount, 1, maxTerritories);
+  if (!capCheck.allowed) {
     return {
       success: false,
-      error: `Has alcanzado el límite máximo de ${maxTerritories} territorios por reino (actuales: ${ownedCount}).`,
+      error: capCheck.error ?? `Has alcanzado el límite máximo de ${maxTerritories} territorios por reino (actuales: ${ownedCount}).`,
     };
   }
   if (input.exploredCellIds && !input.exploredCellIds.has(input.target.cellId)) {
@@ -655,15 +732,52 @@ export function planTerritoryCapCleanup(input: {
       const distA = hexDistance(capital, a);
       const distB = hexDistance(capital, b);
       if (distA !== distB) return distA - distB;
-      const claimedA = typeof a.claimedAt === "number" ? a.claimedAt : Number.MAX_SAFE_INTEGER;
-      const claimedB = typeof b.claimedAt === "number" ? b.claimedAt : Number.MAX_SAFE_INTEGER;
-      if (claimedA !== claimedB) return claimedA - claimedB;
-      return a.cellId.localeCompare(b.cellId);
+      return a.cellId < b.cellId ? -1 : a.cellId > b.cellId ? 1 : 0;
     });
 
   const keepCount = Math.max(0, maxAllowed - 1);
   const kept = [capital, ...others.slice(0, keepCount)];
   const released = others.slice(keepCount);
+  const keptCellIds = kept.map((c) => c.cellId);
+  const releasedCellIds = released.map((c) => c.cellId);
+
+  // Validación matemática estricta del plan: N = K + R, K = min(N, M), R = max(0, N - M),
+  // C ∈ K, K ∩ R = ∅, K ∪ R = T_inicial (sin duplicados).
+  const initialCellIdSet = new Set(cells.map((c) => c.cellId));
+  const keptSet = new Set(keptCellIds);
+  const releasedSet = new Set(releasedCellIds);
+  const hasOverlap = releasedCellIds.some((id) => keptSet.has(id));
+  const expectedKept = Math.min(cells.length, maxAllowed);
+  const expectedReleased = Math.max(0, cells.length - maxAllowed);
+  const unionMatches =
+    initialCellIdSet.size === cells.length &&
+    keptSet.size === keptCellIds.length &&
+    releasedSet.size === releasedCellIds.length &&
+    keptSet.size + releasedSet.size === initialCellIdSet.size;
+
+  const planMathematicallyValid =
+    !hasOverlap &&
+    unionMatches &&
+    keptSet.has(capital.cellId) &&
+    keptCellIds.length === expectedKept &&
+    releasedCellIds.length === expectedReleased &&
+    keptCellIds.length + releasedCellIds.length === cells.length;
+
+  if (!planMathematicallyValid) {
+    return {
+      capitalCellId: capital.cellId,
+      capitalSource,
+      requiresReview: true,
+      blocked: true,
+      totalOwned: cells.length,
+      maxAllowed,
+      keptCellIds: cells.map((c) => c.cellId),
+      releasedCellIds: [],
+      releasedCells: [],
+      skipped: true,
+      reason: "Plan matemáticamente inválido (inconsistencia de partición, duplicados o capital fuera del conjunto conservado); saneamiento bloqueado.",
+    };
+  }
 
   return {
     capitalCellId: capital.cellId,
@@ -672,8 +786,8 @@ export function planTerritoryCapCleanup(input: {
     blocked: false,
     totalOwned: cells.length,
     maxAllowed,
-    keptCellIds: kept.map((c) => c.cellId),
-    releasedCellIds: released.map((c) => c.cellId),
+    keptCellIds,
+    releasedCellIds,
     releasedCells: released,
     skipped: false,
   };
