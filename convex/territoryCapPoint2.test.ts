@@ -19,8 +19,11 @@ import {
   hexDistance,
   planTerritoryCapCleanup,
   validateTerritoryAcquisition,
+  verifyTerritoryCapCleanupPostState,
   type CleanupCandidateCell,
+  type TerritoryOwnershipSnapshot,
 } from "./territoryRules";
+import { runTerritoryCapCleanup } from "./territories";
 import { TERRITORIES } from "./balanceConfig";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -2393,6 +2396,405 @@ describe("Punto 2 — Cierre matemático definitivo (§3–§9)", () => {
     expect(after.buildings).toEqual(before.buildings);
   });
 });
+
+describe("Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tamaños, verificación exacta de conjuntos y rollback transaccional", () => {
+  const originalAdminIds = process.env.ADMIN_USER_IDS;
+
+  beforeEach(() => {
+    process.env.ADMIN_USER_IDS = "admin-c1-c2";
+  });
+
+  afterEach(() => {
+    if (originalAdminIds === undefined) delete process.env.ADMIN_USER_IDS;
+    else process.env.ADMIN_USER_IDS = originalAdminIds;
+  });
+
+  test("C1. Validación obligatoria de duplicados (territoryCount === uniqueCellIdCount) en 0, 1, 99, 100, 101 y duplicados <100, ===100, >100 y en capital", () => {
+    const world = generateWorldCells(15, 42);
+    const ordered = [...world].sort((a, b) => {
+      const da = hexDistance({ q: 0, r: 0 }, a);
+      const db = hexDistance({ q: 0, r: 0 }, b);
+      if (da !== db) return da - db;
+      return a.cellId < b.cellId ? -1 : a.cellId > b.cellId ? 1 : 0;
+    });
+
+    const makeValidCells = (count: number): CleanupCandidateCell[] =>
+      ordered.slice(0, count).map((c, idx) => ({
+        id: `cell_${idx}`,
+        cellId: c.cellId,
+        q: c.q,
+        r: c.r,
+        isHome: c.cellId === "0,0",
+      }));
+
+    // 1. Casos válidos sin duplicados: 0, 1, 99, 100, 101
+    for (const count of [0, 1, 99, 100, 101]) {
+      const cells = makeValidCells(count);
+      const plan = planTerritoryCapCleanup({
+        ownedCells: cells,
+        homeTerritoryId: count > 0 ? "0,0" : null,
+        maxAllowed: 100,
+      });
+      expect(plan.blocked).toBe(false);
+      expect(plan.requiresReview).toBe(false);
+      expect(plan.keptCellIds).toHaveLength(Math.min(count, 100));
+      expect(plan.releasedCellIds).toHaveLength(Math.max(0, count - 100));
+      expect(plan.skipped).toBe(count <= 100);
+    }
+
+    // 2. Duplicados con menos de 100 territorios (ej. 50 registros con 49 cellIds únicos) -> BLOQUEADO
+    const dupUnder100 = makeValidCells(49);
+    dupUnder100.push({ ...dupUnder100[10], id: "dup_under_100" });
+    expect(dupUnder100).toHaveLength(50);
+    const planDupUnder = planTerritoryCapCleanup({
+      ownedCells: dupUnder100,
+      homeTerritoryId: "0,0",
+      maxAllowed: 100,
+    });
+    expect(planDupUnder.blocked).toBe(true);
+    expect(planDupUnder.requiresReview).toBe(true);
+    expect(planDupUnder.skipped).toBe(true);
+    expect(planDupUnder.releasedCellIds).toHaveLength(0);
+
+    // 3. Duplicados con exactamente 100 territorios (99 únicos + 1 duplicado = 100) -> BLOQUEADO
+    const dupExact100 = makeValidCells(99);
+    dupExact100.push({ ...dupExact100[5], id: "dup_exact_100" });
+    expect(dupExact100).toHaveLength(100);
+    const planDupExact = planTerritoryCapCleanup({
+      ownedCells: dupExact100,
+      homeTerritoryId: "0,0",
+      maxAllowed: 100,
+    });
+    expect(planDupExact.blocked).toBe(true);
+    expect(planDupExact.requiresReview).toBe(true);
+    expect(planDupExact.skipped).toBe(true);
+    expect(planDupExact.releasedCellIds).toHaveLength(0);
+
+    // 4. Duplicados con más de 100 territorios (104 únicos + 1 duplicado = 105) -> BLOQUEADO
+    const dupOver100 = makeValidCells(104);
+    dupOver100.push({ ...dupOver100[20], id: "dup_over_100" });
+    expect(dupOver100).toHaveLength(105);
+    const planDupOver = planTerritoryCapCleanup({
+      ownedCells: dupOver100,
+      homeTerritoryId: "0,0",
+      maxAllowed: 100,
+    });
+    expect(planDupOver.blocked).toBe(true);
+    expect(planDupOver.requiresReview).toBe(true);
+    expect(planDupOver.skipped).toBe(true);
+    expect(planDupOver.releasedCellIds).toHaveLength(0);
+
+    // 5. Duplicados que afectan a la capital (en reino pequeño de 10 y en reino de 102) -> BLOQUEADO
+    for (const baseCount of [9, 101]) {
+      const dupCapital = makeValidCells(baseCount);
+      dupCapital.push({ ...dupCapital[0], id: `dup_capital_${baseCount}` });
+      const planDupCap = planTerritoryCapCleanup({
+        ownedCells: dupCapital,
+        homeTerritoryId: "0,0",
+        maxAllowed: 100,
+      });
+      expect(planDupCap.blocked).toBe(true);
+      expect(planDupCap.requiresReview).toBe(true);
+      expect(planDupCap.skipped).toBe(true);
+      expect(planDupCap.releasedCellIds).toHaveLength(0);
+    }
+  });
+
+  test("C2-A. Saneamiento exacto de 101, 108 y 150 territorios: K_real===K_planificado, R_real===R_planificado, propiedad individual, capital, territorios ajenos intactos e idempotencia", async () => {
+    for (const N of [101, 108, 150]) {
+      const t = createTestBackend();
+      const asAdmin = t.withIdentity(identity("admin-c1-c2"));
+
+      const kTarget = await foundKingdom(t, `user-c2-target-${N}`, `Reino Objetivo ${N}`);
+      const kForeign = await foundKingdom(t, `user-c2-foreign-${N}`, `Reino Ajeno ${N}`);
+      await seedKingdomTerritories(t, kTarget.kingdomId, N, { capitalCellId: "0,0", extraNeighborCount: 0 });
+      await seedKingdomTerritories(t, kForeign.kingdomId, 5, { capitalCellId: "25,0", extraNeighborCount: 0 });
+
+      const beforeSnapshot = await t.run(async (ctx) => {
+        const targetOwned = await ctx.db
+          .query("territories")
+          .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kTarget.kingdomId))
+          .collect();
+        const foreignOwned = await ctx.db
+          .query("territories")
+          .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kForeign.kingdomId))
+          .collect();
+        const totalDocs = (await ctx.db.query("territories").collect()).length;
+        return { targetOwned, foreignOwned, totalDocs };
+      });
+
+      const expectedPlan = planTerritoryCapCleanup({
+        ownedCells: beforeSnapshot.targetOwned.map((c) => ({
+          id: String(c._id),
+          cellId: c.cellId,
+          q: c.q,
+          r: c.r,
+          isHome: c.isHome,
+          claimedAt: c.claimedAt,
+        })),
+        homeTerritoryId: "0,0",
+        maxAllowed: 100,
+      });
+
+      // Ejecución 1: saneamiento efectivo
+      const res1 = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+        dryRun: false,
+        kingdomId: kTarget.kingdomId,
+        operationId: `op-c2-exact-${N}-run1`,
+      });
+
+      expect(res1.success).toBe(true);
+      expect(res1.territoriesReleased).toBe(N - 100);
+      expect(res1.details[0].releasedCount).toBe(res1.details[0].releasedCellIds.length);
+      expect(res1.referentialIntegrity.intact).toBe(true);
+
+      // Verificación directa en BD de TODOS los identificadores, propiedad individual y territorios ajenos
+      const afterState = await t.run(async (ctx) => {
+        const kingdomDoc = await ctx.db.get(kTarget.kingdomId);
+        const keptOwned = await ctx.db
+          .query("territories")
+          .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kTarget.kingdomId))
+          .collect();
+        const initialDocsAfter = await Promise.all(beforeSnapshot.targetOwned.map((c) => ctx.db.get(c._id)));
+        const foreignAfter = await ctx.db
+          .query("territories")
+          .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kForeign.kingdomId))
+          .collect();
+        const totalDocsAfter = (await ctx.db.query("territories").collect()).length;
+        return { kingdomDoc, keptOwned, initialDocsAfter, foreignAfter, totalDocsAfter };
+      });
+
+      // Sin eliminación de documentos
+      expect(afterState.totalDocsAfter).toBe(beforeSnapshot.totalDocs);
+      expect(afterState.initialDocsAfter.every((d) => d !== null)).toBe(true);
+
+      // Conjuntos exactos sin depender del orden
+      const kRealSet = new Set(afterState.keptOwned.map((c) => c.cellId));
+      const kPlanSet = new Set(expectedPlan.keptCellIds);
+      const rPlanSet = new Set(expectedPlan.releasedCellIds);
+      const rRealSet = new Set(
+        afterState.initialDocsAfter
+          .filter((d) => d !== null && d.ownerKingdomId !== kTarget.kingdomId)
+          .map((d) => d!.cellId)
+      );
+      const tInitialSet = new Set(beforeSnapshot.targetOwned.map((c) => c.cellId));
+
+      expect(kRealSet).toEqual(kPlanSet);
+      expect(rRealSet).toEqual(rPlanSet);
+      for (const id of rRealSet) expect(kRealSet.has(id)).toBe(false);
+      expect(new Set([...kRealSet, ...rRealSet])).toEqual(tInitialSet);
+      expect(kRealSet.size + rRealSet.size).toBe(tInitialSet.size);
+
+      // Propiedad individual de cada conservado y cada liberado
+      for (const doc of afterState.initialDocsAfter) {
+        if (kPlanSet.has(doc!.cellId)) {
+          expect(doc!.ownerKingdomId).toBe(kTarget.kingdomId);
+        } else {
+          expect(rPlanSet.has(doc!.cellId)).toBe(true);
+          expect(doc!.ownerKingdomId).toBeUndefined();
+          expect(doc!.isHome).toBe(false);
+        }
+      }
+
+      // Capital conservada y única marca isHome
+      expect(afterState.kingdomDoc?.homeTerritoryId).toBe("0,0");
+      expect(kRealSet.has("0,0")).toBe(true);
+      expect(afterState.keptOwned.filter((c) => c.isHome)).toHaveLength(1);
+      expect(afterState.keptOwned.find((c) => c.cellId === "0,0")?.isHome).toBe(true);
+
+      // Territorios ajenos estrictamente sin modificar
+      expect(afterState.foreignAfter).toEqual(beforeSnapshot.foreignOwned);
+
+      // Ejecución 2 (idempotencia con distinto operationId): 0 liberaciones adicionales y estado idéntico
+      const res2 = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+        dryRun: false,
+        kingdomId: kTarget.kingdomId,
+        operationId: `op-c2-exact-${N}-run2`,
+      });
+      expect(res2.success).toBe(true);
+      expect(res2.territoriesReleased).toBe(0);
+      expect(res2.details[0].outcome).toBe("noop");
+      expect(res2.details[0].keptCount).toBe(100);
+    }
+  });
+
+  test("C2-B. Bloqueo en BD ante identificadores duplicados (<100 territorios) sin mutaciones", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-c1-c2"));
+
+    const kDup = await foundKingdom(t, "user-c2-dup-db", "Reino Con Duplicado");
+    await seedKingdomTerritories(t, kDup.kingdomId, 10, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("territories", {
+        cellId: "1,0",
+        q: 1,
+        r: 0,
+        terrain: "llanura",
+        ownerKingdomId: kDup.kingdomId,
+        isHome: false,
+        claimedAt: 9999,
+      });
+    });
+
+    const res = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+      dryRun: false,
+      kingdomId: kDup.kingdomId,
+      operationId: "op-c2-dup-blocked",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.kingdomsBlocked).toBe(1);
+    expect(res.territoriesReleased).toBe(0);
+    expect(res.details[0].outcome).toBe("blocked");
+    expect(res.details[0].errors.some((e) => /duplicad/i.test(e))).toBe(true);
+  });
+
+  test("C2-C. Verificación posterior detecta fallos de conjuntos, propiedad, documento borrado y modificación de territorio ajeno", () => {
+    const baseInitial: TerritoryOwnershipSnapshot[] = [
+      { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
+      { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: "k1", isHome: false },
+      { id: "id2", cellId: "2,0", q: 2, r: 0, ownerKingdomId: "k1", isHome: false },
+    ];
+    const foreignBefore: TerritoryOwnershipSnapshot[] = [
+      { id: "f1", cellId: "10,0", q: 10, r: 0, ownerKingdomId: "k2", isHome: true },
+    ];
+
+    // Fallo 1: K_real tiene un identificador distinto al planificado aunque misma longitud
+    const wrongIdRes = verifyTerritoryCapCleanupPostState({
+      kingdomId: "k1",
+      initialTerritories: baseInitial,
+      plannedKeptCellIds: ["0,0", "1,0"],
+      plannedReleasedCellIds: ["2,0"],
+      capitalCellId: "0,0",
+      maxAllowed: 2,
+      finalOwnedByKingdom: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
+        { id: "id2", cellId: "2,0", q: 2, r: 0, ownerKingdomId: "k1", isHome: false },
+      ],
+      finalInitialDocs: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: null, isHome: false },
+        { id: "id2", cellId: "2,0", q: 2, r: 0, ownerKingdomId: "k1", isHome: false },
+      ],
+      finalKingdomHomeTerritoryId: "0,0",
+      foreignTerritoriesBefore: foreignBefore,
+      foreignTerritoriesAfter: foreignBefore,
+    });
+    expect(wrongIdRes.valid).toBe(false);
+    expect(wrongIdRes.errors.some((e) => e.includes("K_real !== K_planificado"))).toBe(true);
+    expect(wrongIdRes.errors.some((e) => e.includes("R_real !== R_planificado"))).toBe(true);
+
+    // Fallo 2: Documento de territorio liberado fue borrado (null)
+    const deletedDocRes = verifyTerritoryCapCleanupPostState({
+      kingdomId: "k1",
+      initialTerritories: baseInitial,
+      plannedKeptCellIds: ["0,0", "1,0"],
+      plannedReleasedCellIds: ["2,0"],
+      capitalCellId: "0,0",
+      maxAllowed: 2,
+      finalOwnedByKingdom: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: "k1", isHome: false },
+      ],
+      finalInitialDocs: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: "k1", isHome: false },
+        null,
+      ],
+      finalKingdomHomeTerritoryId: "0,0",
+      foreignTerritoriesBefore: foreignBefore,
+      foreignTerritoriesAfter: foreignBefore,
+    });
+    expect(deletedDocRes.valid).toBe(false);
+    expect(deletedDocRes.errors.some((e) => /eliminado/i.test(e))).toBe(true);
+
+    // Fallo 3: Territorio ajeno fue modificado
+    const foreignModifiedRes = verifyTerritoryCapCleanupPostState({
+      kingdomId: "k1",
+      initialTerritories: baseInitial,
+      plannedKeptCellIds: ["0,0", "1,0"],
+      plannedReleasedCellIds: ["2,0"],
+      capitalCellId: "0,0",
+      maxAllowed: 2,
+      finalOwnedByKingdom: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: "k1", isHome: false },
+      ],
+      finalInitialDocs: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: "k1", isHome: false },
+        { id: "id2", cellId: "2,0", q: 2, r: 0, ownerKingdomId: null, isHome: false },
+      ],
+      finalKingdomHomeTerritoryId: "0,0",
+      foreignTerritoriesBefore: foreignBefore,
+      foreignTerritoriesAfter: [{ id: "f1", cellId: "10,0", q: 10, r: 0, ownerKingdomId: null, isHome: false }],
+    });
+    expect(foreignModifiedRes.valid).toBe(false);
+    expect(foreignModifiedRes.errors.some((e) => /ajeno.*modificado/i.test(e))).toBe(true);
+  });
+
+  test("C2-D. Rollback transaccional real de Convex: fallo en verificación posterior tras iniciar escrituras revierte completamente la BD (cero escrituras parciales)", async () => {
+    const t = createTestBackend();
+    const asAdmin = t.withIdentity(identity("admin-c1-c2"));
+
+    const kTarget = await foundKingdom(t, "user-c2-rollback", "Reino Rollback");
+    const kForeign = await foundKingdom(t, "user-c2-rollback-foreign", "Reino Vecino Rollback");
+    await seedKingdomTerritories(t, kTarget.kingdomId, 105, { capitalCellId: "0,0", extraNeighborCount: 0 });
+    await seedKingdomTerritories(t, kForeign.kingdomId, 4, { capitalCellId: "25,0", extraNeighborCount: 0 });
+
+    const takeFullSnapshot = async () =>
+      t.run(async (ctx) => ({
+        kingdoms: await ctx.db.query("kingdoms").collect(),
+        territories: await ctx.db.query("territories").collect(),
+        auditLogs: await ctx.db.query("territoryCapAuditLogs").collect(),
+      }));
+
+    const before = await takeFullSnapshot();
+
+    // Simulamos una corrupción posterior a las escrituras dentro de la misma transacción real de Convex:
+    // tras liberar los 5 territorios, re-asignamos uno liberado al reino (violando K_real === K_planificado).
+    await expect(
+      asAdmin.run(async (ctx) =>
+        runTerritoryCapCleanup(
+          ctx,
+          {
+            dryRun: false,
+            kingdomId: kTarget.kingdomId,
+            operationId: "op-c2-rollback-atomic",
+          },
+          {
+            afterKingdomWrites: async (innerCtx, { kingdomId, plan }) => {
+              const releasedCellId = plan.releasedCellIds[0];
+              const releasedDoc = await innerCtx.db
+                .query("territories")
+                .withIndex("by_cell", (q) => q.eq("cellId", releasedCellId))
+                .first();
+              if (releasedDoc) {
+                await innerCtx.db.patch(releasedDoc._id, { ownerKingdomId: kingdomId });
+              }
+            },
+          }
+        )
+      )
+    ).rejects.toThrow(/Rollback transaccional/i);
+
+    // Demostrar que el estado persistido en BD es 100% idéntico al anterior:
+    // ninguno de los 5 territorios quedó liberado y ningún log de auditoría parcial quedó escrito.
+    const after = await takeFullSnapshot();
+    expect(after.kingdoms).toEqual(before.kingdoms);
+    expect(after.territories).toEqual(before.territories);
+    expect(after.auditLogs).toEqual(before.auditLogs);
+
+    const ownedAfterRollback = await t.run(async (ctx) =>
+      ctx.db
+        .query("territories")
+        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kTarget.kingdomId))
+        .collect()
+    );
+    expect(ownedAfterRollback).toHaveLength(105);
+  });
+});
+
 
 
 

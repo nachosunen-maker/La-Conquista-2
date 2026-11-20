@@ -37,8 +37,11 @@ import {
   parseCellId,
   cellId,
   planTerritoryCapCleanup,
+  verifyTerritoryCapCleanupPostState,
   type ExistingKingdomSpawn,
   type HexCoord,
+  type TerritoryCapCleanupPlan,
+  type TerritoryOwnershipSnapshot,
   type WorldCell,
   hexLine,
   pathTerrainMultiplier,
@@ -2342,9 +2345,27 @@ function arraysEqual(a: string[], b: string[]): boolean {
   return true;
 }
 
-async function runTerritoryCapCleanup(
+function toTerritorySnapshot(doc: Doc<"territories">): TerritoryOwnershipSnapshot {
+  return {
+    id: String(doc._id),
+    cellId: doc.cellId,
+    q: doc.q,
+    r: doc.r,
+    ownerKingdomId: doc.ownerKingdomId ? String(doc.ownerKingdomId) : null,
+    isHome: doc.isHome,
+    claimedAt: doc.claimedAt,
+  };
+}
+
+export async function runTerritoryCapCleanup(
   ctx: MutationCtx,
-  args: { dryRun?: boolean; kingdomId?: Id<"kingdoms">; operationId?: string }
+  args: { dryRun?: boolean; kingdomId?: Id<"kingdoms">; operationId?: string },
+  hooks?: {
+    afterKingdomWrites?: (
+      ctx: MutationCtx,
+      info: { kingdomId: Id<"kingdoms">; plan: TerritoryCapCleanupPlan }
+    ) => Promise<void>;
+  }
 ) {
   const { adminIdentity } = await requireAuthorizedAdmin(ctx);
   const dryRun = args.dryRun ?? true;
@@ -2640,8 +2661,16 @@ async function runTerritoryCapCleanup(
     }
 
     const capitalDoc = owned.find((c) => c.cellId === plan.capitalCellId);
+    const initialDocIds = new Set(owned.map((c) => String(c._id)));
+    const initialSnapshots: TerritoryOwnershipSnapshot[] = owned.map(toTerritorySnapshot);
+    let foreignTerritoriesBefore: TerritoryOwnershipSnapshot[] = [];
 
     if (!dryRun) {
+      const beforeKingdomAllTerritories = await ctx.db.query("territories").collect();
+      foreignTerritoriesBefore = beforeKingdomAllTerritories
+        .filter((t) => !initialDocIds.has(String(t._id)))
+        .map(toTerritorySnapshot);
+
       if (plan.capitalCellId && kingdom.homeTerritoryId !== plan.capitalCellId) {
         await ctx.db.patch(kingdom._id, { homeTerritoryId: plan.capitalCellId });
         homeRepaired = true;
@@ -2667,81 +2696,87 @@ async function runTerritoryCapCleanup(
           }
         }
       }
+
+      if (hooks?.afterKingdomWrites) {
+        await hooks.afterKingdomWrites(ctx, { kingdomId: kingdom._id, plan });
+      }
     }
 
     const freshKingdom = (await ctx.db.get(kingdom._id)) ?? kingdom;
-    const postVerificationErrors: string[] = [];
+    let afterAudit: ReferentialIntegrityAudit;
 
-    if (!dryRun) {
-      const finalOwned = await ctx.db
-        .query("territories")
-        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
-        .collect();
-      const expectedReleased = Math.max(0, owned.length - TERRITORIES.MAX_PER_KINGDOM);
-      const expectedFinalCount = owned.length - plan.releasedCellIds.length;
-      if (finalOwned.length > TERRITORIES.MAX_PER_KINGDOM) {
-        postVerificationErrors.push(
-          `Invariante violado: N_final (${finalOwned.length}) > ${TERRITORIES.MAX_PER_KINGDOM}.`
-        );
+    if (dryRun) {
+      afterAudit = beforeAudit;
+    } else {
+      const [finalOwned, finalInitialDocsRaw, afterKingdomAllTerritories] = await Promise.all([
+        ctx.db
+          .query("territories")
+          .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
+          .collect(),
+        Promise.all(owned.map((c) => ctx.db.get(c._id))),
+        ctx.db.query("territories").collect(),
+      ]);
+
+      const foreignTerritoriesAfter = afterKingdomAllTerritories
+        .filter((t) => !initialDocIds.has(String(t._id)))
+        .map(toTerritorySnapshot);
+
+      const postVerification = verifyTerritoryCapCleanupPostState({
+        kingdomId: String(kingdom._id),
+        initialTerritories: initialSnapshots,
+        plannedKeptCellIds: plan.keptCellIds,
+        plannedReleasedCellIds: plan.releasedCellIds,
+        capitalCellId: plan.capitalCellId,
+        maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
+        finalOwnedByKingdom: finalOwned.map(toTerritorySnapshot),
+        finalInitialDocs: finalInitialDocsRaw.map((doc) => (doc ? toTerritorySnapshot(doc) : null)),
+        finalKingdomHomeTerritoryId: freshKingdom.homeTerritoryId ?? null,
+        foreignTerritoriesBefore,
+        foreignTerritoriesAfter,
+      });
+
+      const refreshedTerritoriesByCellId = new Map<string, Doc<"territories">[]>();
+      for (const t of afterKingdomAllTerritories) {
+        const list = refreshedTerritoriesByCellId.get(t.cellId);
+        if (list) list.push(t);
+        else refreshedTerritoriesByCellId.set(t.cellId, [t]);
       }
-      if (finalOwned.length !== expectedFinalCount) {
-        postVerificationErrors.push(
-          `Invariante violado: N_final (${finalOwned.length}) != N_inicial - R (${expectedFinalCount}).`
+      const afterAuditCtx: ReferentialAuditContext = {
+        ...auditCtx,
+        allTerritoriesByCellId: refreshedTerritoriesByCellId,
+      };
+
+      afterAudit = await auditKingdomTerritoryReferentialIntegrity(
+        ctx,
+        freshKingdom,
+        new Set(),
+        "after",
+        afterAuditCtx
+      );
+
+      // Atomicidad real de Convex: cualquier fallo en la verificación posterior o bloqueo
+      // en la auditoría posterior DEBE lanzar excepción sin capturar para provocar rollback
+      // transaccional completo de la mutation (cero escrituras parciales).
+      if (!postVerification.valid || afterAudit.blockingCount > 0) {
+        const auditBlockingReasons = afterAudit.inconsistencies
+          .filter((i) => i.severity === "blocking")
+          .map((i) => `[${i.relation}] ${i.reason}`);
+        const allReasons = [...postVerification.errors, ...auditBlockingReasons];
+        throw new ConvexError(
+          `Rollback transaccional del saneamiento territorial para '${kingdom.name}': ${allReasons.join(" | ")}`
         );
-      }
-      if (plan.releasedCellIds.length !== expectedReleased) {
-        postVerificationErrors.push(
-          `Invariante violado: R (${plan.releasedCellIds.length}) != max(0, N_inicial - ${TERRITORIES.MAX_PER_KINGDOM}) (${expectedReleased}).`
-        );
-      }
-      if (plan.keptCellIds.length !== finalOwned.length) {
-        postVerificationErrors.push(
-          `Invariante violado: K_final (${plan.keptCellIds.length}) != N_final (${finalOwned.length}).`
-        );
-      }
-      if (finalOwned.length > 0) {
-        const finalMarkedHomes = finalOwned.filter((c) => c.isHome === true);
-        if (freshKingdom.homeTerritoryId !== plan.capitalCellId) {
-          postVerificationErrors.push(
-            `Invariante violado: C_final ('${freshKingdom.homeTerritoryId ?? ""}') != C_inicial ('${plan.capitalCellId}').`
-          );
-        }
-        if (
-          finalMarkedHomes.length !== 1 ||
-          finalMarkedHomes[0].cellId !== plan.capitalCellId
-        ) {
-          postVerificationErrors.push(
-            `Invariante violado: marca isHome incoherente tras saneamiento para capital '${plan.capitalCellId}'.`
-          );
-        }
       }
     }
 
-    const afterAudit = dryRun
-      ? beforeAudit
-      : await auditKingdomTerritoryReferentialIntegrity(
-          ctx,
-          freshKingdom,
-          new Set(),
-          "after",
-          auditCtx
-        );
     afterAudits.push(afterAudit);
 
-    const postVerificationFailed = postVerificationErrors.length > 0;
-    if (postVerificationFailed) {
-      kingdomsBlocked += 1;
-    }
+    const outcome: "simulated" | "cleaned" | "noop" = dryRun
+      ? "simulated"
+      : !plan.skipped || homeRepaired
+        ? "cleaned"
+        : "noop";
 
-    const outcome: "simulated" | "cleaned" | "noop" | "blocked" = postVerificationFailed
-      ? "blocked"
-      : dryRun
-        ? "simulated"
-        : !plan.skipped || homeRepaired
-          ? "cleaned"
-          : "noop";
-
-    if (!postVerificationFailed && (!plan.skipped || homeRepaired)) {
+    if (!plan.skipped || homeRepaired) {
       kingdomsModified += 1;
     }
     territoriesReleased += plan.releasedCellIds.length;
@@ -2761,7 +2796,7 @@ async function runTerritoryCapCleanup(
       referentialIntegrityBefore: beforeAudit,
       referentialIntegrityAfter: afterAudit,
       outcome,
-      errors: postVerificationErrors,
+      errors: [],
       requestedScope,
       requestedKingdomId,
       targetKingdomIds: currentTargetKingdomIds,
@@ -2778,9 +2813,9 @@ async function runTerritoryCapCleanup(
       releasedCellIds: plan.releasedCellIds,
       homeRepaired,
       skippedDemo: false,
-      blocked: postVerificationFailed,
+      blocked: false,
       outcome,
-      errors: postVerificationErrors,
+      errors: [],
     });
   }
 

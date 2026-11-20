@@ -643,6 +643,36 @@ export function planTerritoryCapCleanup(input: {
 }): TerritoryCapCleanupPlan {
   const maxAllowed = input.maxAllowed ?? TERRITORIES.MAX_PER_KINGDOM;
   const cells = [...input.ownedCells];
+
+  // Validación obligatoria de unicidad ANTES de cualquier retorno que declare válido el plan,
+  // independientemente del tamaño del reino (< 100, === 100 o > 100) sin ocultar duplicados en un Set.
+  const seenCellIds = new Set<string>();
+  const duplicateCellIds: string[] = [];
+  for (const cell of cells) {
+    if (seenCellIds.has(cell.cellId)) {
+      duplicateCellIds.push(cell.cellId);
+    } else {
+      seenCellIds.add(cell.cellId);
+    }
+  }
+  const uniqueCellIdCount = seenCellIds.size;
+  if (cells.length !== uniqueCellIdCount) {
+    const uniqueDuplicates = Array.from(new Set(duplicateCellIds)).sort();
+    return {
+      capitalCellId: "",
+      capitalSource: "ambiguous",
+      requiresReview: true,
+      blocked: true,
+      totalOwned: cells.length,
+      maxAllowed,
+      keptCellIds: cells.map((c) => c.cellId),
+      releasedCellIds: [],
+      releasedCells: [],
+      skipped: true,
+      reason: `Identificadores de territorio duplicados detectados (${cells.length} registros para ${uniqueCellIdCount} cellIds únicos; duplicados: ${uniqueDuplicates.join(", ")}); plan bloqueado.`,
+    };
+  }
+
   if (cells.length === 0) {
     return {
       capitalCellId: input.homeTerritoryId ?? "",
@@ -790,6 +820,241 @@ export function planTerritoryCapCleanup(input: {
     releasedCellIds,
     releasedCells: released,
     skipped: false,
+  };
+}
+
+export interface TerritoryOwnershipSnapshot {
+  id: string;
+  cellId: string;
+  q: number;
+  r: number;
+  ownerKingdomId?: string | null;
+  isHome?: boolean;
+  claimedAt?: number;
+}
+
+export interface PostCleanupVerificationInput {
+  kingdomId: string;
+  initialTerritories: ReadonlyArray<TerritoryOwnershipSnapshot>;
+  plannedKeptCellIds: ReadonlyArray<string>;
+  plannedReleasedCellIds: ReadonlyArray<string>;
+  capitalCellId: string;
+  maxAllowed?: number;
+  finalOwnedByKingdom: ReadonlyArray<TerritoryOwnershipSnapshot>;
+  finalInitialDocs: ReadonlyArray<TerritoryOwnershipSnapshot | null>;
+  finalKingdomHomeTerritoryId?: string | null;
+  foreignTerritoriesBefore: ReadonlyArray<TerritoryOwnershipSnapshot>;
+  foreignTerritoriesAfter: ReadonlyArray<TerritoryOwnershipSnapshot>;
+}
+
+export interface PostCleanupVerificationResult {
+  valid: boolean;
+  errors: string[];
+  actualKeptCellIds: string[];
+  actualReleasedCellIds: string[];
+}
+
+function sameStringSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const item of a) {
+    if (!b.has(item)) return false;
+  }
+  return true;
+}
+
+/**
+ * Verificación exacta posterior al saneamiento territorial (Corrección 2):
+ * Comprueba identidad exacta de conjuntos (sin depender del orden), propiedad individual,
+ * conservación de capital, ausencia de borrado de documentos y ausencia de modificaciones
+ * en territorios ajenos al conjunto inicial.
+ */
+export function verifyTerritoryCapCleanupPostState(
+  input: PostCleanupVerificationInput
+): PostCleanupVerificationResult {
+  const maxAllowed = input.maxAllowed ?? TERRITORIES.MAX_PER_KINGDOM;
+  const errors: string[] = [];
+
+  const initialCellIds = input.initialTerritories.map((t) => t.cellId);
+  const initialCellIdSet = new Set(initialCellIds);
+  if (initialCellIdSet.size !== initialCellIds.length) {
+    errors.push(
+      `Conjunto inicial inválido: ${initialCellIds.length} registros para ${initialCellIdSet.size} cellIds únicos.`
+    );
+  }
+
+  const plannedKeptSet = new Set(input.plannedKeptCellIds);
+  const plannedReleasedSet = new Set(input.plannedReleasedCellIds);
+  if (plannedKeptSet.size !== input.plannedKeptCellIds.length) {
+    errors.push("El conjunto K_planificado contiene identificadores duplicados.");
+  }
+  if (plannedReleasedSet.size !== input.plannedReleasedCellIds.length) {
+    errors.push("El conjunto R_planificado contiene identificadores duplicados.");
+  }
+
+  // 1. Verificar que no se ha eliminado ningún documento de territorio del conjunto inicial
+  if (input.finalInitialDocs.length !== input.initialTerritories.length) {
+    errors.push(
+      `Cantidad de documentos iniciales reconsultados (${input.finalInitialDocs.length}) distinta de T_initial (${input.initialTerritories.length}).`
+    );
+  }
+
+  const finalInitialById = new Map<string, TerritoryOwnershipSnapshot>();
+  for (let i = 0; i < input.initialTerritories.length; i += 1) {
+    const initialDoc = input.initialTerritories[i];
+    const finalDoc = input.finalInitialDocs[i] ?? null;
+    if (!finalDoc) {
+      errors.push(
+        `Documento de territorio eliminado durante el saneamiento: id='${initialDoc.id}', cellId='${initialDoc.cellId}'.`
+      );
+      continue;
+    }
+    if (finalDoc.cellId !== initialDoc.cellId || finalDoc.q !== initialDoc.q || finalDoc.r !== initialDoc.r) {
+      errors.push(
+        `Coordenadas o cellId alterados en territorio '${initialDoc.cellId}' (actual: '${finalDoc.cellId}').`
+      );
+    }
+    finalInitialById.set(initialDoc.id, finalDoc);
+  }
+
+  // 2. Construir K_real y R_real desde los registros persistidos reales
+  const actualKeptCellIds = input.finalOwnedByKingdom.map((t) => t.cellId);
+  const actualKeptSet = new Set(actualKeptCellIds);
+  if (actualKeptSet.size !== actualKeptCellIds.length) {
+    errors.push(
+      `K_real contiene identificadores duplicados (${actualKeptCellIds.length} registros para ${actualKeptSet.size} únicos).`
+    );
+  }
+
+  const actualReleasedCellIds: string[] = [];
+  for (const initialDoc of input.initialTerritories) {
+    const finalDoc = finalInitialById.get(initialDoc.id);
+    if (!finalDoc) continue;
+    const owner = finalDoc.ownerKingdomId ?? null;
+    if (owner !== input.kingdomId) {
+      actualReleasedCellIds.push(finalDoc.cellId);
+    }
+  }
+  const actualReleasedSet = new Set(actualReleasedCellIds);
+  if (actualReleasedSet.size !== actualReleasedCellIds.length) {
+    errors.push(
+      `R_real contiene identificadores duplicados (${actualReleasedCellIds.length} registros para ${actualReleasedSet.size} únicos).`
+    );
+  }
+
+  // 3. Invariantes exactos de conjuntos (independientes del orden)
+  if (!sameStringSet(actualKeptSet, plannedKeptSet)) {
+    errors.push(
+      `K_real !== K_planificado (reales=${actualKeptSet.size}, planificados=${plannedKeptSet.size}).`
+    );
+  }
+  if (!sameStringSet(actualReleasedSet, plannedReleasedSet)) {
+    errors.push(
+      `R_real !== R_planificado (reales=${actualReleasedSet.size}, planificados=${plannedReleasedSet.size}).`
+    );
+  }
+
+  for (const id of actualReleasedSet) {
+    if (actualKeptSet.has(id)) {
+      errors.push(`Intersección no vacía K_real ∩ R_real contiene '${id}'.`);
+    }
+  }
+
+  const unionSet = new Set<string>([...actualKeptSet, ...actualReleasedSet]);
+  if (!sameStringSet(unionSet, initialCellIdSet)) {
+    errors.push(
+      `Unión K_real ∪ R_real (${unionSet.size}) no coincide exactamente con T_initial (${initialCellIdSet.size}).`
+    );
+  }
+
+  if (actualReleasedCellIds.length !== input.plannedReleasedCellIds.length) {
+    errors.push(
+      `releasedCount (${actualReleasedCellIds.length}) !== releasedCellIds.length (${input.plannedReleasedCellIds.length}).`
+    );
+  }
+
+  if (actualKeptCellIds.length + actualReleasedCellIds.length !== input.initialTerritories.length) {
+    errors.push(
+      `K_real.length + R_real.length (${actualKeptCellIds.length + actualReleasedCellIds.length}) !== T_initial.length (${input.initialTerritories.length}).`
+    );
+  }
+
+  if (actualKeptCellIds.length > maxAllowed) {
+    errors.push(`N_final (${actualKeptCellIds.length}) supera el tope máximo (${maxAllowed}).`);
+  }
+
+  // 4. Propiedad individual de conservados y liberados
+  for (const initialDoc of input.initialTerritories) {
+    const finalDoc = finalInitialById.get(initialDoc.id);
+    if (!finalDoc) continue;
+    const owner = finalDoc.ownerKingdomId ?? null;
+    if (plannedKeptSet.has(initialDoc.cellId)) {
+      if (owner !== input.kingdomId) {
+        errors.push(
+          `Territorio conservado '${initialDoc.cellId}' no pertenece al reino '${input.kingdomId}' (owner='${owner ?? "null"}').`
+        );
+      }
+    } else if (plannedReleasedSet.has(initialDoc.cellId)) {
+      if (owner !== null) {
+        errors.push(
+          `Territorio liberado '${initialDoc.cellId}' conserva propietario '${owner}' tras el saneamiento.`
+        );
+      }
+      if (finalDoc.isHome === true) {
+        errors.push(`Territorio liberado '${initialDoc.cellId}' conserva marca isHome=true.`);
+      }
+    }
+  }
+
+  // 5. Conservación exacta de la capital
+  if (input.initialTerritories.length > 0) {
+    if (!actualKeptSet.has(input.capitalCellId)) {
+      errors.push(`La capital '${input.capitalCellId}' no forma parte de K_real.`);
+    }
+    if ((input.finalKingdomHomeTerritoryId ?? null) !== input.capitalCellId) {
+      errors.push(
+        `homeTerritoryId del reino ('${input.finalKingdomHomeTerritoryId ?? ""}') !== capital '${input.capitalCellId}'.`
+      );
+    }
+    const finalMarkedHomes = input.finalOwnedByKingdom.filter((c) => c.isHome === true);
+    if (finalMarkedHomes.length !== 1 || finalMarkedHomes[0].cellId !== input.capitalCellId) {
+      errors.push(
+        `Marca isHome incoherente tras saneamiento (marcados=${finalMarkedHomes.length}, capital='${input.capitalCellId}').`
+      );
+    }
+  }
+
+  // 6. Ausencia absoluta de modificaciones en territorios ajenos al conjunto inicial
+  if (input.foreignTerritoriesBefore.length !== input.foreignTerritoriesAfter.length) {
+    errors.push(
+      `El número de territorios ajenos a T_initial cambió (${input.foreignTerritoriesBefore.length} -> ${input.foreignTerritoriesAfter.length}).`
+    );
+  }
+  const foreignAfterById = new Map(input.foreignTerritoriesAfter.map((t) => [t.id, t]));
+  for (const beforeDoc of input.foreignTerritoriesBefore) {
+    const afterDoc = foreignAfterById.get(beforeDoc.id);
+    if (!afterDoc) {
+      errors.push(`Territorio ajeno '${beforeDoc.cellId}' (id='${beforeDoc.id}') desapareció durante el saneamiento.`);
+      continue;
+    }
+    if (
+      afterDoc.cellId !== beforeDoc.cellId ||
+      afterDoc.q !== beforeDoc.q ||
+      afterDoc.r !== beforeDoc.r ||
+      (afterDoc.ownerKingdomId ?? null) !== (beforeDoc.ownerKingdomId ?? null) ||
+      Boolean(afterDoc.isHome) !== Boolean(beforeDoc.isHome) ||
+      (afterDoc.claimedAt ?? null) !== (beforeDoc.claimedAt ?? null)
+    ) {
+      errors.push(
+        `Territorio ajeno '${beforeDoc.cellId}' (id='${beforeDoc.id}') fue modificado durante el saneamiento.`
+      );
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    actualKeptCellIds,
+    actualReleasedCellIds,
   };
 }
 
