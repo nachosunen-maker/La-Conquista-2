@@ -807,6 +807,7 @@ export const getWorldMapCompact = query({
         pendingClaims: 0,
         homeTerritoryId: null,
         visibleCells: [],
+        recentDiscoveries: [],
       };
     }
 
@@ -821,7 +822,7 @@ export const getWorldMapCompact = query({
       throw new Error("No autorizado: solo puede consultar la niebla de guerra de su propio reino.");
     }
 
-    // 3. Leer ÚNICAMENTE los datos propios del reino autorizado
+    // 3. Leer ÚNICAMENTE los datos propios del reino autorizado (marchas filtradas en servidor)
     const [ownedCells, exploredRecords, activeQueue, completedTech, activeMarchesDocs] = await Promise.all([
       ctx.db
         .query("territories")
@@ -839,19 +840,35 @@ export const getWorldMapCompact = query({
       ctx.db
         .query("armyMarches")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+        .filter((q) => q.eq(q.field("status"), "marchando"))
         .collect(),
     ]);
 
     const hasSpy2Tech = completedTech.includes("spy_2");
     const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
 
+    const coordById = new Map<string, HexCoord>();
+    const getValidCoord = (id: string): HexCoord | null => {
+      const cached = coordById.get(id);
+      if (cached) return cached;
+      const parsed = parseCellId(id);
+      if (!parsed || !isInsideWorld(parsed, MAP.RADIUS)) return null;
+      coordById.set(id, parsed);
+      return parsed;
+    };
+
     const ownedIds = new Set<string>();
     const knownTerritoryByCellId = new Map<string, Doc<"territories">>();
     for (const c of ownedCells) {
-      ownedIds.add(String(c.cellId));
-      knownTerritoryByCellId.set(c.cellId, c);
+      const id = String(c.cellId);
+      ownedIds.add(id);
+      knownTerritoryByCellId.set(id, c);
+      coordById.set(id, { q: c.q, r: c.r });
     }
-    if (kingdom.homeTerritoryId) ownedIds.add(String(kingdom.homeTerritoryId));
+    if (kingdom.homeTerritoryId) {
+      ownedIds.add(String(kingdom.homeTerritoryId));
+      if (homeCoord) coordById.set(String(kingdom.homeTerritoryId), homeCoord);
+    }
 
     const ownedCoords: HexCoord[] = ownedCells.map((c) => ({ q: c.q, r: c.r }));
     if (homeCoord && !ownedCoords.some((c) => c.q === homeCoord.q && c.r === homeCoord.r)) {
@@ -874,12 +891,14 @@ export const getWorldMapCompact = query({
       }
     }
 
-    // Leer de `territories` ÚNICAMENTE las celdas conocidas (nunca celdas ni reinos bajo niebla)
-    const missingKnownIds = Array.from(knownIds).filter((id) => {
-      if (knownTerritoryByCellId.has(id)) return false;
-      const coord = parseCellId(id);
-      return coord !== null && isInsideWorld(coord, MAP.RADIUS);
-    });
+    // Leer de `territories` ÚNICAMENTE las celdas conocidas que no sean ya propias (nunca bajo niebla)
+    const missingKnownIds: string[] = [];
+    for (const id of knownIds) {
+      if (knownTerritoryByCellId.has(id)) continue;
+      if (getValidCoord(id) !== null) {
+        missingKnownIds.push(id);
+      }
+    }
     const fetchedKnownDocs = await Promise.all(
       missingKnownIds.map((cid) =>
         ctx.db
@@ -935,12 +954,13 @@ export const getWorldMapCompact = query({
     const frontierIds = new Set<string>();
     if (canLaunchMore) {
       for (const knownId of knownIds) {
-        const coord = parseCellId(knownId);
-        if (!coord || !isInsideWorld(coord, MAP.RADIUS)) continue;
+        const coord = getValidCoord(knownId);
+        if (!coord) continue;
         for (const n of hexNeighbors(coord, MAP.RADIUS)) {
           const nid = cellId(n.q, n.r);
           if (!knownIds.has(nid) && !activeExpeditionMap.has(nid) && !ownedIds.has(nid)) {
             frontierIds.add(nid);
+            if (!coordById.has(nid)) coordById.set(nid, n);
           }
         }
       }
@@ -954,8 +974,8 @@ export const getWorldMapCompact = query({
 
     const visibleCells = [];
     for (const id of interestingIds) {
-      const coord = parseCellId(id);
-      if (!coord || !isInsideWorld(coord, MAP.RADIUS)) continue;
+      const coord = getValidCoord(id);
+      if (!coord) continue;
 
       const isOwned = ownedIds.has(id);
       const isExploring = activeExpeditionMap.has(id);
@@ -1054,24 +1074,27 @@ export const getWorldMapCompact = query({
         progressPercent: explorationProgress(exp.startedAt, exp.durationMs, now),
         isSpyMission: exp.isSpyMission ?? false,
       })),
-      activeMarches: activeMarchesDocs
-        .filter((m) => m.status === "marchando")
-        .map((m) => ({
-          marchId: m._id,
-          cellId: m.targetCellId,
-          targetQ: m.targetQ,
-          targetR: m.targetR,
-          startedAt: m.startedAt,
-          durationMs: m.durationMs,
-          completesAt: m.completesAt,
-          progressPercent: m.durationMs > 0 ? Math.min(100, Math.floor(((now - m.startedAt) / m.durationMs) * 100)) : 100,
-          isConquest: m.isConquest ?? false,
-          units: m.units,
-        })),
+      activeMarches: activeMarchesDocs.map((m) => ({
+        marchId: m._id,
+        cellId: m.targetCellId,
+        targetQ: m.targetQ,
+        targetR: m.targetR,
+        startedAt: m.startedAt,
+        durationMs: m.durationMs,
+        completesAt: m.completesAt,
+        progressPercent: m.durationMs > 0 ? Math.min(100, Math.floor(((now - m.startedAt) / m.durationMs) * 100)) : 100,
+        isConquest: m.isConquest ?? false,
+        units: m.units,
+      })),
       kingdomLegend: legendList,
       pendingClaims: kingdom?.pendingTerritoryClaims ?? 0,
       homeTerritoryId: kingdom?.homeTerritoryId ?? null,
       visibleCells,
+      recentDiscoveries: exploredRecords.slice(-25).map((e) => ({
+        cellId: e.cellId,
+        discoveredAt: e.discoveredAt,
+        note: e.discoveryNote ?? "Territorio cartografiado",
+      })),
     };
   },
 });

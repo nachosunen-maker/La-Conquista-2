@@ -1,1354 +1,1274 @@
-import { useMutation, useQuery } from 'convex/react';
-import { makeFunctionReference } from 'convex/server';
-import { Map as MapIcon, Flag, Compass, Clock, Sparkles, Crosshair } from 'lucide-react';
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { JOB_LABELS, PanelSection, StatusMessages, UNIT_LABELS, cardClass, primaryButton, readOnlyNote, useActionState } from './shared';
-import { TroopSelector, TroopSelection } from './TroopSelector';
-import { MAP } from '../../convex/balanceConfig';
-import { generateWorldCells, parseCellId } from '../../convex/territoryRules';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
+import { makeFunctionReference } from "convex/server";
+import {
+  Castle,
+  Compass,
+  Crosshair,
+  Eye,
+  Flag,
+  Globe,
+  MapPin,
+  Minus,
+  Plus,
+  RefreshCw,
+  Shield,
+  Swords,
+} from "lucide-react";
+import { MAP, TERRAINS, type TerrainType } from "../../convex/balanceConfig";
+import { parseCellId, type HexCoord } from "../../convex/territoryRules";
+import {
+  axialToPixel,
+  BASE_HEX_SIZE,
+  computeClaimableAdjacentIds,
+  createCapitalCenteredCamera,
+  DEFAULT_CAPITAL_ZOOM,
+  getCachedStaticWorld,
+  getPersistedCamera,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  setPersistedCamera,
+  zoomCameraAtPoint,
+  type CameraState,
+} from "../map/hexMath";
+import { MedievalMapRenderer, type RenderableMapCell, type RenderableMarch } from "../map/mapRenderer";
+import { MEDIEVAL_TERRAIN_PALETTE } from "../map/terrainVisuals";
+import { normalizeErrorMessage, StatusMessages } from "./shared";
 
 const getWorldMapCompactQuery = makeFunctionReference<"query">("territories:getWorldMapCompact");
-const getKingdomTerritoriesQuery = makeFunctionReference<"query">("territories:getKingdomTerritories");
-const claimFreeTerritoryMutation = makeFunctionReference<"mutation">("territories:claimFreeTerritory");
-const ensureHomeTerritoryMutation = makeFunctionReference<"mutation">("territories:ensureMyHomeTerritory");
-const startExplorationMutation = makeFunctionReference<"mutation">("territories:startExploration");
-const startSpyExplorationMutation = makeFunctionReference<"mutation">("territories:startSpyExploration");
-const cancelExplorationMutation = makeFunctionReference<"mutation">("territories:cancelExploration");
-const resolveCompletedExplorationsMutation = makeFunctionReference<"mutation">("territories:resolveCompletedExplorations");
-const launchAttackMutation = makeFunctionReference<"mutation">("army:launchAttack");
 const getArmyStateQuery = makeFunctionReference<"query">("army:getArmyState");
 
-interface WorldMapCell {
+const startExplorationMutation = makeFunctionReference<"mutation">("territories:startExploration");
+const startSpyMissionMutation = makeFunctionReference<"mutation">("territories:startSpyMission");
+const resolvePendingExplorationsMutation = makeFunctionReference<"mutation">("territories:resolvePendingExplorations");
+const claimFreeTerritoryMutation = makeFunctionReference<"mutation">("territories:claimFreeTerritory");
+const launchArmyMarchMutation = makeFunctionReference<"mutation">("army:launchArmyMarch");
+const resolveArmyMarchMutation = makeFunctionReference<"mutation">("army:resolveArmyMarch");
+
+interface ActiveExpeditionItem {
+  expeditionId: string;
   cellId: string;
-  q: number;
-  r: number;
-  terrain: string;
-  ownerKingdomId: string | null;
-  ownerName: string | null;
-  ownerColor: string | null;
-  isHome: boolean;
-  state: "owned" | "explored" | "exploring" | "fog";
-  canExplore: boolean;
-  canConquer: boolean;
-  explorationPlan: { distance: number; durationSeconds: number; costs: { gold: number; food: number } } | null;
-  expedition: {
-    expeditionId: string;
-    progressPercent: number;
-    completesAt: number;
-    durationMs: number;
-    distance: number;
-    isSpyMission: boolean;
-  } | null;
+  completesAt: number;
+  durationMs: number;
+  progressPercent: number;
+  isSpyMission: boolean;
+}
+
+interface ActiveMarchItem extends RenderableMarch {
+  units: Array<{ unitType: string; level?: number; count: number }>;
+}
+
+interface RecentDiscoveryItem {
+  cellId: string;
+  discoveredAt: number;
+  note: string;
 }
 
 interface CompactWorldMapResponse {
   radius: number;
   worldSeed: number;
   generated: boolean;
-  terrains: Record<string, { label: string; production: Record<string, number>; defense: number; commerce: number; marchMultiplier: number }>;
   totalCells: number;
   exploredCount: number;
-  activeExpeditions: Array<{
-    expeditionId: string;
-    cellId: string;
-    completesAt: number;
-    durationMs: number;
-    progressPercent: number;
-    isSpyMission: boolean;
-  }>;
-  activeMarches?: Array<{
-    marchId: string;
-    cellId: string;
-    targetQ: number;
-    targetR: number;
-    startedAt: number;
-    durationMs: number;
-    completesAt: number;
-    progressPercent: number;
-    isConquest: boolean;
-    units: Array<{ unitType: string; level?: number; count: number }> | Record<string, number>;
-  }>;
-  kingdomLegend?: Array<{
-    id: string;
-    name: string;
-    monarchName?: string;
-    color: string;
-    territoryCount: number;
-  }>;
+  activeExpeditions: ActiveExpeditionItem[];
+  activeMarches: ActiveMarchItem[];
+  kingdomLegend: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }>;
   pendingClaims: number;
   homeTerritoryId: string | null;
-  visibleCells: WorldMapCell[];
+  visibleCells: RenderableMapCell[];
+  recentDiscoveries?: RecentDiscoveryItem[];
 }
 
-interface KingdomTerritories {
-  homeTerritoryId: string | null;
-  pendingClaims: number;
-  exploredCount: number;
-  activeExpeditions: number;
-  territories: Array<{ cellId: string; q: number; r: number; terrain: string; isHome: boolean }>;
-  recentDiscoveries?: Array<{ cellId: string; discoveredAt: number; note: string }>;
+interface ArmyStateSummary {
+  spyCount?: number;
+  army?: {
+    totalActive?: number;
+    byType?: Record<string, number>;
+  };
 }
 
-const TERRAIN_COLORS: Record<string, string> = {
-  llanura: '#8a9a3a',
-  bosque: '#2f6b3a',
-  colina: '#9c7b4a',
-  montana: '#6e6a66',
-  rio: '#2f6f9a',
-  costa: '#3f8fb5',
-  desconocido: '#18140f',
+const UNIT_LABELS: Record<string, string> = {
+  infanteria: "Infantería",
+  caballeria: "Caballería",
+  arqueria: "Arquería",
+  asedio: "Asedio",
 };
 
-const HEX_SIZE = 14;
-const SQRT3 = Math.sqrt(3);
-const MIN_ZOOM = 0.22;
-const MAX_ZOOM = 5.5;
-
-const HEX_OFFSETS = Array.from({ length: 6 }, (_, i) => {
-  const angle = (Math.PI / 180) * (60 * i - 30);
-  return { dx: HEX_SIZE * Math.cos(angle), dy: HEX_SIZE * Math.sin(angle) };
-});
-
-function hexCenter(q: number, r: number): { x: number; y: number } {
-  return { x: HEX_SIZE * SQRT3 * (q + r / 2), y: HEX_SIZE * 1.5 * r };
-}
-
-function pixelToHex(wx: number, wy: number): { q: number; r: number } {
-  const qf = ((SQRT3 / 3) * wx - (1 / 3) * wy) / HEX_SIZE;
-  const rf = ((2 / 3) * wy) / HEX_SIZE;
-  const xf = qf;
-  const zf = rf;
-  const yf = -xf - zf;
-
-  let rx = Math.round(xf);
-  let ry = Math.round(yf);
-  let rz = Math.round(zf);
-
-  const dx = Math.abs(rx - xf);
-  const dy = Math.abs(ry - yf);
-  const dz = Math.abs(rz - zf);
-
-  if (dx > dy && dx > dz) {
-    rx = -ry - rz;
-  } else if (dy > dz) {
-    ry = -rx - rz;
-  } else {
-    rz = -rx - ry;
+function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.ceil(seconds));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    const rm = m % 60;
+    return `${h}h ${rm}m`;
   }
-  return { q: rx, r: rz };
+  return m > 0 ? `${m}m ${rem}s` : `${rem}s`;
 }
 
-function hexDistance(a: { q: number; r: number }, b: { q: number; r: number }): number {
-  const dq = a.q - b.q;
-  const dr = a.r - b.r;
-  return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
-}
+/**
+ * Subcomponente aislado para cuentas atrás activas.
+ * Solo monta el temporizador de 1s cuando existen expediciones o marchas activas,
+ * logrando 0 re-renders por minuto en estado inactivo.
+ */
+function ActiveActivitiesSection(props: {
+  expeditions: ActiveExpeditionItem[];
+  marches: ActiveMarchItem[];
+  isOwner: boolean;
+  busy: boolean;
+  onFocusCell: (cellId: string) => void;
+  onResolveExpeditions: () => void;
+  onResolveMarch: (marchId: string) => void;
+}) {
+  const { expeditions, marches, isOwner, busy, onFocusCell, onResolveExpeditions, onResolveMarch } = props;
+  const [now, setNow] = useState(() => Date.now());
 
-function formatRemainingSeconds(completesAt: number, nowMs: number): string {
-  const remainingSeconds = Math.max(0, Math.ceil((completesAt - nowMs) / 1000));
-  const m = Math.floor(remainingSeconds / 60);
-  const s = remainingSeconds % 60;
-  return `${m}m ${s < 10 ? '0' : ''}${s}s`;
-}
+  useEffect(() => {
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
-function formatMarchUnits(units: Array<{ unitType: string; level?: number; count: number }> | Record<string, number> | undefined): string {
-  if (!units) return '';
-  if (Array.isArray(units)) {
-    return units
-      .filter((u) => (u.count ?? 0) > 0)
-      .map((u) => `${UNIT_LABELS[u.unitType] ?? u.unitType}: ${u.count}`)
-      .join(', ');
-  }
-  return Object.entries(units)
-    .filter(([, c]) => (c ?? 0) > 0)
-    .map(([u, c]) => `${UNIT_LABELS[u] ?? u}: ${c}`)
-    .join(', ');
+  return (
+    <div className="bg-[#16120d] border border-[#2d251a] rounded-xl p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2 border-b border-[#251e15] pb-2">
+        <h3 className="text-sm font-serif text-[#f3e6cb] tracking-wide flex items-center gap-2">
+          <Compass className="w-4 h-4 text-[#d4af37]" />
+          Operaciones en curso ({expeditions.length + marches.length})
+        </h3>
+        {isOwner && expeditions.some((e) => now >= e.completesAt) && (
+          <button
+            type="button"
+            onClick={onResolveExpeditions}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-lg bg-[#d4af37]/20 hover:bg-[#d4af37]/30 border border-[#d4af37]/50 text-xs font-medium text-[#f5df9c] transition-colors disabled:opacity-50"
+          >
+            Recoger informes
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+        {expeditions.map((exp) => {
+          const remainingSec = Math.max(0, Math.ceil((exp.completesAt - now) / 1000));
+          const pct = exp.durationMs > 0
+            ? Math.min(100, Math.max(4, Math.round(((exp.durationMs - Math.max(0, exp.completesAt - now)) / exp.durationMs) * 100)))
+            : 100;
+          const ready = remainingSec === 0;
+          return (
+            <div
+              key={exp.expeditionId}
+              className="bg-[#110e0a] border border-[#2a2218] rounded-lg p-2.5 flex flex-col gap-1.5"
+            >
+              <div className="flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  onClick={() => onFocusCell(exp.cellId)}
+                  className="text-[#e7d8b9] hover:text-[#fbbf24] font-medium flex items-center gap-1.5 text-left"
+                >
+                  {exp.isSpyMission ? (
+                    <Eye className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                  ) : (
+                    <Compass className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  )}
+                  {exp.isSpyMission ? "Misión de espionaje" : "Exploración"} ({exp.cellId})
+                </button>
+                <span className="font-mono text-[#c5b593]">
+                  {ready ? "Lista" : formatDuration(remainingSec)}
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-[#241d15] overflow-hidden">
+                <div
+                  className={exp.isSpyMission ? "h-full bg-purple-400 transition-all" : "h-full bg-sky-400 transition-all"}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+
+        {marches.map((m) => {
+          const remainingSec = Math.max(0, Math.ceil((m.completesAt - now) / 1000));
+          const pct = m.durationMs > 0
+            ? Math.min(100, Math.max(4, Math.round(((now - m.startedAt) / m.durationMs) * 100)))
+            : 100;
+          const ready = remainingSec === 0;
+          return (
+            <div
+              key={m.marchId}
+              className="bg-[#110e0a] border border-[#3a221c] rounded-lg p-2.5 flex flex-col gap-1.5"
+            >
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => onFocusCell(m.cellId)}
+                  className="text-[#f3d1c6] hover:text-[#fbbf24] font-medium flex items-center gap-1.5 text-left"
+                >
+                  <Swords className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                  {m.isConquest ? "Marcha de conquista" : "Marcha militar"} ({m.cellId})
+                </button>
+                {ready && isOwner ? (
+                  <button
+                    type="button"
+                    onClick={() => onResolveMarch(m.marchId)}
+                    disabled={busy}
+                    className="px-2 py-0.5 rounded bg-red-900/50 hover:bg-red-800/60 border border-red-500/50 text-red-200 font-medium"
+                  >
+                    Resolver
+                  </button>
+                ) : (
+                  <span className="font-mono text-[#d8b4a6]">
+                    {ready ? "Llegada" : formatDuration(remainingSec)}
+                  </span>
+                )}
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-[#241816] overflow-hidden">
+                <div className="h-full bg-red-500 transition-all" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function MapPanel(props: { kingdomId: string; isOwner: boolean; homeTerritoryId: string | null }) {
-  const { kingdomId, isOwner } = props;
+  const { kingdomId, isOwner, homeTerritoryId } = props;
+
+  // Solo 2 suscripciones reactivas (eliminada la suscripción duplicada a getKingdomTerritories)
   const world = useQuery(getWorldMapCompactQuery, { kingdomId }) as CompactWorldMapResponse | undefined;
-  const mine = useQuery(getKingdomTerritoriesQuery, { kingdomId }) as KingdomTerritories | undefined;
-  const claim = useMutation(claimFreeTerritoryMutation);
-  const ensureHome = useMutation(ensureHomeTerritoryMutation);
+  const armyState = useQuery(getArmyStateQuery, { kingdomId }) as ArmyStateSummary | undefined;
+
   const startExploration = useMutation(startExplorationMutation);
-  const startSpyExploration = useMutation(startSpyExplorationMutation);
-  const cancelExploration = useMutation(cancelExplorationMutation);
-  const resolveExplorations = useMutation(resolveCompletedExplorationsMutation);
-  const startMarch = useMutation(launchAttackMutation);
-  const armyState = useQuery(getArmyStateQuery, { kingdomId });
-  const action = useActionState();
+  const startSpyMission = useMutation(startSpyMissionMutation);
+  const resolvePendingExplorations = useMutation(resolvePendingExplorationsMutation);
+  const claimFreeTerritory = useMutation(claimFreeTerritoryMutation);
+  const launchArmyMarch = useMutation(launchArmyMarchMutation);
+  const resolveArmyMarch = useMutation(resolveArmyMarchMutation);
 
-  const [selected, setSelected] = useState<string | null>(null);
-  const [hoveredCellId, setHoveredCellId] = useState<string | null>(null);
-  const [now, setNow] = useState(Date.now());
-  const [showTroopSelector, setShowTroopSelector] = useState(false);
-  const [targetCellId, setTargetCellId] = useState<string | null>(null);
-  const [selectedSpiesCount, setSelectedSpiesCount] = useState<number>(1);
-
-  // Cámara en coordenadas del mundo (x, y) y factor de zoom
-  const [camera, setCamera] = useState<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 1.35 });
-  const cameraRef = useRef(camera);
-  cameraRef.current = camera;
-
-  const centeredKingdomRef = useRef<string | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>({ width: 720, height: 500 });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const rendererRef = useRef<MedievalMapRenderer | null>(null);
+  const hoverHudRef = useRef<HTMLDivElement | null>(null);
+  const zoomLabelRef = useRef<HTMLSpanElement | null>(null);
 
-  const dragRef = useRef({
-    isDragging: false,
-    startX: 0,
-    startY: 0,
-    hasMoved: false,
-    touchMode: null as 'pan' | 'pinch' | null,
-    initialPinchDist: 0,
-    initialZoom: 1.35,
+  const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [sidebarTab, setSidebarTab] = useState<"info" | "provinces" | "chronicle">("info");
+
+  // Estado del formulario de marcha militar
+  const [marchUnits, setMarchUnits] = useState<Record<string, number>>({
+    infanteria: 0,
+    caballeria: 0,
+    arqueria: 0,
+    asedio: 0,
   });
+  const [marchConquest, setMarchConquest] = useState(true);
 
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
+  const radius = world?.radius ?? MAP.RADIUS;
+  const worldSeed = world?.worldSeed ?? MAP.WORLD_SEED;
+  const effectiveHomeId = world?.homeTerritoryId ?? homeTerritoryId;
 
-  const ownedCoords = mine?.territories ?? [];
+  // Índice estático del disco completo (7.651 hexágonos): se construye UNA vez por sesión
+  const staticWorld = useMemo(
+    () => getCachedStaticWorld(radius, worldSeed, BASE_HEX_SIZE),
+    [radius, worldSeed]
+  );
 
-  // Reconstrucción determinista única en memoria de las 7.651 celdas base del disco
-  const baseCells = useMemo(() => {
-    const r = world?.radius ?? MAP.RADIUS;
-    const seed = world?.worldSeed ?? MAP.WORLD_SEED;
-    return generateWorldCells(r, seed);
-  }, [world?.radius, world?.worldSeed]);
-
-  const effectiveCellMap = useMemo(() => {
-    const map = new Map<string, WorldMapCell>();
-    for (const genCell of baseCells) {
-      map.set(genCell.cellId, {
-        cellId: genCell.cellId,
-        q: genCell.q,
-        r: genCell.r,
-        terrain: 'desconocido',
-        ownerKingdomId: null,
-        ownerName: null,
-        ownerColor: null,
-        isHome: false,
-        state: 'fog',
-        canExplore: false,
-        canConquer: false,
-        explorationPlan: null,
-        expedition: null,
-      });
-    }
-    if (world?.visibleCells) {
-      for (const cell of world.visibleCells) {
-        map.set(cell.cellId, cell);
-      }
+  // Mapa ligero solo de celdas dinámicas visibles (0 asignaciones para celdas bajo niebla)
+  const visibleById = useMemo(() => {
+    const map = new Map<string, RenderableMapCell>();
+    if (!world?.visibleCells) return map;
+    for (let i = 0; i < world.visibleCells.length; i++) {
+      const c = world.visibleCells[i];
+      map.set(c.cellId, c);
     }
     return map;
-  }, [baseCells, world?.visibleCells]);
+  }, [world?.visibleCells]);
 
-  // Celdas reclamables a distancia <= 2 cuando hay reclamaciones pendientes
-  const claimableAdjacentIds = useMemo(() => {
-    const ids = new Set<string>();
-    if ((mine?.pendingClaims ?? 0) <= 0 || ownedCoords.length === 0) return ids;
-    for (const cell of world?.visibleCells ?? []) {
-      if (cell.state === 'explored' && !cell.ownerKingdomId) {
-        const d = Math.min(...ownedCoords.map((t) => hexDistance(t, cell)));
-        if (d <= 2) ids.add(cell.cellId);
+  const ownedCells = useMemo(() => {
+    if (!world?.visibleCells) return [] as RenderableMapCell[];
+    return world.visibleCells.filter((c) => c.state === "owned");
+  }, [world?.visibleCells]);
+
+  const ownedCoords = useMemo<HexCoord[]>(() => {
+    const coords = ownedCells.map((c) => ({ q: c.q, r: c.r }));
+    if (effectiveHomeId) {
+      const hc = parseCellId(effectiveHomeId);
+      if (hc && !coords.some((c) => c.q === hc.q && c.r === hc.r)) {
+        coords.push(hc);
       }
     }
-    return ids;
-  }, [world?.visibleCells, ownedCoords, mine?.pendingClaims]);
+    return coords;
+  }, [ownedCells, effectiveHomeId]);
 
-  const resolvedHomeId = props.homeTerritoryId ?? world?.homeTerritoryId ?? mine?.homeTerritoryId ?? null;
+  // Cálculo O(|T_owned|) por expansión local de radio 2 (en lugar de O(|V| * |T_owned|))
+  const claimableAdjacentIds = useMemo(
+    () => computeClaimableAdjacentIds(ownedCoords, visibleById, radius),
+    [ownedCoords, visibleById, radius]
+  );
 
-  const centerOnCellId = useCallback((cellIdStr: string | null, zoomLevel?: number) => {
-    const coord = cellIdStr ? parseCellId(cellIdStr) : null;
-    if (!coord) {
-      setCamera((prev) => ({ x: 0, y: 0, zoom: zoomLevel ?? prev.zoom }));
-      return;
+  // Datos de la celda seleccionada (combinando overlay dinámico + fallback de niebla sin duplicar 7.651 objetos)
+  const selectedCell = useMemo<RenderableMapCell | null>(() => {
+    if (!selectedCellId) return null;
+    const dynamic = visibleById.get(selectedCellId);
+    if (dynamic) return dynamic;
+    const coord = parseCellId(selectedCellId);
+    if (!coord) return null;
+    return {
+      cellId: selectedCellId,
+      q: coord.q,
+      r: coord.r,
+      terrain: "desconocido",
+      ownerKingdomId: null,
+      ownerName: null,
+      ownerColor: null,
+      isHome: false,
+      state: "fog",
+      canExplore: false,
+      canConquer: false,
+      explorationPlan: null,
+      expedition: null,
+    };
+  }, [selectedCellId, visibleById]);
+
+  const updateZoomBadge = useCallback((zoom: number) => {
+    if (zoomLabelRef.current) {
+      zoomLabelRef.current.textContent = `${Math.round(zoom * 100)}%`;
     }
-    const { x, y } = hexCenter(coord.q, coord.r);
-    setCamera((prev) => ({ x, y, zoom: zoomLevel ?? prev.zoom }));
   }, []);
 
-  // Auto-centrado inicial en la capital del reino al abrir el mapa o cambiar de reino
-  useEffect(() => {
-    if (!world) return;
-    if (centeredKingdomRef.current === kingdomId) return;
-    centeredKingdomRef.current = kingdomId;
-    centerOnCellId(resolvedHomeId, 1.35);
-    if (resolvedHomeId) {
-      setSelected(resolvedHomeId);
-    }
-  }, [kingdomId, world, resolvedHomeId, centerOnCellId]);
+  const applyCamera = useCallback(
+    (next: CameraState) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      renderer.setCamera(next);
+      setPersistedCamera(kingdomId, next);
+      updateZoomBadge(next.zoom);
+    },
+    [kingdomId, updateZoomBadge]
+  );
 
-  // Observador de tamaño del contenedor para DPR exacto
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const updateSize = () => {
-      const rect = el.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        setViewportSize({ width: rect.width, height: rect.height });
-      }
-    };
-    updateSize();
-    if (typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(updateSize);
-      ro.observe(el);
-      return () => ro.disconnect();
-    }
-    window.addEventListener('resize', updateSize);
-    return () => window.removeEventListener('resize', updateSize);
-  }, [world !== undefined]);
-
-  // Zoom con rueda del ratón sin scroll de página ({ passive: false })
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const factor = e.deltaY < 0 ? 1.15 : 0.87;
-      setCamera((prev) => {
-        const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * factor));
-        const wx = prev.x + (mx - rect.width / 2) / prev.zoom;
-        const wy = prev.y + (my - rect.height / 2) / prev.zoom;
-        return {
-          x: wx - (mx - rect.width / 2) / nextZoom,
-          y: wy - (my - rect.height / 2) / nextZoom,
-          zoom: nextZoom,
-        };
+  const centerOnCoord = useCallback(
+    (coord: HexCoord, zoom?: number) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      const current = renderer.getCamera();
+      const pos = axialToPixel(coord.q, coord.r, BASE_HEX_SIZE);
+      applyCamera({
+        x: -pos.x,
+        y: -pos.y,
+        zoom: zoom ?? current.zoom,
       });
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [world !== undefined]);
+    },
+    [applyCamera]
+  );
 
-  // Renderizador HTML5 <canvas> con frustum culling, DPR y nivel de detalle (LOD)
+  const centerOnCapital = useCallback(
+    (resetZoom = true) => {
+      const hc = effectiveHomeId ? parseCellId(effectiveHomeId) : null;
+      const targetZoom = resetZoom ? DEFAULT_CAPITAL_ZOOM : rendererRef.current?.getCamera().zoom ?? DEFAULT_CAPITAL_ZOOM;
+      const cam = createCapitalCenteredCamera(hc, targetZoom, BASE_HEX_SIZE);
+      applyCamera(cam);
+      if (effectiveHomeId) {
+        setSelectedCellId(effectiveHomeId);
+      }
+    },
+    [effectiveHomeId, applyCamera]
+  );
+
+  const centerOnCellId = useCallback(
+    (id: string) => {
+      const coord = parseCellId(id);
+      if (!coord) return;
+      const currentZoom = rendererRef.current?.getCamera().zoom ?? DEFAULT_CAPITAL_ZOOM;
+      centerOnCoord(coord, Math.max(currentZoom, 1.0));
+      setSelectedCellId(id);
+      setSidebarTab("info");
+    },
+    [centerOnCoord]
+  );
+
+  // Referencia estable para leer el overlay dinámico desde manejadores de puntero sin re-registrar listeners
+  const visibleByIdRef = useRef(visibleById);
+  visibleByIdRef.current = visibleById;
+
+  // Inicialización del motor Canvas 2D + ResizeObserver + cámara persistida o centrada en capital
+  const initializedCameraRef = useRef<string | null>(null);
+
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !world) return;
-    let rafId = 0;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
 
-    rafId = window.requestAnimationFrame(() => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const { width, height } = viewportSize;
-      const targetW = Math.max(1, Math.floor(width * dpr));
-      const targetH = Math.max(1, Math.floor(height * dpr));
-      if (canvas.width !== targetW || canvas.height !== targetH) {
-        canvas.width = targetW;
-        canvas.height = targetH;
-      }
+    const renderer = new MedievalMapRenderer(canvas, radius, worldSeed);
+    rendererRef.current = renderer;
 
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+    const syncSize = () => {
+      const rect = container.getBoundingClientRect();
+      renderer.setViewport(rect.width, rect.height, window.devicePixelRatio || 1);
+    };
+    syncSize();
 
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = '#0a0806';
-      ctx.fillRect(0, 0, width, height);
+    // Restaurar cámara persistida si el jugador vuelve de otra pestaña; si es primera apertura, centrar en capital
+    const saved = getPersistedCamera(kingdomId);
+    if (saved) {
+      renderer.setCamera(saved);
+      updateZoomBadge(saved.zoom);
+      initializedCameraRef.current = kingdomId;
+    } else if (effectiveHomeId) {
+      const hc = parseCellId(effectiveHomeId);
+      const initial = createCapitalCenteredCamera(hc, DEFAULT_CAPITAL_ZOOM, BASE_HEX_SIZE);
+      renderer.setCamera(initial);
+      setPersistedCamera(kingdomId, initial);
+      updateZoomBadge(initial.zoom);
+      initializedCameraRef.current = kingdomId;
+    }
 
-      const { x: camX, y: camY, zoom } = camera;
-      const radius = world.radius ?? MAP.RADIUS;
-      const pixelRadius = HEX_SIZE * zoom;
-      const showDetailIcons = pixelRadius >= 12;
-      const showMajorIcons = pixelRadius >= 6.5;
-      const drawFogStroke = pixelRadius >= 7.5;
+    const observer = new ResizeObserver(() => syncSize());
+    observer.observe(container);
 
-      // Bounding box visible en coordenadas del mundo (frustum culling)
-      const pad = HEX_SIZE * 2;
-      const minWx = camX - width / (2 * zoom) - pad;
-      const maxWx = camX + width / (2 * zoom) + pad;
-      const minWy = camY - height / (2 * zoom) - pad;
-      const maxWy = camY + height / (2 * zoom) + pad;
+    return () => {
+      observer.disconnect();
+      renderer.destroy();
+      rendererRef.current = null;
+    };
+  }, [kingdomId, radius, worldSeed, updateZoomBadge]);
 
-      const rMin = Math.max(-radius, Math.floor(minWy / (HEX_SIZE * 1.5)) - 1);
-      const rMax = Math.min(radius, Math.ceil(maxWy / (HEX_SIZE * 1.5)) + 1);
+  // Si homeTerritoryId llega tras el primer montaje y no había cámara guardada, centrar en capital una sola vez
+  useEffect(() => {
+    if (!effectiveHomeId || initializedCameraRef.current === kingdomId) return;
+    const saved = getPersistedCamera(kingdomId);
+    if (saved) {
+      initializedCameraRef.current = kingdomId;
+      return;
+    }
+    const hc = parseCellId(effectiveHomeId);
+    const initial = createCapitalCenteredCamera(hc, DEFAULT_CAPITAL_ZOOM, BASE_HEX_SIZE);
+    applyCamera(initial);
+    initializedCameraRef.current = kingdomId;
+  }, [effectiveHomeId, kingdomId, applyCamera]);
 
-      ctx.save();
-      ctx.translate(width / 2 - camX * zoom, height / 2 - camY * zoom);
-      ctx.scale(zoom, zoom);
-
-      const drawCellPolygon = (cx: number, cy: number) => {
-        ctx.beginPath();
-        ctx.moveTo(cx + HEX_OFFSETS[0].dx, cy + HEX_OFFSETS[0].dy);
-        for (let i = 1; i < 6; i++) {
-          ctx.lineTo(cx + HEX_OFFSETS[i].dx, cy + HEX_OFFSETS[i].dy);
-        }
-        ctx.closePath();
-      };
-
-      // Pasada 1: rellenos base y bordes normales (solo hexágonos en viewport)
-      const highlighted: Array<{ cell: WorldMapCell; cx: number; cy: number }> = [];
-
-      for (let r = rMin; r <= rMax; r++) {
-        const qMin = Math.max(-radius, -r - radius, Math.floor(minWx / (HEX_SIZE * SQRT3) - r / 2) - 1);
-        const qMax = Math.min(radius, -r + radius, Math.ceil(maxWx / (HEX_SIZE * SQRT3) - r / 2) + 1);
-
-        for (let q = qMin; q <= qMax; q++) {
-          const id = `${q},${r}`;
-          const cell = effectiveCellMap.get(id);
-          if (!cell) continue;
-
-          const cx = HEX_SIZE * SQRT3 * (q + r / 2);
-          const cy = HEX_SIZE * 1.5 * r;
-
-          const isSelected = selected === id;
-          const isHovered = hoveredCellId === id;
-          const isOwned = cell.state === 'owned';
-          const isFog = cell.state === 'fog';
-          const isExploring = cell.state === 'exploring';
-          const isClaimable = claimableAdjacentIds.has(id);
-
-          drawCellPolygon(cx, cy);
-
-          if (isFog) {
-            ctx.fillStyle = cell.canExplore ? '#19222b' : '#14100c';
-            ctx.fill();
-            if (drawFogStroke) {
-              ctx.strokeStyle = '#221b14';
-              ctx.lineWidth = 0.5;
-              ctx.stroke();
-            }
-          } else if (isExploring) {
-            ctx.fillStyle = '#2b2113';
-            ctx.fill();
-          } else {
-            ctx.fillStyle = TERRAIN_COLORS[cell.terrain] ?? '#555555';
-            ctx.globalAlpha = isOwned ? 0.95 : cell.ownerKingdomId ? 0.72 : 0.86;
-            ctx.fill();
-            ctx.globalAlpha = 1;
-            ctx.strokeStyle = '#1b160f';
-            ctx.lineWidth = 0.65;
-            ctx.stroke();
-          }
-
-          if (
-            isSelected ||
-            isHovered ||
-            isOwned ||
-            isExploring ||
-            cell.canExplore ||
-            cell.canConquer ||
-            isClaimable ||
-            Boolean(cell.ownerKingdomId)
-          ) {
-            highlighted.push({ cell, cx, cy });
-          }
-        }
-      }
-
-      // Pasada 2: bordes destacados, iconos y selección (encima de los vecinos)
-      for (const { cell, cx, cy } of highlighted) {
-        const isSelected = selected === cell.cellId;
-        const isHovered = hoveredCellId === cell.cellId;
-        const isOwned = cell.state === 'owned';
-        const isFog = cell.state === 'fog';
-        const isExploring = cell.state === 'exploring';
-        const isClaimable = claimableAdjacentIds.has(cell.cellId);
-
-        let stroke: string | null = null;
-        let lineWidth = 1.4;
-        let dashed = false;
-
-        if (isSelected) {
-          stroke = '#ffffff';
-          lineWidth = 2.4;
-        } else if (isOwned) {
-          stroke = cell.ownerColor || '#d4af37';
-          lineWidth = 1.8;
-        } else if (isExploring) {
-          stroke = '#f59e0b';
-          lineWidth = 1.9;
-          dashed = true;
-        } else if (cell.canExplore) {
-          stroke = '#0284c7';
-          lineWidth = 1.3;
-        } else if (cell.canConquer) {
-          stroke = '#7dd3fc';
-          lineWidth = 1.7;
-        } else if (isClaimable) {
-          stroke = '#7dd3fc';
-          lineWidth = 1.4;
-          dashed = true;
-        } else if (cell.ownerKingdomId) {
-          stroke = cell.ownerColor || '#c05050';
-          lineWidth = 1.7;
-        } else if (isHovered) {
-          stroke = '#d4af37';
-          lineWidth = 1.2;
-        }
-
-        if (stroke) {
-          drawCellPolygon(cx, cy);
-          ctx.save();
-          if (dashed) ctx.setLineDash([3, 2]);
-          ctx.strokeStyle = stroke;
-          ctx.lineWidth = lineWidth;
-          ctx.stroke();
-          ctx.restore();
-        }
-
-        if (showMajorIcons) {
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          if (cell.isHome) {
-            ctx.font = 'bold 11px serif';
-            ctx.fillStyle = cell.ownerColor || '#d4af37';
-            ctx.fillText('♜', cx, cy + 0.5);
-          } else if (isExploring) {
-            ctx.font = '10px sans-serif';
-            ctx.fillStyle = '#f59e0b';
-            ctx.fillText('🧭', cx, cy + 0.5);
-          } else if (showDetailIcons) {
-            if (isOwned || cell.ownerKingdomId) {
-              ctx.font = '10px sans-serif';
-              ctx.fillStyle = cell.ownerColor || '#f0e8d4';
-              ctx.fillText('⚑', cx, cy + 0.5);
-            } else if (isFog && cell.canExplore) {
-              ctx.font = '9px sans-serif';
-              ctx.fillStyle = '#38bdf8';
-              ctx.fillText('🔭', cx, cy + 0.5);
-            }
-          }
-        }
-      }
-
-      ctx.restore();
+  // Sincronizar datos del servidor con la capa base del motor
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer || !world) return;
+    renderer.setData({
+      radius: world.radius,
+      worldSeed: world.worldSeed,
+      kingdomId,
+      homeTerritoryId: effectiveHomeId,
+      pendingClaims: world.pendingClaims,
+      visibleCells: world.visibleCells,
+      claimableAdjacentIds,
+      activeMarches: world.activeMarches,
     });
+  }, [world, kingdomId, effectiveHomeId, claimableAdjacentIds]);
 
-    return () => window.cancelAnimationFrame(rafId);
-  }, [world, effectiveCellMap, claimableAdjacentIds, camera, viewportSize, selected, hoveredCellId]);
+  // Sincronizar selección con la capa dinámica O(1) (no redibuja la capa base)
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    const coord = selectedCellId ? parseCellId(selectedCellId) : null;
+    renderer.setSelectedCell(coord ? coord.q : null, coord ? coord.r : null);
+  }, [selectedCellId]);
 
-  const screenToCell = useCallback(
-    (clientX: number, clientY: number): WorldMapCell | null => {
-      const el = containerRef.current;
-      if (!el) return null;
-      const rect = el.getBoundingClientRect();
-      const mx = clientX - rect.left;
-      const my = clientY - rect.top;
-      const cam = cameraRef.current;
-      const wx = cam.x + (mx - rect.width / 2) / cam.zoom;
-      const wy = cam.y + (my - rect.height / 2) / cam.zoom;
-      const { q, r } = pixelToHex(wx, wy);
-      return effectiveCellMap.get(`${q},${r}`) ?? null;
+  // Interacción imperativa de ratón, rueda y gestos táctiles (0 re-renders en React durante pan/zoom/hover)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    let isDragging = false;
+    let didDragMove = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragOriginCam: CameraState = { x: 0, y: 0, zoom: DEFAULT_CAPITAL_ZOOM };
+
+    // Estado de pellizco táctil (pinch-to-zoom centrado en el punto medio real)
+    let pinchStartDist = 0;
+    let pinchStartZoom = DEFAULT_CAPITAL_ZOOM;
+    let activeTouchId: number | null = null;
+
+    const getCanvasLocalPoint = (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: clientX - rect.left, y: clientY - rect.top, width: rect.width, height: rect.height };
+    };
+
+    const updateHoverHud = (clientX: number, clientY: number) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      const pt = getCanvasLocalPoint(clientX, clientY);
+      const picked = renderer.pickCellAtScreen(pt.x, pt.y);
+      if (!picked) {
+        renderer.setHoveredCell(null, null);
+        if (hoverHudRef.current) hoverHudRef.current.textContent = "Fuera del disco cartográfico";
+        return;
+      }
+      renderer.setHoveredCell(picked.q, picked.r);
+      if (hoverHudRef.current) {
+        const dyn = visibleByIdRef.current.get(picked.cellId);
+        if (!dyn || dyn.state === "fog") {
+          hoverHudRef.current.textContent = `(${picked.q}, ${picked.r}) · Tierras inexploradas${dyn?.canExplore ? " · Explorable" : ""}`;
+        } else if (dyn.state === "exploring") {
+          hoverHudRef.current.textContent = `(${picked.q}, ${picked.r}) · Expedición en curso`;
+        } else {
+          const tInfo = dyn.terrain !== "desconocido" ? TERRAINS[dyn.terrain as TerrainType] : null;
+          const ownerLabel = dyn.ownerName ? ` · ${dyn.ownerName}${dyn.isHome ? " (Capital)" : ""}` : " · Tierra libre";
+          hoverHudRef.current.textContent = `(${picked.q}, ${picked.r}) · ${tInfo?.label ?? dyn.terrain}${ownerLabel}`;
+        }
+      }
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      isDragging = true;
+      didDragMove = false;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      dragOriginCam = renderer.getCamera();
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      if (isDragging) {
+        const dx = e.clientX - dragStartX;
+        const dy = e.clientY - dragStartY;
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) didDragMove = true;
+        const nextCam: CameraState = {
+          x: dragOriginCam.x + dx / dragOriginCam.zoom,
+          y: dragOriginCam.y + dy / dragOriginCam.zoom,
+          zoom: dragOriginCam.zoom,
+        };
+        applyCamera(nextCam);
+        return;
+      }
+      updateHoverHud(e.clientX, e.clientY);
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      if (!isDragging) return;
+      isDragging = false;
+      if (!didDragMove) {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+        const pt = getCanvasLocalPoint(e.clientX, e.clientY);
+        const picked = renderer.pickCellAtScreen(pt.x, pt.y);
+        if (picked) {
+          setSelectedCellId(picked.cellId);
+          setSidebarTab("info");
+        }
+      }
+    };
+
+    const onMouseLeave = () => {
+      isDragging = false;
+      rendererRef.current?.setHoveredCell(null, null);
+      if (hoverHudRef.current) hoverHudRef.current.textContent = "Desliza para explorar · Rueda para zoom";
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      const pt = getCanvasLocalPoint(e.clientX, e.clientY);
+      const current = renderer.getCamera();
+      const factor = e.deltaY < 0 ? 1.14 : 1 / 1.14;
+      const next = zoomCameraAtPoint(current, pt.x, pt.y, { width: pt.width, height: pt.height }, current.zoom * factor);
+      applyCamera(next);
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      if (e.touches.length === 1) {
+        const t = e.touches[0];
+        activeTouchId = t.identifier;
+        isDragging = true;
+        didDragMove = false;
+        dragStartX = t.clientX;
+        dragStartY = t.clientY;
+        dragOriginCam = renderer.getCamera();
+      } else if (e.touches.length === 2) {
+        e.preventDefault();
+        isDragging = false;
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        pinchStartDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        pinchStartZoom = renderer.getCamera().zoom;
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      if (e.touches.length === 1 && isDragging) {
+        const t = Array.from(e.touches).find((item) => item.identifier === activeTouchId) ?? e.touches[0];
+        const dx = t.clientX - dragStartX;
+        const dy = t.clientY - dragStartY;
+        if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+          didDragMove = true;
+          e.preventDefault();
+        }
+        applyCamera({
+          x: dragOriginCam.x + dx / dragOriginCam.zoom,
+          y: dragOriginCam.y + dy / dragOriginCam.zoom,
+          zoom: dragOriginCam.zoom,
+        });
+      } else if (e.touches.length === 2 && pinchStartDist > 0) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const midX = (t1.clientX + t2.clientX) * 0.5;
+        const midY = (t1.clientY + t2.clientY) * 0.5;
+        const pt = getCanvasLocalPoint(midX, midY);
+        const targetZoom = pinchStartZoom * (dist / pinchStartDist);
+        const next = zoomCameraAtPoint(renderer.getCamera(), pt.x, pt.y, { width: pt.width, height: pt.height }, targetZoom);
+        applyCamera(next);
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length === 0 && isDragging && !didDragMove && e.changedTouches.length > 0) {
+        const t = e.changedTouches[0];
+        const renderer = rendererRef.current;
+        if (renderer) {
+          const pt = getCanvasLocalPoint(t.clientX, t.clientY);
+          const picked = renderer.pickCellAtScreen(pt.x, pt.y);
+          if (picked) {
+            setSelectedCellId(picked.cellId);
+            setSidebarTab("info");
+          }
+        }
+      }
+      if (e.touches.length < 2) pinchStartDist = 0;
+      if (e.touches.length === 0) {
+        isDragging = false;
+        activeTouchId = null;
+      }
+    };
+
+    canvas.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    canvas.addEventListener("mouseleave", onMouseLeave);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd);
+
+    return () => {
+      canvas.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      canvas.removeEventListener("mouseleave", onMouseLeave);
+      canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [applyCamera]);
+
+  // Acciones de zoom por botón centradas en el centro del viewport
+  const stepZoom = useCallback(
+    (multiplier: number) => {
+      const renderer = rendererRef.current;
+      const container = containerRef.current;
+      if (!renderer || !container) return;
+      const rect = container.getBoundingClientRect();
+      const current = renderer.getCamera();
+      const next = zoomCameraAtPoint(
+        current,
+        rect.width * 0.5,
+        rect.height * 0.5,
+        { width: rect.width, height: rect.height },
+        current.zoom * multiplier
+      );
+      applyCamera(next);
     },
-    [effectiveCellMap]
+    [applyCamera]
   );
 
-  const selectedCell = selected ? effectiveCellMap.get(selected) ?? null : null;
-  const hoveredCell = hoveredCellId ? effectiveCellMap.get(hoveredCellId) ?? null : null;
+  const showWorldOverview = useCallback(() => {
+    applyCamera({ x: 0, y: 0, zoom: 0.3 });
+  }, [applyCamera]);
 
-  const selectedDistance =
-    selectedCell && ownedCoords.length
-      ? Math.min(...ownedCoords.map((t) => hexDistance(t, selectedCell)))
+  // Acciones de juego (todas autoritativas en servidor)
+  const runAction = useCallback(async (fn: () => Promise<string>) => {
+    setBusy(true);
+    setError(null);
+    setFeedback(null);
+    try {
+      const msg = await fn();
+      setFeedback(msg);
+    } catch (err) {
+      setError(normalizeErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const handleStartExploration = useCallback(
+    (cellId: string) =>
+      runAction(async () => {
+        await startExploration({ kingdomId, cellId });
+        return `Expedición enviada hacia (${cellId}).`;
+      }),
+    [kingdomId, runAction, startExploration]
+  );
+
+  const handleStartSpyMission = useCallback(
+    (cellId: string) =>
+      runAction(async () => {
+        await startSpyMission({ kingdomId, cellId });
+        return `Espías despachados hacia (${cellId}).`;
+      }),
+    [kingdomId, runAction, startSpyMission]
+  );
+
+  const handleResolveExpeditions = useCallback(
+    () =>
+      runAction(async () => {
+        const res = (await resolvePendingExplorations({ kingdomId })) as { resolved?: number } | undefined;
+        return `Expediciones resueltas: ${res?.resolved ?? 0}.`;
+      }),
+    [kingdomId, resolvePendingExplorations, runAction]
+  );
+
+  const handleClaimFreeTerritory = useCallback(
+    (cellId: string) =>
+      runAction(async () => {
+        await claimFreeTerritory({ kingdomId, cellId });
+        return `Territorio (${cellId}) anexado a tu reino.`;
+      }),
+    [claimFreeTerritory, kingdomId, runAction]
+  );
+
+  const handleLaunchMarch = useCallback(
+    (cellId: string) => {
+      const units = Object.entries(marchUnits)
+        .filter(([, count]) => count > 0)
+        .map(([unitType, count]) => ({ unitType, count }));
+      if (units.length === 0) {
+        setError("Selecciona al menos una unidad para enviar la marcha.");
+        return;
+      }
+      void runAction(async () => {
+        await launchArmyMarch({
+          kingdomId,
+          targetCellId: cellId,
+          units,
+          isConquest: marchConquest,
+        });
+        setMarchUnits({ infanteria: 0, caballeria: 0, arqueria: 0, asedio: 0 });
+        return `Marcha militar enviada hacia (${cellId}).`;
+      });
+    },
+    [kingdomId, launchArmyMarch, marchConquest, marchUnits, runAction]
+  );
+
+  const handleResolveMarch = useCallback(
+    (marchId: string) =>
+      runAction(async () => {
+        await resolveArmyMarch({ kingdomId, marchId });
+        return "Marcha militar resuelta.";
+      }),
+    [kingdomId, resolveArmyMarch, runAction]
+  );
+
+  const availableSpies = armyState?.spyCount ?? 0;
+  const availableArmyTotal = armyState?.army?.totalActive ?? 0;
+  const availableByType = armyState?.army?.byType ?? {};
+  const activeExpeditions = world?.activeExpeditions ?? [];
+  const activeMarches = world?.activeMarches ?? [];
+  const hasActiveActivities = activeExpeditions.length > 0 || activeMarches.length > 0;
+  const recentDiscoveries = world?.recentDiscoveries ?? [];
+
+  const selectedTerrainMeta =
+    selectedCell && selectedCell.terrain !== "desconocido"
+      ? TERRAINS[selectedCell.terrain as TerrainType]
       : null;
 
-  const canClaimSelected = Boolean(
-    isOwner &&
-      selectedCell &&
-      selectedCell.state === 'explored' &&
-      !selectedCell.ownerKingdomId &&
-      (mine?.pendingClaims ?? 0) > 0 &&
-      selectedDistance !== null &&
-      selectedDistance <= 2
-  );
-
-  const handleStartSpyExploration = () => {
-    if (!selectedCell) return;
-    action.run('spy-explore', async () => {
-      const result = await startSpyExploration({ kingdomId, cellId: selectedCell.cellId });
-      if (result && (result as any).success === false) return result;
-      return `Espía enviado a ${selectedCell.cellId}. Llegada estimada en ${Math.round((result as any).durationSeconds / 60)} min.`;
-    });
-  };
-
-  const handleStartMarch = (cellId: string, composition: TroopSelection[]) => {
-    action.run('march', async () => {
-      const res = await startMarch({ kingdomId, cellId, units: composition });
-      if (res && (res as any).success === false) return res;
-      setSelected(null);
-      setShowTroopSelector(false);
-      setTargetCellId(null);
-      return `Marcha militar enviada hacia ${(res as any).cellId}. Llegada estimada en ${Math.round((res as any).durationSeconds / 60)} min.`;
-    });
-  };
-
-  const handleClaim = () => {
-    if (!selectedCell || !world) return;
-    action.run('claim', async () => {
-      const result = await claim({ kingdomId, cellId: selectedCell.cellId });
-      if (result && result.success === false) return result;
-      setSelected(null);
-      return `Territorio ${result.cellId} (${world.terrains[result.terrain]?.label ?? result.terrain}) anexionado a la corona; reclamaciones restantes: ${result.remainingClaims}.`;
-    });
-  };
-
-  const handleStartExploration = (count?: number) => {
-    if (!selectedCell) return;
-    const spiesCount = count ?? selectedSpiesCount ?? 1;
-    action.run('explore', async () => {
-      const result = await startExploration({ kingdomId, cellId: selectedCell.cellId, spiesCount });
-      if (result && (result as any).success === false) return result;
-      return `Expedición enviada a ${result.cellId} con ${spiesCount} espía(s). Llegada estimada en ${Math.round((result as any).durationSeconds / 60)} min. Coste: ${(result as any).costs.gold} oro y ${(result as any).costs.food} alimentos.`;
-    });
-  };
-
-  const handleCancelExploration = (expeditionId: string) => {
-    action.run('cancel-explore', async () => {
-      const result = await cancelExploration({ kingdomId, expeditionId: expeditionId as any });
-      if (result && result.success === false) return result;
-      return result.message || 'Expedición cancelada.';
-    });
-  };
-
-  const handleResolveCompleted = () => {
-    action.run('resolve-explore', async () => {
-      const result = await resolveExplorations({ kingdomId });
-      if (result && result.success === false) return result;
-      return result.count > 0
-        ? `Se completaron ${result.count} expedición(es) de exploración con éxito.`
-        : 'No hay expediciones pendientes de consolidar.';
-    });
-  };
-
-  const handleEnsureHome = () =>
-    action.run('home', async () => {
-      const result = await ensureHome({ kingdomId });
-      if (result && result.success === false) return result;
-      return `Territorio principal asignado en ${result.homeTerritoryId}.`;
-    });
-
-  if (!world) {
-    return <p className="text-xs text-[#8e816d] italic p-4">Cartografiando el mundo y la niebla de guerra…</p>;
-  }
+  const isSelectedClaimable =
+    selectedCell !== null &&
+    (world?.pendingClaims ?? 0) > 0 &&
+    claimableAdjacentIds.has(selectedCell.cellId);
 
   return (
-    <div className="space-y-6">
-      <PanelSection
-        icon={<MapIcon className="w-4 h-4 text-[#d4af37]" />}
-        title="Mapa del mundo y exploración"
-        aside={
-          <span className="flex items-center gap-3">
-            <span>
-              Explorado: {world.exploredCount}/{world.totalCells} ({world.totalCells > 0 ? Math.round((world.exploredCount / world.totalCells) * 100) : 0} %)
-            </span>
-            <span>·</span>
-            <span className="text-[#d4af37]">{mine?.pendingClaims ?? 0} reclamación(es)</span>
-          </span>
-        }
-      >
-        {!world.generated && (
-          <p className="text-xs text-amber-300 bg-amber-950/30 border border-amber-800/50 rounded p-3">
-            El mundo aún no se ha generado en el servidor: se crea al fundar el primer reino o al asignar un territorio principal.
+    <section className="space-y-4">
+      {/* Cabecera cartográfica compacta */}
+      <div className="bg-[#15110c] border border-[#2d2419] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-serif text-[#f5e7c8] tracking-wide flex items-center gap-2">
+            <Globe className="w-5 h-5 text-[#d4af37]" />
+            Atlas de La Conquista
+          </h2>
+          <p className="text-xs text-[#b7a685] mt-0.5">
+            {world ? (
+              <>
+                {world.exploredCount.toLocaleString("es-ES")} / {staticWorld.totalCells.toLocaleString("es-ES")} regiones cartografiadas ·{" "}
+                {ownedCells.length} territorios propios · {availableSpies} espías · {availableArmyTotal} tropas disponibles
+              </>
+            ) : (
+              "Cargando cartografía del mundo..."
+            )}
           </p>
-        )}
+        </div>
 
-        {isOwner && !resolvedHomeId && (
-          <div className="flex items-center gap-3 text-xs bg-[#18140f] p-3 rounded border border-amber-900/40">
-            <span className="text-[#c7beac]">Este reino todavía no tiene territorio principal en el mapa.</span>
-            <button type="button" className={primaryButton} disabled={action.busy !== null} onClick={handleEnsureHome}>
-              {action.busy === 'home' ? 'Asignando…' : 'Asignar territorio principal'}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => centerOnCapital(true)}
+            className="min-h-[44px] px-3.5 py-2 rounded-lg bg-[#d4af37]/20 hover:bg-[#d4af37]/30 border border-[#d4af37]/50 text-xs font-semibold text-[#fbe6a2] flex items-center gap-2 transition-colors"
+          >
+            <Castle className="w-4 h-4" />
+            Ir a mi capital
+          </button>
+          <button
+            type="button"
+            onClick={showWorldOverview}
+            className="min-h-[44px] px-3 py-2 rounded-lg bg-[#1d1710] hover:bg-[#271f16] border border-[#3a2f20] text-xs font-medium text-[#d9c8a6] flex items-center gap-1.5 transition-colors"
+          >
+            <Globe className="w-4 h-4 text-[#b7a685]" />
+            Vista mundial
+          </button>
+          {isOwner && activeExpeditions.length > 0 && (
+            <button
+              type="button"
+              onClick={handleResolveExpeditions}
+              disabled={busy}
+              className="min-h-[44px] px-3 py-2 rounded-lg bg-[#1c242b] hover:bg-[#23303a] border border-sky-500/40 text-xs font-medium text-sky-200 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Actualizar expediciones
             </button>
+          )}
+        </div>
+      </div>
+
+      {/* Aviso de reclamos gratuitos pendientes */}
+      {isOwner && (world?.pendingClaims ?? 0) > 0 && (
+        <div className="bg-[#231b0e] border border-[#d4af37]/50 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="text-xs text-[#f6e3aa] flex items-center gap-2">
+            <Flag className="w-4 h-4 text-[#fbbf24] shrink-0" />
+            <span>
+              Tienes <strong>{world?.pendingClaims}</strong> reclamo(s) gratuito(s) de territorio. Los hexágonos resaltados en dorado discontinuo pueden anexarse sin combate.
+            </span>
           </div>
-        )}
+          <span className="text-[11px] font-mono text-[#d4af37]">
+            {claimableAdjacentIds.size} disponibles
+          </span>
+        </div>
+      )}
 
-        {/* Panel de actividades y expediciones simultáneas en curso */}
-        {((world.activeExpeditions && world.activeExpeditions.length > 0) ||
-          (world.activeMarches && world.activeMarches.length > 0)) && (
-          <div className="space-y-2.5 bg-[#120f0c] p-3 rounded-lg border border-[#2b2419]">
-            <div className="flex items-center justify-between text-xs font-semibold text-[#e6ded0]">
-              <span className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-amber-400" />
-                Misiones y desplazamientos activos ({(world.activeExpeditions?.length ?? 0) + (world.activeMarches?.length ?? 0)})
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-              {world.activeExpeditions?.map((exp) => (
-                <div
-                  key={exp.expeditionId}
-                  className={`flex flex-col justify-between gap-2 text-xs border p-2.5 rounded-md ${
-                    exp.isSpyMission ? 'bg-[#0f172a] border-sky-800/60' : 'bg-[#1a150e] border-amber-800/60'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold flex items-center gap-1.5">
-                      <Compass
-                        className={`w-3.5 h-3.5 animate-spin ${exp.isSpyMission ? 'text-sky-400' : 'text-amber-400'}`}
-                        style={{ animationDuration: '6s' }}
-                      />
-                      <span className={exp.isSpyMission ? 'text-sky-300' : 'text-amber-300'}>
-                        {exp.isSpyMission ? 'Espía infiltrándose en' : 'Expedición en marcha hacia'} {exp.cellId}
-                      </span>
-                    </span>
-                    <span className="text-[10px] font-mono text-[#a89b88]">
-                      ⏳ {formatRemainingSeconds(exp.completesAt, now)}
-                    </span>
-                  </div>
+      <StatusMessages error={error} message={feedback} />
 
-                  <div className="w-full bg-[#0e0b08] h-1.5 rounded overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-500 ${exp.isSpyMission ? 'bg-sky-500' : 'bg-amber-500'}`}
-                      style={{ width: `${exp.progressPercent}%` }}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between text-[10px]">
-                    <span className="text-[#a89b88]">Progreso: {exp.progressPercent} %</span>
-                    <div className="flex items-center gap-1.5">
-                      {now >= exp.completesAt && (
-                        <button
-                          type="button"
-                          className="px-2 py-0.5 text-[10px] bg-emerald-800 hover:bg-emerald-700 text-white rounded font-medium cursor-pointer"
-                          onClick={handleResolveCompleted}
-                          disabled={action.busy !== null}
-                        >
-                          Consolidar hallazgo
-                        </button>
-                      )}
-                      {isOwner && now < exp.completesAt && (
-                        <button
-                          type="button"
-                          className="px-2 py-0.5 text-[10px] bg-[#331c17] hover:bg-[#4a241e] text-red-300 border border-red-900/40 rounded cursor-pointer"
-                          onClick={() => handleCancelExploration(exp.expeditionId)}
-                          disabled={action.busy !== null}
-                        >
-                          {exp.isSpyMission ? 'Cancelar misión (devuelve espía)' : 'Cancelar (50 % reembolso)'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {world.activeMarches?.map((march) => (
-                <div
-                  key={march.marchId}
-                  className={`flex flex-col justify-between gap-2 text-xs border p-2.5 rounded-md ${
-                    march.isConquest ? 'bg-[#142217] border-emerald-800/60' : 'bg-[#221414] border-red-800/60'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold flex items-center gap-1.5">
-                      <span className={march.isConquest ? 'text-emerald-400' : 'text-red-400'}>
-                        {march.isConquest ? '🏰 Marcha de conquista' : '⚔️ Ataque militar'} en marcha a {march.cellId}
-                      </span>
-                    </span>
-                    <span className="text-[10px] font-mono text-[#a89b88]">
-                      ⏳ {formatRemainingSeconds(march.completesAt, now)}
-                    </span>
-                  </div>
-
-                  <div className="w-full bg-[#0e0b08] h-1.5 rounded overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-500 ${march.isConquest ? 'bg-emerald-500' : 'bg-red-500'}`}
-                      style={{ width: `${march.progressPercent}%` }}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between text-[10px] text-[#a89b88]">
-                    <span>Tropas: {formatMarchUnits(march.units)}</span>
-                    <span>{march.progressPercent} % completado</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* Zona principal: lienzo cartográfico + panel lateral de órdenes */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        {/* Lienzo Canvas 2D ilustrado */}
+        <div className="lg:col-span-8 bg-[#0e0c09] border border-[#2e2519] rounded-xl overflow-hidden shadow-lg relative">
           <div
             ref={containerRef}
-            className="lg:col-span-2 bg-[#0a0806] border border-[#2b2419] rounded-lg overflow-hidden relative cursor-grab active:cursor-grabbing select-none h-[500px] touch-none"
-            onMouseDown={(e) => {
-              if (e.button !== 0) return;
-              dragRef.current.isDragging = true;
-              dragRef.current.startX = e.clientX;
-              dragRef.current.startY = e.clientY;
-              dragRef.current.hasMoved = false;
-            }}
-            onMouseMove={(e) => {
-              if (e.buttons === 1 && dragRef.current.isDragging) {
-                const dx = e.clientX - dragRef.current.startX;
-                const dy = e.clientY - dragRef.current.startY;
-                if (Math.hypot(dx, dy) > 5) {
-                  dragRef.current.hasMoved = true;
-                }
-                if (dragRef.current.hasMoved) {
-                  dragRef.current.startX = e.clientX;
-                  dragRef.current.startY = e.clientY;
-                  setCamera((prev) => ({
-                    ...prev,
-                    x: prev.x - dx / prev.zoom,
-                    y: prev.y - dy / prev.zoom,
-                  }));
-                }
-              } else {
-                const hit = screenToCell(e.clientX, e.clientY);
-                const nextHover = hit?.cellId ?? null;
-                if (nextHover !== hoveredCellId) {
-                  setHoveredCellId(nextHover);
-                }
-              }
-            }}
-            onMouseUp={(e) => {
-              const wasClick = dragRef.current.isDragging && !dragRef.current.hasMoved;
-              dragRef.current.isDragging = false;
-              dragRef.current.hasMoved = false;
-              if (wasClick) {
-                const hit = screenToCell(e.clientX, e.clientY);
-                if (hit) setSelected(hit.cellId);
-              }
-            }}
-            onMouseLeave={() => {
-              dragRef.current.isDragging = false;
-              dragRef.current.hasMoved = false;
-              if (hoveredCellId !== null) setHoveredCellId(null);
-            }}
-            onTouchStart={(e) => {
-              if (e.touches.length === 1) {
-                dragRef.current.touchMode = 'pan';
-                dragRef.current.isDragging = true;
-                dragRef.current.startX = e.touches[0].clientX;
-                dragRef.current.startY = e.touches[0].clientY;
-                dragRef.current.hasMoved = false;
-              } else if (e.touches.length === 2) {
-                dragRef.current.touchMode = 'pinch';
-                dragRef.current.isDragging = false;
-                dragRef.current.hasMoved = true;
-                const dist = Math.hypot(
-                  e.touches[0].clientX - e.touches[1].clientX,
-                  e.touches[0].clientY - e.touches[1].clientY
-                );
-                dragRef.current.initialPinchDist = dist;
-                dragRef.current.initialZoom = cameraRef.current.zoom;
-              }
-            }}
-            onTouchMove={(e) => {
-              if (e.touches.length === 2 && dragRef.current.touchMode === 'pinch') {
-                if (e.cancelable) e.preventDefault();
-                const dist = Math.hypot(
-                  e.touches[0].clientX - e.touches[1].clientX,
-                  e.touches[0].clientY - e.touches[1].clientY
-                );
-                if (dragRef.current.initialPinchDist > 0) {
-                  const scale = dist / dragRef.current.initialPinchDist;
-                  const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, dragRef.current.initialZoom * scale));
-                  setCamera((prev) => ({ ...prev, zoom: nextZoom }));
-                }
-              } else if (e.touches.length === 1 && dragRef.current.touchMode === 'pan') {
-                const dx = e.touches[0].clientX - dragRef.current.startX;
-                const dy = e.touches[0].clientY - dragRef.current.startY;
-                if (Math.hypot(dx, dy) > 6) {
-                  dragRef.current.hasMoved = true;
-                }
-                if (dragRef.current.hasMoved) {
-                  if (e.cancelable) e.preventDefault();
-                  dragRef.current.startX = e.touches[0].clientX;
-                  dragRef.current.startY = e.touches[0].clientY;
-                  setCamera((prev) => ({
-                    ...prev,
-                    x: prev.x - dx / prev.zoom,
-                    y: prev.y - dy / prev.zoom,
-                  }));
-                }
-              }
-            }}
-            onTouchEnd={(e) => {
-              if (e.touches.length === 0) {
-                const wasTap = dragRef.current.touchMode === 'pan' && !dragRef.current.hasMoved;
-                dragRef.current.isDragging = false;
-                dragRef.current.touchMode = null;
-                dragRef.current.hasMoved = false;
-                if (wasTap && e.changedTouches.length > 0) {
-                  const hit = screenToCell(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-                  if (hit) setSelected(hit.cellId);
-                }
-              } else if (e.touches.length === 1) {
-                dragRef.current.touchMode = 'pan';
-                dragRef.current.startX = e.touches[0].clientX;
-                dragRef.current.startY = e.touches[0].clientY;
-                dragRef.current.hasMoved = true;
-              }
-            }}
+            className="relative w-full h-[460px] sm:h-[560px] lg:h-[620px] select-none touch-none cursor-grab active:cursor-grabbing"
           >
-            {/* Controles flotantes de Zoom, Centrado y Vista global */}
-            <div
-              className="absolute top-3 right-3 z-10 flex flex-col gap-1 bg-[#18140f]/90 border border-[#2b2419] p-1 rounded shadow-lg"
-              onMouseDown={(e) => e.stopPropagation()}
-              onMouseUp={(e) => e.stopPropagation()}
-            >
-              <button
-                type="button"
-                className="w-7 h-7 flex items-center justify-center bg-[#241c14] hover:bg-[#33281d] text-[#e6ded0] rounded text-sm font-bold cursor-pointer transition"
-                onClick={() => setCamera((prev) => ({ ...prev, zoom: Math.min(MAX_ZOOM, prev.zoom * 1.25) }))}
-                title="Acercar (Zoom +)"
-              >
-                +
-              </button>
-              <button
-                type="button"
-                className="w-7 h-7 flex items-center justify-center bg-[#241c14] hover:bg-[#33281d] text-[#e6ded0] rounded text-sm font-bold cursor-pointer transition"
-                onClick={() => setCamera((prev) => ({ ...prev, zoom: Math.max(MIN_ZOOM, prev.zoom * 0.8) }))}
-                title="Alejar (Zoom -)"
-              >
-                -
-              </button>
-              <button
-                type="button"
-                className="w-7 h-7 flex items-center justify-center bg-[#241c14] hover:bg-[#33281d] text-[#d4af37] rounded cursor-pointer transition"
-                onClick={() => {
-                  centerOnCellId(resolvedHomeId, 1.45);
-                  if (resolvedHomeId) setSelected(resolvedHomeId);
-                }}
-                title="Centrar en mi capital"
-              >
-                <Crosshair className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                className="w-7 h-7 flex items-center justify-center bg-[#241c14] hover:bg-[#33281d] text-[#8e816d] hover:text-[#e6ded0] rounded text-[11px] cursor-pointer transition"
-                onClick={() => setCamera({ x: 0, y: 0, zoom: 0.34 })}
-                title="Vista completa del mundo"
-              >
-                ⌂
-              </button>
-            </div>
+            <canvas ref={canvasRef} className="block w-full h-full" />
 
-            {/* Indicador flotante de celda bajo el cursor */}
-            {hoveredCell && (
-              <div className="pointer-events-none absolute bottom-3 left-3 z-10 bg-[#14110d]/90 border border-[#2b2419] px-2.5 py-1 rounded text-[10px] text-[#e6ded0] shadow">
-                <span className="font-mono text-[#d4af37] mr-1.5">[{hoveredCell.cellId}]</span>
-                <span>
-                  {hoveredCell.state === 'fog'
-                    ? 'Niebla de guerra (Tierra incógnita)'
-                    : `${world.terrains[hoveredCell.terrain]?.label ?? hoveredCell.terrain}${hoveredCell.ownerName ? ` · ${hoveredCell.ownerName}` : ''}`}
-                </span>
+            {/* Indicador de carga inicial */}
+            {!world && (
+              <div className="absolute inset-0 bg-[#0d0b08]/80 flex items-center justify-center">
+                <div className="text-sm font-serif text-[#e5d4b0]">Trazando el mapa del reino...</div>
               </div>
             )}
 
-            <canvas
-              ref={canvasRef}
-              className="w-full h-full block"
-              role="img"
-              aria-label="Mapa hexagonal de La Conquista"
-            />
+            {/* Barra inferior de coordenadas / hover (actualizada por ref, 0 re-renders en React) */}
+            <div className="absolute left-3 bottom-3 max-w-[calc(100%-6rem)] pointer-events-none">
+              <div
+                ref={hoverHudRef}
+                className="px-3 py-1.5 rounded-lg bg-[#120e0a]/90 border border-[#3a2e1e] text-[11px] text-[#e7d8b9] backdrop-blur-xs truncate"
+              >
+                Desliza para explorar · Rueda para zoom
+              </div>
+            </div>
+
+            {/* Controles táctiles de cámara (>= 44px para móvil) */}
+            <div className="absolute right-3 bottom-3 flex flex-col gap-1.5">
+              <button
+                type="button"
+                aria-label="Acercar mapa"
+                onClick={() => stepZoom(1.25)}
+                className="w-11 h-11 rounded-lg bg-[#15110c]/92 hover:bg-[#241d14] border border-[#3c3020] text-[#f3e6cb] flex items-center justify-center shadow-md transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Alejar mapa"
+                onClick={() => stepZoom(0.8)}
+                className="w-11 h-11 rounded-lg bg-[#15110c]/92 hover:bg-[#241d14] border border-[#3c3020] text-[#f3e6cb] flex items-center justify-center shadow-md transition-colors"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Centrar en mi capital"
+                onClick={() => centerOnCapital(false)}
+                className="w-11 h-11 rounded-lg bg-[#1f180e]/92 hover:bg-[#2f2414] border border-[#d4af37]/50 text-[#fbbf24] flex items-center justify-center shadow-md transition-colors"
+              >
+                <Crosshair className="w-4 h-4" />
+              </button>
+              <div className="px-2 py-1 rounded bg-[#120e0a]/90 border border-[#2f2519] text-center">
+                <span ref={zoomLabelRef} className="text-[10px] font-mono text-[#c9b793]">
+                  {Math.round(DEFAULT_CAPITAL_ZOOM * 100)}%
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-3 text-[11px]">
-            <div className={`${cardClass} space-y-2`}>
-              <span className="font-semibold text-[#e6ded0] text-xs flex items-center justify-between">
-                <span>Información del territorio</span>
-                {selectedCell && <span className="text-[10px] text-[#8e816d] font-mono">[{selectedCell.cellId}]</span>}
+          {/* Leyenda cartográfica limpia debajo del lienzo */}
+          <div className="bg-[#14100b] border-t border-[#282016] px-4 py-2.5 flex flex-wrap items-center justify-between gap-x-5 gap-y-2 text-[11px] text-[#c7b797]">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+              {(Object.keys(MEDIEVAL_TERRAIN_PALETTE) as TerrainType[]).map((tKey) => {
+                const pal = MEDIEVAL_TERRAIN_PALETTE[tKey];
+                return (
+                  <span key={tKey} className="inline-flex items-center gap-1.5">
+                    <span
+                      className="w-2.5 h-2.5 rounded-xs border border-black/40"
+                      style={{ backgroundColor: pal.swatch }}
+                    />
+                    {pal.label}
+                  </span>
+                );
+              })}
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-xs border border-[#3a3023] bg-[#1b1813]" />
+                Niebla
               </span>
+            </div>
+            <span className="text-[#9e8d6c]">
+              Zoom {Math.round(MIN_ZOOM * 100)}%–{Math.round(MAX_ZOOM * 100)}%
+            </span>
+          </div>
+        </div>
 
-              {selectedCell ? (
-                <div className="space-y-2">
-                  {selectedCell.state === 'fog' && (
-                    <div className="space-y-2 bg-[#14100c] p-2.5 rounded border border-[#2b2419]">
-                      <div className="flex items-center gap-1.5 text-sky-400 font-medium">
-                        <Compass className="w-3.5 h-3.5" />
-                        <span>Niebla de guerra (Tierra incógnita)</span>
+        {/* Panel lateral derecho: Inspección, Provincias y Crónica */}
+        <div className="lg:col-span-4 space-y-4">
+          <div className="bg-[#15110c] border border-[#2d2419] rounded-xl overflow-hidden">
+            <div className="grid grid-cols-3 border-b border-[#271f15] bg-[#110e0a] text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setSidebarTab("info")}
+                className={`py-2.5 transition-colors ${
+                  sidebarTab === "info"
+                    ? "text-[#fbe6a2] border-b-2 border-[#d4af37] bg-[#19140e]"
+                    : "text-[#9f8f71] hover:text-[#dfd0b0]"
+                }`}
+              >
+                Territorio
+              </button>
+              <button
+                type="button"
+                onClick={() => setSidebarTab("provinces")}
+                className={`py-2.5 transition-colors ${
+                  sidebarTab === "provinces"
+                    ? "text-[#fbe6a2] border-b-2 border-[#d4af37] bg-[#19140e]"
+                    : "text-[#9f8f71] hover:text-[#dfd0b0]"
+                }`}
+              >
+                Dominios ({ownedCells.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSidebarTab("chronicle")}
+                className={`py-2.5 transition-colors ${
+                  sidebarTab === "chronicle"
+                    ? "text-[#fbe6a2] border-b-2 border-[#d4af37] bg-[#19140e]"
+                    : "text-[#9f8f71] hover:text-[#dfd0b0]"
+                }`}
+              >
+                Crónica
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 max-h-[560px] overflow-y-auto">
+              {sidebarTab === "info" && (
+                <>
+                  {!selectedCell ? (
+                    <div className="py-8 text-center space-y-2">
+                      <MapPin className="w-7 h-7 text-[#7d6c4d] mx-auto" />
+                      <p className="text-sm font-serif text-[#dfd0b0]">Selecciona un hexágono</p>
+                      <p className="text-xs text-[#9e8e70]">
+                        Pulsa sobre cualquier región del mapa para consultar su terreno, soberanía y órdenes disponibles.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Cabecera de la región seleccionada */}
+                      <div className="flex items-start justify-between gap-2 border-b border-[#261e15] pb-3">
+                        <div>
+                          <div className="text-sm font-serif text-[#f5e7c8] flex items-center gap-2">
+                            {selectedCell.isHome && <Castle className="w-4 h-4 text-[#fbbf24]" />}
+                            {selectedTerrainMeta ? selectedTerrainMeta.label : "Región inexplorada"}
+                          </div>
+                          <div className="text-[11px] font-mono text-[#a69574] mt-0.5">
+                            Coordenadas ({selectedCell.q}, {selectedCell.r})
+                          </div>
+                        </div>
+                        <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-[#211b13] border border-[#3a2f20] text-[#dfd0b0]">
+                          {selectedCell.state === "owned"
+                            ? selectedCell.isHome
+                              ? "Tu capital"
+                              : "Tu dominio"
+                            : selectedCell.state === "exploring"
+                            ? "Explorando"
+                            : selectedCell.state === "explored"
+                            ? selectedCell.ownerName
+                              ? "Territorio rival"
+                              : "Tierra libre"
+                            : "Niebla"}
+                        </span>
                       </div>
-                      <p className="text-[#a89b88]">Este territorio no ha sido cartografiado.</p>
-                      {selectedCell.canExplore ? (
-                        <div className="pt-2 border-t border-[#261f14] space-y-3">
-                          <div className="bg-[#0b0f19] p-2 rounded border border-sky-950 text-[11px] space-y-1">
-                            <div className="flex justify-between items-center text-[#c7beac]">
-                              <span>Espías totales del reino:</span>
-                              <span className="font-bold text-[#e6ded0] font-mono">{(armyState?.spies?.active ?? 0) + (armyState?.spies?.busy ?? 0)}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-[#c7beac]">
-                              <span>Espías disponibles:</span>
-                              <span className="font-bold text-emerald-400 font-mono">{armyState?.spies?.active ?? 0}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-[#c7beac]">
-                              <span>Espías en misión:</span>
-                              <span className="font-bold text-amber-400 font-mono">{armyState?.spies?.busy ?? 0}</span>
+
+                      {/* Detalles del terreno */}
+                      {selectedTerrainMeta && (
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="bg-[#110e0a] border border-[#261e15] rounded-lg p-2.5">
+                            <div className="text-[#9c8c6d]">Defensa / Marcha</div>
+                            <div className="text-[#f2e4c7] font-semibold mt-0.5 flex items-center gap-1">
+                              <Shield className="w-3.5 h-3.5 text-[#d4af37]" />
+                              +{Math.round(selectedTerrainMeta.defense * 100)}% · ×{selectedTerrainMeta.marchMultiplier.toFixed(2)}
                             </div>
                           </div>
-
-                          {isOwner && (armyState?.spies?.active ?? 0) > 0 ? (
-                            <div className="space-y-2.5 bg-[#121824] p-2.5 rounded border border-sky-900/40">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="font-semibold text-sky-200">Composición de espías:</span>
-                                <span className="text-[10px] text-sky-400 font-mono">Disp: {armyState!.spies!.active}</span>
-                              </div>
-
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  className="w-8 h-7 bg-[#1e293b] hover:bg-[#334155] text-sky-200 rounded border border-sky-800 text-xs font-bold disabled:opacity-40 cursor-pointer flex items-center justify-center"
-                                  disabled={selectedSpiesCount <= 1}
-                                  onClick={() => setSelectedSpiesCount((prev) => Math.max(1, prev - 1))}
-                                >
-                                  -
-                                </button>
-
-                                <input
-                                  type="number"
-                                  min={1}
-                                  max={armyState!.spies!.active}
-                                  value={Math.min(armyState!.spies!.active, Math.max(1, selectedSpiesCount))}
-                                  onChange={(e) => {
-                                    const val = parseInt(e.target.value) || 1;
-                                    setSelectedSpiesCount(Math.max(1, Math.min(armyState!.spies!.active, val)));
-                                  }}
-                                  className="w-14 bg-[#0f172a] text-center font-mono text-sky-100 font-bold border border-sky-700/60 rounded h-7 text-xs"
-                                />
-
-                                <button
-                                  type="button"
-                                  className="w-8 h-7 bg-[#1e293b] hover:bg-[#334155] text-sky-200 rounded border border-sky-800 text-xs font-bold disabled:opacity-40 cursor-pointer flex items-center justify-center"
-                                  disabled={selectedSpiesCount >= armyState!.spies!.active}
-                                  onClick={() => setSelectedSpiesCount((prev) => Math.min(armyState!.spies!.active, prev + 1))}
-                                >
-                                  +
-                                </button>
-
-                                <button
-                                  type="button"
-                                  className="px-2 h-7 bg-sky-950 hover:bg-sky-900 text-sky-300 rounded border border-sky-700 text-[10px] font-bold cursor-pointer ml-auto"
-                                  onClick={() => setSelectedSpiesCount(armyState!.spies!.active)}
-                                >
-                                  Máx ({armyState!.spies!.active})
-                                </button>
-                              </div>
-
-                              {selectedCell.explorationPlan && (
-                                <div className="text-[10px] text-sky-300/90 pt-1.5 space-y-0.5 border-t border-sky-900/30">
-                                  <div className="flex justify-between items-center">
-                                    <span>Duración estimada:</span>
-                                    <span className="font-mono font-bold text-sky-100">
-                                      {Math.round((selectedCell.explorationPlan.durationSeconds / Math.sqrt(Math.min(armyState!.spies!.active, Math.max(1, selectedSpiesCount)))) / 60)} min
-                                      {selectedSpiesCount > 1 && (
-                                        <span className="text-emerald-400 ml-1 font-normal">(×{Math.sqrt(selectedSpiesCount).toFixed(2)})</span>
-                                      )}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between items-center">
-                                    <span>Provisiones requeridas:</span>
-                                    <span className="font-mono text-amber-300">
-                                      {selectedCell.explorationPlan.costs.gold} oro / {selectedCell.explorationPlan.costs.food} alimento
-                                    </span>
-                                  </div>
-                                </div>
-                              )}
-
-                              <button
-                                type="button"
-                                className={`${primaryButton} w-full py-2 font-bold text-xs shadow-lg shadow-sky-950/40`}
-                                disabled={action.busy !== null || (armyState?.spies?.active ?? 0) < 1}
-                                onClick={() => handleStartExploration(Math.min(armyState!.spies!.active, Math.max(1, selectedSpiesCount)))}
-                              >
-                                {action.busy === 'explore'
-                                  ? 'Enviando expedición…'
-                                  : (() => {
-                                      const eff = Math.min(armyState!.spies!.active, Math.max(1, selectedSpiesCount));
-                                      return `Confirmar y enviar (${eff} espía${eff > 1 ? 's' : ''})`;
-                                    })()}
-                              </button>
+                          <div className="bg-[#110e0a] border border-[#261e15] rounded-lg p-2.5">
+                            <div className="text-[#9c8c6d]">Propietario</div>
+                            <div className="text-[#f2e4c7] font-semibold mt-0.5 truncate">
+                              {selectedCell.ownerName ?? "Sin reclamar"}
                             </div>
-                          ) : (
-                            <p className="text-amber-300 text-[10px] bg-amber-950/40 p-2.5 rounded border border-amber-900/50">
-                              No tienes espías profesionales disponibles en tu reino ({(armyState?.spies?.busy ?? 0) > 0 ? `${armyState?.spies?.busy} en misión` : 'sin agentes reclutados'}). Recluta espías en el Cuartel para iniciar nuevas expediciones.
-                            </p>
-                          )}
+                          </div>
                         </div>
-                      ) : (
-                        <p className="text-[#8e816d] italic pt-1 border-t border-[#261f14]">Para explorar, esta celda debe limitar con tus fronteras.</p>
                       )}
-                    </div>
-                  )}
 
-                  {selectedCell.state === 'exploring' && selectedCell.expedition && (
-                    <div className={`space-y-2 p-2.5 rounded border ${selectedCell.expedition.isSpyMission ? 'bg-[#0f172a] border-sky-800/60' : 'bg-[#1c160e] border-amber-800/60'}`}>
-                      <div className={`flex items-center gap-1.5 font-medium ${selectedCell.expedition.isSpyMission ? 'text-sky-300' : 'text-amber-300'}`}>
-                        {selectedCell.expedition.isSpyMission ? <Compass className="w-3.5 h-3.5 animate-pulse" /> : <Clock className="w-3.5 h-3.5" />}
-                        <span>{selectedCell.expedition.isSpyMission ? 'Agente infiltrado' : 'Reconocimiento en curso'}</span>
-                      </div>
-                      <div className="w-full bg-[#0e0b08] h-2 rounded overflow-hidden">
-                        <div
-                          className={`${selectedCell.expedition.isSpyMission ? 'bg-sky-500' : 'bg-amber-500'} h-full transition-all duration-500`}
-                          style={{ width: `${selectedCell.expedition.progressPercent}%` }}
-                        />
-                      </div>
-                      <div className="flex justify-between text-[10px] text-[#c7beac]">
-                        <span>Progreso: {selectedCell.expedition.progressPercent} %</span>
-                        <span>Restante: {formatRemainingSeconds(selectedCell.expedition.completesAt, now)}</span>
-                      </div>
-                      {isOwner && now < selectedCell.expedition.completesAt && (
+                      {/* Exploración de celda fronteriza */}
+                      {isOwner && selectedCell.state === "fog" && selectedCell.canExplore && (
+                        <div className="bg-[#12100c] border border-[#342a1b] rounded-lg p-3 space-y-2.5">
+                          <div className="text-xs font-semibold text-[#f3df9e]">Expedición de reconocimiento</div>
+                          {selectedCell.explorationPlan && (
+                            <div className="text-[11px] text-[#c3b290] space-y-0.5">
+                              <div>Distancia: {selectedCell.explorationPlan.distance} hexágonos</div>
+                              <div>Duración: {formatDuration(selectedCell.explorationPlan.durationSeconds)}</div>
+                              <div>
+                                Coste: {selectedCell.explorationPlan.costs.gold} oro · {selectedCell.explorationPlan.costs.food} comida
+                              </div>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleStartExploration(selectedCell.cellId)}
+                              disabled={busy || availableSpies < 1}
+                              className="min-h-[40px] px-3 py-2 rounded-lg bg-[#d4af37]/20 hover:bg-[#d4af37]/30 border border-[#d4af37]/50 text-xs font-semibold text-[#fbe6a2] transition-colors disabled:opacity-45"
+                            >
+                              Explorar ({availableSpies} espías)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleStartSpyMission(selectedCell.cellId)}
+                              disabled={busy || availableSpies < 1}
+                              className="min-h-[40px] px-3 py-2 rounded-lg bg-purple-950/50 hover:bg-purple-900/50 border border-purple-500/40 text-xs font-semibold text-purple-200 transition-colors disabled:opacity-45"
+                            >
+                              Misión espía
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Reclamo gratuito */}
+                      {isOwner && isSelectedClaimable && (
                         <button
                           type="button"
-                          className="w-full py-1 text-[10px] bg-[#331c17] hover:bg-[#4a241e] text-red-300 rounded border border-red-900/40 cursor-pointer"
-                          disabled={action.busy !== null}
-                          onClick={() => handleCancelExploration(selectedCell.expedition!.expeditionId)}
+                          onClick={() => handleClaimFreeTerritory(selectedCell.cellId)}
+                          disabled={busy}
+                          className="w-full min-h-[42px] px-3 py-2 rounded-lg bg-[#d4af37] hover:bg-[#e1be49] text-[#14100a] text-xs font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                         >
-                          {selectedCell.expedition.isSpyMission
-                            ? 'Cancelar misión (devuelve espía y 50 % costes)'
-                            : 'Cancelar expedición (recuperar 50 % costes)'}
+                          <Flag className="w-4 h-4" />
+                          Reclamar territorio gratuitamente
                         </button>
                       )}
-                    </div>
-                  )}
 
-                  {(selectedCell.state === 'explored' || selectedCell.state === 'owned') && (
-                    <div className="space-y-1.5 bg-[#14100c] p-2.5 rounded border border-[#2b2419]">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-block w-3.5 h-3.5 rounded border border-[#1b160f]" style={{ backgroundColor: TERRAIN_COLORS[selectedCell.terrain] ?? '#555' }} />
-                        <span className="font-semibold text-[#e6ded0] text-xs">{world.terrains[selectedCell.terrain]?.label ?? selectedCell.terrain}</span>
-                        {selectedCell.state === 'owned' && (
-                          <span className="text-amber-400 font-medium text-[10px]">
-                            {selectedCell.isHome ? '👑 Capital' : '🏰 Posesión de la corona'}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[#c7beac]">
-                        {selectedCell.ownerName
-                          ? `Gobernante: ${selectedCell.ownerName}${selectedCell.isHome ? ' (capital)' : ''}`
-                          : 'Territorio libre · Sin soberano'}
-                      </p>
-
-                      {world.terrains[selectedCell.terrain] && (
-                        <div className="text-[10px] text-[#a89b88] bg-[#0c0a08] p-1.5 rounded">
-                          <span className="block text-[#c7beac] font-medium mb-0.5">Rendimiento comarcal:</span>
-                          {Object.entries(world.terrains[selectedCell.terrain].production).map(([job, bonus]) => (
-                            <span key={job} className="mr-2">+{Math.round(bonus * 100)} % {JOB_LABELS[job] ?? job}</span>
-                          ))}
-                          {world.terrains[selectedCell.terrain].defense > 0 && (
-                            <span className="mr-2">+{Math.round(world.terrains[selectedCell.terrain].defense * 100)} % defensa</span>
-                          )}
-                          {world.terrains[selectedCell.terrain].marchMultiplier !== 1.0 && (
-                            <span className="mr-2 text-amber-300">
-                              ×{world.terrains[selectedCell.terrain].marchMultiplier.toFixed(2)} marcha ({world.terrains[selectedCell.terrain].marchMultiplier > 1 ? `+${Math.round((world.terrains[selectedCell.terrain].marchMultiplier - 1) * 100)} % tiempo y fatiga` : ''})
+                      {/* Marcha militar sobre territorio explorado no propio */}
+                      {isOwner && selectedCell.state === "explored" && (
+                        <div className="bg-[#15100d] border border-[#3a241d] rounded-lg p-3 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-[#f3cfc3] flex items-center gap-1.5">
+                              <Swords className="w-3.5 h-3.5 text-red-400" />
+                              Enviar marcha militar
                             </span>
-                          )}
-                        </div>
-                      )}
+                            <span className="text-[11px] text-[#b89f94]">
+                              {availableArmyTotal} disponibles
+                            </span>
+                          </div>
 
-                      {isOwner && !selectedCell.ownerKingdomId && (
-                        <div className="pt-2 border-t border-[#261f14] space-y-2">
-                          {(mine?.pendingClaims ?? 0) > 0 && (
-                            <button
-                              type="button"
-                              className={`${primaryButton} w-full`}
-                              disabled={!canClaimSelected || action.busy !== null}
-                              onClick={handleClaim}
-                            >
-                              {action.busy === 'claim'
-                                ? 'Reclamando territorio…'
-                                : canClaimSelected
-                                ? 'Reclamar territorio libre'
-                                : 'Demasiado lejos (máximo 2 hexágonos)'}
-                            </button>
-                          )}
-                          {selectedCell.canConquer ? (
-                            <button
-                              type="button"
-                              className={`${primaryButton} w-full`}
-                              disabled={action.busy !== null || (armyState?.summary?.totalActive ?? 0) === 0}
-                              onClick={() => {
-                                setTargetCellId(selectedCell.cellId);
-                                setShowTroopSelector(true);
-                              }}
-                            >
-                              Conquistar territorio con ejército
-                            </button>
-                          ) : (
-                            <div className="p-2 bg-[#1c1610] rounded border border-amber-900/20 text-[#8e816d] italic text-center">
-                              No hay conexión directa con tus fronteras para la conquista militar.
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {isOwner && selectedCell.ownerKingdomId && selectedCell.ownerKingdomId !== kingdomId && (
-                        <div className="pt-2 border-t border-[#261f14] space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            {Object.entries(UNIT_LABELS).map(([uKey, uLabel]) => {
+                              const maxAvail = availableByType[uKey] ?? 0;
+                              return (
+                                <label key={uKey} className="block text-[11px] text-[#c7b797]">
+                                  <span className="flex justify-between">
+                                    <span>{uLabel}</span>
+                                    <span className="font-mono text-[#8f7f63]">{maxAvail}</span>
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={maxAvail}
+                                    value={marchUnits[uKey] ?? 0}
+                                    onChange={(e) => {
+                                      const val = Math.max(0, Math.min(maxAvail, Number(e.target.value) || 0));
+                                      setMarchUnits((prev) => ({ ...prev, [uKey]: val }));
+                                    }}
+                                    className="mt-1 w-full px-2 py-1.5 rounded bg-[#0d0a08] border border-[#32271b] text-xs text-[#f3e6cb] font-mono"
+                                  />
+                                </label>
+                              );
+                            })}
+                          </div>
+
+                          <label className="flex items-center gap-2 text-xs text-[#dfd0b0] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={marchConquest}
+                              onChange={(e) => setMarchConquest(e.target.checked)}
+                              className="rounded border-[#4a3b28]"
+                            />
+                            Orden de conquista (anexar si vence)
+                          </label>
+
                           <button
                             type="button"
-                            className="w-full bg-red-900/60 hover:bg-red-800 text-red-100 py-1.5 rounded text-xs border border-red-800/40 transition disabled:opacity-50"
-                            disabled={action.busy !== null || (armyState?.summary?.totalActive ?? 0) === 0}
-                            onClick={() => {
-                              setTargetCellId(selectedCell.cellId);
-                              setShowTroopSelector(true);
-                            }}
+                            onClick={() => handleLaunchMarch(selectedCell.cellId)}
+                            disabled={busy || availableArmyTotal <= 0}
+                            className="w-full min-h-[42px] px-3 py-2 rounded-lg bg-red-900/70 hover:bg-red-800/80 border border-red-500/50 text-xs font-semibold text-red-100 transition-colors disabled:opacity-45"
                           >
-                            Lanzar ataque militar
+                            Despachar ejército hacia ({selectedCell.q}, {selectedCell.r})
                           </button>
                         </div>
                       )}
                     </div>
                   )}
-                  {showTroopSelector && targetCellId && (
-                    <TroopSelector
-                      availableUnits={armyState?.units ?? []}
-                      targetDetails={
-                        selectedCell
-                          ? {
-                              cellId: selectedCell.cellId,
-                              terrainLabel: world.terrains[selectedCell.terrain]?.label ?? selectedCell.terrain,
-                              distance: selectedDistance ?? undefined,
-                              terrainMultiplier: world.terrains[selectedCell.terrain]?.marchMultiplier,
-                              resourceBonusLabel: world.terrains[selectedCell.terrain]?.production
-                                ? Object.entries(world.terrains[selectedCell.terrain].production)
-                                    .map(([j, v]) => `+${Math.round(v * 100)}% ${JOB_LABELS[j] ?? j}`)
-                                    .join(', ')
-                                : undefined,
-                              isAttack: Boolean(selectedCell.ownerKingdomId && selectedCell.ownerKingdomId !== kingdomId),
-                            }
-                          : undefined
-                      }
-                      onConfirm={(comp) => handleStartMarch(targetCellId, comp)}
-                      onCancel={() => setShowTroopSelector(false)}
-                    />
+                </>
+              )}
+
+              {sidebarTab === "provinces" && (
+                <div className="space-y-2">
+                  {ownedCells.length === 0 ? (
+                    <p className="text-xs text-[#9e8e70] py-4 text-center">Aún no hay territorios registrados.</p>
+                  ) : (
+                    ownedCells.map((cell) => {
+                      const tLabel =
+                        cell.terrain !== "desconocido"
+                          ? TERRAINS[cell.terrain as TerrainType]?.label ?? cell.terrain
+                          : "Desconocido";
+                      return (
+                        <button
+                          key={cell.cellId}
+                          type="button"
+                          onClick={() => centerOnCellId(cell.cellId)}
+                          className="w-full text-left px-3 py-2 rounded-lg bg-[#110e0a] hover:bg-[#1c160f] border border-[#2a2218] flex items-center justify-between gap-2 transition-colors"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            {cell.isHome ? (
+                              <Castle className="w-4 h-4 text-[#fbbf24] shrink-0" />
+                            ) : (
+                              <Flag className="w-3.5 h-3.5 text-[#b59c6b] shrink-0" />
+                            )}
+                            <span className="text-xs text-[#f2e4c7] font-medium truncate">
+                              {cell.isHome ? "Capital" : tLabel} ({cell.cellId})
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-[#9e8e70] shrink-0">{tLabel}</span>
+                        </button>
+                      );
+                    })
                   )}
                 </div>
-              ) : (
-                <p className="text-[#8e816d] italic">Selecciona un hexágono en el mapa para examinar su cartografía o enviar exploradores.</p>
+              )}
+
+              {sidebarTab === "chronicle" && (
+                <div className="space-y-2">
+                  {recentDiscoveries.length === 0 ? (
+                    <p className="text-xs text-[#9e8e70] py-4 text-center">
+                      Aún no se han registrado descubrimientos recientes.
+                    </p>
+                  ) : (
+                    recentDiscoveries
+                      .slice()
+                      .reverse()
+                      .map((disc, i) => (
+                        <button
+                          key={`${disc.cellId}-${i}`}
+                          type="button"
+                          onClick={() => centerOnCellId(disc.cellId)}
+                          className="w-full text-left px-3 py-2 rounded-lg bg-[#110e0a] hover:bg-[#1c160f] border border-[#2a2218] transition-colors"
+                        >
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-mono text-[#e7d8b9]">({disc.cellId})</span>
+                            <span className="text-[10px] text-[#8f7f63]">
+                              {new Date(disc.discoveredAt).toLocaleDateString("es-ES")}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-[#b7a685] mt-0.5">{disc.note}</div>
+                        </button>
+                      ))
+                  )}
+                </div>
               )}
             </div>
-
-            {world.kingdomLegend && world.kingdomLegend.length > 0 && (
-              <div className={`${cardClass} space-y-1.5`}>
-                <span className="font-semibold text-[#e6ded0] text-xs flex items-center justify-between">
-                  <span>Reinos del mundo ({world.kingdomLegend.length})</span>
-                  <span className="text-[10px] text-[#8e816d]">Identidad de color</span>
-                </span>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                  {world.kingdomLegend.map((k) => (
-                    <div key={k.id} className="flex items-center justify-between text-[11px] bg-[#120f0c] p-1.5 rounded border border-[#221c15]">
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        <span className="w-3 h-3 rounded-full shrink-0 border border-[#000]/40 shadow-sm" style={{ backgroundColor: k.color }} />
-                        <div className="truncate">
-                          <span className="font-semibold text-[#e6ded0] truncate block">{k.name}</span>
-                          {k.monarchName && <span className="text-[9px] text-[#8e816d] block truncate">Rey {k.monarchName}</span>}
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-mono text-[#d4af37] shrink-0 ml-2 font-medium">
-                        {k.territoryCount} {k.territoryCount === 1 ? 'provincia' : 'provincias'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {!isOwner && <p className="text-[#8e816d] italic">{readOnlyNote}</p>}
           </div>
-        </div>
 
-        {/* SECCIÓN INFORMATIVA DEBAJO DEL MAPA */}
-        <div className="mt-6 space-y-4 pt-4 border-t border-[#2b2419]">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className={`${cardClass} space-y-2.5`}>
-              <span className="font-semibold text-[#e6ded0] text-xs flex items-center justify-between border-b border-[#221c15] pb-2">
-                <span className="flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-amber-400" />
-                  Descubrimientos de exploración ({mine?.recentDiscoveries?.length ?? 0})
-                </span>
-                <span className="text-[10px] text-[#8e816d] font-mono">Historial registrado</span>
-              </span>
-
-              {mine?.recentDiscoveries && mine.recentDiscoveries.length > 0 ? (
-                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                  {mine.recentDiscoveries.slice().reverse().map((disc, idx) => {
-                    const dateObj = disc.discoveredAt ? new Date(disc.discoveredAt) : null;
-                    const dateFormatted = dateObj
-                      ? dateObj.toLocaleDateString('es-ES', {
-                          day: '2-digit',
-                          month: '2-digit',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })
-                      : 'Fecha no registrada';
-
-                    return (
-                      <div key={idx} className="bg-[#120f0c] p-2.5 rounded border border-[#221c15] text-[11px] text-[#c7beac] space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono text-amber-300 font-bold flex items-center gap-1">
-                            <span>🧭</span> [{disc.cellId}]
-                          </span>
-                          <span className="text-[10px] text-[#8e816d] font-mono">{dateFormatted}</span>
-                        </div>
-                        <p className="text-[#a89b88] text-[10px] leading-relaxed">{disc.note}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-xs text-[#8e816d] italic p-3 text-center bg-[#120f0c] rounded border border-[#221c15]">
-                  No se han registrado descubrimientos de exploración en este reino.
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <div className={`${cardClass} space-y-2`}>
-                <span className="font-semibold text-[#e6ded0] text-xs flex items-center justify-between border-b border-[#221c15] pb-2">
-                  <span className="flex items-center gap-1.5">
-                    <Flag className="w-4 h-4 text-[#d4af37]" />
-                    Provincias de la corona ({mine?.territories?.length ?? 0})
-                  </span>
-                  <span className="text-[10px] text-[#d4af37]">Soberanía territorial</span>
-                </span>
-                {mine?.territories.length ? (
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                    {mine.territories.map((t) => (
-                      <button
-                        type="button"
-                        key={t.cellId}
-                        onClick={() => {
-                          setSelected(t.cellId);
-                          centerOnCellId(t.cellId);
-                        }}
-                        className="w-full flex justify-between items-center text-[11px] text-[#c7beac] bg-[#120f0c] hover:bg-[#1a1510] p-2 rounded border border-[#221c15] cursor-pointer text-left transition"
-                      >
-                        <span className="font-mono">
-                          [{t.cellId}] · <span className="text-[#e6ded0]">{world.terrains[t.terrain]?.label ?? t.terrain}</span>
-                        </span>
-                        <span className="text-[10px] text-amber-400 font-medium">
-                          {t.isHome ? '👑 Capital' : '🏰 Provincia'}
-                        </span>
-                      </button>
-                    ))}
+          {/* Leyenda de reinos visibles (solo reinos revelados fuera de niebla) */}
+          {world && world.kingdomLegend.length > 0 && (
+            <div className="bg-[#15110c] border border-[#2d2419] rounded-xl p-4 space-y-2.5">
+              <h3 className="text-xs font-serif uppercase tracking-wider text-[#cbb995]">
+                Reinos avistados
+              </h3>
+              <div className="space-y-1.5">
+                {world.kingdomLegend.map((k) => (
+                  <div key={k.id} className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-2 text-[#e9dbb9] truncate">
+                      <span
+                        className="w-3 h-3 rounded-xs border border-black/50 shrink-0"
+                        style={{ backgroundColor: k.color }}
+                      />
+                      <span className="truncate">{k.name}</span>
+                    </span>
+                    <span className="font-mono text-[11px] text-[#a69574] shrink-0">
+                      {k.territoryCount} {k.territoryCount === 1 ? "región" : "regiones"}
+                    </span>
                   </div>
-                ) : (
-                  <p className="text-xs text-[#8e816d] italic">Sin territorios anexionados.</p>
-                )}
-              </div>
-
-              <div className={`${cardClass} space-y-1.5`}>
-                <span className="font-semibold text-[#e6ded0] text-xs block">Clave cartográfica del mapa</span>
-                <div className="grid grid-cols-2 gap-2 text-[10px] pt-1">
-                  <div className="flex items-center gap-1.5 text-[#c7beac]">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-[#120f0c] border border-[#272017]" />
-                    <span>Niebla de guerra</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-sky-400">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-[#120f0c] border border-sky-500" />
-                    <span>Explorable (frontera)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-amber-400">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-[#8a9a3a] border-2 border-amber-400" />
-                    <span>Reino propio</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-red-400">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-[#555] border border-red-500" />
-                    <span>Reino rival</span>
-                  </div>
-                </div>
-                <p className="text-[#8e816d] text-[10px] pt-1 border-t border-[#221c15] mt-1">
-                  Símbolos: ♜ Castillo capital · ⚑ Provincia · 🧭 Expedición en curso · 🔭 Frontera explorable.
-                </p>
+                ))}
               </div>
             </div>
-          </div>
+          )}
         </div>
-        <StatusMessages error={action.error} message={action.message} />
-      </PanelSection>
-    </div>
+      </div>
+
+      {/* Operaciones en curso: solo se monta (y ejecuta ticker de 1s) si hay expediciones o marchas activas */}
+      {hasActiveActivities && (
+        <ActiveActivitiesSection
+          expeditions={activeExpeditions}
+          marches={activeMarches}
+          isOwner={isOwner}
+          busy={busy}
+          onFocusCell={centerOnCellId}
+          onResolveExpeditions={handleResolveExpeditions}
+          onResolveMarch={handleResolveMarch}
+        />
+      )}
+    </section>
   );
 }
