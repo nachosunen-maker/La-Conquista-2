@@ -1981,11 +1981,13 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     const { asUser, kingdomId } = await foundKingdom(t, "reg-multi-lots", "Reino Múltiples Lotes");
     await setResourcesAndPop(t, kingdomId, { gold: 10000, wood: 10000, food: 10000, stone: 10000, iron: 10000 });
 
-    const targetCellId = "1,0";
+    const homeId = (await t.run(async (ctx) => (await ctx.db.get(kingdomId))?.homeTerritoryId)) ?? "0,0";
+    const [hq, hr] = homeId.split(",").map(Number);
+    const targetCellId = `${hq + 1},${hr}`;
     await t.run(async (ctx) => {
-      // Crear celda neutral adyacente válida (distancia 1 desde 0,0) y explorada
-      await ctx.db.insert("territories", { cellId: "1,0", q: 1, r: 0, terrain: "llanura" });
-      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: "1,0", discoveredAt: Date.now() });
+      // Crear celda neutral adyacente válida (distancia 1 desde capital) y explorada
+      await ctx.db.insert("territories", { cellId: targetCellId, q: hq + 1, r: hr, terrain: "llanura" });
+      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: targetCellId, discoveredAt: Date.now() });
       // Lote 1 de infantería nivel 1 (count: 4)
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 1, count: 4 });
       // Lote 2 de infantería nivel 1 (count: 6)
@@ -2012,9 +2014,12 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     const { asUser, kingdomId } = await foundKingdom(t, "reg-repeated-req", "Reino Solicitudes Repetidas");
     await setResourcesAndPop(t, kingdomId, { gold: 10000, wood: 10000, food: 10000, stone: 10000, iron: 10000 });
 
+    const homeId = (await t.run(async (ctx) => (await ctx.db.get(kingdomId))?.homeTerritoryId)) ?? "0,0";
+    const [hq, hr] = homeId.split(",").map(Number);
+    const targetCellId = `${hq + 1},${hr}`;
     await t.run(async (ctx) => {
-      await ctx.db.insert("territories", { cellId: "1,0", q: 1, r: 0, terrain: "llanura" });
-      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: "1,0", discoveredAt: Date.now() });
+      await ctx.db.insert("territories", { cellId: targetCellId, q: hq + 1, r: hr, terrain: "llanura" });
+      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: targetCellId, discoveredAt: Date.now() });
       // Total disponible: 5
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "arqueria", level: 1, count: 5 });
     });
@@ -2023,7 +2028,7 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     await expect(
       asUser.mutation(api.army.launchAttack, {
         kingdomId,
-        cellId: "1,0",
+        cellId: targetCellId,
         units: [
           { unitType: "arqueria", level: 1, count: 3 },
           { unitType: "arqueria", level: 1, count: 3 },
@@ -2037,9 +2042,12 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     const { asUser, kingdomId } = await foundKingdom(t, "reg-contradictory", "Reino Contradictorio");
     await setResourcesAndPop(t, kingdomId, { gold: 10000, wood: 10000, food: 10000, stone: 10000, iron: 10000 });
 
+    const homeId = (await t.run(async (ctx) => (await ctx.db.get(kingdomId))?.homeTerritoryId)) ?? "0,0";
+    const [hq, hr] = homeId.split(",").map(Number);
+    const targetCellId = `${hq + 1},${hr}`;
     await t.run(async (ctx) => {
-      await ctx.db.insert("territories", { cellId: "1,0", q: 1, r: 0, terrain: "llanura" });
-      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: "1,0", discoveredAt: Date.now() });
+      await ctx.db.insert("territories", { cellId: targetCellId, q: hq + 1, r: hr, terrain: "llanura" });
+      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: targetCellId, discoveredAt: Date.now() });
       // Documento contradictorio 1: infantería pero isSpy: true
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 1, count: 10, isSpy: true });
       // Documento contradictorio 2: espía pero isSpy: false
@@ -2050,7 +2058,7 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     await expect(
       asUser.mutation(api.army.launchAttack, {
         kingdomId,
-        cellId: "1,0",
+        cellId: targetCellId,
         units: [{ unitType: "infanteria", level: 1, count: 2 }],
       })
     ).rejects.toThrow(/Tropas insuficientes/i);
@@ -2148,9 +2156,12 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     const { asUser, kingdomId } = await foundKingdom(t, "reg-consolidate", "Reino Consolidación");
     await setResourcesAndPop(t, kingdomId, { gold: 10000, wood: 10000, food: 10000, stone: 10000, iron: 10000 });
 
+    const homeId = (await t.run(async (ctx) => (await ctx.db.get(kingdomId))?.homeTerritoryId)) ?? "0,0";
+    const [hq, hr] = homeId.split(",").map(Number);
+    const targetCellId = `${hq + 1},${hr}`;
     await t.run(async (ctx) => {
-      await ctx.db.insert("territories", { cellId: "1,0", q: 1, r: 0, terrain: "llanura" });
-      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: "1,0", discoveredAt: Date.now() });
+      await ctx.db.insert("territories", { cellId: targetCellId, q: hq + 1, r: hr, terrain: "llanura" });
+      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: targetCellId, discoveredAt: Date.now() });
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 1, count: 4, isSpy: false });
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 1, count: 6, isSpy: false });
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 3, count: 5, isSpy: false });
@@ -2170,7 +2181,7 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     ];
     for (const badUnits of invalidPayloads) {
       await expect(
-        asUser.mutation(api.army.launchAttack, { kingdomId, cellId: "1,0", units: badUnits })
+        asUser.mutation(api.army.launchAttack, { kingdomId, cellId: targetCellId, units: badUnits })
       ).rejects.toThrow();
     }
 
@@ -2184,7 +2195,7 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     // Lanzar ataque con solicitudes repetidas del mismo tipo/nivel y otro nivel distinto
     const res = await asUser.mutation(api.army.launchAttack, {
       kingdomId,
-      cellId: "1,0",
+      cellId: targetCellId,
       units: [
         { unitType: "infanteria", level: 1, count: 3 },
         { unitType: "infanteria", level: 1, count: 4 },
@@ -2275,9 +2286,13 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     const { kingdomId: otherKingdomId } = await foundKingdom(t, "reg-idemp-other", "Reino Rival");
     await setResourcesAndPop(t, kingdomId, { gold: 20000, wood: 20000, food: 20000, stone: 20000, iron: 20000 });
 
+    const homeId = (await t.run(async (ctx) => (await ctx.db.get(kingdomId))?.homeTerritoryId)) ?? "0,0";
+    const [hq, hr] = homeId.split(",").map(Number);
+    const adjCellId = `${hq + 1},${hr}`;
+    const dist2CellId = `${hq + 2},${hr}`;
     await t.run(async (ctx) => {
-      await ctx.db.insert("territories", { cellId: "1,0", q: 1, r: 0, terrain: "llanura" });
-      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: "1,0", discoveredAt: Date.now() });
+      await ctx.db.insert("territories", { cellId: adjCellId, q: hq + 1, r: hr, terrain: "llanura" });
+      await ctx.db.insert("exploredTerritories", { kingdomId, cellId: adjCellId, discoveredAt: Date.now() });
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "infanteria", level: 3, count: 12, isSpy: false });
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 4, isSpy: true });
     });
@@ -2285,7 +2300,7 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
     // Ruta A: conquista neutral resuelta concurrentemente dos veces vía completeMarchScheduled
     const launchA = await asUser.mutation(api.army.launchAttack, {
       kingdomId,
-      cellId: "1,0",
+      cellId: adjCellId,
       units: [{ unitType: "infanteria", level: 3, count: 5 }],
     });
     const [rA1, rA2] = await Promise.allSettled([
@@ -2303,7 +2318,7 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
 
     // Ruta B: desafío cancelado (desafio_no_vigente) resuelto dos veces
     const cancelledChallengeId = await t.run(async (ctx) => {
-      await ctx.db.insert("territories", { cellId: "2,0", q: 2, r: 0, terrain: "llanura", ownerKingdomId: otherKingdomId });
+      await ctx.db.insert("territories", { cellId: dist2CellId, q: hq + 2, r: hr, terrain: "llanura", ownerKingdomId: otherKingdomId });
       return ctx.db.insert("challenges", {
         challengerKingdomId: kingdomId,
         targetKingdomId: otherKingdomId,
@@ -2319,9 +2334,9 @@ describe("Pruebas de regresión del sistema militar y parches de lanzamiento de 
       await ctx.db.patch(infDoc._id, { count: infDoc.count - 4 });
       return ctx.db.insert("armyMarches", {
         kingdomId,
-        targetCellId: "2,0",
-        targetQ: 2,
-        targetR: 0,
+        targetCellId: dist2CellId,
+        targetQ: hq + 2,
+        targetR: hr,
         distance: 2,
         units: [{ unitType: "infanteria", level: 3, count: 4 }],
         startedAt: Date.now(),
@@ -2515,9 +2530,11 @@ describe("Cierre definitivo Punto 1: reclutamiento, misiones, concurrencia y coh
     });
 
     // Enviar el único espía activo a una expedición en celda no explorada (distancia 2) -> active=0, busy=1, occupied=4, remaining=0
-    const targetId = "2,0";
+    const homeId = (await t.run(async (ctx) => (await ctx.db.get(kingdomId))?.homeTerritoryId)) ?? "0,0";
+    const [hq, hr] = homeId.split(",").map(Number);
+    const targetId = `${hq + 2},${hr}`;
     await t.run(async (ctx) => {
-      await ctx.db.insert("territories", { cellId: targetId, q: 2, r: 0, terrain: "llanura" });
+      await ctx.db.insert("territories", { cellId: targetId, q: hq + 2, r: hr, terrain: "llanura" });
     });
 
     const launchRes = await asUser.mutation(api.territories.startExploration, {
@@ -2640,13 +2657,15 @@ describe("Cierre definitivo Punto 1: reclutamiento, misiones, concurrencia y coh
     await setBuildingLevel(t, kingdomId, "cuartel", 4);
     await setResourcesAndPop(t, kingdomId, { gold: 50000, food: 50000, wood: 50000, stone: 50000, iron: 50000, available: 50 });
 
-    const targetA = "2,0";
-    const targetB = "0,2";
-    const targetC = "-2,0";
+    const homeId = (await t.run(async (ctx) => (await ctx.db.get(kingdomId))?.homeTerritoryId)) ?? "0,0";
+    const [hq, hr] = homeId.split(",").map(Number);
+    const targetA = `${hq + 2},${hr}`;
+    const targetB = `${hq},${hr + 2}`;
+    const targetC = `${hq - 2},${hr}`;
     await t.run(async (ctx) => {
-      await ctx.db.insert("territories", { cellId: targetA, q: 2, r: 0, terrain: "llanura" });
-      await ctx.db.insert("territories", { cellId: targetB, q: 0, r: 2, terrain: "llanura" });
-      await ctx.db.insert("territories", { cellId: targetC, q: -2, r: 0, terrain: "llanura" });
+      await ctx.db.insert("territories", { cellId: targetA, q: hq + 2, r: hr, terrain: "llanura" });
+      await ctx.db.insert("territories", { cellId: targetB, q: hq, r: hr + 2, terrain: "llanura" });
+      await ctx.db.insert("territories", { cellId: targetC, q: hq - 2, r: hr, terrain: "llanura" });
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 2, isSpy: true });
     });
 

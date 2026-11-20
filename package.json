@@ -11,7 +11,8 @@
     "test": "tsx scripts/runEconomicTests.ts",
     "codegen:offline": "node scripts/regenerateConvexApi.mjs",
     "test:integration": "vitest run",
-    "simulate:battles": "tsx scripts/simulateBattles.ts"
+    "simulate:battles": "tsx scripts/simulateBattles.ts",
+    "benchmark:map": "node scripts/runMapBrowserBenchmark.mjs"
   },
   "dependencies": {
     "@auth/core": "^0.41.3",
@@ -29,6 +30,7 @@
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^6.1.1",
     "convex-test": "^0.0.62",
+    "playwright": "^1.65.1",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

@@ -189,10 +189,85 @@ export function inspectWorldIntegrity(
   };
 }
 
+export interface CivilizationAnchorVerification {
+  readonly totalAnchors: number;
+  readonly allInsideMap: boolean;
+  readonly allIntegerCoords: boolean;
+  readonly hasDuplicates: boolean;
+  readonly minPairwiseDistance: number;
+  readonly minPairwisePair: readonly [string, string] | null;
+  readonly invalidAnchors: string[];
+  readonly duplicateCoords: string[];
+  readonly isValid: boolean;
+}
+
+/**
+ * Verifica matemáticamente las 12 anclas de civilización en `CIVILIZATION_ZONES`:
+ * 1. Todas dentro del mapa de radio R.
+ * 2. Todas son coordenadas enteras válidas.
+ * 3. Distancia hexagonal mínima entre dos anclas distintas (21 para las 12 anclas canónicas).
+ * 4. Sin anclas duplicadas.
+ */
+export function verifyCivilizationAnchors(radius: number = MAP.RADIUS): CivilizationAnchorVerification {
+  const entries = Object.entries(CIVILIZATION_ZONES);
+  const invalidAnchors: string[] = [];
+  const duplicateCoords: string[] = [];
+  const seenCoords = new Set<string>();
+  let allInsideMap = true;
+  let allIntegerCoords = true;
+
+  for (const [civ, z] of entries) {
+    const isInt = Number.isInteger(z.q) && Number.isInteger(z.r);
+    if (!isInt) allIntegerCoords = false;
+    const inside = isInt && isInsideWorld({ q: z.q, r: z.r }, radius);
+    if (!inside) {
+      allInsideMap = false;
+      invalidAnchors.push(civ);
+    }
+    const key = cellId(z.q, z.r);
+    if (seenCoords.has(key)) {
+      duplicateCoords.push(`${civ}@${key}`);
+    } else {
+      seenCoords.add(key);
+    }
+  }
+
+  let minPairwiseDistance = Infinity;
+  let minPairwisePair: [string, string] | null = null;
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const d = hexDistance(entries[i][1], entries[j][1]);
+      if (d < minPairwiseDistance) {
+        minPairwiseDistance = d;
+        minPairwisePair = [entries[i][0], entries[j][0]];
+      }
+    }
+  }
+  if (!Number.isFinite(minPairwiseDistance)) minPairwiseDistance = 0;
+
+  return {
+    totalAnchors: entries.length,
+    allInsideMap,
+    allIntegerCoords,
+    hasDuplicates: duplicateCoords.length > 0,
+    minPairwiseDistance,
+    minPairwisePair,
+    invalidAnchors,
+    duplicateCoords,
+    isValid:
+      entries.length === 12 &&
+      allInsideMap &&
+      allIntegerCoords &&
+      duplicateCoords.length === 0 &&
+      minPairwiseDistance >= 21,
+  };
+}
+
 export interface ExistingKingdomSpawn {
   q: number;
   r: number;
   civilization?: string | null;
+  kingdomId?: string;
 }
 
 export interface SpawnPlacementOptions {
@@ -200,8 +275,13 @@ export interface SpawnPlacementOptions {
   existingKingdoms?: ReadonlyArray<ExistingKingdomSpawn>;
   separationMin?: number;
   separationMax?: number;
-  preferCenterIfEmpty?: boolean;
 }
+
+export type SpawnPlacementStatus =
+  | "solution_in_target_band"
+  | "solution_min_separation_only"
+  | "proven_infeasible_min_separation"
+  | "search_exhausted_without_infeasibility_proof";
 
 export interface SpawnPlacementDiagnostics {
   cell: WorldCell | null;
@@ -209,28 +289,45 @@ export interface SpawnPlacementDiagnostics {
   zoneAnchor: HexCoord | null;
   zoneLabel: string | null;
   nearestDistance: number | null;
+  nearestSameCivDistance: number | null;
   distanceToAnchor: number | null;
   withinTargetBand: boolean;
-  strictPackingImpossible: boolean;
+  meetsMinSeparation: boolean;
+  status: SpawnPlacementStatus;
+  provenInfeasible: boolean;
   reason: string;
 }
 
 export interface WorldSpawnGeometryAnalysis {
-  radius: number;
-  totalCells: number;
-  diameter: number;
-  separationMin: number;
-  separationMax: number;
-  greedyPackingMaxAtMinSeparation: number;
-  exclusiveDiskCellsAtHalfSep: number;
-  areaUpperBoundAtMinSeparation: number;
-  sameCivClusterMaxAtBand30: number;
-  notes: string;
+  readonly radius: number;
+  readonly totalCells: number;
+  readonly diameter: number;
+  readonly separationMin: number;
+  readonly separationMax: number;
+  readonly exclusionDiskRadius: number;
+  readonly fullExclusionDiskCells: number;
+  readonly minDiskIntersectionCells: number;
+  readonly minDiskIntersectionCoord: HexCoord;
+  readonly conservativeIntersectionUpperBound: number;
+  readonly constructiveGreedyCountAtMinSeparation: number;
+  readonly constructivePlacement: ReadonlyArray<HexCoord>;
+  readonly constructiveMinPairwiseDistance: number | null;
+  readonly constructiveVerified: boolean;
+  readonly constructiveClusterCountAtBand30: number;
+  readonly notes: string;
 }
 
 /**
- * Demostración geométrica verificable de empaquetamiento hexagonal sobre un disco de radio R.
- * Calcula cota superior por área (discos disjuntos de radio floor((minSep-1)/2)) y cota constructiva greedy.
+ * Análisis geométrico riguroso de empaquetamiento hexagonal sobre el disco canónico de radio R.
+ *
+ * Para R = 50 y separación mínima d_min = 20:
+ * - Radio del disco de exclusión disjunto: r_ex = floor((20 - 1) / 2) = 9.
+ * - Disco completo de radio 9: 1 + 3 × 9 × 10 = 271 celdas.
+ * - Intersección mínima real entre el disco de radio 9 y el mapa de radio 50 (verificada
+ *   exhaustivamente en las 7.651 posiciones válidas): 100 celdas (vértices del borde).
+ * - Cota superior conservadora válida: floor(7.651 / 100) = 76 capitales.
+ *   (Es una cota superior, NO una afirmación de que quepan 76 capitales.)
+ * - La distribución constructiva se devuelve explícitamente y se verifica por parejas.
  */
 export function analyzeWorldSpawnGeometry(
   radius: number = MAP.RADIUS,
@@ -239,23 +336,73 @@ export function analyzeWorldSpawnGeometry(
 ): WorldSpawnGeometryAnalysis {
   const totalCells = 1 + 3 * radius * (radius + 1);
   const diameter = 2 * radius;
-  const halfRadius = Math.max(0, Math.floor((separationMin - 1) / 2));
-  const exclusiveDiskCellsAtHalfSep = 1 + 3 * halfRadius * (halfRadius + 1);
-  const areaUpperBoundAtMinSeparation = Math.floor(totalCells / exclusiveDiskCellsAtHalfSep);
+  const exclusionDiskRadius = Math.max(0, Math.floor((separationMin - 1) / 2));
+  const fullExclusionDiskCells = 1 + 3 * exclusionDiskRadius * (exclusionDiskRadius + 1);
 
-  // Empaquetamiento constructivo en orden espiral/axial sobre el disco completo
-  const placed: HexCoord[] = [];
+  // Recorrido exhaustivo de todas las posiciones válidas del mapa para hallar la intersección mínima real
+  // entre el disco de exclusión de radio `exclusionDiskRadius` y el disco del mundo de radio `radius`.
+  let minDiskIntersectionCells = Infinity;
+  let minDiskIntersectionCoord: HexCoord = { q: 0, r: 0 };
+
   for (let q = -radius; q <= radius; q++) {
-    for (let r = Math.max(-radius, -q - radius); r <= Math.min(radius, -q + radius); r++) {
-      const candidate = { q, r };
-      if (placed.every((p) => hexDistance(candidate, p) >= separationMin)) {
-        placed.push(candidate);
+    const rLow = Math.max(-radius, -q - radius);
+    const rHigh = Math.min(radius, -q + radius);
+    for (let r = rLow; r <= rHigh; r++) {
+      // Intersección del disco centrado en (q, r) de radio exclusionDiskRadius con el disco centrado en (0, 0) de radio radius
+      const qMin = Math.max(-radius, q - exclusionDiskRadius);
+      const qMax = Math.min(radius, q + exclusionDiskRadius);
+      let count = 0;
+      for (let cq = qMin; cq <= qMax; cq++) {
+        const dq = cq - q;
+        const rMinWorld = Math.max(-radius, -cq - radius);
+        const rMaxWorld = Math.min(radius, -cq + radius);
+        const rMinDisk = r + Math.max(-exclusionDiskRadius, -dq - exclusionDiskRadius);
+        const rMaxDisk = r + Math.min(exclusionDiskRadius, -dq + exclusionDiskRadius);
+        const lo = Math.max(rMinWorld, rMinDisk);
+        const hi = Math.min(rMaxWorld, rMaxDisk);
+        if (hi >= lo) {
+          count += hi - lo + 1;
+        }
+      }
+      if (count < minDiskIntersectionCells) {
+        minDiskIntersectionCells = count;
+        minDiskIntersectionCoord = { q, r };
       }
     }
   }
 
-  // En una subregión de diámetro <= separationMax (radio <= separationMax / 2 = 15),
-  // cuántas capitales caben manteniendo distancia mutua >= separationMin (20):
+  const conservativeIntersectionUpperBound =
+    minDiskIntersectionCells > 0 ? Math.floor(totalCells / minDiskIntersectionCells) : 0;
+
+  // Distribución constructiva determinista (voraz axial) y verificación por parejas
+  const constructivePlacement: HexCoord[] = [];
+  for (let q = -radius; q <= radius; q++) {
+    for (let r = Math.max(-radius, -q - radius); r <= Math.min(radius, -q + radius); r++) {
+      const candidate = { q, r };
+      if (constructivePlacement.every((p) => hexDistance(candidate, p) >= separationMin)) {
+        constructivePlacement.push(candidate);
+      }
+    }
+  }
+
+  let constructiveMinPairwiseDistance: number | null = null;
+  let constructiveVerified = true;
+  for (let i = 0; i < constructivePlacement.length; i++) {
+    if (!isInsideWorld(constructivePlacement[i], radius)) {
+      constructiveVerified = false;
+    }
+    for (let j = i + 1; j < constructivePlacement.length; j++) {
+      const d = hexDistance(constructivePlacement[i], constructivePlacement[j]);
+      if (constructiveMinPairwiseDistance === null || d < constructiveMinPairwiseDistance) {
+        constructiveMinPairwiseDistance = d;
+      }
+      if (d < separationMin) {
+        constructiveVerified = false;
+      }
+    }
+  }
+
+  // Solución constructiva en una subregión de diámetro <= separationMax (radio = floor(separationMax / 2))
   const clusterRadius = Math.floor(separationMax / 2);
   const clusterPlaced: HexCoord[] = [];
   for (let q = -clusterRadius; q <= clusterRadius; q++) {
@@ -273,22 +420,39 @@ export function analyzeWorldSpawnGeometry(
     diameter,
     separationMin,
     separationMax,
-    greedyPackingMaxAtMinSeparation: placed.length,
-    exclusiveDiskCellsAtHalfSep,
-    areaUpperBoundAtMinSeparation,
-    sameCivClusterMaxAtBand30: clusterPlaced.length,
+    exclusionDiskRadius,
+    fullExclusionDiskCells,
+    minDiskIntersectionCells,
+    minDiskIntersectionCoord,
+    conservativeIntersectionUpperBound,
+    constructiveGreedyCountAtMinSeparation: constructivePlacement.length,
+    constructivePlacement,
+    constructiveMinPairwiseDistance,
+    constructiveVerified,
+    constructiveClusterCountAtBand30: clusterPlaced.length,
     notes:
-      `En radio ${radius} (${totalCells} celdas, diámetro ${diameter}), cada reino con separación >= ${separationMin} ` +
-      `reserva al menos un disco exclusivo de radio ${halfRadius} (${exclusiveDiskCellsAtHalfSep} celdas): cota superior absoluta ~${areaUpperBoundAtMinSeparation} ` +
-      `reinos y empaquetamiento constructivo ${placed.length}. Además, dentro de una zona de diámetro ${separationMax} solo caben ` +
-      `${clusterPlaced.length} reinos con d >= ${separationMin} mutua; a partir de ese umbral resulta matemáticamente imposible satisfacer ` +
-      `a la vez separación >= ${separationMin}, distancia <= ${separationMax} y agrupación compacta en la misma zona.`,
+      `En radio ${radius} (${totalCells} celdas, diámetro ${diameter}) con separación mínima ${separationMin}: ` +
+      `el disco de exclusión tiene radio ${exclusionDiskRadius} (${fullExclusionDiskCells} celdas completo), ` +
+      `pero su intersección mínima real con el mapa en el borde es de ${minDiskIntersectionCells} celdas ` +
+      `(en ${minDiskIntersectionCoord.q},${minDiskIntersectionCoord.r}). ` +
+      `Cota superior conservadora válida: floor(${totalCells}/${minDiskIntersectionCells}) = ${conservativeIntersectionUpperBound} ` +
+      `(cota superior, no afirmación de alcanzabilidad). ` +
+      `Distribución constructiva verificada por parejas: ${constructivePlacement.length} capitales ` +
+      `(d_min observada = ${constructiveMinPairwiseDistance ?? "N/A"}). ` +
+      `En una subregión de diámetro ${separationMax}, el algoritmo constructivo ubica ${clusterPlaced.length} capitales.`,
   };
 }
 
 /**
  * Selecciona la casilla inicial con agrupación geográfica por civilización y banda objetivo [20, 30] hexágonos.
- * Si no se pasa `options`, mantiene el comportamiento histórico para compatibilidad de pruebas heredadas.
+ * Reglas:
+ * - La civilización determina el ancla regional (sin usar el centro del mundo como posición predeterminada).
+ * - La primera capital de una civilización utiliza su ancla regional si está libre y cumple la separación mínima.
+ * - La separación mínima (20) tiene prioridad estricta frente a la preferencia de región.
+ * - Se favorece la banda [20, 30] respecto a reinos de la misma civilización y agrupación regional.
+ * - Desempate determinista por `cellId`.
+ * - Nunca asigna celdas fuera del mapa ni ocupadas.
+ * - Si no se pasa `options`, mantiene compatibilidad determinista para llamadas heredadas sin civilización.
  */
 export function chooseHomeCellWithDiagnostics(
   cells: ReadonlyArray<WorldCell>,
@@ -296,20 +460,31 @@ export function chooseHomeCellWithDiagnostics(
   existingHomes: ReadonlyArray<HexCoord>,
   options?: SpawnPlacementOptions
 ): SpawnPlacementDiagnostics {
-  const free = cells.filter((cell) => !occupiedCellIds.has(cell.cellId));
+  const free = cells.filter((cell) => isInsideWorld(cell, MAP.RADIUS) && !occupiedCellIds.has(cell.cellId));
+  const normCiv = normalizeCivilizationId(options?.civilization);
+  const zone = normCiv ? CIVILIZATION_ZONES[normCiv] ?? null : null;
+  const anchor: HexCoord | null = zone ? { q: zone.q, r: zone.r } : null;
+
   if (free.length === 0) {
     return {
       cell: null,
-      civilization: normalizeCivilizationId(options?.civilization),
-      zoneAnchor: null,
-      zoneLabel: null,
+      civilization: normCiv,
+      zoneAnchor: anchor,
+      zoneLabel: zone?.label ?? null,
       nearestDistance: null,
+      nearestSameCivDistance: null,
       distanceToAnchor: null,
       withinTargetBand: false,
-      strictPackingImpossible: true,
-      reason: "No hay casillas libres disponibles en el mapa.",
+      meetsMinSeparation: false,
+      status: "proven_infeasible_min_separation",
+      provenInfeasible: true,
+      reason: "No hay casillas libres disponibles dentro del mapa.",
     };
   }
+
+  const minSep = options?.separationMin ?? TERRITORIES.SPAWN_SEPARATION_MIN;
+  const maxSep = options?.separationMax ?? TERRITORIES.SPAWN_SEPARATION_MAX;
+  const idealMid = (minSep + maxSep) / 2;
 
   if (!options) {
     if (existingHomes.length === 0) {
@@ -317,50 +492,61 @@ export function chooseHomeCellWithDiagnostics(
       return {
         cell: center,
         civilization: null,
-        zoneAnchor: { q: 0, r: 0 },
-        zoneLabel: "Centro del mundo",
+        zoneAnchor: null,
+        zoneLabel: null,
         nearestDistance: null,
-        distanceToAnchor: hexDistance(center, { q: 0, r: 0 }),
+        nearestSameCivDistance: null,
+        distanceToAnchor: null,
         withinTargetBand: true,
-        strictPackingImpossible: false,
-        reason: "Casilla central asignada al primer reino.",
+        meetsMinSeparation: true,
+        status: "solution_in_target_band",
+        provenInfeasible: false,
+        reason: "Primer reino sin civilización especificada asignado de forma determinista.",
       };
     }
     let best: WorldCell | null = null;
     let bestScore = -1;
     for (const cell of free) {
-      const score = Math.min(...existingHomes.map((home) => hexDistance(cell, home)));
+      let score = Infinity;
+      for (const home of existingHomes) {
+        const d = hexDistance(cell, home);
+        if (d < score) score = d;
+      }
       if (score > bestScore || (score === bestScore && best && cell.cellId < best.cellId)) {
         best = cell;
         bestScore = score;
       }
     }
+    const meetsMin = bestScore >= minSep;
+    const inBand = bestScore >= minSep && bestScore <= maxSep;
     return {
       cell: best,
       civilization: null,
       zoneAnchor: null,
       zoneLabel: null,
       nearestDistance: bestScore,
+      nearestSameCivDistance: null,
       distanceToAnchor: null,
-      withinTargetBand: bestScore >= TERRITORIES.SPAWN_SEPARATION_MIN && bestScore <= TERRITORIES.SPAWN_SEPARATION_MAX,
-      strictPackingImpossible: false,
-      reason: "Asignación heredada por distancia máxima mínima.",
+      withinTargetBand: inBand,
+      meetsMinSeparation: meetsMin,
+      status: inBand
+        ? "solution_in_target_band"
+        : meetsMin
+          ? "solution_min_separation_only"
+          : "proven_infeasible_min_separation",
+      provenInfeasible: !meetsMin,
+      reason: "Asignación determinista por distancia máxima mínima (sin civilización).",
     };
   }
 
-  const normCiv = normalizeCivilizationId(options.civilization);
-  const zone = normCiv ? CIVILIZATION_ZONES[normCiv] ?? null : null;
-  const anchor: HexCoord | null = zone ? { q: zone.q, r: zone.r } : null;
-  const minSep = options.separationMin ?? TERRITORIES.SPAWN_SEPARATION_MIN;
-  const maxSep = options.separationMax ?? TERRITORIES.SPAWN_SEPARATION_MAX;
-  const idealMid = (minSep + maxSep) / 2;
+  const existing: ReadonlyArray<ExistingKingdomSpawn> =
+    options.existingKingdoms && options.existingKingdoms.length > 0
+      ? options.existingKingdoms
+      : existingHomes.map((h) => ({ q: h.q, r: h.r, civilization: null }));
 
-  const existing: ReadonlyArray<ExistingKingdomSpawn> = options.existingKingdoms && options.existingKingdoms.length > 0
-    ? options.existingKingdoms
-    : existingHomes.map((h) => ({ q: h.q, r: h.r, civilization: null }));
-
+  // Primer reino del mundo: si tiene ancla de civilización, usa SIEMPRE su ancla regional (no el centro)
   if (existing.length === 0) {
-    const targetRef: HexCoord = options.preferCenterIfEmpty || !anchor ? { q: 0, r: 0 } : anchor;
+    const targetRef: HexCoord = anchor ?? { q: 0, r: 0 };
     let best = free[0];
     let bestAnchorDist = hexDistance(best, targetRef);
     for (const cell of free) {
@@ -373,17 +559,18 @@ export function chooseHomeCellWithDiagnostics(
     return {
       cell: best,
       civilization: normCiv,
-      zoneAnchor: options.preferCenterIfEmpty ? { q: 0, r: 0 } : anchor,
-      zoneLabel: options.preferCenterIfEmpty ? "Centro del mundo" : (zone?.label ?? null),
+      zoneAnchor: anchor,
+      zoneLabel: zone?.label ?? null,
       nearestDistance: null,
-      distanceToAnchor: bestAnchorDist,
+      nearestSameCivDistance: null,
+      distanceToAnchor: anchor ? bestAnchorDist : null,
       withinTargetBand: true,
-      strictPackingImpossible: false,
-      reason: options.preferCenterIfEmpty
-        ? "Primer reino asignado al centro del mundo."
-        : zone
-          ? `Primer reino asignado a su zona geográfica (${zone.label}).`
-          : "Primer reino asignado al centro.",
+      meetsMinSeparation: true,
+      status: "solution_in_target_band",
+      provenInfeasible: false,
+      reason: zone
+        ? `Primera capital de ${normCiv} asignada en su ancla regional (${zone.label}: ${best.cellId}).`
+        : `Primer reino sin ancla regional asignado en ${best.cellId}.`,
     };
   }
 
@@ -391,8 +578,52 @@ export function chooseHomeCellWithDiagnostics(
     ? existing.filter((k) => normalizeCivilizationId(k.civilization) === normCiv)
     : [];
 
-  let bestFeasible: { cell: WorldCell; cost: number; nearest: number; anchorDist: number; inBand: boolean } | null = null;
-  let bestFallback: { cell: WorldCell; nearest: number; anchorDist: number } | null = null;
+  // Si es la primera capital de esta civilización y su ancla regional está libre y respeta d >= minSep, usarla directamente
+  if (sameCiv.length === 0 && anchor) {
+    const anchorId = cellId(anchor.q, anchor.r);
+    if (!occupiedCellIds.has(anchorId)) {
+      const anchorCell = free.find((c) => c.cellId === anchorId);
+      if (anchorCell) {
+        let nearestAtAnchor = Infinity;
+        for (const k of existing) {
+          const d = hexDistance(anchorCell, k);
+          if (d < nearestAtAnchor) nearestAtAnchor = d;
+        }
+        if (nearestAtAnchor >= minSep) {
+          const inBand = nearestAtAnchor <= maxSep;
+          return {
+            cell: anchorCell,
+            civilization: normCiv,
+            zoneAnchor: anchor,
+            zoneLabel: zone?.label ?? null,
+            nearestDistance: nearestAtAnchor,
+            nearestSameCivDistance: null,
+            distanceToAnchor: 0,
+            withinTargetBand: inBand,
+            meetsMinSeparation: true,
+            status: inBand ? "solution_in_target_band" : "solution_min_separation_only",
+            provenInfeasible: false,
+            reason: inBand
+              ? `Primera capital de ${normCiv} en su ancla regional (${zone?.label}) dentro de la banda [${minSep}, ${maxSep}].`
+              : `Primera capital de ${normCiv} en su ancla regional (${zone?.label}); separación mínima >= ${minSep} cumplida (d = ${nearestAtAnchor}).`,
+          };
+        }
+      }
+    }
+  }
+
+  interface CandidateScore {
+    cell: WorldCell;
+    tier: number; // 0 = cumple banda objetivo; 1 = cumple minSep pero fuera de banda
+    cost: number;
+    nearest: number;
+    nearestSame: number | null;
+    anchorDist: number;
+    inBand: boolean;
+  }
+
+  let bestFeasible: CandidateScore | null = null;
+  let bestFallback: { cell: WorldCell; nearest: number; nearestSame: number | null; anchorDist: number } | null = null;
 
   for (const cell of free) {
     let nearest = Infinity;
@@ -401,8 +632,19 @@ export function chooseHomeCellWithDiagnostics(
       if (d < nearest) nearest = d;
     }
 
+    let nearestSame: number | null = null;
+    if (sameCiv.length > 0) {
+      let ns = Infinity;
+      for (const k of sameCiv) {
+        const d = hexDistance(cell, k);
+        if (d < ns) ns = d;
+      }
+      nearestSame = ns;
+    }
+
     const anchorDist = anchor ? hexDistance(cell, anchor) : 0;
 
+    // Prioridad 1 absoluta: separación mínima >= minSep
     if (nearest < minSep) {
       if (
         !bestFallback ||
@@ -410,36 +652,41 @@ export function chooseHomeCellWithDiagnostics(
         (nearest === bestFallback.nearest && anchorDist < bestFallback.anchorDist) ||
         (nearest === bestFallback.nearest && anchorDist === bestFallback.anchorDist && cell.cellId < bestFallback.cell.cellId)
       ) {
-        bestFallback = { cell, nearest, anchorDist };
+        bestFallback = { cell, nearest, nearestSame, anchorDist };
       }
       continue;
     }
 
-    const inBand = nearest >= minSep && nearest <= maxSep;
-    let cost = 0;
+    let inBand: boolean;
+    let tier: number;
+    let cost: number;
 
-    if (sameCiv.length > 0) {
-      let nearestSame = Infinity;
-      for (const k of sameCiv) {
-        const d = hexDistance(cell, k);
-        if (d < nearestSame) nearestSame = d;
-      }
-      const sameBandPenalty = nearestSame <= maxSep ? 0 : (nearestSame - maxSep) * 4;
-      cost = sameBandPenalty + anchorDist * 1.5 + Math.abs(nearestSame - idealMid) * 0.5;
+    if (sameCiv.length > 0 && nearestSame !== null) {
+      // Misma civilización: favorecer distancia [20, 30] a la misma civilización y cercanía al ancla regional
+      inBand = nearestSame >= minSep && nearestSame <= maxSep;
+      tier = inBand ? 0 : 1;
+      const bandOverflow = nearestSame > maxSep ? (nearestSame - maxSep) * 4 : 0;
+      cost = bandOverflow + anchorDist * 1.5 + Math.abs(nearestSame - idealMid) * 0.5;
     } else if (anchor) {
-      const farPenalty = nearest <= maxSep ? 0 : (nearest - maxSep) * 0.1;
+      // Primera capital de su civilización pero el ancla exacta estaba ocupada o a d < 20 de otra capital:
+      // priorizar cercanía al ancla respetando d >= 20, y desempatar hacia banda [20, 30]
+      inBand = nearest >= minSep && nearest <= maxSep;
+      tier = 0;
+      const farPenalty = nearest > maxSep ? (nearest - maxSep) * 0.15 : 0;
       cost = anchorDist * 2 + farPenalty;
     } else {
-      const bandPenalty = inBand ? 0 : Math.abs(nearest - idealMid) * 2;
-      cost = bandPenalty + Math.abs(nearest - idealMid) * 0.25;
+      inBand = nearest >= minSep && nearest <= maxSep;
+      tier = inBand ? 0 : 1;
+      cost = Math.abs(nearest - idealMid);
     }
 
     if (
       !bestFeasible ||
-      cost < bestFeasible.cost ||
-      (cost === bestFeasible.cost && cell.cellId < bestFeasible.cell.cellId)
+      tier < bestFeasible.tier ||
+      (tier === bestFeasible.tier && cost < bestFeasible.cost) ||
+      (tier === bestFeasible.tier && cost === bestFeasible.cost && cell.cellId < bestFeasible.cell.cellId)
     ) {
-      bestFeasible = { cell, cost, nearest, anchorDist, inBand };
+      bestFeasible = { cell, tier, cost, nearest, nearestSame, anchorDist, inBand };
     }
   }
 
@@ -450,25 +697,33 @@ export function chooseHomeCellWithDiagnostics(
       zoneAnchor: anchor,
       zoneLabel: zone?.label ?? null,
       nearestDistance: bestFeasible.nearest,
-      distanceToAnchor: bestFeasible.anchorDist,
+      nearestSameCivDistance: bestFeasible.nearestSame,
+      distanceToAnchor: anchor ? bestFeasible.anchorDist : null,
       withinTargetBand: bestFeasible.inBand,
-      strictPackingImpossible: !bestFeasible.inBand && sameCiv.length > 0,
+      meetsMinSeparation: true,
+      status: bestFeasible.inBand ? "solution_in_target_band" : "solution_min_separation_only",
+      provenInfeasible: false,
       reason: bestFeasible.inBand
-        ? `Ubicado dentro de la banda objetivo [${minSep}, ${maxSep}] hexágonos` + (zone ? ` en ${zone.label}.` : ".")
-        : `Separación mínima >= ${minSep} preservada; banda <= ${maxSep} saturada o incompatible con ancla regional distante.`,
+        ? `Ubicado en la banda objetivo [${minSep}, ${maxSep}]` + (zone ? ` (${zone.label}).` : ".")
+        : `Separación mínima >= ${minSep} preservada (d_min = ${bestFeasible.nearest}); banda <= ${maxSep} no alcanzada para esta posición.`,
     };
   }
 
+  // Búsqueda exhaustiva en todas las casillas libres del mapa sin ninguna candidata con d >= minSep:
+  // inviabilidad demostrada para este siguiente reino dada la configuración actual.
   return {
     cell: bestFallback?.cell ?? null,
     civilization: normCiv,
     zoneAnchor: anchor,
     zoneLabel: zone?.label ?? null,
     nearestDistance: bestFallback?.nearest ?? null,
-    distanceToAnchor: bestFallback?.anchorDist ?? null,
+    nearestSameCivDistance: bestFallback?.nearestSame ?? null,
+    distanceToAnchor: anchor && bestFallback ? bestFallback.anchorDist : null,
     withinTargetBand: false,
-    strictPackingImpossible: true,
-    reason: `Saturación espacial del mapa: no existen casillas libres con separación >= ${minSep}; se eligió la máxima separación disponible (${bestFallback?.nearest ?? 0}).`,
+    meetsMinSeparation: false,
+    status: "proven_infeasible_min_separation",
+    provenInfeasible: true,
+    reason: `Inviabilidad demostrada (búsqueda exhaustiva sobre ${free.length} celdas libres): ninguna celda libre cumple d >= ${minSep}; mejor separación disponible = ${bestFallback?.nearest ?? 0}.`,
   };
 }
 
@@ -482,6 +737,559 @@ export function chooseHomeCell(
   options?: SpawnPlacementOptions
 ): WorldCell | null {
   return chooseHomeCellWithDiagnostics(cells, occupiedCellIds, existingHomes, options).cell;
+}
+
+export interface MultiKingdomSpawnRequest {
+  readonly kingdomId: string;
+  readonly civilization?: string | null;
+}
+
+export interface MultiKingdomDistributionResult {
+  readonly status:
+    | "solution_in_target_band"
+    | "solution_min_separation_only"
+    | "proven_infeasible"
+    | "search_exhausted";
+  readonly assignments: ReadonlyArray<{
+    readonly kingdomId: string;
+    readonly civilization: string | null;
+    readonly cellId: string;
+    readonly q: number;
+    readonly r: number;
+    readonly distanceToAnchor: number | null;
+    readonly nearestCapitalDistance: number | null;
+    readonly withinTargetBand: boolean;
+  }>;
+  readonly minPairwiseDistance: number | null;
+  readonly allMeetMinSeparation: boolean;
+  readonly allMeetTargetBand: boolean;
+  readonly verifiedAllPairwiseDistances: boolean;
+  readonly attemptsUsed: number;
+  readonly maxAttempts: number;
+  readonly upperBoundAtMinSeparation: number;
+  readonly notes: string;
+}
+
+/**
+ * Optimizador determinista acotado para distribuir un conjunto de reinos sobre el mapa canónico.
+ * Separa explícitamente:
+ * - solución en banda objetivo [20, 30]
+ * - solución que respeta únicamente separación mínima (>= 20)
+ * - inviabilidad demostrada (cuando N supera la cota superior geométrica real)
+ * - búsqueda agotada sin demostrar inviabilidad (cuando se alcanza el límite de intentos)
+ * Valida posteriormente TODAS las distancias por parejas.
+ */
+export function optimizeKingdomDistribution(
+  requests: ReadonlyArray<MultiKingdomSpawnRequest>,
+  radius: number = MAP.RADIUS,
+  options?: {
+    separationMin?: number;
+    separationMax?: number;
+    maxAttempts?: number;
+    seed?: number;
+  }
+): MultiKingdomDistributionResult {
+  const minSep = options?.separationMin ?? TERRITORIES.SPAWN_SEPARATION_MIN;
+  const maxSep = options?.separationMax ?? TERRITORIES.SPAWN_SEPARATION_MAX;
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? 6);
+  const seed = options?.seed ?? MAP.WORLD_SEED;
+
+  const geometry = analyzeWorldSpawnGeometry(radius, minSep, maxSep);
+  if (requests.length > geometry.conservativeIntersectionUpperBound) {
+    return {
+      status: "proven_infeasible",
+      assignments: [],
+      minPairwiseDistance: null,
+      allMeetMinSeparation: false,
+      allMeetTargetBand: false,
+      verifiedAllPairwiseDistances: true,
+      attemptsUsed: 0,
+      maxAttempts,
+      upperBoundAtMinSeparation: geometry.conservativeIntersectionUpperBound,
+      notes: `Inviabilidad demostrada: se solicitan ${requests.length} capitales y la cota superior geométrica conservadora para R=${radius}, d>=${minSep} es ${geometry.conservativeIntersectionUpperBound}.`,
+    };
+  }
+
+  const world = generateWorldCells(radius, seed);
+  // Ordenaciones deterministas por ID y rotación por civilización (sin aleatoriedad)
+  const baseSorted = [...requests].sort((a, b) => a.kingdomId.localeCompare(b.kingdomId));
+  const orderings: MultiKingdomSpawnRequest[][] = [baseSorted];
+  if (baseSorted.length > 1) {
+    // Intercalar por civilización para favorecer primeras capitales en sus anclas
+    const byCiv = new Map<string, MultiKingdomSpawnRequest[]>();
+    for (const req of baseSorted) {
+      const key = normalizeCivilizationId(req.civilization) ?? "_none";
+      const list = byCiv.get(key) ?? [];
+      list.push(req);
+      byCiv.set(key, list);
+    }
+    const interleaved: MultiKingdomSpawnRequest[] = [];
+    const civKeys = Array.from(byCiv.keys()).sort();
+    let remaining = baseSorted.length;
+    while (remaining > 0) {
+      for (const ck of civKeys) {
+        const list = byCiv.get(ck)!;
+        if (list.length > 0) {
+          interleaved.push(list.shift()!);
+          remaining--;
+        }
+      }
+    }
+    orderings.push(interleaved);
+
+    // Rotaciones deterministas adicionales hasta maxAttempts
+    for (let shift = 1; orderings.length < maxAttempts && shift < interleaved.length; shift++) {
+      const rotated = [...interleaved.slice(shift), ...interleaved.slice(0, shift)];
+      orderings.push(rotated);
+    }
+  }
+
+  let bestSolution: {
+    assignments: Array<{
+      kingdomId: string;
+      civilization: string | null;
+      cellId: string;
+      q: number;
+      r: number;
+      distanceToAnchor: number | null;
+    }>;
+    minPairwise: number | null;
+    allMin: boolean;
+    allBand: boolean;
+    bandCount: number;
+  } | null = null;
+
+  let attemptsUsed = 0;
+
+  for (let a = 0; a < Math.min(orderings.length, maxAttempts); a++) {
+    attemptsUsed++;
+    const order = orderings[a];
+    const occupied = new Set<string>();
+    const placedHomes: HexCoord[] = [];
+    const placedKingdoms: ExistingKingdomSpawn[] = [];
+    const current: Array<{
+      kingdomId: string;
+      civilization: string | null;
+      cellId: string;
+      q: number;
+      r: number;
+      distanceToAnchor: number | null;
+    }> = [];
+
+    let failedPlacement = false;
+    for (const req of order) {
+      const diag = chooseHomeCellWithDiagnostics(world, occupied, placedHomes, {
+        civilization: req.civilization,
+        existingKingdoms: placedKingdoms,
+        separationMin: minSep,
+        separationMax: maxSep,
+      });
+      if (!diag.cell) {
+        failedPlacement = true;
+        break;
+      }
+      occupied.add(diag.cell.cellId);
+      placedHomes.push({ q: diag.cell.q, r: diag.cell.r });
+      placedKingdoms.push({
+        q: diag.cell.q,
+        r: diag.cell.r,
+        civilization: req.civilization ?? null,
+        kingdomId: req.kingdomId,
+      });
+      current.push({
+        kingdomId: req.kingdomId,
+        civilization: diag.civilization,
+        cellId: diag.cell.cellId,
+        q: diag.cell.q,
+        r: diag.cell.r,
+        distanceToAnchor: diag.distanceToAnchor,
+      });
+    }
+
+    if (failedPlacement) continue;
+
+    // Verificación exacta de TODAS las distancias por parejas
+    let minPairwise: number | null = null;
+    let allMin = true;
+    let bandCount = 0;
+    for (let i = 0; i < current.length; i++) {
+      let nearest = Infinity;
+      for (let j = 0; j < current.length; j++) {
+        if (i === j) continue;
+        const d = hexDistance(current[i], current[j]);
+        if (d < nearest) nearest = d;
+        if (minPairwise === null || d < minPairwise) minPairwise = d;
+      }
+      if (current.length > 1 && nearest < minSep) allMin = false;
+      if (current.length <= 1 || (nearest >= minSep && nearest <= maxSep)) bandCount++;
+    }
+    const allBand = allMin && bandCount === current.length;
+
+    if (
+      !bestSolution ||
+      (allBand && !bestSolution.allBand) ||
+      (allMin && !bestSolution.allMin) ||
+      (allMin === bestSolution.allMin && bandCount > bestSolution.bandCount) ||
+      (allMin === bestSolution.allMin &&
+        bandCount === bestSolution.bandCount &&
+        (minPairwise ?? 0) > (bestSolution.minPairwise ?? 0))
+    ) {
+      bestSolution = { assignments: current, minPairwise, allMin, allBand, bandCount };
+    }
+
+    if (allBand) break;
+  }
+
+  if (!bestSolution) {
+    return {
+      status: "search_exhausted",
+      assignments: [],
+      minPairwiseDistance: null,
+      allMeetMinSeparation: false,
+      allMeetTargetBand: false,
+      verifiedAllPairwiseDistances: true,
+      attemptsUsed,
+      maxAttempts,
+      upperBoundAtMinSeparation: geometry.conservativeIntersectionUpperBound,
+      notes: `Búsqueda acotada agotada (${attemptsUsed}/${maxAttempts} intentos) sin hallar asignación completa; esto NO demuestra inviabilidad.`,
+    };
+  }
+
+  // Enriquecer con distancia real al reino más próximo y ordenar deterministamente por kingdomId
+  const finalAssignments = bestSolution.assignments
+    .map((item) => {
+      let nearest: number | null = null;
+      for (const other of bestSolution!.assignments) {
+        if (other.kingdomId === item.kingdomId) continue;
+        const d = hexDistance(item, other);
+        if (nearest === null || d < nearest) nearest = d;
+      }
+      return {
+        ...item,
+        nearestCapitalDistance: nearest,
+        withinTargetBand: nearest === null || (nearest >= minSep && nearest <= maxSep),
+      };
+    })
+    .sort((a, b) => a.kingdomId.localeCompare(b.kingdomId));
+
+  const status: MultiKingdomDistributionResult["status"] = bestSolution.allBand
+    ? "solution_in_target_band"
+    : bestSolution.allMin
+      ? "solution_min_separation_only"
+      : "search_exhausted";
+
+  return {
+    status,
+    assignments: finalAssignments,
+    minPairwiseDistance: bestSolution.minPairwise,
+    allMeetMinSeparation: bestSolution.allMin,
+    allMeetTargetBand: bestSolution.allBand,
+    verifiedAllPairwiseDistances: true,
+    attemptsUsed,
+    maxAttempts,
+    upperBoundAtMinSeparation: geometry.conservativeIntersectionUpperBound,
+    notes:
+      status === "solution_in_target_band"
+        ? `Solución determinista verificada en banda [${minSep}, ${maxSep}] para ${finalAssignments.length} reinos.`
+        : status === "solution_min_separation_only"
+          ? `Solución determinista verificada respetando separación mínima >= ${minSep} (d_min = ${bestSolution.minPairwise}) para ${finalAssignments.length} reinos; no todos alcanzan <= ${maxSep}.`
+          : `Búsqueda agotada (${attemptsUsed}/${maxAttempts} intentos) sin cumplir separación mínima >= ${minSep} (d_min = ${bestSolution.minPairwise}); no demuestra inviabilidad matemática.`,
+  };
+}
+
+export interface ExistingKingdomAuditInput {
+  readonly kingdomId: string;
+  readonly name: string;
+  readonly civilization?: string | null;
+  readonly homeTerritoryId?: string | null;
+  readonly persistedHomeCell?: {
+    readonly cellId: string;
+    readonly q: number;
+    readonly r: number;
+    readonly ownerKingdomId?: string | null;
+    readonly isHome?: boolean;
+  } | null;
+  readonly ownedTerritoryCount: number;
+  readonly activeMarchesCount: number;
+  readonly activeChallengesCount: number;
+  readonly activeExplorationsCount: number;
+}
+
+export interface KingdomSpawnAuditEntry {
+  readonly kingdomId: string;
+  readonly name: string;
+  readonly civilization: string | null;
+  readonly persistedHomeTerritoryId: string | null;
+  readonly coord: HexCoord | null;
+  readonly regionalAnchor: HexCoord | null;
+  readonly distanceToAnchor: number | null;
+  readonly nearestCapitalDistance: number | null;
+  readonly nearestCapitalKingdomId: string | null;
+  readonly nearestSameCivDistance: number | null;
+  readonly sameCivGroupedWithinBand: boolean | null;
+  readonly hasOccupationConflict: boolean;
+  readonly conflictDetails: string[];
+  readonly meetsMinSeparation: boolean;
+  readonly meetsTargetBand: boolean;
+  readonly requiresRelocation: boolean;
+  readonly relocationAction: "none" | "planned" | "blocked";
+  readonly proposedHomeCellId: string | null;
+  readonly proposedCoord: HexCoord | null;
+  readonly blockedReasons: string[];
+}
+
+export interface ExistingKingdomsSpawnAuditReport {
+  readonly radius: number;
+  readonly separationMin: number;
+  readonly separationMax: number;
+  readonly totalKingdoms: number;
+  readonly kingdomsMeetingMinSeparation: number;
+  readonly kingdomsMeetingTargetBand: number;
+  readonly kingdomsWithConflicts: number;
+  readonly kingdomsRequiringRelocation: number;
+  readonly plannedRelocations: number;
+  readonly blockedRelocations: number;
+  readonly readOnlyPlan: true;
+  readonly entries: ReadonlyArray<KingdomSpawnAuditEntry>;
+}
+
+/**
+ * Auditoría geográfica y plan determinista de recolocación para reinos existentes.
+ * NO modifica datos persistidos. Identifica conflictos, distancias reales, agrupación por
+ * civilización, cumplimiento de la banda 20-30 y bloqueos de integridad si recolocar
+ * rompería propiedad territorial, marchas, desafíos o expediciones activas.
+ */
+export function auditExistingKingdomSpawns(
+  kingdoms: ReadonlyArray<ExistingKingdomAuditInput>,
+  radius: number = MAP.RADIUS,
+  options?: { separationMin?: number; separationMax?: number }
+): ExistingKingdomsSpawnAuditReport {
+  const minSep = options?.separationMin ?? TERRITORIES.SPAWN_SEPARATION_MIN;
+  const maxSep = options?.separationMax ?? TERRITORIES.SPAWN_SEPARATION_MAX;
+  const sorted = [...kingdoms].sort((a, b) => a.kingdomId.localeCompare(b.kingdomId));
+
+  // Detectar colisiones de coordenadas de capital entre reinos
+  const kingdomsByCell = new Map<string, string[]>();
+  const resolved = sorted.map((k) => {
+    const normCiv = normalizeCivilizationId(k.civilization);
+    const zone = normCiv ? CIVILIZATION_ZONES[normCiv] ?? null : null;
+    const anchor = zone ? { q: zone.q, r: zone.r } : null;
+    const parsedFromHomeId = k.homeTerritoryId ? parseCellId(k.homeTerritoryId) : null;
+    const coord = k.persistedHomeCell
+      ? { q: k.persistedHomeCell.q, r: k.persistedHomeCell.r }
+      : parsedFromHomeId;
+    const effectiveCellId = coord ? cellId(coord.q, coord.r) : null;
+    if (effectiveCellId) {
+      const list = kingdomsByCell.get(effectiveCellId) ?? [];
+      list.push(k.kingdomId);
+      kingdomsByCell.set(effectiveCellId, list);
+    }
+    return { k, normCiv, anchor, coord, effectiveCellId };
+  });
+
+  const world = generateWorldCells(radius, MAP.WORLD_SEED);
+  const reservedCells = new Set<string>();
+  const keptHomes: ExistingKingdomSpawn[] = [];
+
+  // Primera pasada: métricas reales y detección de qué reinos requieren recolocación
+  const preliminary = resolved.map((item) => {
+    const conflictDetails: string[] = [];
+    if (!item.coord || !isInsideWorld(item.coord, radius)) {
+      conflictDetails.push("Capital ausente o fuera del radio canónico del mapa.");
+    }
+    if (
+      item.k.homeTerritoryId &&
+      item.k.persistedHomeCell &&
+      item.k.homeTerritoryId !== item.k.persistedHomeCell.cellId
+    ) {
+      conflictDetails.push(
+        `Incoherencia entre homeTerritoryId (${item.k.homeTerritoryId}) y territorio persistido (${item.k.persistedHomeCell.cellId}).`
+      );
+    }
+    if (
+      item.k.persistedHomeCell &&
+      item.k.persistedHomeCell.ownerKingdomId &&
+      item.k.persistedHomeCell.ownerKingdomId !== item.k.kingdomId
+    ) {
+      conflictDetails.push(
+        `La casilla de capital pertenece a otro reino (${item.k.persistedHomeCell.ownerKingdomId}).`
+      );
+    }
+    if (item.effectiveCellId && (kingdomsByCell.get(item.effectiveCellId)?.length ?? 0) > 1) {
+      conflictDetails.push(`Colisión de capital en ${item.effectiveCellId} con otro reino.`);
+    }
+
+    let nearestDist: number | null = null;
+    let nearestId: string | null = null;
+    let nearestSameDist: number | null = null;
+
+    if (item.coord) {
+      for (const other of resolved) {
+        if (other.k.kingdomId === item.k.kingdomId || !other.coord) continue;
+        const d = hexDistance(item.coord, other.coord);
+        if (nearestDist === null || d < nearestDist) {
+          nearestDist = d;
+          nearestId = other.k.kingdomId;
+        }
+        if (item.normCiv && other.normCiv === item.normCiv) {
+          if (nearestSameDist === null || d < nearestSameDist) {
+            nearestSameDist = d;
+          }
+        }
+      }
+    }
+
+    const distanceToAnchor = item.coord && item.anchor ? hexDistance(item.coord, item.anchor) : null;
+    const hasOccupationConflict = conflictDetails.length > 0;
+    const meetsMinSeparation = !hasOccupationConflict && (nearestDist === null || nearestDist >= minSep);
+    const meetsTargetBand =
+      meetsMinSeparation && (nearestDist === null || (nearestDist >= minSep && nearestDist <= maxSep));
+    const sameCivGroupedWithinBand =
+      nearestSameDist === null ? null : nearestSameDist >= minSep && nearestSameDist <= maxSep;
+
+    // Requiere recolocación si tiene conflicto de ocupación o incumple separación mínima < 20
+    const requiresRelocation = hasOccupationConflict || !meetsMinSeparation;
+    if (!requiresRelocation && item.coord && item.effectiveCellId) {
+      reservedCells.add(item.effectiveCellId);
+      keptHomes.push({
+        q: item.coord.q,
+        r: item.coord.r,
+        civilization: item.normCiv,
+        kingdomId: item.k.kingdomId,
+      });
+    }
+
+    return {
+      ...item,
+      conflictDetails,
+      hasOccupationConflict,
+      nearestDist,
+      nearestId,
+      nearestSameDist,
+      distanceToAnchor,
+      meetsMinSeparation,
+      meetsTargetBand,
+      sameCivGroupedWithinBand,
+      requiresRelocation,
+    };
+  });
+
+  // Segunda pasada: construir plan determinista para los reinos que requieren recolocación
+  const entries: KingdomSpawnAuditEntry[] = preliminary.map((p) => {
+    if (!p.requiresRelocation) {
+      return {
+        kingdomId: p.k.kingdomId,
+        name: p.k.name,
+        civilization: p.normCiv,
+        persistedHomeTerritoryId: p.k.homeTerritoryId ?? null,
+        coord: p.coord,
+        regionalAnchor: p.anchor,
+        distanceToAnchor: p.distanceToAnchor,
+        nearestCapitalDistance: p.nearestDist,
+        nearestCapitalKingdomId: p.nearestId,
+        nearestSameCivDistance: p.nearestSameDist,
+        sameCivGroupedWithinBand: p.sameCivGroupedWithinBand,
+        hasOccupationConflict: false,
+        conflictDetails: [],
+        meetsMinSeparation: true,
+        meetsTargetBand: p.meetsTargetBand,
+        requiresRelocation: false,
+        relocationAction: "none",
+        proposedHomeCellId: null,
+        proposedCoord: null,
+        blockedReasons: [],
+      };
+    }
+
+    const blockedReasons: string[] = [];
+    if (p.k.ownedTerritoryCount > 1) {
+      blockedReasons.push(
+        `El reino posee ${p.k.ownedTerritoryCount} territorios; mover solo la capital rompería la contigüidad y propiedad territorial.`
+      );
+    }
+    if (p.k.activeMarchesCount > 0) {
+      blockedReasons.push(
+        `Existen ${p.k.activeMarchesCount} marchas militares activas referenciando las coordenadas actuales.`
+      );
+    }
+    if (p.k.activeChallengesCount > 0) {
+      blockedReasons.push(
+        `Existen ${p.k.activeChallengesCount} desafíos activos vinculados al reino.`
+      );
+    }
+    if (p.k.activeExplorationsCount > 0) {
+      blockedReasons.push(
+        `Existen ${p.k.activeExplorationsCount} expediciones de exploración activas desde la posición actual.`
+      );
+    }
+
+    const planned = chooseHomeCellWithDiagnostics(
+      world,
+      reservedCells,
+      keptHomes.map((h) => ({ q: h.q, r: h.r })),
+      {
+        civilization: p.normCiv,
+        existingKingdoms: keptHomes,
+        separationMin: minSep,
+        separationMax: maxSep,
+      }
+    );
+
+    if (!planned.cell || !planned.meetsMinSeparation) {
+      blockedReasons.push(
+        `No existe destino determinista disponible que garantice separación >= ${minSep} sin conflictos.`
+      );
+    }
+
+    const isBlocked = blockedReasons.length > 0;
+    if (!isBlocked && planned.cell) {
+      reservedCells.add(planned.cell.cellId);
+      keptHomes.push({
+        q: planned.cell.q,
+        r: planned.cell.r,
+        civilization: p.normCiv,
+        kingdomId: p.k.kingdomId,
+      });
+    }
+
+    return {
+      kingdomId: p.k.kingdomId,
+      name: p.k.name,
+      civilization: p.normCiv,
+      persistedHomeTerritoryId: p.k.homeTerritoryId ?? null,
+      coord: p.coord,
+      regionalAnchor: p.anchor,
+      distanceToAnchor: p.distanceToAnchor,
+      nearestCapitalDistance: p.nearestDist,
+      nearestCapitalKingdomId: p.nearestId,
+      nearestSameCivDistance: p.nearestSameDist,
+      sameCivGroupedWithinBand: p.sameCivGroupedWithinBand,
+      hasOccupationConflict: p.hasOccupationConflict,
+      conflictDetails: p.conflictDetails,
+      meetsMinSeparation: p.meetsMinSeparation,
+      meetsTargetBand: p.meetsTargetBand,
+      requiresRelocation: true,
+      relocationAction: isBlocked ? "blocked" : "planned",
+      proposedHomeCellId: !isBlocked && planned.cell ? planned.cell.cellId : null,
+      proposedCoord: !isBlocked && planned.cell ? { q: planned.cell.q, r: planned.cell.r } : null,
+      blockedReasons,
+    };
+  });
+
+  return {
+    radius,
+    separationMin: minSep,
+    separationMax: maxSep,
+    totalKingdoms: entries.length,
+    kingdomsMeetingMinSeparation: entries.filter((e) => e.meetsMinSeparation).length,
+    kingdomsMeetingTargetBand: entries.filter((e) => e.meetsTargetBand).length,
+    kingdomsWithConflicts: entries.filter((e) => e.hasOccupationConflict).length,
+    kingdomsRequiringRelocation: entries.filter((e) => e.requiresRelocation).length,
+    plannedRelocations: entries.filter((e) => e.relocationAction === "planned").length,
+    blockedRelocations: entries.filter((e) => e.relocationAction === "blocked").length,
+    readOnlyPlan: true,
+    entries,
+  };
 }
 
 /** [MAESTRA P48] Tras una victoria aplastante se reclama un territorio libre CERCANO: a distancia ≤ 2 de uno propio ([DERIVADO]). */

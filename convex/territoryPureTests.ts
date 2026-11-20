@@ -278,11 +278,10 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
         maxAllowed: TERRITORIES.MAX_PER_KINGDOM,
       });
 
-      // Bloque 2.2 & 2.3: Agrupación por civilización, banda [20, 30] y análisis de empaquetamiento
+      // Bloque A: Agrupación por civilización, banda [20, 30] y análisis geométrico corregido
       const rom1 = chooseHomeCellWithDiagnostics(world, new Set(), [], {
         civilization: "romanos",
         existingKingdoms: [],
-        preferCenterIfEmpty: false,
       });
       const occupiedSpawns = new Set<string>([rom1.cell!.cellId]);
       const existingSpawns = [{ q: rom1.cell!.q, r: rom1.cell!.r, civilization: "romanos" }];
@@ -313,7 +312,7 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
           details: `Rechazo en 100: ${!claimAtCap.success}; saneo 115→${cleanupPlan1.keptCellIds.length} (liberados=${cleanupPlan1.releasedCellIds.length}); maxDistConservada=${maxKeptDist}<=minDistLiberada=${minReleasedDist}; 2ª ejecución idempotente: ${cleanupPlan2.skipped}`,
         },
         {
-          test: "Aparición por zonas de civilización, banda [20, 30] hex y prueba matemática de empaquetamiento (Bloques 2.2-2.3)",
+          test: "Aparición por zonas de civilización, banda [20, 30] hex y análisis geométrico por intersección real (Bloque A)",
           passed:
             Object.keys(CIVILIZATION_ZONES).length === 12 &&
             rom1.cell?.q === CIVILIZATION_ZONES.romanos.q &&
@@ -322,15 +321,17 @@ export function runTerritoryValidationTests(): TerritoryTestResult[] {
             rom2.nearestDistance !== null &&
             rom2.nearestDistance >= 20 &&
             rom2.nearestDistance <= 30 &&
-            vik1.cell !== null &&
-            hexDistance(vik1.cell, CIVILIZATION_ZONES.vikingos) < hexDistance(vik1.cell, CIVILIZATION_ZONES.romanos) &&
+            vik1.cell?.q === CIVILIZATION_ZONES.vikingos.q &&
+            vik1.cell?.r === CIVILIZATION_ZONES.vikingos.r &&
             geometry.totalCells === 7651 &&
             geometry.diameter === 100 &&
-            geometry.exclusiveDiskCellsAtHalfSep === 271 &&
-            geometry.areaUpperBoundAtMinSeparation === 28 &&
-            geometry.sameCivClusterMaxAtBand30 >= 1 &&
-            geometry.greedyPackingMaxAtMinSeparation >= 15,
-          details: `Romanos 1 en ${rom1.cell?.cellId}; Romanos 2 a dist=${rom2.nearestDistance} (banda=${rom2.withinTargetBand}); Vikingos cerca de su ancla: ${vik1.cell?.cellId}; cota área d>=20 en R50=${geometry.areaUpperBoundAtMinSeparation}, greedy=${geometry.greedyPackingMaxAtMinSeparation}, clúster diam=30=${geometry.sameCivClusterMaxAtBand30}`,
+            geometry.fullExclusionDiskCells === 271 &&
+            geometry.minDiskIntersectionCells === 100 &&
+            geometry.conservativeIntersectionUpperBound === 76 &&
+            geometry.constructiveVerified &&
+            geometry.constructiveClusterCountAtBand30 >= 1 &&
+            geometry.constructiveGreedyCountAtMinSeparation >= 15,
+          details: `Romanos 1 en ${rom1.cell?.cellId}; Romanos 2 a dist=${rom2.nearestDistance} (banda=${rom2.withinTargetBand}); Vikingos en su ancla: ${vik1.cell?.cellId}; intersección mín=${geometry.minDiskIntersectionCells}, cota superior conservadora=${geometry.conservativeIntersectionUpperBound}, constructivo=${geometry.constructiveGreedyCountAtMinSeparation}, clúster diam=30=${geometry.constructiveClusterCountAtBand30}`,
         },
       ];
     })(),

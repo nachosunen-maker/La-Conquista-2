@@ -28,6 +28,7 @@ import { isSpyUnitDoc } from "./armyRules";
 import { runMapReduction } from "./mapReduction";
 import { EXPLORATION, MAP, TERRAINS, TERRITORIES, type TerrainType } from "./balanceConfig";
 import {
+  auditExistingKingdomSpawns,
   canClaimTerritory,
   chooseHomeCell,
   generateWorldCells,
@@ -38,6 +39,7 @@ import {
   cellId,
   planTerritoryCapCleanup,
   verifyTerritoryCapCleanupPostState,
+  type ExistingKingdomAuditInput,
   type ExistingKingdomSpawn,
   type HexCoord,
   type TerritoryCapCleanupPlan,
@@ -254,6 +256,7 @@ export async function ensureHomeTerritory(ctx: MutationCtx, kingdomId: Id<"kingd
         q: homeCoord.q,
         r: homeCoord.r,
         civilization: k.civilization ?? null,
+        kingdomId: String(k._id),
       });
     }
   }
@@ -262,7 +265,6 @@ export async function ensureHomeTerritory(ctx: MutationCtx, kingdomId: Id<"kingd
   const choice = chooseHomeCell(worldCells, occupied, existingHomes, {
     civilization: kingdom.civilization,
     existingKingdoms,
-    preferCenterIfEmpty: existingHomes.length === 0 || kingdom.userId === DEMO_USER_ID,
   });
   if (!choice) return null;
 
@@ -626,9 +628,13 @@ export const getWorldMap = query({
       }
     }
 
-    const visibleOwnerDocs = await Promise.all(
-      Array.from(visibleOwnerIdMap.values()).map((id) => ctx.db.get(id))
-    );
+    const visibleOwnerDocs = (
+      await Promise.all(
+        Array.from(visibleOwnerIdMap.values()).map((id) => ctx.db.get(id))
+      )
+    )
+      .filter((doc): doc is NonNullable<typeof doc> => doc !== null)
+      .sort((a, b) => a._creationTime - b._creationTime || String(a._id).localeCompare(String(b._id)));
     const names = new Map<string, string>();
     const colorsMap = new Map<string, string>();
     const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
@@ -783,6 +789,8 @@ export const getWorldMap = query({
 
 export const MAX_MAP_COLUMN_QUERIES = MAP.RADIUS * 2 + 1; // 101 columnas para R = 50
 export const MAX_CONCURRENT_TERRITORY_QUERIES = 8;
+/** Límite teórico máximo de documentos leídos incluyendo 1 documento centinela por columna: 7.651 + 101 = 7.752. */
+export const MAX_THEORETICAL_DOCS_WITH_SENTINEL = MAP.MAX_CELLS + MAX_MAP_COLUMN_QUERIES;
 
 export interface AxialColumnQuery {
   readonly q: number;
@@ -790,6 +798,8 @@ export interface AxialColumnQuery {
   readonly rMax: number;
   readonly targetCount: number;
   readonly maxRangeSpan: number;
+  /** Límite de lectura `.take(maxRangeSpan + 1)` para detectar duplicados en la columna sin lecturas ilimitadas. */
+  readonly takeLimit: number;
 }
 
 export interface ColumnQueryPlanSummary {
@@ -798,6 +808,7 @@ export interface ColumnQueryPlanSummary {
   readonly invalidOrDuplicateSkipped: number;
   readonly missingTargetCount: number;
   readonly theoreticalMaxRangeDocs: number;
+  readonly theoreticalMaxRangeDocsWithSentinel: number;
   readonly geometricColumnUpperBound: number;
 }
 
@@ -806,21 +817,23 @@ export interface ColumnQueryExecutionMetrics {
   readonly docsRetrievedCount: number;
   readonly docsDiscardedCount: number;
   readonly docsAcceptedCount: number;
+  readonly duplicatesDetected: number;
   readonly maxObservedConcurrency: number;
   readonly elapsedMs: number;
+  readonly errors: string[];
 }
 
 /**
  * Planificador acotado por columna axial `q` para `getWorldMapCompact`:
  * 1. Valida coordenadas axiales dentro del disco (|q| <= R, |r| <= R, |q + r| <= R).
  * 2. Elimina identificadores inválidos y duplicados.
- * 3. Agrupa las celdas conocidas pendientes por columna `q`, calculando [rMin, rMax] por columna.
+ * 3. Agrupa las celdas conocidas pendientes por columna `q`, calculando [rMin, rMax] y `takeLimit = maxRangeSpan + 1`.
  *
- * Garantía matemática para R = 50:
- * - Como q ∈ [-50, 50], el número de consultas indexadas es SIEMPRE <= 2R + 1 = 101,
- *   incluso ante distribuciones dispersas, fragmentadas o adversas.
- * - Añadir celdas dentro de una misma columna jamás incrementa el número de consultas.
- * - El peor caso geométrico de lectura para un subconjunto Q de columnas es Σ_{q ∈ Q} (101 - |q|) <= 7.651.
+ * Garantías matemáticas para R = 50:
+ * - q ∈ [-50, 50] => <= 2R + 1 = 101 consultas indexadas.
+ * - Cada columna tiene n(q) = 101 - |q| celdas válidas; Σ_{q=-50}^{50} n(q) = 7.651.
+ * - Con el documento centinela (+1 por columna) para detectar duplicados en DB, la cota absoluta de lecturas es
+ *   7.651 + 101 = 7.752 (y 7.651 en un mapa íntegro sin duplicados).
  */
 export function buildKnownColumnQueries(
   knownCellIds: Iterable<string>,
@@ -860,6 +873,7 @@ export function buildKnownColumnQueries(
 
   const columns: AxialColumnQuery[] = [];
   let theoreticalMaxRangeDocs = 0;
+  let theoreticalMaxRangeDocsWithSentinel = 0;
   let geometricColumnUpperBound = 0;
   const sortedQs = Array.from(byQ.keys()).sort((a, b) => a - b);
 
@@ -867,14 +881,17 @@ export function buildKnownColumnQueries(
     const q = sortedQs[i];
     const entry = byQ.get(q)!;
     const maxRangeSpan = entry.rMax - entry.rMin + 1;
+    const takeLimit = maxRangeSpan + 1;
     columns.push({
       q,
       rMin: entry.rMin,
       rMax: entry.rMax,
       targetCount: entry.targetCount,
       maxRangeSpan,
+      takeLimit,
     });
     theoreticalMaxRangeDocs += maxRangeSpan;
+    theoreticalMaxRangeDocsWithSentinel += takeLimit;
     geometricColumnUpperBound += (2 * radius + 1) - Math.abs(q);
   }
 
@@ -884,21 +901,24 @@ export function buildKnownColumnQueries(
     invalidOrDuplicateSkipped,
     missingTargetCount,
     theoreticalMaxRangeDocs,
+    theoreticalMaxRangeDocsWithSentinel,
     geometricColumnUpperBound,
   };
 }
 
 /**
  * Ejecuta consultas por columna con concurrencia estrictamente acotada (lotes de hasta 8),
- * filtrando todos los documentos recibidos contra el conjunto exacto `knownIds` y propagando
- * cualquier fallo sin devolver nunca resultados parciales como completos.
+ * validando integridad de cada documento (`cellId`, `q`, `r`), detectando duplicados y
+ * desbordamientos del documento centinela (`colDocs.length > col.maxRangeSpan`),
+ * filtrando contra `knownIds` y propagando cualquier error sin devolver resultados parciales.
  */
-export async function executeBoundedColumnQueries<T extends { cellId: string }>(
+export async function executeBoundedColumnQueries<T extends { cellId: string; q: number; r: number }>(
   columns: ReadonlyArray<AxialColumnQuery>,
   knownIds: ReadonlySet<string>,
   alreadyLoadedIds: ReadonlySet<string>,
   fetchColumn: (col: AxialColumnQuery) => Promise<ReadonlyArray<T>>,
-  maxConcurrency: number = MAX_CONCURRENT_TERRITORY_QUERIES
+  maxConcurrency: number = MAX_CONCURRENT_TERRITORY_QUERIES,
+  radius: number = MAP.RADIUS
 ): Promise<{ docs: T[]; metrics: ColumnQueryExecutionMetrics }> {
   const start = Date.now();
   const batchLimit = Math.max(1, Math.min(maxConcurrency, MAX_CONCURRENT_TERRITORY_QUERIES));
@@ -907,6 +927,9 @@ export async function executeBoundedColumnQueries<T extends { cellId: string }>(
   let maxObservedConcurrency = 0;
   let docsRetrievedCount = 0;
   let docsDiscardedCount = 0;
+  let duplicatesDetected = 0;
+  const errors: string[] = [];
+  const seenCoordsInQuery = new Set<string>();
   const acceptedById = new Map<string, T>();
 
   for (let offset = 0; offset < columns.length; offset += batchLimit) {
@@ -916,7 +939,7 @@ export async function executeBoundedColumnQueries<T extends { cellId: string }>(
         inFlight++;
         if (inFlight > maxObservedConcurrency) maxObservedConcurrency = inFlight;
         try {
-          return await fetchColumn(col);
+          return { col, colDocs: await fetchColumn(col) };
         } finally {
           inFlight--;
         }
@@ -924,11 +947,50 @@ export async function executeBoundedColumnQueries<T extends { cellId: string }>(
     );
 
     for (let i = 0; i < batchResults.length; i++) {
-      const colDocs = batchResults[i];
+      const { col, colDocs } = batchResults[i];
+      docsRetrievedCount += colDocs.length;
+
+      // Comprobación del documento centinela (+1): si llegan más documentos que coordenadas válidas en [rMin, rMax],
+      // existe necesariamente al menos un duplicado o registro inconsistente en la columna.
+      if (colDocs.length > col.maxRangeSpan) {
+        duplicatesDetected += colDocs.length - col.maxRangeSpan;
+        const msg =
+          `Anomalía de integridad en columna q=${col.q} [${col.rMin}, ${col.rMax}]: ` +
+          `se recuperaron ${colDocs.length} documentos cuando el máximo válido del intervalo es ${col.maxRangeSpan} (centinela disparado).`;
+        errors.push(msg);
+        throw new Error(msg);
+      }
+
       for (let j = 0; j < colDocs.length; j++) {
         const doc = colDocs[j];
-        docsRetrievedCount++;
-        if (!knownIds.has(doc.cellId) || alreadyLoadedIds.has(doc.cellId) || acceptedById.has(doc.cellId)) {
+        // 1. Coherencia estricta de cellId, q y r dentro del intervalo y del disco canónico
+        const expectedId = cellId(doc.q, doc.r);
+        if (
+          !Number.isInteger(doc.q) ||
+          !Number.isInteger(doc.r) ||
+          doc.q !== col.q ||
+          doc.r < col.rMin ||
+          doc.r > col.rMax ||
+          doc.cellId !== expectedId ||
+          !isInsideWorld({ q: doc.q, r: doc.r }, radius)
+        ) {
+          const msg =
+            `Inconsistencia de coordenadas en territorio: cellId="${doc.cellId}", q=${doc.q}, r=${doc.r} ` +
+            `(esperado q=${col.q}, r∈[${col.rMin},${col.rMax}], cellId="${expectedId}").`;
+          errors.push(msg);
+          throw new Error(msg);
+        }
+
+        // 2. Detección explícita de duplicados en la misma coordenada (sin ocultarlos)
+        if (seenCoordsInQuery.has(doc.cellId)) {
+          duplicatesDetected++;
+          const msg = `Registro duplicado detectado en la tabla territories para la coordenada ${doc.cellId}.`;
+          errors.push(msg);
+          throw new Error(msg);
+        }
+        seenCoordsInQuery.add(doc.cellId);
+
+        if (!knownIds.has(doc.cellId) || alreadyLoadedIds.has(doc.cellId)) {
           docsDiscardedCount++;
           continue;
         }
@@ -944,26 +1006,38 @@ export async function executeBoundedColumnQueries<T extends { cellId: string }>(
       docsRetrievedCount,
       docsDiscardedCount,
       docsAcceptedCount: acceptedById.size,
+      duplicatesDetected,
       maxObservedConcurrency,
       elapsedMs: Date.now() - start,
+      errors,
     },
   };
 }
 
 /**
- * Consulta compacta del mapa mundial: evita leer las 7.651 filas de `territories` en Convex.
- * Solo consulta territorios poseídos por reinos (`by_owner`) e intervalos contiguos conocidos (`by_q_r`),
- * más las tablas del reino activo; el terreno determinista se reconstruye en cliente desde `WORLD_SEED`.
+ * Núcleo compartido de `getWorldMapCompact` que conserva y devuelve métricas reales de consulta
+ * sin escribir en base de datos ni añadir sobrecoste operativo.
  */
-export const getWorldMapCompact = query({
-  args: {
-    kingdomId: v.optional(v.id("kingdoms")),
-  },
-  handler: async (ctx, args) => {
-    // Consulta global sin kingdomId: devuelve únicamente la base cartográfica pública (semilla y radio),
-    // sin exponer celdas ocupadas, capitales ni leyenda de reinos ocultos por la niebla de guerra.
-    if (!args.kingdomId) {
-      return {
+async function executeWorldMapCompactQuery(
+  ctx: QueryCtx,
+  args: { kingdomId?: Id<"kingdoms"> }
+) {
+  const emptyMetrics: ColumnQueryExecutionMetrics = {
+    indexedQueriesCount: 0,
+    docsRetrievedCount: 0,
+    docsDiscardedCount: 0,
+    docsAcceptedCount: 0,
+    duplicatesDetected: 0,
+    maxObservedConcurrency: 0,
+    elapsedMs: 0,
+    errors: [],
+  };
+
+  // Consulta global sin kingdomId: devuelve únicamente la base cartográfica pública (semilla y radio),
+  // sin exponer celdas ocupadas, capitales ni leyenda de reinos ocultos por la niebla de guerra.
+  if (!args.kingdomId) {
+    return {
+      payload: {
         radius: MAP.RADIUS,
         worldSeed: MAP.WORLD_SEED,
         generated: true,
@@ -977,261 +1051,276 @@ export const getWorldMapCompact = query({
         homeTerritoryId: null,
         visibleCells: [],
         recentDiscoveries: [],
+      },
+      metrics: emptyMetrics,
+    };
+  }
+
+  // 2. Autorización ESTRICTA ANTES de leer territorios, propietarios o reinos rivales (P22)
+  const kingdomId = args.kingdomId;
+  const identity = await ctx.auth.getUserIdentity();
+  const kingdom = await ctx.db.get(kingdomId);
+  if (!kingdom) throw new Error("Reino no encontrado.");
+
+  const isDemoRead = kingdom.userId === DEMO_USER_ID;
+  if (!isDemoRead && !isKingdomOwner(kingdom.userId, identity?.subject)) {
+    throw new Error("No autorizado: solo puede consultar la niebla de guerra de su propio reino.");
+  }
+
+  // 3. Leer ÚNICAMENTE los datos propios del reino autorizado (marchas filtradas en servidor)
+  const [ownedCells, exploredRecords, activeQueue, completedTech, activeMarchesDocs] = await Promise.all([
+    ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdomId))
+      .collect(),
+    ctx.db
+      .query("exploredTerritories")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+      .collect(),
+    ctx.db
+      .query("explorationQueue")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+      .collect(),
+    readCompletedTechnologyIds(ctx, kingdomId),
+    ctx.db
+      .query("armyMarches")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+      .filter((q) => q.eq(q.field("status"), "marchando"))
+      .collect(),
+  ]);
+
+  const hasSpy2Tech = completedTech.includes("spy_2");
+  const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
+
+  const coordById = new Map<string, HexCoord>();
+  const getValidCoord = (id: string): HexCoord | null => {
+    const cached = coordById.get(id);
+    if (cached) return cached;
+    const parsed = parseCellId(id);
+    if (!parsed || !isInsideWorld(parsed, MAP.RADIUS)) return null;
+    coordById.set(id, parsed);
+    return parsed;
+  };
+
+  const ownedIds = new Set<string>();
+  const knownTerritoryByCellId = new Map<string, Doc<"territories">>();
+  for (const c of ownedCells) {
+    const id = String(c.cellId);
+    const expectedId = cellId(c.q, c.r);
+    if (!Number.isInteger(c.q) || !Number.isInteger(c.r) || id !== expectedId || !isInsideWorld({ q: c.q, r: c.r }, MAP.RADIUS)) {
+      throw new Error(`Inconsistencia de coordenadas en territorio poseído: cellId="${id}", q=${c.q}, r=${c.r}.`);
+    }
+    if (knownTerritoryByCellId.has(id)) {
+      throw new Error(`Registro duplicado detectado en territorios poseídos para la coordenada ${id}.`);
+    }
+    ownedIds.add(id);
+    knownTerritoryByCellId.set(id, c);
+    coordById.set(id, { q: c.q, r: c.r });
+  }
+  if (kingdom.homeTerritoryId) {
+    ownedIds.add(String(kingdom.homeTerritoryId));
+    if (homeCoord) coordById.set(String(kingdom.homeTerritoryId), homeCoord);
+  }
+
+  const ownedCoords: HexCoord[] = ownedCells.map((c) => ({ q: c.q, r: c.r }));
+  if (homeCoord && !ownedCoords.some((c) => c.q === homeCoord.q && c.r === homeCoord.r)) {
+    ownedCoords.push(homeCoord);
+  }
+
+  const knownIds = new Set<string>([
+    ...Array.from(ownedIds),
+    ...getInitialSightCellIds(homeCoord, EXPLORATION.INITIAL_SIGHT_RADIUS, MAP.RADIUS),
+    ...exploredRecords.map((r) => String(r.cellId)),
+  ]);
+
+  const activeExpeditionMap = new Map<string, (typeof activeQueue)[0]>();
+  const now = Date.now();
+  for (const exp of activeQueue) {
+    if (now >= exp.completesAt) {
+      knownIds.add(exp.cellId);
+    } else {
+      activeExpeditionMap.set(exp.cellId, exp);
+    }
+  }
+
+  // Agrupar celdas conocidas pendientes por columna axial `q` con rango [rMin, rMax],
+  // límite `.take(col.takeLimit)` (maxRangeSpan + 1 centinela) y concurrencia <= 8.
+  const alreadyLoadedIds = new Set<string>(knownTerritoryByCellId.keys());
+  const columnPlan = buildKnownColumnQueries(knownIds, alreadyLoadedIds, MAP.RADIUS);
+  let queryMetrics: ColumnQueryExecutionMetrics = emptyMetrics;
+
+  if (columnPlan.columns.length > 0) {
+    const { docs: fetchedKnownDocs, metrics } = await executeBoundedColumnQueries(
+      columnPlan.columns,
+      knownIds,
+      alreadyLoadedIds,
+      (col) =>
+        ctx.db
+          .query("territories")
+          .withIndex("by_q_r", (idx) => idx.eq("q", col.q).gte("r", col.rMin).lte("r", col.rMax))
+          .take(col.takeLimit),
+      MAX_CONCURRENT_TERRITORY_QUERIES,
+      MAP.RADIUS
+    );
+    queryMetrics = metrics;
+    for (let i = 0; i < fetchedKnownDocs.length; i++) {
+      const doc = fetchedKnownDocs[i];
+      knownTerritoryByCellId.set(doc.cellId, doc);
+    }
+  }
+
+  // Cargar ÚNICAMENTE los reinos propietarios de celdas conocidas
+  const knownOwnedCountByKingdom = new Map<string, number>();
+  const visibleOwnerIdMap = new Map<string, Id<"kingdoms">>();
+  for (const cid of knownIds) {
+    const cell = knownTerritoryByCellId.get(cid);
+    if (cell?.ownerKingdomId) {
+      const key = String(cell.ownerKingdomId);
+      knownOwnedCountByKingdom.set(key, (knownOwnedCountByKingdom.get(key) ?? 0) + 1);
+      visibleOwnerIdMap.set(key, cell.ownerKingdomId);
+    }
+  }
+
+  const visibleOwnerDocs = (
+    await Promise.all(Array.from(visibleOwnerIdMap.values()).map((id) => ctx.db.get(id)))
+  )
+    .filter((k): k is Doc<"kingdoms"> => k !== null)
+    .sort((a, b) => a._creationTime - b._creationTime);
+  const names = new Map<string, string>();
+  const colorsMap = new Map<string, string>();
+  const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
+  for (const k of visibleOwnerDocs) {
+    if (!k) continue;
+    const key = String(k._id);
+    const color = k.color ?? "#d4af37";
+    names.set(key, k.name);
+    colorsMap.set(key, color);
+    const visibleOwnedCount = knownOwnedCountByKingdom.get(key) ?? 0;
+    if (visibleOwnedCount > 0) {
+      legendList.push({
+        id: key,
+        name: k.name,
+        monarchName: k.monarchName,
+        color,
+        territoryCount: visibleOwnedCount,
+      });
+    }
+  }
+
+  const activeExpeditionsCount = activeExpeditionMap.size;
+  const canLaunchMore = activeExpeditionsCount < EXPLORATION.MAX_CONCURRENT_EXPEDITIONS;
+  const activeCellIds = new Set(activeExpeditionMap.keys());
+
+  const frontierIds = new Set<string>();
+  if (canLaunchMore) {
+    for (const knownId of knownIds) {
+      const coord = getValidCoord(knownId);
+      if (!coord) continue;
+      for (const n of hexNeighbors(coord, MAP.RADIUS)) {
+        const nid = cellId(n.q, n.r);
+        if (!knownIds.has(nid) && !activeExpeditionMap.has(nid) && !ownedIds.has(nid)) {
+          frontierIds.add(nid);
+          if (!coordById.has(nid)) coordById.set(nid, n);
+        }
+      }
+    }
+  }
+
+  const interestingIds = new Set<string>([
+    ...Array.from(knownIds),
+    ...Array.from(activeCellIds),
+    ...Array.from(frontierIds),
+  ]);
+
+  const visibleCells = [];
+  for (const id of interestingIds) {
+    const coord = getValidCoord(id);
+    if (!coord) continue;
+
+    const isOwned = ownedIds.has(id);
+    const isExploring = activeExpeditionMap.has(id);
+    const isKnown = knownIds.has(id);
+    const dbKnown = isKnown ? knownTerritoryByCellId.get(id) : undefined;
+
+    let state: CellExplorationState;
+    if (isOwned) {
+      state = "owned";
+    } else if (isExploring) {
+      state = "exploring";
+    } else if (isKnown) {
+      state = "explored";
+    } else {
+      state = "fog";
+    }
+
+    const canExplore = state === "fog" && canLaunchMore && frontierIds.has(id);
+
+    const canConquer =
+      isKnown &&
+      !isOwned &&
+      dbKnown?.ownerKingdomId !== undefined &&
+      dbKnown.ownerKingdomId !== null;
+
+    let explorationPlan = null;
+    if (canExplore) {
+      let minDist = Infinity;
+      for (let i = 0; i < ownedCoords.length; i++) {
+        const d = hexDistance(ownedCoords[i], coord);
+        if (d < minDist) minDist = d;
+      }
+      if (!Number.isFinite(minDist)) minDist = 1;
+
+      const spySpeedMult = hasSpy2Tech ? 0.75 : 1;
+      const durationSeconds = Math.max(
+        60,
+        Math.round(EXPLORATION.SECONDS_PER_HEX * minDist * spySpeedMult)
+      );
+      explorationPlan = {
+        distance: minDist,
+        durationSeconds,
+        costs: {
+          gold: Math.round(EXPLORATION.BASE_COSTS.gold * minDist),
+          food: Math.round(EXPLORATION.BASE_COSTS.food * minDist),
+        },
       };
     }
 
-    // 2. Autorización ESTRICTA ANTES de leer territorios, propietarios o reinos rivales (P22)
-    const kingdomId = args.kingdomId;
-    const identity = await ctx.auth.getUserIdentity();
-    const kingdom = await ctx.db.get(kingdomId);
-    if (!kingdom) throw new Error("Reino no encontrado.");
-
-    const isDemoRead = kingdom.userId === DEMO_USER_ID;
-    if (!isDemoRead && !isKingdomOwner(kingdom.userId, identity?.subject)) {
-      throw new Error("No autorizado: solo puede consultar la niebla de guerra de su propio reino.");
-    }
-
-    // 3. Leer ÚNICAMENTE los datos propios del reino autorizado (marchas filtradas en servidor)
-    const [ownedCells, exploredRecords, activeQueue, completedTech, activeMarchesDocs] = await Promise.all([
-      ctx.db
-        .query("territories")
-        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdomId))
-        .collect(),
-      ctx.db
-        .query("exploredTerritories")
-        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
-        .collect(),
-      ctx.db
-        .query("explorationQueue")
-        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
-        .collect(),
-      readCompletedTechnologyIds(ctx, kingdomId),
-      ctx.db
-        .query("armyMarches")
-        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
-        .filter((q) => q.eq(q.field("status"), "marchando"))
-        .collect(),
-    ]);
-
-    const hasSpy2Tech = completedTech.includes("spy_2");
-    const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
-
-    const coordById = new Map<string, HexCoord>();
-    const getValidCoord = (id: string): HexCoord | null => {
-      const cached = coordById.get(id);
-      if (cached) return cached;
-      const parsed = parseCellId(id);
-      if (!parsed || !isInsideWorld(parsed, MAP.RADIUS)) return null;
-      coordById.set(id, parsed);
-      return parsed;
-    };
-
-    const ownedIds = new Set<string>();
-    const knownTerritoryByCellId = new Map<string, Doc<"territories">>();
-    for (const c of ownedCells) {
-      const id = String(c.cellId);
-      ownedIds.add(id);
-      knownTerritoryByCellId.set(id, c);
-      coordById.set(id, { q: c.q, r: c.r });
-    }
-    if (kingdom.homeTerritoryId) {
-      ownedIds.add(String(kingdom.homeTerritoryId));
-      if (homeCoord) coordById.set(String(kingdom.homeTerritoryId), homeCoord);
-    }
-
-    const ownedCoords: HexCoord[] = ownedCells.map((c) => ({ q: c.q, r: c.r }));
-    if (homeCoord && !ownedCoords.some((c) => c.q === homeCoord.q && c.r === homeCoord.r)) {
-      ownedCoords.push(homeCoord);
-    }
-
-    const knownIds = new Set<string>([
-      ...Array.from(ownedIds),
-      ...getInitialSightCellIds(homeCoord, EXPLORATION.INITIAL_SIGHT_RADIUS, MAP.RADIUS),
-      ...exploredRecords.map((r) => String(r.cellId)),
-    ]);
-
-    const activeExpeditionMap = new Map<string, (typeof activeQueue)[0]>();
-    const now = Date.now();
-    for (const exp of activeQueue) {
-      if (now >= exp.completesAt) {
-        knownIds.add(exp.cellId);
-      } else {
-        activeExpeditionMap.set(exp.cellId, exp);
-      }
-    }
-
-    // Agrupar celdas conocidas pendientes por columna axial `q` con rango [rMin, rMax]
-    // y concurrencia estrictamente acotada (<= 101 consultas, <= 8 simultáneas).
-    // Todos los documentos recuperados se filtran en servidor contra el conjunto exacto `knownIds`.
-    const alreadyLoadedIds = new Set<string>(knownTerritoryByCellId.keys());
-    const columnPlan = buildKnownColumnQueries(knownIds, alreadyLoadedIds, MAP.RADIUS);
-    if (columnPlan.columns.length > 0) {
-      const { docs: fetchedKnownDocs } = await executeBoundedColumnQueries(
-        columnPlan.columns,
-        knownIds,
-        alreadyLoadedIds,
-        (col) =>
-          ctx.db
-            .query("territories")
-            .withIndex("by_q_r", (idx) => idx.eq("q", col.q).gte("r", col.rMin).lte("r", col.rMax))
-            .collect(),
-        MAX_CONCURRENT_TERRITORY_QUERIES
-      );
-      for (let i = 0; i < fetchedKnownDocs.length; i++) {
-        const doc = fetchedKnownDocs[i];
-        knownTerritoryByCellId.set(doc.cellId, doc);
-      }
-    }
-
-    // Cargar ÚNICAMENTE los reinos propietarios de celdas conocidas
-    const knownOwnedCountByKingdom = new Map<string, number>();
-    const visibleOwnerIdMap = new Map<string, Id<"kingdoms">>();
-    for (const cid of knownIds) {
-      const cell = knownTerritoryByCellId.get(cid);
-      if (cell?.ownerKingdomId) {
-        const key = String(cell.ownerKingdomId);
-        knownOwnedCountByKingdom.set(key, (knownOwnedCountByKingdom.get(key) ?? 0) + 1);
-        visibleOwnerIdMap.set(key, cell.ownerKingdomId);
-      }
-    }
-
-    const visibleOwnerDocs = await Promise.all(
-      Array.from(visibleOwnerIdMap.values()).map((id) => ctx.db.get(id))
-    );
-    const names = new Map<string, string>();
-    const colorsMap = new Map<string, string>();
-    const legendList: Array<{ id: string; name: string; monarchName?: string; color: string; territoryCount: number }> = [];
-    for (const k of visibleOwnerDocs) {
-      if (!k) continue;
-      const key = String(k._id);
-      const color = k.color ?? "#d4af37";
-      names.set(key, k.name);
-      colorsMap.set(key, color);
-      const visibleOwnedCount = knownOwnedCountByKingdom.get(key) ?? 0;
-      if (visibleOwnedCount > 0) {
-        legendList.push({
-          id: key,
-          name: k.name,
-          monarchName: k.monarchName,
-          color,
-          territoryCount: visibleOwnedCount,
-        });
-      }
-    }
-
-    const activeExpeditionsCount = activeExpeditionMap.size;
-    const canLaunchMore = activeExpeditionsCount < EXPLORATION.MAX_CONCURRENT_EXPEDITIONS;
-    const activeCellIds = new Set(activeExpeditionMap.keys());
-
-    const frontierIds = new Set<string>();
-    if (canLaunchMore) {
-      for (const knownId of knownIds) {
-        const coord = getValidCoord(knownId);
-        if (!coord) continue;
-        for (const n of hexNeighbors(coord, MAP.RADIUS)) {
-          const nid = cellId(n.q, n.r);
-          if (!knownIds.has(nid) && !activeExpeditionMap.has(nid) && !ownedIds.has(nid)) {
-            frontierIds.add(nid);
-            if (!coordById.has(nid)) coordById.set(nid, n);
-          }
+    const activeExp = activeExpeditionMap.get(id);
+    const expedition = activeExp
+      ? {
+          expeditionId: activeExp._id,
+          progressPercent: explorationProgress(activeExp.startedAt, activeExp.durationMs, now),
+          completesAt: activeExp.completesAt,
+          durationMs: activeExp.durationMs,
+          distance: activeExp.distance,
+          isSpyMission: activeExp.isSpyMission ?? false,
         }
-      }
-    }
+      : null;
 
-    const interestingIds = new Set<string>([
-      ...Array.from(knownIds),
-      ...Array.from(activeCellIds),
-      ...Array.from(frontierIds),
-    ]);
+    const isHidden = !isKnown;
+    const realTerrain = dbKnown?.terrain ?? terrainForCell(coord.q, coord.r, MAP.WORLD_SEED, MAP.RADIUS);
+    const ownerId = dbKnown?.ownerKingdomId ?? null;
+    const ownerColor = isHidden ? null : ownerId ? colorsMap.get(String(ownerId)) ?? "#d4af37" : null;
 
-    const visibleCells = [];
-    for (const id of interestingIds) {
-      const coord = getValidCoord(id);
-      if (!coord) continue;
+    visibleCells.push({
+      cellId: id,
+      q: coord.q,
+      r: coord.r,
+      terrain: isHidden ? "desconocido" : realTerrain,
+      ownerKingdomId: isHidden ? null : ownerId,
+      ownerName: isHidden ? null : ownerId ? names.get(String(ownerId)) ?? null : null,
+      ownerColor,
+      isHome: isHidden ? false : dbKnown?.isHome ?? false,
+      state,
+      canExplore,
+      canConquer,
+      explorationPlan,
+      expedition,
+    });
+  }
 
-      const isOwned = ownedIds.has(id);
-      const isExploring = activeExpeditionMap.has(id);
-      const isKnown = knownIds.has(id);
-      const dbKnown = isKnown ? knownTerritoryByCellId.get(id) : undefined;
-
-      let state: CellExplorationState;
-      if (isOwned) {
-        state = "owned";
-      } else if (isExploring) {
-        state = "exploring";
-      } else if (isKnown) {
-        state = "explored";
-      } else {
-        state = "fog";
-      }
-
-      let canExplore = false;
-      let explorationPlan: { distance: number; durationSeconds: number; costs: { gold: number; food: number } } | null = null;
-      if (state === "fog" && frontierIds.has(id) && canLaunchMore) {
-        canExplore = true;
-        const planRes = canStartExploration({
-          targetCoord: coord,
-          targetCellId: id,
-          knownCellIds: knownIds,
-          activeCellIds,
-          ownedCoords,
-          availableSpies: 999,
-          currentResources: { gold: 999999, food: 999999 },
-          activeExpeditionsCount,
-          worldRadius: MAP.RADIUS,
-          civilization: kingdom.civilization,
-          hasSpy2Tech,
-        });
-        if (planRes.success) {
-          explorationPlan = {
-            distance: planRes.plan.distance,
-            durationSeconds: planRes.plan.durationSeconds,
-            costs: planRes.plan.costs,
-          };
-        }
-      }
-
-      let canConquer = false;
-      if (state === "explored" && !dbKnown?.ownerKingdomId) {
-        const neighbors = hexNeighbors(coord, MAP.RADIUS);
-        canConquer = neighbors.some((n) => ownedIds.has(cellId(n.q, n.r)));
-      }
-
-      const activeExp = activeExpeditionMap.get(id);
-      const expedition = activeExp
-        ? {
-            expeditionId: activeExp._id,
-            progressPercent: explorationProgress(activeExp.startedAt, activeExp.durationMs, now),
-            completesAt: activeExp.completesAt,
-            durationMs: activeExp.durationMs,
-            distance: activeExp.distance,
-            isSpyMission: activeExp.isSpyMission ?? false,
-          }
-        : null;
-
-      const isHidden = !isKnown;
-      const realTerrain = dbKnown?.terrain ?? terrainForCell(coord.q, coord.r, MAP.WORLD_SEED, MAP.RADIUS);
-      const ownerId = dbKnown?.ownerKingdomId ?? null;
-      const ownerColor = isHidden ? null : ownerId ? colorsMap.get(String(ownerId)) ?? "#d4af37" : null;
-
-      visibleCells.push({
-        cellId: id,
-        q: coord.q,
-        r: coord.r,
-        terrain: isHidden ? "desconocido" : realTerrain,
-        ownerKingdomId: isHidden ? null : ownerId,
-        ownerName: isHidden ? null : ownerId ? names.get(String(ownerId)) ?? null : null,
-        ownerColor,
-        isHome: isHidden ? false : dbKnown?.isHome ?? false,
-        state,
-        canExplore,
-        canConquer,
-        explorationPlan,
-        expedition,
-      });
-    }
-
-    return {
+  return {
+    payload: {
       radius: MAP.RADIUS,
       worldSeed: MAP.WORLD_SEED,
       generated: true,
@@ -1267,7 +1356,106 @@ export const getWorldMapCompact = query({
         discoveredAt: e.discoveredAt,
         note: e.discoveryNote ?? "Territorio cartografiado",
       })),
-    };
+    },
+    metrics: queryMetrics,
+  };
+}
+
+/**
+ * Consulta compacta del mapa mundial: evita leer las 7.651 filas de `territories` en Convex.
+ * Agrupa celdas conocidas por columna axial `q` (<= 101 consultas, <= 8 concurrentes, `.take(span+1)` centinela)
+ * y filtra estrictamente la niebla de guerra en servidor.
+ */
+export const getWorldMapCompact = query({
+  args: {
+    kingdomId: v.optional(v.id("kingdoms")),
+  },
+  handler: async (ctx, args) => {
+    const { payload } = await executeWorldMapCompactQuery(ctx, args);
+    return payload;
+  },
+});
+
+/**
+ * Consulta interna de diagnóstico para pruebas y auditoría: devuelve tanto el payload compacto
+ * como las métricas reales de ejecución de columnas (sin descartar métricas ni escribir en DB).
+ */
+export const getWorldMapCompactWithDiagnostics = internalQuery({
+  args: {
+    kingdomId: v.optional(v.id("kingdoms")),
+  },
+  handler: async (ctx, args) => {
+    return await executeWorldMapCompactQuery(ctx, args);
+  },
+});
+
+/**
+ * Auditoría geográfica de solo lectura para todos los reinos persistidos (Bloque A.4).
+ * Genera un plan determinista de recolocación sin modificar ningún registro en base de datos.
+ */
+async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx) {
+  const allKingdoms = await ctx.db.query("kingdoms").collect();
+  const inputs: ExistingKingdomAuditInput[] = await Promise.all(
+    allKingdoms.map(async (k) => {
+      const [owned, marches, challengesAsChallenger, challengesAsTarget, explorations] = await Promise.all([
+        ctx.db.query("territories").withIndex("by_owner", (q) => q.eq("ownerKingdomId", k._id)).collect(),
+        ctx.db
+          .query("armyMarches")
+          .withIndex("by_kingdom", (q) => q.eq("kingdomId", k._id))
+          .filter((q) => q.eq(q.field("status"), "marchando"))
+          .collect(),
+        ctx.db.query("challenges").withIndex("by_challenger", (q) => q.eq("challengerKingdomId", k._id)).collect(),
+        ctx.db.query("challenges").withIndex("by_target", (q) => q.eq("targetKingdomId", k._id)).collect(),
+        ctx.db.query("explorationQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", k._id)).collect(),
+      ]);
+
+      const homeDoc =
+        (k.homeTerritoryId ? owned.find((c) => c.cellId === k.homeTerritoryId) : undefined) ??
+        owned.find((c) => c.isHome) ??
+        owned[0] ??
+        null;
+
+      const activeChallenges = [...challengesAsChallenger, ...challengesAsTarget].filter(
+        (ch) => ch.status !== "RESOLVED" && ch.status !== "CANCELLED" && ch.status !== "EXPIRED" && ch.status !== "REJECTED"
+      );
+
+      return {
+        kingdomId: String(k._id),
+        name: k.name,
+        civilization: k.civilization ?? null,
+        homeTerritoryId: k.homeTerritoryId ?? null,
+        persistedHomeCell: homeDoc
+          ? {
+              cellId: homeDoc.cellId,
+              q: homeDoc.q,
+              r: homeDoc.r,
+              ownerKingdomId: homeDoc.ownerKingdomId ? String(homeDoc.ownerKingdomId) : null,
+              isHome: homeDoc.isHome,
+            }
+          : null,
+        ownedTerritoryCount: owned.length,
+        activeMarchesCount: marches.length,
+        activeChallengesCount: activeChallenges.length,
+        activeExplorationsCount: explorations.length,
+      };
+    })
+  );
+
+  return auditExistingKingdomSpawns(inputs, MAP.RADIUS);
+}
+
+export const auditKingdomSpawnDistributionInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    return await runKingdomSpawnAuditReadOnly(ctx);
+  },
+});
+
+export const auditKingdomSpawnDistribution = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAuthorizedAdmin(ctx);
+    return await runKingdomSpawnAuditReadOnly(ctx);
   },
 });
 

@@ -230,7 +230,9 @@ describe("Corrección 1 — Parlamento y fechas de combate (P38)", () => {
     const atk = await foundKingdom(t, "p38-neut-atk", "Reino Expansivo");
     const def = await foundKingdom(t, "p38-neut-def", "Reino Rival");
 
-    await atk.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: atk.kingdomId });
+    const atkHomeRes: any = await atk.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: atk.kingdomId });
+    const atkHomeId: string = typeof atkHomeRes === "string" ? atkHomeRes : atkHomeRes.homeTerritoryId;
+    const [ahq, ahr] = atkHomeId.split(",").map(Number);
     await def.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: def.kingdomId });
     await setBuilding(t, atk.kingdomId, "parlamento", 1);
     await setBuilding(t, def.kingdomId, "parlamento", 1);
@@ -240,10 +242,10 @@ describe("Corrección 1 — Parlamento y fechas de combate (P38)", () => {
       await ctx.db.insert("armyUnits", { kingdomId: def.kingdomId, unitType: "infanteria", level: 1, count: 100 });
     });
 
-    // Celda "1,0" es vecina inmediata de la capital "0,0" y conocida por visión inicial
+    // Celda vecina inmediata de la capital regional y conocida por visión inicial
     const neutralMarch = await atk.asUser.mutation(api.army.launchAttack, {
       kingdomId: atk.kingdomId,
-      cellId: "1,0",
+      cellId: `${ahq + 1},${ahr}`,
       units: [{ unitType: "infanteria", level: 1, count: 50 }],
     });
     expect(neutralMarch.success).toBe(true);
@@ -379,11 +381,14 @@ describe("Corrección 3 — Niebla de guerra coherente en getWorldMap y getWorld
     expect(compactA.kingdomLegend.some((k) => k.id === String(kB.kingdomId))).toBe(false);
 
     // 4. Celda en estado "exploring" (expedición en curso) NO filtra propietario ni terreno hasta completarse
+    const kAHomeId = await t.run(async (ctx) => (await ctx.db.get(kA.kingdomId))?.homeTerritoryId ?? "0,34");
+    const [kAq, kAr] = kAHomeId.split(",").map(Number);
+    const expTargetId = `${kAq + 2},${kAr}`;
     await t.run(async (ctx) => {
       await ctx.db.insert("territories", {
-        cellId: "2,0",
-        q: 2,
-        r: 0,
+        cellId: expTargetId,
+        q: kAq + 2,
+        r: kAr,
         terrain: "montana",
         ownerKingdomId: kB.kingdomId,
         isHome: false,
@@ -393,13 +398,13 @@ describe("Corrección 3 — Niebla de guerra coherente en getWorldMap y getWorld
       if (res) await ctx.db.patch(res._id, { gold: 1000, food: 1000 });
     });
 
-    await kA.asUser.mutation(api.territories.startExploration, { kingdomId: kA.kingdomId, cellId: "2,0", spiesCount: 1 });
+    await kA.asUser.mutation(api.territories.startExploration, { kingdomId: kA.kingdomId, cellId: expTargetId, spiesCount: 1 });
 
     const mapDuring = await kA.asUser.query(api.territories.getWorldMap, { kingdomId: kA.kingdomId });
     const compactDuring = await kA.asUser.query(api.territories.getWorldMapCompact, { kingdomId: kA.kingdomId });
 
-    const cellDuringFull = mapDuring.cells.find((c) => c.cellId === "2,0");
-    const cellDuringCompact = compactDuring.visibleCells.find((c) => c.cellId === "2,0");
+    const cellDuringFull = mapDuring.cells.find((c) => c.cellId === expTargetId);
+    const cellDuringCompact = compactDuring.visibleCells.find((c) => c.cellId === expTargetId);
     expect(cellDuringFull?.state).toBe("exploring");
     expect(cellDuringFull?.ownerKingdomId).toBeNull();
     expect(cellDuringFull?.terrain).toBe("desconocido");
@@ -464,9 +469,10 @@ describe("Corrección 4 — Reducción del mapa unificada (MAP.RADIUS, dryRun, c
     expect(realRes.protectedCapitals).toBe(1);
     expect(realRes.explorationsDeleted).toBe(1);
 
-    // Verificar que se conservó la capital inicial, la celda interior (30,0) y la capital exterior protegida
+    // Verificar que se conservó la capital inicial regional, la celda interior (30,0) y la capital exterior protegida
+    const initialHome = await t.run(async (ctx) => (await ctx.db.get(k.kingdomId))?.homeTerritoryId ?? "0,34");
     const remaining = await t.run(async (ctx) => ctx.db.query("territories").collect());
-    expect(remaining.map((c) => c.cellId).sort()).toEqual(["0,0", "30,0", `${MAP.RADIUS + 3},0`].sort());
+    expect(remaining.map((c) => c.cellId).sort()).toEqual([initialHome, "30,0", `${MAP.RADIUS + 3},0`].sort());
 
     // 3. Idempotencia (sin doble ejecución)
     const secondRun: any = await t.mutation(internal.territories.executeMapReduction, { dryRun: false });

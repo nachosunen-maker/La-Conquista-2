@@ -1,14 +1,24 @@
 import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { api } from "./_generated/api";
-import { MAP } from "./balanceConfig";
-import { cellId, generateWorldCells, hexDistance } from "./territoryRules";
+import { api, internal } from "./_generated/api";
+import { CIVILIZATION_ZONES, MAP } from "./balanceConfig";
+import {
+  analyzeWorldSpawnGeometry,
+  auditExistingKingdomSpawns,
+  cellId,
+  chooseHomeCellWithDiagnostics,
+  generateWorldCells,
+  hexDistance,
+  optimizeKingdomDistribution,
+  verifyCivilizationAnchors,
+} from "./territoryRules";
 import {
   buildKnownColumnQueries,
   executeBoundedColumnQueries,
   MAX_CONCURRENT_TERRITORY_QUERIES,
   MAX_MAP_COLUMN_QUERIES,
+  MAX_THEORETICAL_DOCS_WITH_SENTINEL,
 } from "./territories";
 import {
   BASE_HEX_SIZE,
@@ -306,6 +316,225 @@ describe("Bloque 1 — Convex: consultas agrupadas por columna axial q, coste ac
     // La leyenda de reinos solo contabiliza territorios visibles de Imperio Oculto (1, NO 2)
     const legendB = compactA.kingdomLegend.find((l: any) => l.id === String(kingdomB._id));
     expect(legendB?.territoryCount).toBe(1);
+
+    // Verificar métricas reales devueltas por getWorldMapCompactWithDiagnostics (sin descartarlas)
+    const diag = await userA.query(internal.territories.getWorldMapCompactWithDiagnostics, { kingdomId: kingdomA._id });
+    expect(diag.metrics.indexedQueriesCount).toBeGreaterThan(0);
+    expect(diag.metrics.indexedQueriesCount).toBeLessThanOrEqual(101);
+    expect(diag.metrics.maxObservedConcurrency).toBeLessThanOrEqual(8);
+    expect(diag.metrics.duplicatesDetected).toBe(0);
+    expect(diag.metrics.errors).toEqual([]);
+    expect(diag.metrics.docsRetrievedCount).toBe(diag.metrics.docsAcceptedCount + diag.metrics.docsDiscardedCount);
+  });
+
+  test("Duplicados e inconsistencias en territories: límite centinela 7651+101=7752, detección y error controlado sin resultados parciales", async () => {
+    // 1. Verificar límite teórico con centinela en mapa completo (7.651 + 101 = 7.752)
+    expect(MAX_THEORETICAL_DOCS_WITH_SENTINEL).toBe(7752);
+    const fullPlan = buildKnownColumnQueries(allCells.map((c) => c.cellId), new Set(), MAP.RADIUS);
+    expect(fullPlan.columns.length).toBe(101);
+    expect(fullPlan.theoreticalMaxRangeDocs).toBe(7651);
+    expect(fullPlan.theoreticalMaxRangeDocsWithSentinel).toBe(7752);
+
+    // 2. Simular documento duplicado en una columna (dispara centinela take(maxRangeSpan + 1))
+    const colPlan = buildKnownColumnQueries(["0,0", "0,1"], new Set(), MAP.RADIUS);
+    expect(colPlan.columns[0].maxRangeSpan).toBe(2);
+    expect(colPlan.columns[0].takeLimit).toBe(3);
+
+    await expect(
+      executeBoundedColumnQueries(
+        colPlan.columns,
+        new Set(["0,0", "0,1"]),
+        new Set(),
+        async () => [
+          { cellId: "0,0", q: 0, r: 0 },
+          { cellId: "0,1", q: 0, r: 1 },
+          { cellId: "0,1", q: 0, r: 1 }, // centinela (+1) disparado
+        ]
+      )
+    ).rejects.toThrow(/centinela disparado|duplicado/i);
+
+    // 3. Simular incoherencia de cellId vs (q, r)
+    await expect(
+      executeBoundedColumnQueries(
+        colPlan.columns,
+        new Set(["0,0", "0,1"]),
+        new Set(),
+        async () => [{ cellId: "0,99", q: 0, r: 0 }]
+      )
+    ).rejects.toThrow(/Inconsistencia de coordenadas/i);
+
+    // 4. Integración real en Convex: insertar documento duplicado en BD para una celda explorada -> debe fallar sin devolver parciales
+    const t = convexTest(schema, modules);
+    const userA = t.withIdentity(identity("dup-user-a"));
+    const kingdomA = await userA.mutation(api.economy.getOrInitializeKingdom, {
+      name: "Reino Centinela",
+      civilization: "romanos",
+      castleName: "Torre",
+      monarchName: "Tito",
+    });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("exploredTerritories", {
+        kingdomId: kingdomA._id,
+        cellId: "5,-5",
+        discoveredAt: Date.now(),
+      });
+      await ctx.db.insert("territories", { cellId: "5,-5", q: 5, r: -5, terrain: "llanura" });
+      await ctx.db.insert("territories", { cellId: "5,-5", q: 5, r: -5, terrain: "bosque" });
+    });
+
+    await expect(
+      userA.query(api.territories.getWorldMapCompact, { kingdomId: kingdomA._id })
+    ).rejects.toThrow(/centinela disparado|duplicado/i);
+  });
+});
+
+describe("Bloque A — Distribución geográfica, anclas, geometría por intersección y auditoría de reinos existentes", () => {
+  test("Verificación matemática de las 12 anclas de civilización: válidas, enteras, sin duplicados y distancia mínima 21", () => {
+    const check = verifyCivilizationAnchors(MAP.RADIUS);
+    expect(check.totalAnchors).toBe(12);
+    expect(check.allInsideMap).toBe(true);
+    expect(check.allIntegerCoords).toBe(true);
+    expect(check.hasDuplicates).toBe(false);
+    expect(check.minPairwiseDistance).toBe(21);
+    expect(check.isValid).toBe(true);
+  });
+
+  test("Análisis geométrico corregido (R=50, d_min=20): disco completo 271, intersección mínima real 100, cota superior conservadora 76 y distribución constructiva verificada", () => {
+    const g = analyzeWorldSpawnGeometry(50, 20, 30);
+    expect(g.totalCells).toBe(7651);
+    expect(g.exclusionDiskRadius).toBe(9);
+    expect(g.fullExclusionDiskCells).toBe(271);
+    expect(g.minDiskIntersectionCells).toBe(100);
+    expect(g.conservativeIntersectionUpperBound).toBe(76);
+    expect(g.constructiveVerified).toBe(true);
+    expect(g.constructiveMinPairwiseDistance).toBeGreaterThanOrEqual(20);
+    expect(g.constructivePlacement.length).toBe(g.constructiveGreedyCountAtMinSeparation);
+  });
+
+  test("Asignación de capitales respeta siempre el ancla regional (sin usar el centro por defecto) y prioriza d >= 20", async () => {
+    const worldCells = generateWorldCells(MAP.RADIUS, MAP.WORLD_SEED);
+    // Primera capital del mundo (romanos) -> debe caer en su ancla (0, 34), NO en (0, 0)
+    const first = chooseHomeCellWithDiagnostics(worldCells, new Set(), [], {
+      civilization: "romanos",
+      existingKingdoms: [],
+    });
+    expect(first.cell?.q).toBe(CIVILIZATION_ZONES.romanos.q);
+    expect(first.cell?.r).toBe(CIVILIZATION_ZONES.romanos.r);
+    expect(first.status).toBe("solution_in_target_band");
+    expect(first.provenInfeasible).toBe(false);
+
+    // En Convex real (`ensureHomeTerritory`), el primer reino también recibe su ancla regional
+    const t = convexTest(schema, modules);
+    const user1 = t.withIdentity(identity("anchor-first-user"));
+    const k1 = await user1.mutation(api.economy.getOrInitializeKingdom, {
+      name: "Roma Prima",
+      civilization: "romanos",
+      castleName: "Capitolio",
+      monarchName: "Rómulo",
+    });
+    const terr1 = await user1.query(api.territories.getKingdomTerritories, { kingdomId: k1._id });
+    expect(terr1.homeTerritoryId).toBe("0,34");
+
+    // Segundo reino de otra civilización (vikingos) recibe su ancla (-34, 0)
+    const user2 = t.withIdentity(identity("anchor-second-user"));
+    const k2 = await user2.mutation(api.economy.getOrInitializeKingdom, {
+      name: "Fiordo Alfa",
+      civilization: "vikingos",
+      castleName: "Valhalla",
+      monarchName: "Bjorn",
+    });
+    const terr2 = await user2.query(api.territories.getKingdomTerritories, { kingdomId: k2._id });
+    expect(terr2.homeTerritoryId).toBe("-34,0");
+  });
+
+  test("Optimizador multi-reino determinista separa solución en banda, solo separación mínima e inviabilidad demostrada (N > 76)", () => {
+    const reqs12 = Object.keys(CIVILIZATION_ZONES).map((civ, i) => ({
+      kingdomId: `k-${String(i).padStart(2, "0")}`,
+      civilization: civ,
+    }));
+    const runA = optimizeKingdomDistribution(reqs12, MAP.RADIUS);
+    const runB = optimizeKingdomDistribution(reqs12, MAP.RADIUS);
+
+    // Determinista
+    expect(runA.assignments).toEqual(runB.assignments);
+    expect(runA.verifiedAllPairwiseDistances).toBe(true);
+    expect(runA.allMeetMinSeparation).toBe(true);
+    expect(runA.minPairwiseDistance).toBe(21);
+    expect(runA.status).toBe("solution_in_target_band");
+
+    // Inviabilidad demostrada cuando N > 76
+    const reqs80 = Array.from({ length: 80 }, (_, i) => ({
+      kingdomId: `k-${i}`,
+      civilization: "romanos",
+    }));
+    const infeasible = optimizeKingdomDistribution(reqs80, MAP.RADIUS);
+    expect(infeasible.status).toBe("proven_infeasible");
+    expect(infeasible.upperBoundAtMinSeparation).toBe(76);
+  });
+
+  test("Auditoría geográfica de reinos existentes detecta conflictos, bloqueos de integridad y NO modifica la base de datos", async () => {
+    const pureAudit = auditExistingKingdomSpawns([
+      {
+        kingdomId: "k1",
+        name: "Roma",
+        civilization: "romanos",
+        homeTerritoryId: "0,34",
+        persistedHomeCell: { cellId: "0,34", q: 0, r: 34, ownerKingdomId: "k1", isHome: true },
+        ownedTerritoryCount: 1,
+        activeMarchesCount: 0,
+        activeChallengesCount: 0,
+        activeExplorationsCount: 0,
+      },
+      {
+        kingdomId: "k2",
+        name: "Roma Cercana Libre",
+        civilization: "romanos",
+        homeTerritoryId: "0,30",
+        persistedHomeCell: { cellId: "0,30", q: 0, r: 30, ownerKingdomId: "k2", isHome: true },
+        ownedTerritoryCount: 1,
+        activeMarchesCount: 0,
+        activeChallengesCount: 0,
+        activeExplorationsCount: 0,
+      },
+      {
+        kingdomId: "k3",
+        name: "Roma Cercana Bloqueada",
+        civilization: "romanos",
+        homeTerritoryId: "1,33",
+        persistedHomeCell: { cellId: "1,33", q: 1, r: 33, ownerKingdomId: "k3", isHome: true },
+        ownedTerritoryCount: 5,
+        activeMarchesCount: 1,
+        activeChallengesCount: 0,
+        activeExplorationsCount: 0,
+      },
+    ]);
+
+    expect(pureAudit.readOnlyPlan).toBe(true);
+    expect(pureAudit.totalKingdoms).toBe(3);
+    expect(pureAudit.kingdomsRequiringRelocation).toBe(3);
+    expect(pureAudit.blockedRelocations).toBe(1);
+    const blockedEntry = pureAudit.entries.find((e) => e.kingdomId === "k3")!;
+    expect(blockedEntry.relocationAction).toBe("blocked");
+    expect(blockedEntry.blockedReasons.length).toBeGreaterThanOrEqual(2);
+
+    // Verificar consulta interna de solo lectura en Convex
+    const t = convexTest(schema, modules);
+    const userA = t.withIdentity(identity("audit-spawn-a"));
+    const kA = await userA.mutation(api.economy.getOrInitializeKingdom, {
+      name: "Reino Auditado",
+      civilization: "griegos",
+      castleName: "Acrópolis",
+      monarchName: "Pericles",
+    });
+    const beforeHome = (await userA.query(api.territories.getKingdomTerritories, { kingdomId: kA._id })).homeTerritoryId;
+    const report = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    const afterHome = (await userA.query(api.territories.getKingdomTerritories, { kingdomId: kA._id })).homeTerritoryId;
+
+    expect(report.readOnlyPlan).toBe(true);
+    expect(report.totalKingdoms).toBe(1);
+    expect(report.entries[0].coord).toEqual({ q: -34, r: 34 });
+    expect(afterHome).toBe(beforeHome); // 0 mutaciones
   });
 });
 
@@ -389,5 +618,12 @@ describe("Bloque 2 — Pruebas unitarias simuladas (Canvas headless, NO benchmar
     expect(renderer.getPerfSnapshot().baseRenderCount).toBe(baseAfterInit + 1);
 
     renderer.destroy();
+    // Verificar limpieza completa tras destroy(): caché liberada y renderNow() inactivo
+    const afterDestroy = renderer.getPerfSnapshot();
+    expect(afterDestroy.stampCacheEntries).toBe(0);
+    expect(afterDestroy.stampCacheBytes).toBe(0);
+    const overlayCountBefore = afterDestroy.overlayRenderCount;
+    renderer.renderNow();
+    expect(renderer.getPerfSnapshot().overlayRenderCount).toBe(overlayCountBefore);
   });
 });

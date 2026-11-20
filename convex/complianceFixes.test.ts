@@ -375,7 +375,9 @@ describe("Paquete D y Transversal: Mapa, exploración unificada y tecnologías",
   test("startSpyExploration aplica costes, límite MAX_CONCURRENT_EXPEDITIONS y bonificaciones igual que startExploration", async () => {
     const t = createTestBackend();
     const k = await foundKingdom(t, "user-exp-spy", "Reino Explorador");
-    await k.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: k.kingdomId });
+    const homeRes: any = await k.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: k.kingdomId });
+    const homeId: string = typeof homeRes === "string" ? homeRes : homeRes.homeTerritoryId;
+    const [hq, hr] = homeId.split(",").map(Number);
     await k.asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId: k.kingdomId });
 
     await t.run(async (ctx) => {
@@ -384,8 +386,8 @@ describe("Paquete D y Transversal: Mapa, exploración unificada y tecnologías",
       if (res) await ctx.db.patch(res._id, { gold: 5000, food: 5000 });
     });
 
-    // Con capital en 0,0 y radio inicial 1, todas estas celdas a distancia 2 limitan con el anillo de radio 1 conocido
-    const borderCells = ["2,0", "0,2", "-2,0", "0,-2", "2,-1", "-2,1"];
+    // Con radio inicial 1 desde la capital regional, estas celdas a distancia 2 limitan con el anillo conocido
+    const borderCells = [`${hq + 2},${hr}`, `${hq},${hr + 2}`, `${hq - 2},${hr}`, `${hq},${hr - 2}`, `${hq + 2},${hr - 1}`, `${hq - 2},${hr + 1}`];
     const exp1: any = await k.asUser.mutation(api.territories.startSpyExploration, {
       kingdomId: k.kingdomId,
       cellId: borderCells[0],

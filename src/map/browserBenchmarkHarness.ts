@@ -29,9 +29,12 @@ export type BenchmarkScenarioMode =
 
 export interface BrowserBenchmarkScenario {
   readonly id: string;
+  readonly profile: "desktop" | "mobile";
   readonly label: string;
   readonly viewport: { readonly width: number; readonly height: number };
   readonly dpr: number;
+  readonly isMobile: boolean;
+  readonly hasTouch: boolean;
   readonly knownCells: number;
   readonly expeditions: number;
   readonly initialZoom: number;
@@ -60,6 +63,12 @@ export interface BrowserBenchmarkRunResult {
   readonly panReuseHits: number;
   readonly stampCacheEntries: number;
   readonly stampCacheBytes: number;
+  readonly actualViewport: {
+    readonly innerWidth: number;
+    readonly innerHeight: number;
+    readonly devicePixelRatio: number;
+    readonly maxTouchPoints: number;
+  };
   readonly browserMemory: {
     readonly api: string;
     readonly usedJSHeapBytes: number | null;
@@ -77,7 +86,17 @@ export interface BrowserBenchmarkScenarioSummary {
     readonly p99FrameMs: number;
     readonly framesOver16_67ms: number;
     readonly framesOver33_33ms: number;
+    readonly jsPrepMs: number;
+    readonly baseRenderP50Ms: number;
+    readonly overlayRenderP50Ms: number;
+    readonly hexesProcessed: number;
+    readonly expeditionsInspected: number;
+    readonly expeditionsDrawn: number;
     readonly baseRedrawCount: number;
+    readonly panReuseHits: number;
+    readonly stampCacheEntries: number;
+    readonly stampCacheBytes: number;
+    readonly usedJSHeapBytes: number | null;
     readonly meets60FpsBudgetP95: boolean;
     readonly meets30FpsBudgetP95: boolean;
   };
@@ -111,18 +130,18 @@ export function sortedPercentile(sortedAsc: ReadonlyArray<number>, p: number): n
 }
 
 export const MANDATORY_BROWSER_SCENARIOS: ReadonlyArray<BrowserBenchmarkScenario> = [
-  { id: "desktop_500_5_close_pan", label: "Escritorio 1440x900 | 500 celdas | 5 exp | Zoom cercano | Pan continuo", viewport: { width: 1440, height: 900 }, dpr: 2, knownCells: 500, expeditions: 5, initialZoom: 2.2, mode: "pan_continuous" },
-  { id: "desktop_2000_50_mid_pan", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Zoom intermedio | Pan continuo", viewport: { width: 1440, height: 900 }, dpr: 2, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "pan_continuous" },
-  { id: "desktop_7651_200_far_pan", label: "Escritorio 1440x900 | 7651 celdas | 200 exp | Zoom alejado | Pan continuo", viewport: { width: 1440, height: 900 }, dpr: 2, knownCells: 7651, expeditions: 200, initialZoom: 0.35, mode: "pan_continuous" },
-  { id: "desktop_2000_50_zoom", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Zoom continuo", viewport: { width: 1440, height: 900 }, dpr: 2, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "zoom_continuous" },
-  { id: "desktop_2000_50_dyn", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Datos dinámicos sin cambio terreno", viewport: { width: 1440, height: 900 }, dpr: 2, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "dynamic_no_terrain" },
-  { id: "desktop_2000_50_exp_prog", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Progreso de expediciones", viewport: { width: 1440, height: 900 }, dpr: 2, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "expedition_progress" },
-  { id: "desktop_2000_50_select", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Cambio de selección", viewport: { width: 1440, height: 900 }, dpr: 2, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "selection_change" },
-  { id: "desktop_2000_50_hover", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Cambio de hover", viewport: { width: 1440, height: 900 }, dpr: 2, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "hover_change" },
-  { id: "mobile_500_5_close_pan", label: "Móvil 390x844 | 500 celdas | 5 exp | Zoom cercano | Pan continuo", viewport: { width: 390, height: 844 }, dpr: 3, knownCells: 500, expeditions: 5, initialZoom: 2.2, mode: "pan_continuous" },
-  { id: "mobile_2000_50_mid_pan", label: "Móvil 390x844 | 2000 celdas | 50 exp | Zoom intermedio | Pan continuo", viewport: { width: 390, height: 844 }, dpr: 3, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "pan_continuous" },
-  { id: "mobile_7651_200_far_pan", label: "Móvil 390x844 | 7651 celdas | 200 exp | Zoom alejado | Pan continuo", viewport: { width: 390, height: 844 }, dpr: 3, knownCells: 7651, expeditions: 200, initialZoom: 0.35, mode: "pan_continuous" },
-  { id: "mobile_2000_50_zoom", label: "Móvil 390x844 | 2000 celdas | 50 exp | Zoom continuo", viewport: { width: 390, height: 844 }, dpr: 3, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "zoom_continuous" },
+  { id: "desktop_500_5_close_pan", profile: "desktop", label: "Escritorio 1440x900 | 500 celdas | 5 exp | Zoom cercano | Pan continuo", viewport: { width: 1440, height: 900 }, dpr: 2, isMobile: false, hasTouch: false, knownCells: 500, expeditions: 5, initialZoom: 2.2, mode: "pan_continuous" },
+  { id: "desktop_2000_50_mid_pan", profile: "desktop", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Zoom intermedio | Pan continuo", viewport: { width: 1440, height: 900 }, dpr: 2, isMobile: false, hasTouch: false, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "pan_continuous" },
+  { id: "desktop_7651_200_far_pan", profile: "desktop", label: "Escritorio 1440x900 | 7651 celdas | 200 exp | Zoom alejado | Pan continuo", viewport: { width: 1440, height: 900 }, dpr: 2, isMobile: false, hasTouch: false, knownCells: 7651, expeditions: 200, initialZoom: 0.35, mode: "pan_continuous" },
+  { id: "desktop_2000_50_zoom", profile: "desktop", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Zoom continuo", viewport: { width: 1440, height: 900 }, dpr: 2, isMobile: false, hasTouch: false, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "zoom_continuous" },
+  { id: "desktop_2000_50_dyn", profile: "desktop", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Datos dinámicos sin cambio terreno", viewport: { width: 1440, height: 900 }, dpr: 2, isMobile: false, hasTouch: false, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "dynamic_no_terrain" },
+  { id: "desktop_2000_50_exp_prog", profile: "desktop", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Progreso de expediciones", viewport: { width: 1440, height: 900 }, dpr: 2, isMobile: false, hasTouch: false, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "expedition_progress" },
+  { id: "desktop_2000_50_select", profile: "desktop", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Cambio de selección", viewport: { width: 1440, height: 900 }, dpr: 2, isMobile: false, hasTouch: false, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "selection_change" },
+  { id: "desktop_2000_50_hover", profile: "desktop", label: "Escritorio 1440x900 | 2000 celdas | 50 exp | Cambio de hover", viewport: { width: 1440, height: 900 }, dpr: 2, isMobile: false, hasTouch: false, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "hover_change" },
+  { id: "mobile_500_5_close_pan", profile: "mobile", label: "Móvil 390x844 | 500 celdas | 5 exp | Zoom cercano | Pan continuo", viewport: { width: 390, height: 844 }, dpr: 3, isMobile: true, hasTouch: true, knownCells: 500, expeditions: 5, initialZoom: 2.2, mode: "pan_continuous" },
+  { id: "mobile_2000_50_mid_pan", profile: "mobile", label: "Móvil 390x844 | 2000 celdas | 50 exp | Zoom intermedio | Pan continuo", viewport: { width: 390, height: 844 }, dpr: 3, isMobile: true, hasTouch: true, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "pan_continuous" },
+  { id: "mobile_7651_200_far_pan", profile: "mobile", label: "Móvil 390x844 | 7651 celdas | 200 exp | Zoom alejado | Pan continuo", viewport: { width: 390, height: 844 }, dpr: 3, isMobile: true, hasTouch: true, knownCells: 7651, expeditions: 200, initialZoom: 0.35, mode: "pan_continuous" },
+  { id: "mobile_2000_50_zoom", profile: "mobile", label: "Móvil 390x844 | 2000 celdas | 50 exp | Zoom continuo", viewport: { width: 390, height: 844 }, dpr: 3, isMobile: true, hasTouch: true, knownCells: 2000, expeditions: 50, initialZoom: 1.25, mode: "zoom_continuous" },
 ];
 
 let cachedSortedCells: ReturnType<typeof generateWorldCells> | null = null;
@@ -212,7 +231,10 @@ async function runSingleScenarioRepetition(
   measureMs: number
 ): Promise<BrowserBenchmarkRunResult> {
   const renderer = new MedievalMapRenderer(canvas, MAP.RADIUS, MAP.WORLD_SEED);
-  renderer.setViewport(scenario.viewport.width, scenario.viewport.height, scenario.dpr);
+  const effectiveW = window.innerWidth > 0 ? window.innerWidth : scenario.viewport.width;
+  const effectiveH = window.innerHeight > 0 ? window.innerHeight : scenario.viewport.height;
+  const effectiveDpr = window.devicePixelRatio > 0 ? window.devicePixelRatio : scenario.dpr;
+  renderer.setViewport(effectiveW, effectiveH, effectiveDpr);
   const cam0 = createCapitalCenteredCamera({ q: 0, r: 0 }, scenario.initialZoom, BASE_HEX_SIZE);
   renderer.setCamera(cam0);
   renderer.setData(createBenchmarkInput(scenario.knownCells, scenario.expeditions, 0));
@@ -310,6 +332,13 @@ async function runSingleScenarioRepetition(
   const sortedBase = [...baseDraws].sort((a, b) => a - b);
   const sortedOverlay = [...overlayDraws].sort((a, b) => a - b);
 
+  const actualViewport = {
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio || 1,
+    maxTouchPoints: navigator.maxTouchPoints ?? 0,
+  };
+
   const result: BrowserBenchmarkRunResult = {
     runIndex,
     totalFrames: frameDeltas.length,
@@ -332,6 +361,7 @@ async function runSingleScenarioRepetition(
     panReuseHits: snap.panReuseHitCount - panHitsBeforeMeasure,
     stampCacheEntries: snap.stampCacheEntries,
     stampCacheBytes: snap.stampCacheBytes,
+    actualViewport,
     browserMemory: readBrowserMemory(),
   };
 
@@ -366,6 +396,10 @@ export async function runBrowserBenchmarkSuite(options?: {
     }
     const med = (vals: number[]) => sortedPercentile([...vals].sort((a, b) => a - b), 0.5);
     const medP95 = Number(med(runs.map((r) => r.p95FrameMs)).toFixed(3));
+    const heapSamples = runs
+      .map((r) => r.browserMemory.usedJSHeapBytes)
+      .filter((v): v is number => typeof v === "number");
+
     scenarios.push({
       scenario,
       runs,
@@ -376,7 +410,17 @@ export async function runBrowserBenchmarkSuite(options?: {
         p99FrameMs: Number(med(runs.map((r) => r.p99FrameMs)).toFixed(3)),
         framesOver16_67ms: Math.round(med(runs.map((r) => r.framesOver16_67ms))),
         framesOver33_33ms: Math.round(med(runs.map((r) => r.framesOver33_33ms))),
+        jsPrepMs: Number(med(runs.map((r) => r.jsPrepMs)).toFixed(3)),
+        baseRenderP50Ms: Number(med(runs.map((r) => r.baseRenderP50Ms)).toFixed(3)),
+        overlayRenderP50Ms: Number(med(runs.map((r) => r.overlayRenderP50Ms)).toFixed(3)),
+        hexesProcessed: Math.round(med(runs.map((r) => r.hexesProcessed))),
+        expeditionsInspected: Math.round(med(runs.map((r) => r.expeditionsInspected))),
+        expeditionsDrawn: Math.round(med(runs.map((r) => r.expeditionsDrawn))),
         baseRedrawCount: Math.round(med(runs.map((r) => r.baseRedrawCount))),
+        panReuseHits: Math.round(med(runs.map((r) => r.panReuseHits))),
+        stampCacheEntries: Math.round(med(runs.map((r) => r.stampCacheEntries))),
+        stampCacheBytes: Math.round(med(runs.map((r) => r.stampCacheBytes))),
+        usedJSHeapBytes: heapSamples.length > 0 ? Math.round(med(heapSamples)) : null,
         meets60FpsBudgetP95: medP95 <= 16.67,
         meets30FpsBudgetP95: medP95 <= 33.33,
       },
@@ -399,10 +443,14 @@ export async function runBrowserBenchmarkSuite(options?: {
   };
 }
 
-/** Monta el harness interactivo y expone `window.__runMapBenchmarkSuite` para Playwright. */
+/** Monta el harness interactivo y expone `window.__runMapBenchmarkSuite` y `window.__mapBenchmarkScenarios` para Playwright. */
 export function mountBrowserBenchmarkPage(): void {
-  (window as unknown as { __runMapBenchmarkSuite?: typeof runBrowserBenchmarkSuite }).__runMapBenchmarkSuite =
-    runBrowserBenchmarkSuite;
+  const win = window as unknown as {
+    __runMapBenchmarkSuite?: typeof runBrowserBenchmarkSuite;
+    __mapBenchmarkScenarios?: ReadonlyArray<BrowserBenchmarkScenario>;
+  };
+  win.__runMapBenchmarkSuite = runBrowserBenchmarkSuite;
+  win.__mapBenchmarkScenarios = MANDATORY_BROWSER_SCENARIOS;
 
   const root = document.getElementById("root") ?? document.body;
   root.innerHTML = `<div style="padding:16px;font-family:monospace;color:#e5d4b0;background:#0e0c09;min-height:100vh">

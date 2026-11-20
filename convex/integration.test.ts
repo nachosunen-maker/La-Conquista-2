@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import { createTestBackend } from "./test.setup";
-import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT, RESOURCE_PRODUCTION_MULTIPLIERS, PRODUCTION_PER_WORKER_PER_DAY, TERRITORIES, OUTAGE_COMPENSATION, CIVILIZATION_ZONES } from "./balanceConfig";
+import { INITIAL_BUILDINGS, TIME, BUILDINGS, UNITS, DAILY_BONUS, PARLIAMENT, RESOURCE_PRODUCTION_MULTIPLIERS, PRODUCTION_PER_WORKER_PER_DAY, TERRITORIES, TERRAINS, OUTAGE_COMPENSATION, CIVILIZATION_ZONES } from "./balanceConfig";
 import { costsForTargetLevel, BUILDING_RULES } from "./buildingRules";
 import { DEMO_USER_ID } from "./kingdomAccess";
 import { ensureHomeTerritory } from "./territories";
@@ -58,7 +58,7 @@ describe("Fundación del reino (P4-P10, H)", () => {
     const levels = Object.fromEntries((full?.buildings ?? []).map((b: any) => [b.buildingType, b.level]));
     expect(levels).toEqual(INITIAL_BUILDINGS);
     const territories = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
-    expect(territories.homeTerritoryId).toBe("0,0");
+    expect(territories.homeTerritoryId).toBe(`${CIVILIZATION_ZONES.romanos.q},${CIVILIZATION_ZONES.romanos.r}`);
     await expect(
       asUser.mutation(api.economy.getOrInitializeKingdom, { name: "Reino A", civilization: "vikingos" })
     ).rejects.toThrow(/no puede cambiarse/);
@@ -295,11 +295,15 @@ describe("Liquidación económica (Bloque D)", () => {
     const t = createTestBackend();
     const { asUser, kingdomId } = await foundKingdom(t, "user-a", "Reino A");
     const before = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
+    const territories = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
+    const homeTerrain = territories.territories.find((cell) => cell.isHome)?.terrain as keyof typeof TERRAINS | undefined;
+    const woodTerrainMult = 1 + (homeTerrain ? (TERRAINS[homeTerrain]?.production.wood ?? 0) : 0);
+    const stoneTerrainMult = 1 + (homeTerrain ? (TERRAINS[homeTerrain]?.production.stone ?? 0) : 0);
     vi.setSystemTime(T0 + DAY);
     const settled = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
     expect(settled.resources.food).toBeGreaterThan(before!.resources.food);
-    expect(settled.resources.wood).toBeCloseTo(before!.resources.wood + 250 * PRODUCTION_PER_WORKER_PER_DAY.wood * RESOURCE_PRODUCTION_MULTIPLIERS.wood, 3);
-    expect(settled.resources.stone).toBeCloseTo(before!.resources.stone + 250 * PRODUCTION_PER_WORKER_PER_DAY.stone * 1.1 * RESOURCE_PRODUCTION_MULTIPLIERS.stone, 3);
+    expect(settled.resources.wood).toBeCloseTo(before!.resources.wood + 250 * PRODUCTION_PER_WORKER_PER_DAY.wood * woodTerrainMult * RESOURCE_PRODUCTION_MULTIPLIERS.wood, 3);
+    expect(settled.resources.stone).toBeCloseTo(before!.resources.stone + 250 * PRODUCTION_PER_WORKER_PER_DAY.stone * 1.1 * stoneTerrainMult * RESOURCE_PRODUCTION_MULTIPLIERS.stone, 3);
     expect(settled.taxesCollected).toBeGreaterThan(0);
     expect(settled.population?.births).toBe(0);
     expect(settled.population?.growthCappedByHousing).toBe(true);
@@ -616,9 +620,11 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
     });
 
     const mapBefore = await asUser.query(api.territories.getWorldMap, { kingdomId });
-    expect(mapBefore.exploredCount).toBe(7); // Capital (0,0) + 6 vecinos iniciales
+    expect(mapBefore.exploredCount).toBe(7); // Capital + 6 vecinos iniciales
+    const [hq, hr] = mapBefore.homeTerritoryId!.split(",").map(Number);
+    const targetCellId = `${hq + 1},${hr + 1}`;
 
-    const target = mapBefore.cells.find((c) => c.cellId === "1,1")!;
+    const target = mapBefore.cells.find((c) => c.cellId === targetCellId)!;
     expect(target.state).toBe("fog");
     expect(target.canExplore).toBe(true);
 
@@ -628,7 +634,7 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
     expect(armyBefore.spies.active).toBe(2);
     expect(armyBefore.spies.busy).toBe(0);
 
-    const started = await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: "1,1" });
+    const started = await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: targetCellId });
     expect(started.costs.gold).toBe(30);
     expect(started.costs.food).toBe(40);
 
@@ -642,7 +648,7 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
     expect(armyDuring.spies.busy).toBe(1);
 
     const mapDuring = await asUser.query(api.territories.getWorldMap, { kingdomId });
-    const cellDuring = mapDuring.cells.find((c) => c.cellId === "1,1");
+    const cellDuring = mapDuring.cells.find((c) => c.cellId === targetCellId);
     expect(cellDuring?.state).toBe("exploring");
     expect(mapDuring.activeExpeditions).toHaveLength(1);
 
@@ -651,7 +657,7 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
     await t.finishAllScheduledFunctions(vi.runAllTimers);
 
     const mapAfter = await asUser.query(api.territories.getWorldMap, { kingdomId });
-    const cellAfter = mapAfter.cells.find((c) => c.cellId === "1,1");
+    const cellAfter = mapAfter.cells.find((c) => c.cellId === targetCellId);
     expect(cellAfter?.state).toBe("explored");
     expect(cellAfter?.terrain).not.toBe("desconocido");
     expect(mapAfter.exploredCount).toBe(8);
@@ -672,7 +678,9 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
     });
 
     const fullBefore = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
-    const started = await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: "1,1" });
+    const territoriesBefore = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
+    const [hq, hr] = territoriesBefore.homeTerritoryId!.split(",").map(Number);
+    const started = await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: `${hq + 1},${hr + 1}` });
     const cancelled = await asUser.mutation(api.territories.cancelExploration, {
       kingdomId,
       expeditionId: started.expeditionId,
@@ -708,13 +716,15 @@ describe("Exploración del mapa y territorios libres (P22, P49)", () => {
       asUser.mutation(api.territories.claimFreeTerritory, { kingdomId, cellId: "5,-2" })
     ).rejects.toThrow(/explorar y cartografiar/);
 
-    // Celda adyacente conocida (0,1) está en la visión inicial y a distancia 1: puede reclamarse
-    const claimed = await asUser.mutation(api.territories.claimFreeTerritory, { kingdomId, cellId: "0,1" });
+    // Celda adyacente conocida está en la visión inicial y a distancia 1: puede reclamarse
+    const territoriesBefore = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
+    const [hq, hr] = territoriesBefore.homeTerritoryId!.split(",").map(Number);
+    const claimed = await asUser.mutation(api.territories.claimFreeTerritory, { kingdomId, cellId: `${hq},${hr + 1}` });
     expect(claimed.success).toBe(true);
     expect(claimed.remainingClaims).toBe(0);
 
     const territories = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
-    expect(territories.territories).toHaveLength(2); // Capital (0,0) + nuevo territorio (0,1)
+    expect(territories.territories).toHaveLength(2); // Capital + nuevo territorio adyacente
   });
 });
 
@@ -1025,11 +1035,12 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
     expect(demoMap.totalCells).toBe(7651);
     expect(demoMap.cells).toHaveLength(7651);
     expect(demoMap.exploredCount).toBe(7); // Capital y sus 6 vecinos iniciales
-    expect(demoMap.homeTerritoryId).toBe("0,0");
+    const expectedDemoHome = `${CIVILIZATION_ZONES.ingleses.q},${CIVILIZATION_ZONES.ingleses.r}`;
+    expect(demoMap.homeTerritoryId).toBe(expectedDemoHome);
     expect(demoMap.activeExpeditions).toEqual([]);
 
     // Comprobar la celda capital del reino demo
-    const homeCell = demoMap.cells.find((c) => c.cellId === "0,0");
+    const homeCell = demoMap.cells.find((c) => c.cellId === expectedDemoHome);
     expect(homeCell).toBeDefined();
     expect(homeCell?.state).toBe("owned");
     expect(homeCell?.isHome).toBe(true);
@@ -1045,7 +1056,9 @@ describe("Campañas militares y marchas sobre el mapa (Bloque G, P34-P41)", () =
       await ctx.db.patch(kingdomId, { pendingTerritoryClaims: 3 });
       await ctx.db.insert("armyUnits", { kingdomId, unitType: "espia", level: 1, count: 1, isSpy: true });
     });
-    await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: "1,1" });
+    const privTerritories = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
+    const [hq, hr] = privTerritories.homeTerritoryId!.split(",").map(Number);
+    await asUser.mutation(api.territories.startExploration, { kingdomId, cellId: `${hq + 1},${hr + 1}` });
 
     // 2. Consulta global pública/neutral (sin kingdomId)
     const publicMap = await t.query(api.territories.getWorldMap, {});
@@ -1493,10 +1506,12 @@ describe("Bloque 2: Mapa compacto y zonas geográficas de aparición", () => {
     const t2 = await t.withIdentity(identity("user-zone-2")).query(api.territories.getKingdomTerritories, { kingdomId: second._id as any });
     const t3 = await t.withIdentity(identity("user-zone-3")).query(api.territories.getKingdomTerritories, { kingdomId: third._id as any });
 
-    expect(t1.homeTerritoryId).toBe("0,0");
+    const expectedRomanAnchor = `${CIVILIZATION_ZONES.romanos.q},${CIVILIZATION_ZONES.romanos.r}`;
+    expect(t1.homeTerritoryId).toBe(expectedRomanAnchor);
+    const c1 = t1.territories.find((c) => c.isHome)!;
     const c2 = t2.territories.find((c) => c.isHome)!;
     const c3 = t3.territories.find((c) => c.isHome)!;
-    const dist12 = hexDistance({ q: 0, r: 0 }, { q: c2.q, r: c2.r });
+    const dist12 = hexDistance({ q: c1.q, r: c1.r }, { q: c2.q, r: c2.r });
     expect(dist12).toBeGreaterThanOrEqual(20);
     expect(dist12).toBeLessThanOrEqual(30);
     expect(hexDistance(c3, CIVILIZATION_ZONES.vikingos)).toBeLessThan(hexDistance(c3, CIVILIZATION_ZONES.romanos));
