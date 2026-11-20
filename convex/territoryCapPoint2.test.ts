@@ -2401,7 +2401,8 @@ describe("Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tam
   const originalAdminIds = process.env.ADMIN_USER_IDS;
 
   beforeEach(() => {
-    process.env.ADMIN_USER_IDS = "admin-c1-c2";
+    process.env.ADMIN_USER_IDS =
+      "admin-c1-c2,admin-terrain-foreign,admin-terrain-kept,admin-terrain-released";
   });
 
   afterEach(() => {
@@ -2649,14 +2650,14 @@ describe("Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tam
     expect(res.details[0].errors.some((e) => /duplicad/i.test(e))).toBe(true);
   });
 
-  test("C2-C. Verificación posterior detecta fallos de conjuntos, propiedad, documento borrado y modificación de territorio ajeno", () => {
+  test("C2-C. Verificación posterior detecta fallos de conjuntos, propiedad, documento borrado, modificación de territorio ajeno y alteración de terreno", () => {
     const baseInitial: TerritoryOwnershipSnapshot[] = [
-      { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
-      { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: "k1", isHome: false },
-      { id: "id2", cellId: "2,0", q: 2, r: 0, ownerKingdomId: "k1", isHome: false },
+      { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+      { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
+      { id: "id2", cellId: "2,0", q: 2, r: 0, terrain: "colina", ownerKingdomId: "k1", isHome: false, claimedAt: 300 },
     ];
     const foreignBefore: TerritoryOwnershipSnapshot[] = [
-      { id: "f1", cellId: "10,0", q: 10, r: 0, ownerKingdomId: "k2", isHome: true },
+      { id: "f1", cellId: "10,0", q: 10, r: 0, terrain: "montana", ownerKingdomId: "k2", isHome: true, claimedAt: 50 },
     ];
 
     // Fallo 1: K_real tiene un identificador distinto al planificado aunque misma longitud
@@ -2668,13 +2669,13 @@ describe("Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tam
       capitalCellId: "0,0",
       maxAllowed: 2,
       finalOwnedByKingdom: [
-        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
-        { id: "id2", cellId: "2,0", q: 2, r: 0, ownerKingdomId: "k1", isHome: false },
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id2", cellId: "2,0", q: 2, r: 0, terrain: "colina", ownerKingdomId: "k1", isHome: false, claimedAt: 300 },
       ],
       finalInitialDocs: [
-        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
-        { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: null, isHome: false },
-        { id: "id2", cellId: "2,0", q: 2, r: 0, ownerKingdomId: "k1", isHome: false },
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: null, isHome: false },
+        { id: "id2", cellId: "2,0", q: 2, r: 0, terrain: "colina", ownerKingdomId: "k1", isHome: false, claimedAt: 300 },
       ],
       finalKingdomHomeTerritoryId: "0,0",
       foreignTerritoriesBefore: foreignBefore,
@@ -2693,12 +2694,12 @@ describe("Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tam
       capitalCellId: "0,0",
       maxAllowed: 2,
       finalOwnedByKingdom: [
-        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
-        { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: "k1", isHome: false },
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
       ],
       finalInitialDocs: [
-        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
-        { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: "k1", isHome: false },
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
         null,
       ],
       finalKingdomHomeTerritoryId: "0,0",
@@ -2708,7 +2709,7 @@ describe("Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tam
     expect(deletedDocRes.valid).toBe(false);
     expect(deletedDocRes.errors.some((e) => /eliminado/i.test(e))).toBe(true);
 
-    // Fallo 3: Territorio ajeno fue modificado
+    // Fallo 3: Territorio ajeno fue modificado en propietario
     const foreignModifiedRes = verifyTerritoryCapCleanupPostState({
       kingdomId: "k1",
       initialTerritories: baseInitial,
@@ -2717,20 +2718,120 @@ describe("Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tam
       capitalCellId: "0,0",
       maxAllowed: 2,
       finalOwnedByKingdom: [
-        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
-        { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: "k1", isHome: false },
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
       ],
       finalInitialDocs: [
-        { id: "id0", cellId: "0,0", q: 0, r: 0, ownerKingdomId: "k1", isHome: true },
-        { id: "id1", cellId: "1,0", q: 1, r: 0, ownerKingdomId: "k1", isHome: false },
-        { id: "id2", cellId: "2,0", q: 2, r: 0, ownerKingdomId: null, isHome: false },
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
+        { id: "id2", cellId: "2,0", q: 2, r: 0, terrain: "colina", ownerKingdomId: null, isHome: false },
       ],
       finalKingdomHomeTerritoryId: "0,0",
       foreignTerritoriesBefore: foreignBefore,
-      foreignTerritoriesAfter: [{ id: "f1", cellId: "10,0", q: 10, r: 0, ownerKingdomId: null, isHome: false }],
+      foreignTerritoriesAfter: [
+        { id: "f1", cellId: "10,0", q: 10, r: 0, terrain: "montana", ownerKingdomId: null, isHome: false },
+      ],
     });
     expect(foreignModifiedRes.valid).toBe(false);
     expect(foreignModifiedRes.errors.some((e) => /ajeno.*modificado/i.test(e))).toBe(true);
+
+    // Fallo 4 (terreno): Alteración del terreno de un territorio conservado
+    const keptTerrainChanged = verifyTerritoryCapCleanupPostState({
+      kingdomId: "k1",
+      initialTerritories: baseInitial,
+      plannedKeptCellIds: ["0,0", "1,0"],
+      plannedReleasedCellIds: ["2,0"],
+      capitalCellId: "0,0",
+      maxAllowed: 2,
+      finalOwnedByKingdom: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "montana", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
+      ],
+      finalInitialDocs: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "montana", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
+        { id: "id2", cellId: "2,0", q: 2, r: 0, terrain: "colina", ownerKingdomId: null, isHome: false },
+      ],
+      finalKingdomHomeTerritoryId: "0,0",
+      foreignTerritoriesBefore: foreignBefore,
+      foreignTerritoriesAfter: foreignBefore,
+    });
+    expect(keptTerrainChanged.valid).toBe(false);
+    expect(keptTerrainChanged.errors.some((e) => /Terreno alterado.*1,0/i.test(e))).toBe(true);
+
+    // Fallo 5 (terreno): Alteración del terreno de un territorio liberado
+    const releasedTerrainChanged = verifyTerritoryCapCleanupPostState({
+      kingdomId: "k1",
+      initialTerritories: baseInitial,
+      plannedKeptCellIds: ["0,0", "1,0"],
+      plannedReleasedCellIds: ["2,0"],
+      capitalCellId: "0,0",
+      maxAllowed: 2,
+      finalOwnedByKingdom: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
+      ],
+      finalInitialDocs: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
+        { id: "id2", cellId: "2,0", q: 2, r: 0, terrain: "llanura", ownerKingdomId: null, isHome: false },
+      ],
+      finalKingdomHomeTerritoryId: "0,0",
+      foreignTerritoriesBefore: foreignBefore,
+      foreignTerritoriesAfter: foreignBefore,
+    });
+    expect(releasedTerrainChanged.valid).toBe(false);
+    expect(releasedTerrainChanged.errors.some((e) => /Terreno alterado.*2,0/i.test(e))).toBe(true);
+
+    // Fallo 6 (terreno): Alteración del terreno de un territorio ajeno
+    const foreignTerrainChanged = verifyTerritoryCapCleanupPostState({
+      kingdomId: "k1",
+      initialTerritories: baseInitial,
+      plannedKeptCellIds: ["0,0", "1,0"],
+      plannedReleasedCellIds: ["2,0"],
+      capitalCellId: "0,0",
+      maxAllowed: 2,
+      finalOwnedByKingdom: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
+      ],
+      finalInitialDocs: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "llanura", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
+        { id: "id2", cellId: "2,0", q: 2, r: 0, terrain: "colina", ownerKingdomId: null, isHome: false },
+      ],
+      finalKingdomHomeTerritoryId: "0,0",
+      foreignTerritoriesBefore: foreignBefore,
+      foreignTerritoriesAfter: [
+        { id: "f1", cellId: "10,0", q: 10, r: 0, terrain: "bosque", ownerKingdomId: "k2", isHome: true, claimedAt: 50 },
+      ],
+    });
+    expect(foreignTerrainChanged.valid).toBe(false);
+    expect(foreignTerrainChanged.errors.some((e) => /ajeno.*10,0.*modificado/i.test(e))).toBe(true);
+
+    // Fallo 7 (terreno): Alteración del terreno de un documento inicial (capital 0,0)
+    const initialCapitalTerrainChanged = verifyTerritoryCapCleanupPostState({
+      kingdomId: "k1",
+      initialTerritories: baseInitial,
+      plannedKeptCellIds: ["0,0", "1,0"],
+      plannedReleasedCellIds: ["2,0"],
+      capitalCellId: "0,0",
+      maxAllowed: 2,
+      finalOwnedByKingdom: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "colina", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
+      ],
+      finalInitialDocs: [
+        { id: "id0", cellId: "0,0", q: 0, r: 0, terrain: "colina", ownerKingdomId: "k1", isHome: true, claimedAt: 100 },
+        { id: "id1", cellId: "1,0", q: 1, r: 0, terrain: "bosque", ownerKingdomId: "k1", isHome: false, claimedAt: 200 },
+        { id: "id2", cellId: "2,0", q: 2, r: 0, terrain: "colina", ownerKingdomId: null, isHome: false },
+      ],
+      finalKingdomHomeTerritoryId: "0,0",
+      foreignTerritoriesBefore: foreignBefore,
+      foreignTerritoriesAfter: foreignBefore,
+    });
+    expect(initialCapitalTerrainChanged.valid).toBe(false);
+    expect(initialCapitalTerrainChanged.errors.some((e) => /Terreno alterado.*0,0/i.test(e))).toBe(true);
   });
 
   test("C2-D. Rollback transaccional real de Convex: fallo en verificación posterior tras iniciar escrituras revierte completamente la BD (cero escrituras parciales)", async () => {
@@ -2793,6 +2894,103 @@ describe("Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tam
     );
     expect(ownedAfterRollback).toHaveLength(105);
   });
+
+  test.each(["foreign", "kept", "released"] as const)(
+    "C2-E. Rollback completo cuando se altera exclusivamente terrain en un territorio %s",
+    async (targetType) => {
+      const t = createTestBackend();
+      const asAdmin = t.withIdentity(identity(`admin-terrain-${targetType}`));
+
+      const kTarget = await foundKingdom(
+        t,
+        `user-terrain-target-${targetType}`,
+        `Reino Terreno ${targetType}`
+      );
+
+      const kForeign = await foundKingdom(
+        t,
+        `user-terrain-foreign-${targetType}`,
+        `Reino Ajeno Terreno ${targetType}`
+      );
+
+      await seedKingdomTerritories(t, kTarget.kingdomId, 105, {
+        capitalCellId: "0,0",
+        extraNeighborCount: 0,
+      });
+
+      await seedKingdomTerritories(t, kForeign.kingdomId, 4, {
+        capitalCellId: "25,0",
+        extraNeighborCount: 0,
+      });
+
+      const takeSnapshot = async () =>
+        t.run(async (ctx) => ({
+          kingdoms: await ctx.db.query("kingdoms").collect(),
+          territories: await ctx.db.query("territories").collect(),
+          auditLogs: await ctx.db.query("territoryCapAuditLogs").collect(),
+        }));
+
+      const before = await takeSnapshot();
+
+      await expect(
+        asAdmin.run(async (ctx) =>
+          runTerritoryCapCleanup(
+            ctx,
+            {
+              dryRun: false,
+              kingdomId: kTarget.kingdomId,
+              operationId: `op-terrain-rollback-${targetType}`,
+            },
+            {
+              afterKingdomWrites: async (innerCtx, { plan }) => {
+                let targetCellId: string;
+
+                if (targetType === "foreign") {
+                  const foreignDoc = await innerCtx.db
+                    .query("territories")
+                    .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kForeign.kingdomId))
+                    .first();
+
+                  if (!foreignDoc) throw new Error("No se encontró el territorio ajeno.");
+                  targetCellId = foreignDoc.cellId;
+                } else if (targetType === "kept") {
+                  targetCellId = plan.keptCellIds[0];
+                } else {
+                  targetCellId = plan.releasedCellIds[0];
+                }
+
+                const doc = await innerCtx.db
+                  .query("territories")
+                  .withIndex("by_cell", (q) => q.eq("cellId", targetCellId))
+                  .first();
+
+                if (!doc) throw new Error(`No se encontró el territorio ${targetCellId}.`);
+
+                await innerCtx.db.patch(doc._id, {
+                  terrain: doc.terrain === "llanura" ? "bosque" : "llanura",
+                });
+              },
+            }
+          )
+        )
+      ).rejects.toThrow(/Rollback transaccional/i);
+
+      const after = await takeSnapshot();
+
+      expect(after.kingdoms).toEqual(before.kingdoms);
+      expect(after.territories).toEqual(before.territories);
+      expect(after.auditLogs).toEqual(before.auditLogs);
+
+      const ownedAfter = await t.run(async (ctx) =>
+        ctx.db
+          .query("territories")
+          .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kTarget.kingdomId))
+          .collect()
+      );
+
+      expect(ownedAfter).toHaveLength(105);
+    }
+  );
 });
 
 

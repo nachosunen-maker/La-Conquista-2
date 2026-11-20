@@ -2351,6 +2351,7 @@ function toTerritorySnapshot(doc: Doc<"territories">): TerritoryOwnershipSnapsho
     cellId: doc.cellId,
     q: doc.q,
     r: doc.r,
+    terrain: doc.terrain as TerrainType,
     ownerKingdomId: doc.ownerKingdomId ? String(doc.ownerKingdomId) : null,
     isHome: doc.isHome,
     claimedAt: doc.claimedAt,

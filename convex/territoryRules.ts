@@ -828,6 +828,7 @@ export interface TerritoryOwnershipSnapshot {
   cellId: string;
   q: number;
   r: number;
+  terrain: TerrainType;
   ownerKingdomId?: string | null;
   isHome?: boolean;
   claimedAt?: number;
@@ -891,7 +892,7 @@ export function verifyTerritoryCapCleanupPostState(
     errors.push("El conjunto R_planificado contiene identificadores duplicados.");
   }
 
-  // 1. Verificar que no se ha eliminado ningún documento de territorio del conjunto inicial
+  // 1. Verificar conservación e integridad de TODOS los documentos iniciales.
   if (input.finalInitialDocs.length !== input.initialTerritories.length) {
     errors.push(
       `Cantidad de documentos iniciales reconsultados (${input.finalInitialDocs.length}) distinta de T_initial (${input.initialTerritories.length}).`
@@ -899,20 +900,40 @@ export function verifyTerritoryCapCleanupPostState(
   }
 
   const finalInitialById = new Map<string, TerritoryOwnershipSnapshot>();
+
   for (let i = 0; i < input.initialTerritories.length; i += 1) {
     const initialDoc = input.initialTerritories[i];
     const finalDoc = input.finalInitialDocs[i] ?? null;
+
     if (!finalDoc) {
       errors.push(
         `Documento de territorio eliminado durante el saneamiento: id='${initialDoc.id}', cellId='${initialDoc.cellId}'.`
       );
       continue;
     }
-    if (finalDoc.cellId !== initialDoc.cellId || finalDoc.q !== initialDoc.q || finalDoc.r !== initialDoc.r) {
+
+    if (finalDoc.id !== initialDoc.id) {
       errors.push(
-        `Coordenadas o cellId alterados en territorio '${initialDoc.cellId}' (actual: '${finalDoc.cellId}').`
+        `Identificador documental alterado para el territorio '${initialDoc.cellId}': '${initialDoc.id}' -> '${finalDoc.id}'.`
       );
     }
+
+    if (
+      finalDoc.cellId !== initialDoc.cellId ||
+      finalDoc.q !== initialDoc.q ||
+      finalDoc.r !== initialDoc.r
+    ) {
+      errors.push(
+        `Coordenadas o cellId alterados en territorio '${initialDoc.cellId}'.`
+      );
+    }
+
+    if (finalDoc.terrain !== initialDoc.terrain) {
+      errors.push(
+        `Terreno alterado en territorio '${initialDoc.cellId}': '${initialDoc.terrain}' -> '${finalDoc.terrain}'.`
+      );
+    }
+
     finalInitialById.set(initialDoc.id, finalDoc);
   }
 
@@ -982,26 +1003,55 @@ export function verifyTerritoryCapCleanupPostState(
     errors.push(`N_final (${actualKeptCellIds.length}) supera el tope máximo (${maxAllowed}).`);
   }
 
-  // 4. Propiedad individual de conservados y liberados
+  // 4. Propiedad individual y conservación exacta de los datos de los territorios.
   for (const initialDoc of input.initialTerritories) {
     const finalDoc = finalInitialById.get(initialDoc.id);
     if (!finalDoc) continue;
+
     const owner = finalDoc.ownerKingdomId ?? null;
+
     if (plannedKeptSet.has(initialDoc.cellId)) {
       if (owner !== input.kingdomId) {
         errors.push(
-          `Territorio conservado '${initialDoc.cellId}' no pertenece al reino '${input.kingdomId}' (owner='${owner ?? "null"}').`
+          `Territorio conservado '${initialDoc.cellId}' no pertenece al reino '${input.kingdomId}'.`
+        );
+      }
+
+      if (finalDoc.isHome !== (initialDoc.cellId === input.capitalCellId)) {
+        errors.push(
+          `Marca de capital incorrecta en territorio conservado '${initialDoc.cellId}'.`
+        );
+      }
+
+      if ((finalDoc.claimedAt ?? null) !== (initialDoc.claimedAt ?? null)) {
+        errors.push(
+          `claimedAt fue alterado en territorio conservado '${initialDoc.cellId}'.`
         );
       }
     } else if (plannedReleasedSet.has(initialDoc.cellId)) {
       if (owner !== null) {
         errors.push(
-          `Territorio liberado '${initialDoc.cellId}' conserva propietario '${owner}' tras el saneamiento.`
+          `Territorio liberado '${initialDoc.cellId}' conserva propietario '${owner}'.`
         );
       }
-      if (finalDoc.isHome === true) {
-        errors.push(`Territorio liberado '${initialDoc.cellId}' conserva marca isHome=true.`);
+
+      if (finalDoc.isHome !== false) {
+        errors.push(
+          `Territorio liberado '${initialDoc.cellId}' conserva una marca de capital incorrecta.`
+        );
       }
+
+      if (finalDoc.claimedAt !== undefined) {
+        errors.push(
+          `Territorio liberado '${initialDoc.cellId}' conserva claimedAt después de su liberación.`
+        );
+      }
+
+      // cellId, coordenadas, terrain e id ya se compararon con el documento original.
+    } else {
+      errors.push(
+        `Territorio inicial '${initialDoc.cellId}' no pertenece a K_planificado ni a R_planificado.`
+      );
     }
   }
 
@@ -1023,23 +1073,48 @@ export function verifyTerritoryCapCleanupPostState(
     }
   }
 
-  // 6. Ausencia absoluta de modificaciones en territorios ajenos al conjunto inicial
+  // 6. Conservación íntegra de todos los territorios ajenos al conjunto inicial.
   if (input.foreignTerritoriesBefore.length !== input.foreignTerritoriesAfter.length) {
     errors.push(
       `El número de territorios ajenos a T_initial cambió (${input.foreignTerritoriesBefore.length} -> ${input.foreignTerritoriesAfter.length}).`
     );
   }
-  const foreignAfterById = new Map(input.foreignTerritoriesAfter.map((t) => [t.id, t]));
+
+  const foreignBeforeIds = new Set(input.foreignTerritoriesBefore.map((t) => t.id));
+  const foreignAfterIds = new Set(input.foreignTerritoriesAfter.map((t) => t.id));
+
+  if (foreignBeforeIds.size !== input.foreignTerritoriesBefore.length) {
+    errors.push("Existen identificadores documentales duplicados en los territorios ajenos iniciales.");
+  }
+
+  if (foreignAfterIds.size !== input.foreignTerritoriesAfter.length) {
+    errors.push("Existen identificadores documentales duplicados en los territorios ajenos finales.");
+  }
+
+  if (!sameStringSet(foreignBeforeIds, foreignAfterIds)) {
+    errors.push("El conjunto exacto de documentos territoriales ajenos ha cambiado.");
+  }
+
+  const foreignAfterById = new Map(
+    input.foreignTerritoriesAfter.map((t) => [t.id, t])
+  );
+
   for (const beforeDoc of input.foreignTerritoriesBefore) {
     const afterDoc = foreignAfterById.get(beforeDoc.id);
+
     if (!afterDoc) {
-      errors.push(`Territorio ajeno '${beforeDoc.cellId}' (id='${beforeDoc.id}') desapareció durante el saneamiento.`);
+      errors.push(
+        `Territorio ajeno '${beforeDoc.cellId}' (id='${beforeDoc.id}') desapareció durante el saneamiento.`
+      );
       continue;
     }
+
     if (
+      afterDoc.id !== beforeDoc.id ||
       afterDoc.cellId !== beforeDoc.cellId ||
       afterDoc.q !== beforeDoc.q ||
       afterDoc.r !== beforeDoc.r ||
+      afterDoc.terrain !== beforeDoc.terrain ||
       (afterDoc.ownerKingdomId ?? null) !== (beforeDoc.ownerKingdomId ?? null) ||
       Boolean(afterDoc.isHome) !== Boolean(beforeDoc.isHome) ||
       (afterDoc.claimedAt ?? null) !== (beforeDoc.claimedAt ?? null)
