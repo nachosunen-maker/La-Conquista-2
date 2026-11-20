@@ -2991,6 +2991,116 @@ describe("Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tam
       expect(ownedAfter).toHaveLength(105);
     }
   );
+
+  test("V1. Escenarios límite completos en Convex (dryRun): tamaños {0, 1, 99, 100, 101, 105, 108, 150, 200} y capital lejos del centro geométrico (30,-15)", async () => {
+    // 1. Capital situada lejos del centro geométrico (30, -15) con 108 territorios
+    {
+      const t = createTestBackend();
+      const asAdmin = t.withIdentity(identity("admin-c1-c2"));
+      const kFar = await foundKingdom(t, "user-far-capital", "Reino Capital Lejana");
+
+      const world = generateWorldCells(50, 42);
+      const farCapital = { q: 30, r: -15 };
+      const farCapitalId = "30,-15";
+      const orderedAroundFar = [...world]
+        .sort((a, b) => {
+          const da = hexDistance(farCapital, a);
+          const db = hexDistance(farCapital, b);
+          if (da !== db) return da - db;
+          return a.cellId < b.cellId ? -1 : a.cellId > b.cellId ? 1 : 0;
+        })
+        .slice(0, 108);
+
+      await t.run(async (ctx) => {
+        const existing = await ctx.db
+          .query("territories")
+          .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kFar.kingdomId))
+          .collect();
+        for (const c of existing) {
+          await ctx.db.patch(c._id, { ownerKingdomId: undefined, isHome: false, claimedAt: undefined });
+        }
+        for (let i = 0; i < orderedAroundFar.length; i += 1) {
+          const cell = orderedAroundFar[i];
+          const existingDoc = await ctx.db
+            .query("territories")
+            .withIndex("by_cell", (q) => q.eq("cellId", cell.cellId))
+            .first();
+          if (existingDoc) {
+            await ctx.db.patch(existingDoc._id, {
+              ownerKingdomId: kFar.kingdomId,
+              isHome: cell.cellId === farCapitalId,
+              claimedAt: 1000 + i,
+            });
+          } else {
+            await ctx.db.insert("territories", {
+              cellId: cell.cellId,
+              q: cell.q,
+              r: cell.r,
+              terrain: cell.terrain,
+              ownerKingdomId: kFar.kingdomId,
+              isHome: cell.cellId === farCapitalId,
+              claimedAt: 1000 + i,
+            });
+          }
+        }
+        await ctx.db.patch(kFar.kingdomId, { homeTerritoryId: farCapitalId });
+      });
+
+      const simFar = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+        dryRun: true,
+        kingdomId: kFar.kingdomId,
+        operationId: "op-v1-far-capital-dryrun",
+      });
+
+      expect(simFar.success).toBe(true);
+      expect(simFar.dryRun).toBe(true);
+      expect(simFar.details[0].capitalCellId).toBe(farCapitalId);
+      expect(simFar.details[0].keptCount).toBe(100);
+      expect(simFar.details[0].releasedCount).toBe(8);
+      expect(simFar.details[0].keptCellIds).toContain(farCapitalId);
+      expect(simFar.details[0].keptCellIds).toEqual(orderedAroundFar.slice(0, 100).map((c) => c.cellId));
+      expect(simFar.details[0].releasedCellIds).toEqual(orderedAroundFar.slice(100).map((c) => c.cellId));
+      expect(simFar.referentialIntegrity.intact).toBe(true);
+    }
+
+    // 2. Simulación dryRun en Convex para todos los tamaños obligatorios: 0, 1, 99, 100, 101, 105, 108, 150, 200
+    for (const N of [0, 1, 99, 100, 101, 105, 108, 150, 200]) {
+      const t = createTestBackend();
+      const asAdmin = t.withIdentity(identity("admin-c1-c2"));
+      const k = await foundKingdom(t, `user-v1-size-${N}`, `Reino Tamaño ${N}`);
+
+      if (N === 0) {
+        await t.run(async (ctx) => {
+          const existing = await ctx.db
+            .query("territories")
+            .withIndex("by_owner", (q) => q.eq("ownerKingdomId", k.kingdomId))
+            .collect();
+          for (const c of existing) {
+            await ctx.db.patch(c._id, { ownerKingdomId: undefined, isHome: false, claimedAt: undefined });
+          }
+          await ctx.db.patch(k.kingdomId, { homeTerritoryId: undefined });
+        });
+      } else {
+        await seedKingdomTerritories(t, k.kingdomId, N, { capitalCellId: "0,0", extraNeighborCount: 0 });
+      }
+
+      const territoriesBefore = await t.run(async (ctx) => ctx.db.query("territories").collect());
+      const sim = await asAdmin.mutation(api.territories.executeTerritoryCapCleanup, {
+        dryRun: true,
+        kingdomId: k.kingdomId,
+        operationId: `op-v1-dryrun-${N}`,
+      });
+      const territoriesAfter = await t.run(async (ctx) => ctx.db.query("territories").collect());
+
+      expect(sim.success).toBe(true);
+      expect(sim.dryRun).toBe(true);
+      expect(sim.details[0].totalOwnedBefore).toBe(N);
+      expect(sim.details[0].keptCount).toBe(Math.min(N, 100));
+      expect(sim.details[0].releasedCount).toBe(Math.max(0, N - 100));
+      expect(sim.referentialIntegrity.intact).toBe(true);
+      expect(territoriesAfter).toEqual(territoriesBefore);
+    }
+  });
 });
 
 
