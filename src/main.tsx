@@ -41,7 +41,11 @@ const rawConvexUrl = import.meta.env.VITE_CONVEX_URL || DEFAULT_CONVEX_URL;
 const convexUrl = resolveConvexUrl(rawConvexUrl) || DEFAULT_CONVEX_URL;
 const rootElement = document.getElementById('root')!;
 
-if (!convexUrl) {
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('benchmark') === 'map') {
+  import('./map/browserBenchmarkHarness').then(({ mountBrowserBenchmarkPage }) => {
+    mountBrowserBenchmarkPage();
+  });
+} else if (!convexUrl) {
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
       <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-6">

@@ -781,56 +781,173 @@ export const getWorldMap = query({
   },
 });
 
-export interface AxialRangeSegment {
+export const MAX_MAP_COLUMN_QUERIES = MAP.RADIUS * 2 + 1; // 101 columnas para R = 50
+export const MAX_CONCURRENT_TERRITORY_QUERIES = 8;
+
+export interface AxialColumnQuery {
   readonly q: number;
-  readonly rStart: number;
-  readonly rEnd: number;
+  readonly rMin: number;
+  readonly rMax: number;
+  readonly targetCount: number;
+  readonly maxRangeSpan: number;
+}
+
+export interface ColumnQueryPlanSummary {
+  readonly columns: AxialColumnQuery[];
+  readonly validUniqueKnownCount: number;
+  readonly invalidOrDuplicateSkipped: number;
+  readonly missingTargetCount: number;
+  readonly theoreticalMaxRangeDocs: number;
+  readonly geometricColumnUpperBound: number;
+}
+
+export interface ColumnQueryExecutionMetrics {
+  readonly indexedQueriesCount: number;
+  readonly docsRetrievedCount: number;
+  readonly docsDiscardedCount: number;
+  readonly docsAcceptedCount: number;
+  readonly maxObservedConcurrency: number;
+  readonly elapsedMs: number;
 }
 
 /**
- * Agrupa coordenadas conocidas (q, r) en intervalos contiguos `[rStart, rEnd]` por columna `q`,
- * emitiendo únicamente los segmentos que contienen al menos una celda aún no cargada (`missingKnownSet`).
- * Garantiza 0 lecturas de celdas bajo niebla, 0 duplicados y escala O(sqrt(K)) <= 101 consultas
- * incluso con las 7.651 celdas conocidas.
+ * Planificador acotado por columna axial `q` para `getWorldMapCompact`:
+ * 1. Valida coordenadas axiales dentro del disco (|q| <= R, |r| <= R, |q + r| <= R).
+ * 2. Elimina identificadores inválidos y duplicados.
+ * 3. Agrupa las celdas conocidas pendientes por columna `q`, calculando [rMin, rMax] por columna.
+ *
+ * Garantía matemática para R = 50:
+ * - Como q ∈ [-50, 50], el número de consultas indexadas es SIEMPRE <= 2R + 1 = 101,
+ *   incluso ante distribuciones dispersas, fragmentadas o adversas.
+ * - Añadir celdas dentro de una misma columna jamás incrementa el número de consultas.
+ * - El peor caso geométrico de lectura para un subconjunto Q de columnas es Σ_{q ∈ Q} (101 - |q|) <= 7.651.
  */
-export function buildKnownAxialRangeSegments(
-  knownRsByQ: ReadonlyMap<number, number[]>,
-  missingKnownSet: ReadonlySet<string>
-): AxialRangeSegment[] {
-  if (missingKnownSet.size === 0) return [];
-  const segments: AxialRangeSegment[] = [];
+export function buildKnownColumnQueries(
+  knownCellIds: Iterable<string>,
+  alreadyLoadedIds: ReadonlySet<string>,
+  radius: number = MAP.RADIUS
+): ColumnQueryPlanSummary {
+  const seenValid = new Set<string>();
+  const byQ = new Map<number, { rMin: number; rMax: number; targetCount: number }>();
+  let invalidOrDuplicateSkipped = 0;
+  let missingTargetCount = 0;
 
-  for (const [q, rs] of knownRsByQ.entries()) {
-    if (rs.length === 0) continue;
-    rs.sort((a, b) => a - b);
-
-    let segStart = rs[0];
-    let segEnd = rs[0];
-    let segHasMissing = missingKnownSet.has(cellId(q, rs[0]));
-
-    for (let i = 1; i < rs.length; i++) {
-      const r = rs[i];
-      if (r === segEnd) continue; // Deduplicar si hubiese repetidos
-      if (r === segEnd + 1) {
-        segEnd = r;
-        if (!segHasMissing && missingKnownSet.has(cellId(q, r))) {
-          segHasMissing = true;
-        }
-      } else {
-        if (segHasMissing) {
-          segments.push({ q, rStart: segStart, rEnd: segEnd });
-        }
-        segStart = r;
-        segEnd = r;
-        segHasMissing = missingKnownSet.has(cellId(q, r));
-      }
+  for (const rawId of knownCellIds) {
+    const parsed = parseCellId(rawId);
+    if (!parsed || !isInsideWorld(parsed, radius)) {
+      invalidOrDuplicateSkipped++;
+      continue;
     }
-    if (segHasMissing) {
-      segments.push({ q, rStart: segStart, rEnd: segEnd });
+    const canonicalId = cellId(parsed.q, parsed.r);
+    if (seenValid.has(canonicalId)) {
+      invalidOrDuplicateSkipped++;
+      continue;
+    }
+    seenValid.add(canonicalId);
+
+    if (alreadyLoadedIds.has(canonicalId)) continue;
+    missingTargetCount++;
+
+    const existing = byQ.get(parsed.q);
+    if (!existing) {
+      byQ.set(parsed.q, { rMin: parsed.r, rMax: parsed.r, targetCount: 1 });
+    } else {
+      if (parsed.r < existing.rMin) existing.rMin = parsed.r;
+      if (parsed.r > existing.rMax) existing.rMax = parsed.r;
+      existing.targetCount++;
     }
   }
 
-  return segments;
+  const columns: AxialColumnQuery[] = [];
+  let theoreticalMaxRangeDocs = 0;
+  let geometricColumnUpperBound = 0;
+  const sortedQs = Array.from(byQ.keys()).sort((a, b) => a - b);
+
+  for (let i = 0; i < sortedQs.length; i++) {
+    const q = sortedQs[i];
+    const entry = byQ.get(q)!;
+    const maxRangeSpan = entry.rMax - entry.rMin + 1;
+    columns.push({
+      q,
+      rMin: entry.rMin,
+      rMax: entry.rMax,
+      targetCount: entry.targetCount,
+      maxRangeSpan,
+    });
+    theoreticalMaxRangeDocs += maxRangeSpan;
+    geometricColumnUpperBound += (2 * radius + 1) - Math.abs(q);
+  }
+
+  return {
+    columns,
+    validUniqueKnownCount: seenValid.size,
+    invalidOrDuplicateSkipped,
+    missingTargetCount,
+    theoreticalMaxRangeDocs,
+    geometricColumnUpperBound,
+  };
+}
+
+/**
+ * Ejecuta consultas por columna con concurrencia estrictamente acotada (lotes de hasta 8),
+ * filtrando todos los documentos recibidos contra el conjunto exacto `knownIds` y propagando
+ * cualquier fallo sin devolver nunca resultados parciales como completos.
+ */
+export async function executeBoundedColumnQueries<T extends { cellId: string }>(
+  columns: ReadonlyArray<AxialColumnQuery>,
+  knownIds: ReadonlySet<string>,
+  alreadyLoadedIds: ReadonlySet<string>,
+  fetchColumn: (col: AxialColumnQuery) => Promise<ReadonlyArray<T>>,
+  maxConcurrency: number = MAX_CONCURRENT_TERRITORY_QUERIES
+): Promise<{ docs: T[]; metrics: ColumnQueryExecutionMetrics }> {
+  const start = Date.now();
+  const batchLimit = Math.max(1, Math.min(maxConcurrency, MAX_CONCURRENT_TERRITORY_QUERIES));
+
+  let inFlight = 0;
+  let maxObservedConcurrency = 0;
+  let docsRetrievedCount = 0;
+  let docsDiscardedCount = 0;
+  const acceptedById = new Map<string, T>();
+
+  for (let offset = 0; offset < columns.length; offset += batchLimit) {
+    const batch = columns.slice(offset, offset + batchLimit);
+    const batchResults = await Promise.all(
+      batch.map(async (col) => {
+        inFlight++;
+        if (inFlight > maxObservedConcurrency) maxObservedConcurrency = inFlight;
+        try {
+          return await fetchColumn(col);
+        } finally {
+          inFlight--;
+        }
+      })
+    );
+
+    for (let i = 0; i < batchResults.length; i++) {
+      const colDocs = batchResults[i];
+      for (let j = 0; j < colDocs.length; j++) {
+        const doc = colDocs[j];
+        docsRetrievedCount++;
+        if (!knownIds.has(doc.cellId) || alreadyLoadedIds.has(doc.cellId) || acceptedById.has(doc.cellId)) {
+          docsDiscardedCount++;
+          continue;
+        }
+        acceptedById.set(doc.cellId, doc);
+      }
+    }
+  }
+
+  return {
+    docs: Array.from(acceptedById.values()),
+    metrics: {
+      indexedQueriesCount: columns.length,
+      docsRetrievedCount,
+      docsDiscardedCount,
+      docsAcceptedCount: acceptedById.size,
+      maxObservedConcurrency,
+      elapsedMs: Date.now() - start,
+    },
+  };
 }
 
 /**
@@ -943,43 +1060,26 @@ export const getWorldMapCompact = query({
       }
     }
 
-    // Agrupar celdas conocidas en intervalos contiguos (q, [rStart, rEnd]) para eliminar el patrón N+1.
-    // Cada (q, r) dentro de cada intervalo pertenece estrictamente a `knownIds`, por lo que NUNCA
-    // se lee de la base de datos ninguna celda bajo niebla de guerra ni se escanea el mundo completo.
-    const missingKnownSet = new Set<string>();
-    const knownRsByQ = new Map<number, number[]>();
-    for (const id of knownIds) {
-      const coord = getValidCoord(id);
-      if (!coord) continue;
-      let col = knownRsByQ.get(coord.q);
-      if (!col) {
-        col = [];
-        knownRsByQ.set(coord.q, col);
-      }
-      col.push(coord.r);
-      if (!knownTerritoryByCellId.has(id)) {
-        missingKnownSet.add(id);
-      }
-    }
-
-    const queryRanges = buildKnownAxialRangeSegments(knownRsByQ, missingKnownSet);
-    if (queryRanges.length > 0) {
-      const rangeResults = await Promise.all(
-        queryRanges.map((seg) =>
+    // Agrupar celdas conocidas pendientes por columna axial `q` con rango [rMin, rMax]
+    // y concurrencia estrictamente acotada (<= 101 consultas, <= 8 simultáneas).
+    // Todos los documentos recuperados se filtran en servidor contra el conjunto exacto `knownIds`.
+    const alreadyLoadedIds = new Set<string>(knownTerritoryByCellId.keys());
+    const columnPlan = buildKnownColumnQueries(knownIds, alreadyLoadedIds, MAP.RADIUS);
+    if (columnPlan.columns.length > 0) {
+      const { docs: fetchedKnownDocs } = await executeBoundedColumnQueries(
+        columnPlan.columns,
+        knownIds,
+        alreadyLoadedIds,
+        (col) =>
           ctx.db
             .query("territories")
-            .withIndex("by_q_r", (q) => q.eq("q", seg.q).gte("r", seg.rStart).lte("r", seg.rEnd))
-            .collect()
-        )
+            .withIndex("by_q_r", (idx) => idx.eq("q", col.q).gte("r", col.rMin).lte("r", col.rMax))
+            .collect(),
+        MAX_CONCURRENT_TERRITORY_QUERIES
       );
-      for (let i = 0; i < rangeResults.length; i++) {
-        const docs = rangeResults[i];
-        for (let j = 0; j < docs.length; j++) {
-          const doc = docs[j];
-          if (knownIds.has(doc.cellId) && !knownTerritoryByCellId.has(doc.cellId)) {
-            knownTerritoryByCellId.set(doc.cellId, doc);
-          }
-        }
+      for (let i = 0; i < fetchedKnownDocs.length; i++) {
+        const doc = fetchedKnownDocs[i];
+        knownTerritoryByCellId.set(doc.cellId, doc);
       }
     }
 
