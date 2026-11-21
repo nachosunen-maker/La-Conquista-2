@@ -1187,6 +1187,12 @@ export interface ExistingKingdomAuditInput {
     readonly targetR: number;
     readonly status?: string;
     readonly direction?: "outgoing" | "incoming";
+    readonly startedAt?: number;
+    readonly durationMs?: number;
+    readonly completesAt?: number;
+    readonly cancelledAt?: number | null;
+    readonly unitsRefundedAt?: number | null;
+    readonly cancelReason?: string | null;
   }>;
   readonly activeChallengesCount: number;
   readonly activeChallenges?: ReadonlyArray<{
@@ -1194,6 +1200,15 @@ export interface ExistingKingdomAuditInput {
     readonly challengerKingdomId: string;
     readonly targetKingdomId: string;
     readonly status: string;
+    readonly createdAt?: number;
+    readonly expiresAt?: number;
+    readonly respondedAt?: number | null;
+    readonly scheduledAt?: number | null;
+    readonly freezeAt?: number | null;
+    readonly frozenAt?: number | null;
+    readonly resolvedAt?: number | null;
+    readonly cancelledAt?: number | null;
+    readonly activeMarchId?: string | null;
   }>;
   readonly activeExplorationsCount: number;
   readonly activeExplorations?: ReadonlyArray<{
@@ -1201,6 +1216,9 @@ export interface ExistingKingdomAuditInput {
     readonly cellId: string;
     readonly targetQ: number;
     readonly targetR: number;
+    readonly startedAt?: number;
+    readonly durationMs?: number;
+    readonly completesAt?: number;
   }>;
 }
 
@@ -1310,40 +1328,95 @@ export function auditExistingKingdomSpawns(
   const sorted = [...kingdoms].sort((a, b) => a.kingdomId.localeCompare(b.kingdomId));
 
   // Huella determinista del estado de entrada (detecta cualquier cambio entre simulación y ejecución)
+  const fmtVal = (v: string | number | boolean | null | undefined): string =>
+    v === undefined || v === null ? "null" : String(v);
+
   const fingerprintParts = sorted.map((k) => {
     const sortedDupes = [...(k.duplicateTerritoryCellIds ?? [])].sort().join("|");
     const sortedOwnedCells = k.ownedCellIds ? [...k.ownedCellIds].sort().join("|") : "";
     const sortedOwnedDocs = k.ownedTerritories
       ? [...k.ownedTerritories]
+          .sort(
+            (a, b) =>
+              (a.id ?? "").localeCompare(b.id ?? "") ||
+              a.cellId.localeCompare(b.cellId)
+          )
           .map(
             (t) =>
-              `${t.id ?? ""}:${t.cellId}:${t.q},${t.r}:${t.ownerKingdomId ?? ""}:${t.isHome ? 1 : 0}`
+              `${fmtVal(t.id)}:${t.cellId}:${t.q},${t.r}:${fmtVal(t.ownerKingdomId)}:${t.isHome ? 1 : 0}`
           )
-          .sort()
           .join("|")
       : "";
     const sortedMarches = k.activeMarches
       ? [...k.activeMarches]
-          .map(
-            (m) =>
-              `${m.id ?? ""}:${m.direction ?? ""}:${m.kingdomId ?? ""}:${m.targetCellId}:${m.targetQ},${m.targetR}:${m.status ?? ""}`
+          .sort(
+            (a, b) =>
+              (a.id ?? "").localeCompare(b.id ?? "") ||
+              (a.direction ?? "").localeCompare(b.direction ?? "") ||
+              a.targetCellId.localeCompare(b.targetCellId)
           )
-          .sort()
+          .map((m) =>
+            [
+              fmtVal(m.id),
+              fmtVal(m.direction),
+              fmtVal(m.kingdomId),
+              m.targetCellId,
+              `${m.targetQ},${m.targetR}`,
+              fmtVal(m.status),
+              fmtVal(m.startedAt),
+              fmtVal(m.durationMs),
+              fmtVal(m.completesAt),
+              fmtVal(m.cancelledAt),
+              fmtVal(m.unitsRefundedAt),
+              fmtVal(m.cancelReason),
+            ].join(":")
+          )
           .join("|")
       : "";
     const sortedExplorations = k.activeExplorations
       ? [...k.activeExplorations]
-          .map((e) => `${e.id ?? ""}:${e.cellId}:${e.targetQ},${e.targetR}`)
-          .sort()
+          .sort(
+            (a, b) =>
+              (a.id ?? "").localeCompare(b.id ?? "") ||
+              a.cellId.localeCompare(b.cellId)
+          )
+          .map((e) =>
+            [
+              fmtVal(e.id),
+              e.cellId,
+              `${e.targetQ},${e.targetR}`,
+              fmtVal(e.startedAt),
+              fmtVal(e.durationMs),
+              fmtVal(e.completesAt),
+            ].join(":")
+          )
           .join("|")
       : "";
     const sortedChallenges = k.activeChallenges
       ? [...k.activeChallenges]
-          .map(
-            (c) =>
-              `${c.id ?? ""}:${c.challengerKingdomId}:${c.targetKingdomId}:${c.status}`
+          .sort(
+            (a, b) =>
+              (a.id ?? "").localeCompare(b.id ?? "") ||
+              a.challengerKingdomId.localeCompare(b.challengerKingdomId) ||
+              a.targetKingdomId.localeCompare(b.targetKingdomId)
           )
-          .sort()
+          .map((c) =>
+            [
+              fmtVal(c.id),
+              c.challengerKingdomId,
+              c.targetKingdomId,
+              c.status,
+              fmtVal(c.createdAt),
+              fmtVal(c.expiresAt),
+              fmtVal(c.respondedAt),
+              fmtVal(c.scheduledAt),
+              fmtVal(c.freezeAt),
+              fmtVal(c.frozenAt),
+              fmtVal(c.resolvedAt),
+              fmtVal(c.cancelledAt),
+              fmtVal(c.activeMarchId),
+            ].join(":")
+          )
           .join("|")
       : "";
 
@@ -1352,7 +1425,7 @@ export function auditExistingKingdomSpawns(
       normalizeCivilizationId(k.civilization) ?? "",
       k.homeTerritoryId ?? "",
       k.persistedHomeCell
-        ? `${k.persistedHomeCell.cellId}:${k.persistedHomeCell.q},${k.persistedHomeCell.r}:${k.persistedHomeCell.ownerKingdomId ?? ""}:${k.persistedHomeCell.isHome ? 1 : 0}`
+        ? `${k.persistedHomeCell.cellId}:${k.persistedHomeCell.q},${k.persistedHomeCell.r}:${fmtVal(k.persistedHomeCell.ownerKingdomId)}:${k.persistedHomeCell.isHome ? 1 : 0}`
         : "none",
       String(k.ownedTerritoryCount),
       String(k.markedHomeCount ?? -1),

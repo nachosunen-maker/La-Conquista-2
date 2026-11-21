@@ -1633,9 +1633,11 @@ describe("Validación quirúrgica commit 241686b — 13 pruebas obligatorias", (
     expect(audit3.planFingerprint).not.toBe(audit2.planFingerprint);
   });
 
-  test("12. Preservación íntegra de territorios, recursos, edificios, investigaciones y demás datos tras recolocación válida", async () => {
+  test("12. Preservación íntegra de territorios, recursos, edificios, colas, ejército, investigaciones e historiales tras recolocación válida", async () => {
     const t = convexTest(schema, modules);
     const { kingdomId } = await createKingdomWithHome(t, "qfix-12", "Roma Completa", "romanos", 0, 0);
+    // Segundo reino ya correctamente ubicado en (-34,0) para referencias cruzadas históricas (Battle, challenges, espionaje)
+    const { kingdomId: rivalKingdomId } = await createKingdomWithHome(t, "qfix-12-rival", "Vikingo Histórico", "vikingos", -34, 0);
 
     await t.run(async (ctx) => {
       for (const [q, r] of [[1, 0], [0, 1], [-1, 0]] as const) {
@@ -1651,19 +1653,245 @@ describe("Validación quirúrgica commit 241686b — 13 pruebas obligatorias", (
       }
       const res = await ctx.db.query("resources").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).first();
       if (res) await ctx.db.patch(res._id, { gold: 77777, food: 66666, stone: 44444 });
+      await ctx.db.insert("populationJobs", {
+        kingdomId,
+        jobType: "agriculture",
+        assignedCount: 12,
+      });
+      await ctx.db.insert("constructionQueue", {
+        kingdomId,
+        buildingType: "granero",
+        targetLevel: 2,
+        startedAt: 1000,
+        durationMs: 50_000,
+        costs: { gold: 10, wood: 20 },
+      });
+      await ctx.db.insert("trainingQueue", {
+        kingdomId,
+        unitType: "infanteria",
+        count: 5,
+        level: 1,
+        populationReserved: 5,
+        startedAt: 1100,
+        durationMs: 40_000,
+        costs: { gold: 25, food: 30 },
+      });
       await ctx.db.insert("technologyProgress", {
         kingdomId,
         technologyId: "mil_1",
         status: "completed",
       });
+      await ctx.db.insert("armyUnits", {
+        kingdomId,
+        unitType: "infanteria",
+        level: 2,
+        count: 40,
+        wounded: 3,
+        recoveryProgress: 0.25,
+      });
+      await ctx.db.insert("armyUnits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 2,
+        isSpy: true,
+      });
+      // Nota: explorationQueue y marchas/desafíos activos bloquean la recolocación como pending_activity;
+      // se verifican marchas y desafíos históricos persistidos más la cola explorationQueue vacía.
+      await ctx.db.insert("armyMarches", {
+        kingdomId,
+        targetCellId: "2,0",
+        targetQ: 2,
+        targetR: 0,
+        distance: 2,
+        terrainMultiplier: 1.1,
+        units: [{ unitType: "infanteria", level: 1, count: 10 }],
+        startedAt: 1200,
+        durationMs: 20_000,
+        completesAt: 21_200,
+        status: "completada",
+        battleResult: { outcome: "victory" },
+        isConquest: false,
+      });
+      const histChallengeId = await ctx.db.insert("challenges", {
+        challengerKingdomId: kingdomId,
+        targetKingdomId: rivalKingdomId,
+        challengeType: "duel",
+        status: "RESOLVED",
+        createdAt: 1000,
+        expiresAt: 10_000,
+        respondedAt: 2000,
+        resolvedAt: 9000,
+      });
+      await ctx.db.insert("challenges", {
+        challengerKingdomId: rivalKingdomId,
+        targetKingdomId: kingdomId,
+        challengeType: "duel",
+        status: "EXPIRED",
+        createdAt: 1500,
+        expiresAt: 10_500,
+      });
+      await ctx.db.insert("Battle", {
+        challengeId: histChallengeId,
+        attackerKingdomId: kingdomId,
+        defenderKingdomId: rivalKingdomId,
+        resolvedAt: 9000,
+        outcome: "attacker_win",
+        winnerKingdomId: kingdomId,
+        crushingVictory: false,
+        report: { rounds: 3 },
+      });
+      await ctx.db.insert("exploredTerritories", {
+        kingdomId,
+        cellId: "3,0",
+        discoveredAt: 22_222,
+        discoveryNote: "Ruinas antiguas",
+      });
+      await ctx.db.insert("espionageReports", {
+        kingdomId,
+        targetKingdomId: rivalKingdomId,
+        level: 2,
+        createdAt: 5000,
+        expiresAt: 91_400,
+        estimate: { min: 10, max: 20 },
+      });
+      await ctx.db.insert("missionProgress", {
+        kingdomId,
+        progressId: "stage:1",
+        missionId: "stage_1",
+        kind: "stageReward",
+        stage: 1,
+        title: "Inicio",
+        rewardSummary: "+100 oro",
+        completedAt: 3000,
+        rewardGranted: true,
+      });
+      await ctx.db.insert("missionCounters", {
+        kingdomId,
+        dayKey: "2026-11-21",
+        lifetime: { battles: 1 },
+        daily: { explores: 2 },
+        updatedAt: 4000,
+      });
+      await ctx.db.insert("transactions", {
+        kingdomId,
+        idempotencyKey: "tx-cons-1",
+        resourceType: "gold",
+        amount: 50,
+        reason: "test_spend",
+        createdAt: 4500,
+      });
+      await ctx.db.insert("marketTrades", {
+        kingdomId,
+        idempotencyKey: "mkt-cons-1",
+        fromResource: "wood",
+        fromAmount: 100,
+        toResource: "gold",
+        toAmount: 50,
+        createdAt: 4600,
+      });
+      await ctx.db.insert("territoryCapAuditLogs", {
+        operationId: "op-hist-1",
+        executedAt: 4700,
+        adminIdentity: "admin-1",
+        mode: "dryRun",
+        kingdomId,
+        kingdomName: "Roma Completa",
+        initialTerritoryCount: 4,
+        capitalCellId: "0,0",
+        keptCellIds: ["0,0", "1,0", "0,1", "-1,0"],
+        releasedCellIds: [],
+        releasedCount: 0,
+        referentialIntegrityBefore: {},
+        referentialIntegrityAfter: {},
+        outcome: "noop",
+        errors: [],
+      });
     });
 
-    const beforeBuildings = await t.run((ctx) =>
-      ctx.db.query("buildings").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect()
-    );
-    const beforePop = await t.run((ctx) =>
-      ctx.db.query("population").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).first()
-    );
+    const sortDocs = <T extends { _id: string }>(docs: T[]) =>
+      [...docs].sort((a, b) => String(a._id).localeCompare(String(b._id)));
+
+    const captureFullSnapshot = async () =>
+      t.run(async (ctx) => {
+        const [
+          kDoc,
+          owned,
+          res,
+          pop,
+          popJobs,
+          buildings,
+          constructionQ,
+          trainingQ,
+          tech,
+          army,
+          explorations,
+          marches,
+          chChallenger,
+          chTarget,
+          battlesAtk,
+          battlesDef,
+          explored,
+          espReports,
+          missionProg,
+          missionCnt,
+          txs,
+          trades,
+          auditLogs,
+        ] = await Promise.all([
+          ctx.db.get(kingdomId),
+          ctx.db.query("territories").withIndex("by_owner", (qb) => qb.eq("ownerKingdomId", kingdomId)).collect(),
+          ctx.db.query("resources").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("population").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("populationJobs").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("buildings").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("constructionQueue").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("trainingQueue").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("technologyProgress").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("armyUnits").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("explorationQueue").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("armyMarches").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("challenges").withIndex("by_challenger", (qb) => qb.eq("challengerKingdomId", kingdomId)).collect(),
+          ctx.db.query("challenges").withIndex("by_target", (qb) => qb.eq("targetKingdomId", kingdomId)).collect(),
+          ctx.db.query("Battle").withIndex("by_attacker", (qb) => qb.eq("attackerKingdomId", kingdomId)).collect(),
+          ctx.db.query("Battle").withIndex("by_defender", (qb) => qb.eq("defenderKingdomId", kingdomId)).collect(),
+          ctx.db.query("exploredTerritories").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("espionageReports").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("missionProgress").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("missionCounters").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("transactions").withIndex("by_kingdom_and_key", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("marketTrades").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+          ctx.db.query("territoryCapAuditLogs").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
+        ]);
+
+        return {
+          kDoc,
+          owned: sortDocs(owned),
+          res: sortDocs(res),
+          pop: sortDocs(pop),
+          popJobs: sortDocs(popJobs),
+          buildings: sortDocs(buildings),
+          constructionQ: sortDocs(constructionQ),
+          trainingQ: sortDocs(trainingQ),
+          tech: sortDocs(tech),
+          army: sortDocs(army),
+          explorations: sortDocs(explorations),
+          marches: sortDocs(marches),
+          chChallenger: sortDocs(chChallenger),
+          chTarget: sortDocs(chTarget),
+          battlesAtk: sortDocs(battlesAtk),
+          battlesDef: sortDocs(battlesDef),
+          explored: sortDocs(explored),
+          espReports: sortDocs(espReports),
+          missionProg: sortDocs(missionProg),
+          missionCnt: sortDocs(missionCnt),
+          txs: sortDocs(txs),
+          trades: sortDocs(trades),
+          auditLogs: sortDocs(auditLogs),
+        };
+      });
+
+    const before = await captureFullSnapshot();
 
     const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
     const applied = await t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
@@ -1674,25 +1902,50 @@ describe("Validación quirúrgica commit 241686b — 13 pruebas obligatorias", (
     expect(applied.outcomes[0].preservedOwnedTerritoriesCount).toBe(4);
     expect(applied.outcomes[0].finalOwnedTerritoriesCount).toBe(5);
 
-    const after = await t.run(async (ctx) => ({
-      k: await ctx.db.get(kingdomId),
-      owned: await ctx.db.query("territories").withIndex("by_owner", (qb) => qb.eq("ownerKingdomId", kingdomId)).collect(),
-      res: await ctx.db.query("resources").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).first(),
-      buildings: await ctx.db.query("buildings").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
-      tech: await ctx.db.query("technologyProgress").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).collect(),
-      pop: await ctx.db.query("population").withIndex("by_kingdom", (qb) => qb.eq("kingdomId", kingdomId)).first(),
-    }));
+    const after = await captureFullSnapshot();
 
-    expect(after.k?.homeTerritoryId).toBe("0,34");
+    // Documento del reino: solo cambia homeTerritoryId ("0,0" -> "0,34")
+    expect(after.kDoc).toEqual({ ...before.kDoc!, homeTerritoryId: "0,34" });
+
+    // Territorios: los 4 previos mantienen id, cellId, q, r, terrain, ownerKingdomId y claimedAt;
+    // "0,0" pasa de isHome: true a isHome: false y se incorpora "0,34" con isHome: true.
     expect(after.owned).toHaveLength(5);
     expect(after.owned.map((c) => c.cellId)).toEqual(expect.arrayContaining(["0,0", "1,0", "0,1", "-1,0", "0,34"]));
     expect(after.owned.filter((c) => c.isHome).map((c) => c.cellId)).toEqual(["0,34"]);
-    expect(after.res?.gold).toBe(77777);
-    expect(after.res?.food).toBe(66666);
-    expect(after.res?.stone).toBe(44444);
-    expect(after.buildings).toHaveLength(beforeBuildings.length);
-    expect(after.tech).toHaveLength(1);
-    expect(after.pop?.total).toBe(beforePop?.total);
+    for (const prevTerr of before.owned) {
+      const currTerr = after.owned.find((c) => c._id === prevTerr._id)!;
+      expect(currTerr).toBeDefined();
+      expect(currTerr).toEqual({
+        ...prevTerr,
+        isHome: prevTerr.cellId === "0,0" ? false : prevTerr.isHome,
+      });
+    }
+
+    // Todos los registros ajenos al traslado de capital conservados íntegramente por ID y contenido
+    expect(after.res).toEqual(before.res);
+    expect(after.res[0]?.gold).toBe(77777);
+    expect(after.res[0]?.food).toBe(66666);
+    expect(after.res[0]?.stone).toBe(44444);
+    expect(after.pop).toEqual(before.pop);
+    expect(after.popJobs).toEqual(before.popJobs);
+    expect(after.buildings).toEqual(before.buildings);
+    expect(after.constructionQ).toEqual(before.constructionQ);
+    expect(after.trainingQ).toEqual(before.trainingQ);
+    expect(after.tech).toEqual(before.tech);
+    expect(after.army).toEqual(before.army);
+    expect(after.explorations).toEqual(before.explorations);
+    expect(after.marches).toEqual(before.marches);
+    expect(after.chChallenger).toEqual(before.chChallenger);
+    expect(after.chTarget).toEqual(before.chTarget);
+    expect(after.battlesAtk).toEqual(before.battlesAtk);
+    expect(after.battlesDef).toEqual(before.battlesDef);
+    expect(after.explored).toEqual(before.explored);
+    expect(after.espReports).toEqual(before.espReports);
+    expect(after.missionProg).toEqual(before.missionProg);
+    expect(after.missionCnt).toEqual(before.missionCnt);
+    expect(after.txs).toEqual(before.txs);
+    expect(after.trades).toEqual(before.trades);
+    expect(after.auditLogs).toEqual(before.auditLogs);
   });
 
   test("13. Rollback atómico íntegro ante un fallo de validación en lote mixto", async () => {
@@ -1728,3 +1981,275 @@ describe("Validación quirúrgica commit 241686b — 13 pruebas obligatorias", (
   });
 });
 
+describe("Invalidación temporal de huella determinista — pruebas obligatorias", () => {
+  const createTypedTest = () => convexTest(schema, modules);
+  type TypedTestBackend = ReturnType<typeof createTypedTest>;
+
+  async function createKingdomAtHome(
+    t: TypedTestBackend,
+    subject: string,
+    name: string,
+    civilization: string,
+    q: number,
+    r: number
+  ) {
+    const asUser = t.withIdentity(identity(subject));
+    const k = await asUser.mutation(api.economy.getOrInitializeKingdom, {
+      name,
+      civilization,
+      castleName: `Castillo ${name}`,
+      monarchName: `Monarca ${name}`,
+    });
+    const targetCellId = `${q},${r}`;
+    await t.run(async (ctx) => {
+      const owned = await ctx.db
+        .query("territories")
+        .withIndex("by_owner", (qb) => qb.eq("ownerKingdomId", k._id))
+        .collect();
+      for (const c of owned) {
+        await ctx.db.patch(c._id, { ownerKingdomId: undefined, isHome: false, claimedAt: undefined });
+      }
+      const existingTarget = await ctx.db
+        .query("territories")
+        .withIndex("by_cell", (qb) => qb.eq("cellId", targetCellId))
+        .first();
+      if (existingTarget) {
+        await ctx.db.patch(existingTarget._id, {
+          ownerKingdomId: k._id,
+          isHome: true,
+          claimedAt: 100_000,
+        });
+      } else {
+        await ctx.db.insert("territories", {
+          cellId: targetCellId,
+          q,
+          r,
+          terrain: "llanura",
+          ownerKingdomId: k._id,
+          isHome: true,
+          claimedAt: 100_000,
+        });
+      }
+      await ctx.db.patch(k._id, { homeTerritoryId: targetCellId });
+    });
+    return { kingdomId: k._id as Id<"kingdoms"> };
+  }
+
+  async function expectRejectedWithoutTerritorialChanges(
+    t: TypedTestBackend,
+    kingdomId: Id<"kingdoms">,
+    staleFingerprint: string,
+    expectedHome: string
+  ) {
+    const territoriesBefore = await t.run((ctx) =>
+      ctx.db.query("territories").withIndex("by_owner", (qb) => qb.eq("ownerKingdomId", kingdomId)).collect()
+    );
+
+    await expect(
+      t.mutation(internal.territories.applyKingdomSpawnRelocationInternal, {
+        expectedPlanFingerprint: staleFingerprint,
+      })
+    ).rejects.toThrow(/Plan desactualizado/i);
+
+    const [kAfter, territoriesAfter] = await t.run(async (ctx) => [
+      await ctx.db.get(kingdomId),
+      await ctx.db.query("territories").withIndex("by_owner", (qb) => qb.eq("ownerKingdomId", kingdomId)).collect(),
+    ]);
+    expect(kAfter?.homeTerritoryId).toBe(expectedHome);
+    expect(territoriesAfter).toEqual(territoriesBefore);
+  }
+
+  test("Marcha activa: cambiar startedAt invalida el plan anterior", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAtHome(t, "tmp-m-start", "Roma Marcha Start", "romanos", 0, 0);
+
+    const marchId = await t.run((ctx) =>
+      ctx.db.insert("armyMarches", {
+        kingdomId,
+        targetCellId: "1,0",
+        targetQ: 1,
+        targetR: 0,
+        distance: 1,
+        units: [{ unitType: "infanteria", level: 1, count: 5 }],
+        startedAt: 1_000_000,
+        durationMs: 60_000,
+        completesAt: 1_060_000,
+        status: "marchando",
+      })
+    );
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    await t.run((ctx) => ctx.db.patch(marchId, { startedAt: 1_005_000 }));
+    await expectRejectedWithoutTerritorialChanges(t, kingdomId, audit.planFingerprint, "0,0");
+  });
+
+  test("Marcha activa: cambiar durationMs invalida el plan anterior", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAtHome(t, "tmp-m-dur", "Roma Marcha Dur", "romanos", 0, 0);
+
+    const marchId = await t.run((ctx) =>
+      ctx.db.insert("armyMarches", {
+        kingdomId,
+        targetCellId: "1,0",
+        targetQ: 1,
+        targetR: 0,
+        distance: 1,
+        units: [{ unitType: "infanteria", level: 1, count: 5 }],
+        startedAt: 1_000_000,
+        durationMs: 60_000,
+        completesAt: 1_060_000,
+        status: "marchando",
+      })
+    );
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    await t.run((ctx) => ctx.db.patch(marchId, { durationMs: 90_000 }));
+    await expectRejectedWithoutTerritorialChanges(t, kingdomId, audit.planFingerprint, "0,0");
+  });
+
+  test("Marcha activa: cambiar completesAt invalida el plan anterior", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAtHome(t, "tmp-m-comp", "Roma Marcha Comp", "romanos", 0, 0);
+
+    const marchId = await t.run((ctx) =>
+      ctx.db.insert("armyMarches", {
+        kingdomId,
+        targetCellId: "1,0",
+        targetQ: 1,
+        targetR: 0,
+        distance: 1,
+        units: [{ unitType: "infanteria", level: 1, count: 5 }],
+        startedAt: 1_000_000,
+        durationMs: 60_000,
+        completesAt: 1_060_000,
+        status: "marchando",
+      })
+    );
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    await t.run((ctx) => ctx.db.patch(marchId, { completesAt: 1_099_000 }));
+    await expectRejectedWithoutTerritorialChanges(t, kingdomId, audit.planFingerprint, "0,0");
+  });
+
+  test("Marcha entrante hacia la capital: cambiar completesAt invalida el plan anterior", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAtHome(t, "tmp-m-inc", "Roma Defensora", "romanos", 0, 0);
+    const { kingdomId: attackerId } = await createKingdomAtHome(t, "tmp-m-atk", "Vikingo Atacante", "vikingos", -34, 0);
+
+    const marchId = await t.run((ctx) =>
+      ctx.db.insert("armyMarches", {
+        kingdomId: attackerId,
+        targetCellId: "0,0",
+        targetQ: 0,
+        targetR: 0,
+        distance: 34,
+        units: [{ unitType: "infanteria", level: 1, count: 8 }],
+        startedAt: 2_000_000,
+        durationMs: 120_000,
+        completesAt: 2_120_000,
+        status: "marchando",
+      })
+    );
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    await t.run((ctx) => ctx.db.patch(marchId, { completesAt: 2_150_000 }));
+    await expectRejectedWithoutTerritorialChanges(t, kingdomId, audit.planFingerprint, "0,0");
+  });
+
+  test("Expedición activa: cambiar startedAt invalida el plan anterior", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAtHome(t, "tmp-e-start", "Roma Exp Start", "romanos", 0, 0);
+
+    const expId = await t.run((ctx) =>
+      ctx.db.insert("explorationQueue", {
+        kingdomId,
+        cellId: "1,0",
+        targetQ: 1,
+        targetR: 0,
+        distance: 1,
+        startedAt: 3_000_000,
+        durationMs: 60_000,
+        completesAt: 3_060_000,
+        scoutsCount: 1,
+        costs: { gold: 30, food: 40 },
+      })
+    );
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    await t.run((ctx) => ctx.db.patch(expId, { startedAt: 3_010_000 }));
+    await expectRejectedWithoutTerritorialChanges(t, kingdomId, audit.planFingerprint, "0,0");
+  });
+
+  test("Expedición activa: cambiar completesAt invalida el plan anterior", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAtHome(t, "tmp-e-comp", "Roma Exp Comp", "romanos", 0, 0);
+
+    const expId = await t.run((ctx) =>
+      ctx.db.insert("explorationQueue", {
+        kingdomId,
+        cellId: "1,0",
+        targetQ: 1,
+        targetR: 0,
+        distance: 1,
+        startedAt: 3_000_000,
+        durationMs: 60_000,
+        completesAt: 3_060_000,
+        scoutsCount: 1,
+        costs: { gold: 30, food: 40 },
+      })
+    );
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    await t.run((ctx) => ctx.db.patch(expId, { completesAt: 3_095_000 }));
+    await expectRejectedWithoutTerritorialChanges(t, kingdomId, audit.planFingerprint, "0,0");
+  });
+
+  test("Desafío activo: cambiar expiresAt invalida el plan anterior", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAtHome(t, "tmp-c-exp", "Roma Ch Exp", "romanos", 0, 0);
+    const { kingdomId: kRival } = await createKingdomAtHome(t, "tmp-c-exp-r", "Vikingo Rival", "vikingos", -34, 0);
+
+    const challengeId = await t.run((ctx) =>
+      ctx.db.insert("challenges", {
+        challengerKingdomId: kingdomId,
+        targetKingdomId: kRival,
+        challengeType: "duel",
+        status: "PENDING",
+        createdAt: 4_000_000,
+        expiresAt: 4_120_000,
+      })
+    );
+
+    const audit = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    await t.run((ctx) => ctx.db.patch(challengeId, { expiresAt: 4_180_000 }));
+    await expectRejectedWithoutTerritorialChanges(t, kingdomId, audit.planFingerprint, "0,0");
+  });
+
+  test("Desafío activo: cambiar scheduledAt o freezeAt invalida el plan anterior", async () => {
+    const t = convexTest(schema, modules);
+    const { kingdomId } = await createKingdomAtHome(t, "tmp-c-sch", "Roma Ch Sch", "romanos", 0, 0);
+    const { kingdomId: kRival } = await createKingdomAtHome(t, "tmp-c-sch-r", "Vikingo Rival 2", "vikingos", -34, 0);
+
+    const challengeId = await t.run((ctx) =>
+      ctx.db.insert("challenges", {
+        challengerKingdomId: kingdomId,
+        targetKingdomId: kRival,
+        challengeType: "duel",
+        status: "ACCEPTED",
+        createdAt: 5_000_000,
+        expiresAt: 5_500_000,
+        respondedAt: 5_050_000,
+        scheduledAt: 5_200_000,
+        freezeAt: 5_180_000,
+      })
+    );
+
+    const audit1 = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    await t.run((ctx) => ctx.db.patch(challengeId, { scheduledAt: 5_260_000 }));
+    await expectRejectedWithoutTerritorialChanges(t, kingdomId, audit1.planFingerprint, "0,0");
+
+    const audit2 = await t.query(internal.territories.auditKingdomSpawnDistributionInternal, {});
+    await t.run((ctx) => ctx.db.patch(challengeId, { freezeAt: 5_230_000 }));
+    await expectRejectedWithoutTerritorialChanges(t, kingdomId, audit2.planFingerprint, "0,0");
+  });
+});

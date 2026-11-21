@@ -1468,6 +1468,12 @@ async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx | MutationCtx) {
           targetR: m.targetR,
           status: m.status,
           direction: "outgoing" as const,
+          startedAt: m.startedAt,
+          durationMs: m.durationMs,
+          completesAt: m.completesAt,
+          cancelledAt: m.cancelledAt ?? null,
+          unitsRefundedAt: m.unitsRefundedAt ?? null,
+          cancelReason: m.cancelReason ?? null,
         })),
         ...incomingMarches.map((m) => ({
           id: String(m._id),
@@ -1477,6 +1483,12 @@ async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx | MutationCtx) {
           targetR: m.targetR,
           status: m.status,
           direction: "incoming" as const,
+          startedAt: m.startedAt,
+          durationMs: m.durationMs,
+          completesAt: m.completesAt,
+          cancelledAt: m.cancelledAt ?? null,
+          unitsRefundedAt: m.unitsRefundedAt ?? null,
+          cancelReason: m.cancelReason ?? null,
         })),
       ].sort((a, b) => a.id.localeCompare(b.id) || a.direction.localeCompare(b.direction));
 
@@ -1497,6 +1509,15 @@ async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx | MutationCtx) {
           challengerKingdomId: String(ch.challengerKingdomId),
           targetKingdomId: String(ch.targetKingdomId),
           status: ch.status,
+          createdAt: ch.createdAt,
+          expiresAt: ch.expiresAt,
+          respondedAt: ch.respondedAt ?? null,
+          scheduledAt: ch.scheduledAt ?? null,
+          freezeAt: ch.freezeAt ?? null,
+          frozenAt: ch.frozenAt ?? null,
+          resolvedAt: ch.resolvedAt ?? null,
+          cancelledAt: ch.cancelledAt ?? null,
+          activeMarchId: ch.activeMarchId ? String(ch.activeMarchId) : null,
         }))
         .sort((a, b) => a.id.localeCompare(b.id));
 
@@ -1506,6 +1527,9 @@ async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx | MutationCtx) {
           cellId: e.cellId,
           targetQ: e.targetQ,
           targetR: e.targetR,
+          startedAt: e.startedAt,
+          durationMs: e.durationMs,
+          completesAt: e.completesAt,
         }))
         .sort((a, b) => a.id.localeCompare(b.id));
 
