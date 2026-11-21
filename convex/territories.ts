@@ -1404,13 +1404,19 @@ async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx | MutationCtx) {
       .collect(),
   ]);
 
-  const incomingMarchTargetCells = new Map<string, number>();
+  const sortedKingdoms = [...allKingdoms].sort((a, b) =>
+    String(a._id).localeCompare(String(b._id))
+  );
+
+  const incomingMarchesByTargetCell = new Map<string, typeof allActiveMarches>();
   for (const m of allActiveMarches) {
-    incomingMarchTargetCells.set(m.targetCellId, (incomingMarchTargetCells.get(m.targetCellId) ?? 0) + 1);
+    const list = incomingMarchesByTargetCell.get(m.targetCellId) ?? [];
+    list.push(m);
+    incomingMarchesByTargetCell.set(m.targetCellId, list);
   }
 
   const inputs: ExistingKingdomAuditInput[] = await Promise.all(
-    allKingdoms.map(async (k) => {
+    sortedKingdoms.map(async (k) => {
       const [owned, outgoingMarches, challengesAsChallenger, challengesAsTarget, explorations] = await Promise.all([
         ctx.db.query("territories").withIndex("by_owner", (q) => q.eq("ownerKingdomId", k._id)).collect(),
         ctx.db
@@ -1423,10 +1429,14 @@ async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx | MutationCtx) {
         ctx.db.query("explorationQueue").withIndex("by_kingdom", (q) => q.eq("kingdomId", k._id)).collect(),
       ]);
 
+      const sortedOwned = [...owned].sort(
+        (a, b) => a.cellId.localeCompare(b.cellId) || String(a._id).localeCompare(String(b._id))
+      );
+
       const seenOwnedIds = new Set<string>();
       const duplicateOwnedIds: string[] = [];
       let markedHomeCount = 0;
-      for (const cell of owned) {
+      for (const cell of sortedOwned) {
         if (seenOwnedIds.has(cell.cellId)) {
           duplicateOwnedIds.push(cell.cellId);
         } else {
@@ -1438,22 +1448,75 @@ async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx | MutationCtx) {
       }
 
       const homeDoc =
-        (k.homeTerritoryId ? owned.find((c) => c.cellId === k.homeTerritoryId) : undefined) ??
-        owned.find((c) => c.isHome) ??
-        owned[0] ??
+        (k.homeTerritoryId ? sortedOwned.find((c) => c.cellId === k.homeTerritoryId) : undefined) ??
+        sortedOwned.find((c) => c.isHome) ??
+        sortedOwned[0] ??
         null;
 
-      // Contar marchas entrantes dirigidas a la capital o celdas poseídas por este reino
-      let incomingMarchesCount = 0;
-      if (k.homeTerritoryId) {
-        incomingMarchesCount += incomingMarchTargetCells.get(k.homeTerritoryId) ?? 0;
-      } else if (homeDoc) {
-        incomingMarchesCount += incomingMarchTargetCells.get(homeDoc.cellId) ?? 0;
-      }
+      // Recopilar marchas salientes y entrantes dirigidas a la capital actual del reino
+      const homeCellForIncoming = k.homeTerritoryId ?? homeDoc?.cellId ?? null;
+      const incomingMarches = homeCellForIncoming
+        ? (incomingMarchesByTargetCell.get(homeCellForIncoming) ?? [])
+        : [];
 
-      const activeChallenges = [...challengesAsChallenger, ...challengesAsTarget].filter(
-        (ch) => ch.status !== "RESOLVED" && ch.status !== "CANCELLED" && ch.status !== "EXPIRED" && ch.status !== "REJECTED"
-      );
+      const activeMarches = [
+        ...outgoingMarches.map((m) => ({
+          id: String(m._id),
+          kingdomId: String(m.kingdomId),
+          targetCellId: m.targetCellId,
+          targetQ: m.targetQ,
+          targetR: m.targetR,
+          status: m.status,
+          direction: "outgoing" as const,
+        })),
+        ...incomingMarches.map((m) => ({
+          id: String(m._id),
+          kingdomId: String(m.kingdomId),
+          targetCellId: m.targetCellId,
+          targetQ: m.targetQ,
+          targetR: m.targetR,
+          status: m.status,
+          direction: "incoming" as const,
+        })),
+      ].sort((a, b) => a.id.localeCompare(b.id) || a.direction.localeCompare(b.direction));
+
+      const activeChallengeMap = new Map<string, (typeof challengesAsChallenger)[number]>();
+      for (const ch of [...challengesAsChallenger, ...challengesAsTarget]) {
+        if (
+          ch.status !== "RESOLVED" &&
+          ch.status !== "CANCELLED" &&
+          ch.status !== "EXPIRED" &&
+          ch.status !== "REJECTED"
+        ) {
+          activeChallengeMap.set(String(ch._id), ch);
+        }
+      }
+      const activeChallenges = Array.from(activeChallengeMap.values())
+        .map((ch) => ({
+          id: String(ch._id),
+          challengerKingdomId: String(ch.challengerKingdomId),
+          targetKingdomId: String(ch.targetKingdomId),
+          status: ch.status,
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id));
+
+      const activeExplorations = [...explorations]
+        .map((e) => ({
+          id: String(e._id),
+          cellId: e.cellId,
+          targetQ: e.targetQ,
+          targetR: e.targetR,
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id));
+
+      const ownedTerritories = sortedOwned.map((c) => ({
+        id: String(c._id),
+        cellId: c.cellId,
+        q: c.q,
+        r: c.r,
+        ownerKingdomId: c.ownerKingdomId ? String(c.ownerKingdomId) : null,
+        isHome: c.isHome,
+      }));
 
       return {
         kingdomId: String(k._id),
@@ -1469,13 +1532,17 @@ async function runKingdomSpawnAuditReadOnly(ctx: QueryCtx | MutationCtx) {
               isHome: homeDoc.isHome,
             }
           : null,
-        ownedTerritoryCount: owned.length,
-        ownedCellIds: owned.map((c) => c.cellId),
+        ownedTerritoryCount: sortedOwned.length,
+        ownedCellIds: sortedOwned.map((c) => c.cellId),
+        ownedTerritories,
         markedHomeCount,
         duplicateTerritoryCellIds: Array.from(new Set(duplicateOwnedIds)).sort(),
-        activeMarchesCount: outgoingMarches.length + incomingMarchesCount,
+        activeMarchesCount: activeMarches.length,
+        activeMarches,
         activeChallengesCount: activeChallenges.length,
-        activeExplorationsCount: explorations.length,
+        activeChallenges,
+        activeExplorationsCount: activeExplorations.length,
+        activeExplorations,
       };
     })
   );
@@ -1535,11 +1602,13 @@ async function executeKingdomSpawnRelocation(
   // 1. Re-ejecutar auditoría en vivo dentro de la mutación atómica
   const liveAudit = await runKingdomSpawnAuditReadOnly(ctx);
 
-  // 2. Verificar que los datos no han cambiado desde la simulación
-  if (
-    args.expectedPlanFingerprint !== undefined &&
-    liveAudit.planFingerprint !== args.expectedPlanFingerprint
-  ) {
+  // 2. Exigir huella del plan y verificar que los datos no han cambiado desde la simulación
+  if (!args.expectedPlanFingerprint || !args.expectedPlanFingerprint.trim()) {
+    throw new Error(
+      "Falta 'expectedPlanFingerprint': toda ejecución de recolocación exige la huella del plan previamente auditado."
+    );
+  }
+  if (liveAudit.planFingerprint !== args.expectedPlanFingerprint) {
     throw new Error(
       `Plan desactualizado: los datos cambiaron desde la simulación (esperado='${args.expectedPlanFingerprint}', actual='${liveAudit.planFingerprint}'). Vuelve a ejecutar la auditoría.`
     );
@@ -1554,19 +1623,30 @@ async function executeKingdomSpawnRelocation(
     name: string;
     fromCellId: string | null;
     toCellId: string;
+    targetCurrentOwnerId: string | null;
+    releasesOldHome: boolean;
   };
 
-  const toExecute: ValidatedMove[] = [];
+  let toExecute: ValidatedMove[] = [];
   const outcomes: KingdomRelocationOutcome[] = [];
   const seenTargets = new Set<string>();
+  const seenKingdomIds = new Set<string>();
 
   if (args.plannedRelocations && args.plannedRelocations.length > 0) {
-    // Validar cada recolocación explícita contra el estado real actual
+    // Validar cada recolocación explícita contra el plan global validado y el estado real actual
     const sortedPlan = [...args.plannedRelocations].sort((a, b) =>
       String(a.kingdomId).localeCompare(String(b.kingdomId))
     );
+    const stagedCandidates: ValidatedMove[] = [];
+
     for (const item of sortedPlan) {
       const kIdStr = String(item.kingdomId);
+      if (seenKingdomIds.has(kIdStr)) {
+        throw new Error(
+          `Conflicto en el plan: el reino '${kIdStr}' aparece duplicado en 'plannedRelocations'; operación abortada sin cambios.`
+        );
+      }
+      seenKingdomIds.add(kIdStr);
       if (filterIdSet && !filterIdSet.has(kIdStr)) continue;
 
       const kingdom = await ctx.db.get(item.kingdomId);
@@ -1600,6 +1680,11 @@ async function executeKingdomSpawnRelocation(
           `Incompatibilidad de integridad en reino '${kIdStr}': ${auditEntry.integrityBlockReasons.join(" ")}`
         );
       }
+      if (auditEntry.status !== "planned" || !auditEntry.proposedHomeCellId) {
+        throw new Error(
+          `El reino '${kIdStr}' tiene estado '${auditEntry.status}' en la auditoría y no admite recolocación; operación abortada sin cambios.`
+        );
+      }
       const parsedTarget = parseCellId(item.toCellId);
       if (!parsedTarget || !isInsideWorld(parsedTarget, MAP.RADIUS)) {
         throw new Error(
@@ -1613,7 +1698,7 @@ async function executeKingdomSpawnRelocation(
       }
       seenTargets.add(item.toCellId);
 
-      // Comprobar ocupación en BD real
+      // Comprobar estado real de la celda destino en BD
       const targetDocs = await ctx.db
         .query("territories")
         .withIndex("by_cell", (q) => q.eq("cellId", item.toCellId))
@@ -1623,17 +1708,51 @@ async function executeKingdomSpawnRelocation(
           `Registros duplicados en celda destino '${item.toCellId}'; operación abortada sin cambios.`
         );
       }
-      if (targetDocs[0]?.ownerKingdomId && String(targetDocs[0].ownerKingdomId) !== kIdStr) {
+      const targetCurrentOwnerId = targetDocs[0]?.ownerKingdomId
+        ? String(targetDocs[0].ownerKingdomId)
+        : null;
+      if (
+        targetCurrentOwnerId &&
+        targetCurrentOwnerId !== kIdStr &&
+        item.toCellId !== auditEntry.proposedHomeCellId
+      ) {
         throw new Error(
-          `La celda de destino '${item.toCellId}' está ocupada por otro reino ('${String(targetDocs[0].ownerKingdomId)}'); operación abortada sin cambios.`
+          `La celda de destino '${item.toCellId}' está ocupada por otro reino ('${targetCurrentOwnerId}'); operación abortada sin cambios.`
+        );
+      }
+      if (item.toCellId !== auditEntry.proposedHomeCellId) {
+        throw new Error(
+          `Destino no autorizado para '${kIdStr}': toCellId='${item.toCellId}' no coincide con proposedHomeCellId='${auditEntry.proposedHomeCellId}' de la distribución global validada; operación abortada sin cambios.`
         );
       }
 
+      const ownedForRelease = await ctx.db
+        .query("territories")
+        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", item.kingdomId))
+        .collect();
+      const fromCell = kingdom.homeTerritoryId ?? null;
+      const releasesOldHome =
+        fromCell !== null &&
+        fromCell !== item.toCellId &&
+        (ownedForRelease.length <= 1 || ownedForRelease.length >= TERRITORIES.MAX_PER_KINGDOM) &&
+        ownedForRelease.some((c) => c.cellId === fromCell || c.isHome === true);
+
+      stagedCandidates.push({
+        kingdomId: item.kingdomId,
+        name: kingdom.name,
+        fromCellId: fromCell,
+        toCellId: item.toCellId,
+        targetCurrentOwnerId,
+        releasesOldHome,
+      });
+    }
+
+    for (const candidate of stagedCandidates) {
       if (toExecute.length >= batchLimit) {
         outcomes.push({
-          kingdomId: kIdStr,
-          name: kingdom.name,
-          previousHomeCellId: kingdom.homeTerritoryId ?? null,
+          kingdomId: String(candidate.kingdomId),
+          name: candidate.name,
+          previousHomeCellId: candidate.fromCellId,
           newHomeCellId: null,
           outcome: "deferred_batch",
           preservedOwnedTerritoriesCount: 0,
@@ -1642,16 +1761,11 @@ async function executeKingdomSpawnRelocation(
         });
         continue;
       }
-
-      toExecute.push({
-        kingdomId: item.kingdomId,
-        name: kingdom.name,
-        fromCellId: kingdom.homeTerritoryId ?? null,
-        toCellId: item.toCellId,
-      });
+      toExecute.push(candidate);
     }
   } else {
     // Generar y ejecutar directamente desde el plan global verificado de la auditoría en vivo
+    const eligibleAutoMoves: ValidatedMove[] = [];
     for (const entry of liveAudit.entries) {
       if (filterIdSet && !filterIdSet.has(entry.kingdomId)) continue;
       if (entry.status === "correctly_positioned") {
@@ -1699,11 +1813,112 @@ async function executeKingdomSpawnRelocation(
       }
 
       if (!entry.proposedHomeCellId) continue;
+
+      const kId = entry.kingdomId as Id<"kingdoms">;
+      const [targetDocs, ownedForRelease] = await Promise.all([
+        ctx.db
+          .query("territories")
+          .withIndex("by_cell", (q) => q.eq("cellId", entry.proposedHomeCellId!))
+          .collect(),
+        ctx.db
+          .query("territories")
+          .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kId))
+          .collect(),
+      ]);
+      if (targetDocs.length > 1) {
+        throw new Error(
+          `Registros duplicados en celda destino '${entry.proposedHomeCellId}'; operación abortada sin cambios.`
+        );
+      }
+      const targetCurrentOwnerId = targetDocs[0]?.ownerKingdomId
+        ? String(targetDocs[0].ownerKingdomId)
+        : null;
+      const fromCell = entry.persistedHomeTerritoryId;
+      const releasesOldHome =
+        fromCell !== null &&
+        fromCell !== entry.proposedHomeCellId &&
+        (ownedForRelease.length <= 1 || ownedForRelease.length >= TERRITORIES.MAX_PER_KINGDOM) &&
+        ownedForRelease.some((c) => c.cellId === fromCell || c.isHome === true);
+
+      eligibleAutoMoves.push({
+        kingdomId: kId,
+        name: entry.name,
+        fromCellId: fromCell,
+        toCellId: entry.proposedHomeCellId,
+        targetCurrentOwnerId,
+        releasesOldHome,
+      });
+    }
+
+    // Ordenar prerequisitos de liberación y separación (< 20 respecto a capitales aún por mover)
+    // antes de aplicar batchLimit, evitando conflictos temporales entre lotes consecutivos.
+    const autoById = new Map(eligibleAutoMoves.map((m) => [String(m.kingdomId), m]));
+    const softDependents = new Map<string, string[]>();
+    const softInDegree = new Map<string, number>();
+    const autoCoords = new Map<string, { from: HexCoord | null; to: HexCoord | null }>();
+    for (const m of eligibleAutoMoves) {
+      const id = String(m.kingdomId);
+      softDependents.set(id, []);
+      softInDegree.set(id, 0);
+      autoCoords.set(id, {
+        from: m.fromCellId ? parseCellId(m.fromCellId) : null,
+        to: parseCellId(m.toCellId),
+      });
+    }
+    for (const m of eligibleAutoMoves) {
+      const id = String(m.kingdomId);
+      const mCoords = autoCoords.get(id)!;
+      if (m.targetCurrentOwnerId && m.targetCurrentOwnerId !== id) {
+        const prereq = autoById.get(m.targetCurrentOwnerId);
+        if (prereq && prereq.releasesOldHome && prereq.fromCellId === m.toCellId) {
+          softDependents.get(m.targetCurrentOwnerId)!.push(id);
+          softInDegree.set(id, (softInDegree.get(id) ?? 0) + 1);
+        }
+      }
+      if (mCoords.to) {
+        for (const other of eligibleAutoMoves) {
+          const otherId = String(other.kingdomId);
+          if (otherId === id) continue;
+          const otherCoords = autoCoords.get(otherId)!;
+          if (
+            otherCoords.from &&
+            hexDistance(mCoords.to, otherCoords.from) < TERRITORIES.SPAWN_SEPARATION_MIN &&
+            !softDependents.get(otherId)!.includes(id)
+          ) {
+            softDependents.get(otherId)!.push(id);
+            softInDegree.set(id, (softInDegree.get(id) ?? 0) + 1);
+          }
+        }
+      }
+    }
+
+    const orderedAutoMoves: ValidatedMove[] = [];
+    const remainingAuto = new Set(eligibleAutoMoves.map((m) => String(m.kingdomId)));
+    while (remainingAuto.size > 0) {
+      const ready = Array.from(remainingAuto)
+        .filter((id) => (softInDegree.get(id) ?? 0) === 0)
+        .sort();
+      const pickedId =
+        ready.length > 0
+          ? ready[0]
+          : Array.from(remainingAuto).sort(
+              (a, b) => (softInDegree.get(a) ?? 0) - (softInDegree.get(b) ?? 0) || a.localeCompare(b)
+            )[0];
+      remainingAuto.delete(pickedId);
+      orderedAutoMoves.push(autoById.get(pickedId)!);
+      for (const depId of softDependents.get(pickedId) ?? []) {
+        if (remainingAuto.has(depId)) {
+          softInDegree.set(depId, Math.max(0, (softInDegree.get(depId) ?? 0) - 1));
+        }
+      }
+    }
+
+    for (const m of orderedAutoMoves) {
       if (toExecute.length >= batchLimit) {
         outcomes.push({
-          kingdomId: entry.kingdomId,
-          name: entry.name,
-          previousHomeCellId: entry.persistedHomeTerritoryId,
+          kingdomId: String(m.kingdomId),
+          name: m.name,
+          previousHomeCellId: m.fromCellId,
           newHomeCellId: null,
           outcome: "deferred_batch",
           preservedOwnedTerritoriesCount: 0,
@@ -1712,13 +1927,90 @@ async function executeKingdomSpawnRelocation(
         });
         continue;
       }
+      toExecute.push(m);
+    }
+  }
 
-      toExecute.push({
-        kingdomId: entry.kingdomId as Id<"kingdoms">,
-        name: entry.name,
-        fromCellId: entry.persistedHomeTerritoryId,
-        toCellId: entry.proposedHomeCellId,
-      });
+  // 3b. Verificar dependencias de ocupación y ordenar topológicamente el lote antes de mutar
+  if (toExecute.length > 0) {
+    const batchMoveById = new Map(toExecute.map((m) => [String(m.kingdomId), m]));
+    const dependents = new Map<string, string[]>();
+    const inDegree = new Map<string, number>();
+
+    for (const m of toExecute) {
+      const id = String(m.kingdomId);
+      inDegree.set(id, 0);
+      dependents.set(id, []);
+    }
+
+    for (const m of toExecute) {
+      const id = String(m.kingdomId);
+      if (m.targetCurrentOwnerId && m.targetCurrentOwnerId !== id) {
+        const prereq = batchMoveById.get(m.targetCurrentOwnerId);
+        if (
+          !prereq ||
+          !prereq.releasesOldHome ||
+          prereq.fromCellId !== m.toCellId ||
+          prereq.toCellId === m.toCellId
+        ) {
+          throw new Error(
+            `La celda de destino '${m.toCellId}' está ocupada por otro reino ('${m.targetCurrentOwnerId}'); operación abortada sin cambios.`
+          );
+        }
+        dependents.get(m.targetCurrentOwnerId)!.push(id);
+        inDegree.set(id, (inDegree.get(id) ?? 0) + 1);
+      }
+    }
+
+    const ready = Array.from(inDegree.entries())
+      .filter(([, deg]) => deg === 0)
+      .map(([id]) => id)
+      .sort();
+    const topoSorted: ValidatedMove[] = [];
+    while (ready.length > 0) {
+      const nextId = ready.shift()!;
+      topoSorted.push(batchMoveById.get(nextId)!);
+      for (const depId of dependents.get(nextId) ?? []) {
+        const nextDeg = (inDegree.get(depId) ?? 0) - 1;
+        inDegree.set(depId, nextDeg);
+        if (nextDeg === 0) {
+          ready.push(depId);
+          ready.sort();
+        }
+      }
+    }
+    if (topoSorted.length !== toExecute.length) {
+      throw new Error(
+        "Conflicto de ordenación entre celdas liberadas y reclamadas en el lote; operación abortada sin cambios."
+      );
+    }
+    toExecute = topoSorted;
+
+    // 3c. Verificar separación mínima >= 20 de todas las capitales resultantes tras el lote
+    const postBatchCapitals: Array<{ kingdomId: string; coord: HexCoord; movedInBatch: boolean }> = [];
+    for (const entry of liveAudit.entries) {
+      const plannedMove = batchMoveById.get(entry.kingdomId);
+      if (plannedMove) {
+        const coord = parseCellId(plannedMove.toCellId);
+        if (!coord) {
+          throw new Error(`Celda destino '${plannedMove.toCellId}' inválida; operación abortada sin cambios.`);
+        }
+        postBatchCapitals.push({ kingdomId: entry.kingdomId, coord, movedInBatch: true });
+      } else if (entry.coord) {
+        postBatchCapitals.push({ kingdomId: entry.kingdomId, coord: entry.coord, movedInBatch: false });
+      }
+    }
+    for (const moved of postBatchCapitals) {
+      if (!moved.movedInBatch) continue;
+      for (const other of postBatchCapitals) {
+        if (other.kingdomId === moved.kingdomId) continue;
+        const dist = hexDistance(moved.coord, other.coord);
+        if (dist < TERRITORIES.SPAWN_SEPARATION_MIN) {
+          throw new Error(
+            `Separación mínima incumplida tras el lote: '${moved.kingdomId}' (${moved.coord.q},${moved.coord.r}) queda a distancia ${dist} < ${TERRITORIES.SPAWN_SEPARATION_MIN} respecto a '${other.kingdomId}' (${other.coord.q},${other.coord.r}); operación abortada sin cambios.`
+          );
+        }
+      }
     }
   }
 

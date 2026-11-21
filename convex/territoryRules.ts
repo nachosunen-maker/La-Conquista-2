@@ -742,6 +742,8 @@ export function chooseHomeCell(
 export interface MultiKingdomSpawnRequest {
   readonly kingdomId: string;
   readonly civilization?: string | null;
+  readonly currentHomeCellId?: string | null;
+  readonly releasesCurrentHomeOnRelocation?: boolean;
 }
 
 export interface MultiKingdomDistributionResult {
@@ -891,14 +893,33 @@ export function optimizeKingdomDistribution(
   for (let a = 0; a < Math.min(orderings.length, maxAttempts); a++) {
     attemptsUsed++;
     const order = orderings[a];
-    const occupied = new Set<string>(extraOccupied);
+    const permanentOccupied = new Set<string>(extraOccupied);
+    const activeHomeHolders = new Map<string, number>();
     const placedHomes: HexCoord[] = [];
     const placedKingdoms: ExistingKingdomSpawn[] = [];
 
     for (const fk of fixedKingdoms) {
-      occupied.add(cellId(fk.q, fk.r));
+      const fkCellId = cellId(fk.q, fk.r);
+      permanentOccupied.add(fkCellId);
       placedHomes.push({ q: fk.q, r: fk.r });
       placedKingdoms.push(fk);
+    }
+
+    for (const req of order) {
+      if (req.currentHomeCellId) {
+        activeHomeHolders.set(
+          req.currentHomeCellId,
+          (activeHomeHolders.get(req.currentHomeCellId) ?? 0) + 1
+        );
+        if (!req.releasesCurrentHomeOnRelocation) {
+          permanentOccupied.add(req.currentHomeCellId);
+        }
+      }
+    }
+
+    const occupied = new Set<string>(permanentOccupied);
+    for (const holderCellId of activeHomeHolders.keys()) {
+      occupied.add(holderCellId);
     }
 
     const current: Array<{
@@ -926,6 +947,22 @@ export function optimizeKingdomDistribution(
         break;
       }
       occupied.add(diag.cell.cellId);
+      permanentOccupied.add(diag.cell.cellId);
+      if (
+        req.currentHomeCellId &&
+        req.releasesCurrentHomeOnRelocation &&
+        req.currentHomeCellId !== diag.cell.cellId
+      ) {
+        const remainingHolders = (activeHomeHolders.get(req.currentHomeCellId) ?? 1) - 1;
+        if (remainingHolders <= 0) {
+          activeHomeHolders.delete(req.currentHomeCellId);
+          if (!permanentOccupied.has(req.currentHomeCellId)) {
+            occupied.delete(req.currentHomeCellId);
+          }
+        } else {
+          activeHomeHolders.set(req.currentHomeCellId, remainingHolders);
+        }
+      }
       placedHomes.push({ q: diag.cell.q, r: diag.cell.r });
       placedKingdoms.push({
         q: diag.cell.q,
@@ -1131,11 +1168,40 @@ export interface ExistingKingdomAuditInput {
   } | null;
   readonly ownedTerritoryCount: number;
   readonly ownedCellIds?: ReadonlyArray<string>;
+  readonly ownedTerritories?: ReadonlyArray<{
+    readonly id?: string;
+    readonly cellId: string;
+    readonly q: number;
+    readonly r: number;
+    readonly ownerKingdomId?: string | null;
+    readonly isHome?: boolean;
+  }>;
   readonly markedHomeCount?: number;
   readonly duplicateTerritoryCellIds?: ReadonlyArray<string>;
   readonly activeMarchesCount: number;
+  readonly activeMarches?: ReadonlyArray<{
+    readonly id?: string;
+    readonly kingdomId?: string;
+    readonly targetCellId: string;
+    readonly targetQ: number;
+    readonly targetR: number;
+    readonly status?: string;
+    readonly direction?: "outgoing" | "incoming";
+  }>;
   readonly activeChallengesCount: number;
+  readonly activeChallenges?: ReadonlyArray<{
+    readonly id?: string;
+    readonly challengerKingdomId: string;
+    readonly targetKingdomId: string;
+    readonly status: string;
+  }>;
   readonly activeExplorationsCount: number;
+  readonly activeExplorations?: ReadonlyArray<{
+    readonly id?: string;
+    readonly cellId: string;
+    readonly targetQ: number;
+    readonly targetR: number;
+  }>;
 }
 
 export interface KingdomSpawnAuditEntry {
@@ -1244,23 +1310,63 @@ export function auditExistingKingdomSpawns(
   const sorted = [...kingdoms].sort((a, b) => a.kingdomId.localeCompare(b.kingdomId));
 
   // Huella determinista del estado de entrada (detecta cualquier cambio entre simulación y ejecución)
-  const fingerprintParts = sorted.map((k) =>
-    [
+  const fingerprintParts = sorted.map((k) => {
+    const sortedDupes = [...(k.duplicateTerritoryCellIds ?? [])].sort().join("|");
+    const sortedOwnedCells = k.ownedCellIds ? [...k.ownedCellIds].sort().join("|") : "";
+    const sortedOwnedDocs = k.ownedTerritories
+      ? [...k.ownedTerritories]
+          .map(
+            (t) =>
+              `${t.id ?? ""}:${t.cellId}:${t.q},${t.r}:${t.ownerKingdomId ?? ""}:${t.isHome ? 1 : 0}`
+          )
+          .sort()
+          .join("|")
+      : "";
+    const sortedMarches = k.activeMarches
+      ? [...k.activeMarches]
+          .map(
+            (m) =>
+              `${m.id ?? ""}:${m.direction ?? ""}:${m.kingdomId ?? ""}:${m.targetCellId}:${m.targetQ},${m.targetR}:${m.status ?? ""}`
+          )
+          .sort()
+          .join("|")
+      : "";
+    const sortedExplorations = k.activeExplorations
+      ? [...k.activeExplorations]
+          .map((e) => `${e.id ?? ""}:${e.cellId}:${e.targetQ},${e.targetR}`)
+          .sort()
+          .join("|")
+      : "";
+    const sortedChallenges = k.activeChallenges
+      ? [...k.activeChallenges]
+          .map(
+            (c) =>
+              `${c.id ?? ""}:${c.challengerKingdomId}:${c.targetKingdomId}:${c.status}`
+          )
+          .sort()
+          .join("|")
+      : "";
+
+    return [
       k.kingdomId,
       normalizeCivilizationId(k.civilization) ?? "",
       k.homeTerritoryId ?? "",
       k.persistedHomeCell
-        ? `${k.persistedHomeCell.cellId}:${k.persistedHomeCell.ownerKingdomId ?? ""}:${k.persistedHomeCell.isHome ? 1 : 0}`
+        ? `${k.persistedHomeCell.cellId}:${k.persistedHomeCell.q},${k.persistedHomeCell.r}:${k.persistedHomeCell.ownerKingdomId ?? ""}:${k.persistedHomeCell.isHome ? 1 : 0}`
         : "none",
       String(k.ownedTerritoryCount),
       String(k.markedHomeCount ?? -1),
-      (k.duplicateTerritoryCellIds ?? []).join("|"),
+      sortedDupes,
       String(k.activeMarchesCount),
       String(k.activeChallengesCount),
       String(k.activeExplorationsCount),
-      (k.ownedCellIds ? [...k.ownedCellIds].sort().join("|") : ""),
-    ].join(";")
-  );
+      sortedOwnedCells,
+      sortedOwnedDocs,
+      sortedMarches,
+      sortedExplorations,
+      sortedChallenges,
+    ].join(";");
+  });
   if (options?.occupiedCellIds && options.occupiedCellIds.size > 0) {
     fingerprintParts.push(`__occ:${Array.from(options.occupiedCellIds).sort().join("|")}`);
   }
@@ -1529,9 +1635,34 @@ export function auditExistingKingdomSpawns(
         });
       }
     } else {
+      const ownsEffectiveCell =
+        p.effectiveCellId !== null &&
+        p.k.ownedTerritoryCount > 0 &&
+        (p.k.ownedCellIds
+          ? p.k.ownedCellIds.includes(p.effectiveCellId)
+          : p.k.persistedHomeCell?.cellId === p.effectiveCellId &&
+            p.k.persistedHomeCell?.ownerKingdomId === p.k.kingdomId);
+
+      const canReleaseCurrentHome =
+        ownsEffectiveCell &&
+        p.integrityBlockReasons.length === 0 &&
+        (p.k.ownedTerritoryCount === 1 || p.k.ownedTerritoryCount === TERRITORIES.MAX_PER_KINGDOM) &&
+        p.k.persistedHomeCell != null &&
+        p.k.persistedHomeCell.ownerKingdomId === p.k.kingdomId &&
+        (!p.k.homeTerritoryId ||
+          p.k.homeTerritoryId === p.effectiveCellId ||
+          p.k.persistedHomeCell.isHome === true) &&
+        (p.k.markedHomeCount === undefined || p.k.markedHomeCount <= 1);
+
+      if (ownsEffectiveCell && p.effectiveCellId && !canReleaseCurrentHome) {
+        reservedOccupied.add(p.effectiveCellId);
+      }
+
       movableRequests.push({
         kingdomId: p.k.kingdomId,
         civilization: p.normCiv,
+        currentHomeCellId: ownsEffectiveCell ? p.effectiveCellId : null,
+        releasesCurrentHomeOnRelocation: canReleaseCurrentHome,
       });
       movableById.set(p.k.kingdomId, p);
     }
