@@ -744,4 +744,128 @@ describe("Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y
     );
     expect(records).toHaveLength(0);
   });
+
+  test("18. La consulta de estado refleja la economía liquidada y obras/tecnologías vencidas igual que la mutación", async () => {
+    const t = createTestBackend();
+    // Vikingos (+10 % capacidad) con Mercado 7 en BD + mejora vencida a Mercado 8 en cola
+    // y tecnología storage_1 vencida en cola => storageCapacity(8, 1.1 * 1.1) = 31.460
+    const asUser = t.withIdentity(identity("user-p6-query-parity"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Coherente", "vikingos");
+    await setBuildingLevel(t, kingdomId, "mercado", 7);
+    await setResources(t, kingdomId, { gold: 1_000, wood: 1_000, stone: 1_000, iron: 1_000, food: 1_000 });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("constructionQueue", {
+        kingdomId,
+        buildingType: "mercado",
+        targetLevel: 8,
+        startedAt: T0 - 20_000,
+        durationMs: 10_000,
+        costs: { gold: 100 },
+      });
+      await ctx.db.insert("technologyProgress", {
+        kingdomId,
+        technologyId: "storage_1",
+        status: "researching",
+        startedAt: T0 - 20_000,
+        durationMs: 10_000,
+        costs: { gold: 100 },
+      });
+    });
+
+    // Avanzamos el reloj 1 hora SIN llamar a syncKingdom antes: la consulta debe proyectar
+    // la producción/impuestos/consumo + Mercado 8 + storage_1 + bonus vikingo de forma exacta.
+    vi.setSystemTime(T0 + 3_600_000);
+
+    const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    const expectedCap = storageCapacity(8, 1.1 * 1.1);
+    expect(expectedCap).toBe(31_460);
+    expect(status.capacityReport?.maxCapacity).toBe(expectedCap);
+    expect(status.canClaim).toBe(true);
+    // Los recursos proyectados deben haber avanzado desde 1.000 por producción/impuestos
+    expect(status.capacityReport!.resources.gold.current).toBeGreaterThan(1_000);
+    expect(status.capacityReport!.resources.wood.current).toBeGreaterThan(1_000);
+
+    const projectedBeforeClaim = status.capacityReport!.resources;
+    const claim = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    expect(claim.status).toBe("claimed");
+    expect(claim.maxCapacity).toBe(expectedCap);
+
+    // El saldo resultante en BD coincide exactamente con lo proyectado por la consulta + 30.000
+    const after = await getResourcesDoc(t, kingdomId);
+    expect(after!.gold).toBeCloseTo(projectedBeforeClaim.gold.current + 30_000, 6);
+    expect(after!.wood).toBeCloseTo(projectedBeforeClaim.wood.current + 30_000, 6);
+    expect(after!.stone).toBeCloseTo(projectedBeforeClaim.stone.current + 30_000, 6);
+    expect(after!.iron).toBeCloseTo(projectedBeforeClaim.iron.current + 30_000, 6);
+    expect(after!.food).toBeCloseTo(projectedBeforeClaim.food.current + 30_000, 6);
+  });
+
+  test("19. Si la capacidad efectiva cambia entre la consulta y el clic, el backend rechaza el cobro íntegramente", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-drift-reject"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Deriva");
+
+    // Mercado 13 => tope 36.000. En T0 oro = 5.995 -> disponible = 30.005 >= 30.000 -> canClaim = true.
+    await setBuildingLevel(t, kingdomId, "mercado", 13);
+    await setResources(t, kingdomId, { gold: 5_995, wood: 1_000, stone: 1_000, iron: 1_000, food: 1_000 });
+
+    const statusAtT0 = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(statusAtT0.canClaim).toBe(true);
+    expect(statusAtT0.capacityReport?.maxCapacity).toBe(36_000);
+
+    // Pasa 1 hora sin actualizar en cliente: la recaudación/producción eleva el oro por encima de 6.000
+    vi.setSystemTime(T0 + 3_600_000);
+    const snapshotBeforeClick = await getResourcesDoc(t, kingdomId);
+
+    // La mutación reevalúa con la economía liquidada al instante del clic y rechaza atómicamente
+    await expect(
+      asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId })
+    ).rejects.toThrow(/oro/i);
+
+    const afterRejected = await getResourcesDoc(t, kingdomId);
+    expect(afterRejected!.gold).toBe(snapshotBeforeClick!.gold);
+    expect(afterRejected!.wood).toBe(snapshotBeforeClick!.wood);
+    expect(afterRejected!.food).toBe(snapshotBeforeClick!.food);
+    expect(afterRejected!.lastUpdated).toBe(T0);
+
+    const records = await t.run(async (ctx) =>
+      ctx.db
+        .query("outageCompensations")
+        .withIndex("by_user", (q) => q.eq("userId", "user-p6-drift-reject"))
+        .collect()
+    );
+    expect(records).toHaveLength(0);
+  });
+
+  test("20. Coherencia en el umbral exacto de capacidad disponible (30.000 aceptado vs 29.999 rechazado)", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-boundary"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Umbral");
+
+    // Mercado 13 => tope exacto 36.000
+    await setBuildingLevel(t, kingdomId, "mercado", 13);
+    await setResources(t, kingdomId, { gold: 6_000.5, wood: 6_000, stone: 6_000, iron: 6_000, food: 6_000 });
+
+    const lowStatus = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(lowStatus.canClaim).toBe(false);
+    expect(lowStatus.capacityReport?.insufficientResources.map((r) => r.resource)).toEqual(["gold"]);
+    expect(lowStatus.capacityReport?.resources.gold.additionalNeeded).toBe(1);
+
+    await expect(
+      asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId })
+    ).rejects.toThrow(/oro/i);
+
+    // Bajamos exactamente a 6.000 (disponible = 30.000 exactos): tanto consulta como mutación aceptan
+    await setResources(t, kingdomId, { gold: 6_000, wood: 6_000, stone: 6_000, iron: 6_000, food: 6_000 });
+    const exactStatus = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(exactStatus.canClaim).toBe(true);
+    expect(exactStatus.capacityReport?.allSufficient).toBe(true);
+
+    const claim = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    expect(claim.status).toBe("claimed");
+    const after = await getResourcesDoc(t, kingdomId);
+    expect(after!.gold).toBe(36_000);
+    expect(after!.food).toBe(36_000);
+  });
 });
+
