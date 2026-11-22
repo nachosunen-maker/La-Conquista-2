@@ -168,258 +168,262 @@ async function projectKingdomCapacityState(
   currentResources: Record<CompensationResourceKey, number>;
   maxCapacity: number;
 } | null> {
-  const normalizedCivilization = normalizeCivilizationId(kingdom.civilization);
-  const effectiveKingdom =
-    normalizedCivilization && normalizedCivilization !== kingdom.civilization
-      ? { ...kingdom, civilization: normalizedCivilization }
-      : kingdom;
+  try {
+    const normalizedCivilization = normalizeCivilizationId(kingdom.civilization);
+    const effectiveKingdom =
+      normalizedCivilization && normalizedCivilization !== kingdom.civilization
+        ? { ...kingdom, civilization: normalizedCivilization }
+        : kingdom;
 
-  const [
-    populationDoc,
-    populationJobs,
-    storedBuildings,
-    constructionQueue,
-    trainingQueue,
-    technologyProgress,
-    storedArmyUnits,
-    territories,
-  ] = await Promise.all([
-    ctx.db
-      .query("population" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-      .first(),
-    ctx.db
-      .query("populationJobs" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-      .collect(),
-    ctx.db
-      .query("buildings")
-      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
-      .collect(),
-    ctx.db
-      .query("constructionQueue")
-      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
-      .collect(),
-    ctx.db
-      .query("trainingQueue")
-      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
-      .collect(),
-    ctx.db
-      .query("technologyProgress")
-      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
-      .collect(),
-    readArmyUnitDocs(ctx, kingdom._id),
-    ctx.db
-      .query("territories")
-      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
-      .collect(),
-  ]);
+    const [
+      populationDoc,
+      populationJobs,
+      storedBuildings,
+      constructionQueue,
+      trainingQueue,
+      technologyProgress,
+      storedArmyUnits,
+      territories,
+    ] = await Promise.all([
+      ctx.db
+        .query("population" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+        .first(),
+      ctx.db
+        .query("populationJobs" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+        .collect(),
+      ctx.db
+        .query("buildings")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+        .collect(),
+      ctx.db
+        .query("constructionQueue")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+        .collect(),
+      ctx.db
+        .query("trainingQueue")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+        .collect(),
+      ctx.db
+        .query("technologyProgress")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+        .collect(),
+      readArmyUnitDocs(ctx, kingdom._id),
+      ctx.db
+        .query("territories")
+        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
+        .collect(),
+    ]);
 
-  const effectiveBuildings = storedBuildings.map((b: any) => ({ ...b }));
-  for (const construction of constructionQueue) {
-    if (
-      typeof construction.startedAt !== "number" ||
-      typeof construction.durationMs !== "number" ||
-      typeof construction.targetLevel !== "number" ||
-      typeof construction.buildingType !== "string" ||
-      constructionProgress(construction as ConstructionQueueEntry, now) !== 100
-    ) {
-      continue;
-    }
-    const matching = effectiveBuildings.filter(
-      (item: any) => item.buildingType === construction.buildingType
-    );
-    const completion = validateConstructionCompletion({
-      buildingType: construction.buildingType,
-      targetLevel: construction.targetLevel,
-      existingLevels: matching.map((item: any) => item.level),
-    });
-    if (!completion.success) continue;
-    if (completion.action === "upgrade" && matching[0]) {
-      matching[0].level = construction.targetLevel;
-    } else if (completion.action === "insert") {
-      effectiveBuildings.push({
-        kingdomId: kingdom._id,
-        buildingType: construction.buildingType,
-        level: construction.targetLevel,
-      });
-    }
-  }
-
-  const effectiveArmyUnits = storedArmyUnits.map((u: any) => ({ ...u }));
-  for (const entry of trainingQueue) {
-    if (
-      typeof entry.startedAt !== "number" ||
-      typeof entry.durationMs !== "number" ||
-      typeof entry.count !== "number" ||
-      typeof entry.unitType !== "string" ||
-      trainingProgress(entry as TrainingQueueEntry, now) !== 100
-    ) {
-      continue;
-    }
-    const unitType = normalizeUnitType(entry.unitType);
-    if (!unitType) continue;
-    const isSpy = unitType === "espia";
-    const effectiveLevel = unitLevelOf({ level: entry.level });
-    const existing = effectiveArmyUnits.find((doc: any) => {
-      if (doc.migrationAmbiguous) return false;
-      const docIsSpy = doc.isSpy === true || normalizeUnitType(doc.unitType) === "espia";
-      if (isSpy) {
-        return docIsSpy && unitLevelOf(doc) === effectiveLevel;
+    const effectiveBuildings = storedBuildings.map((b: any) => ({ ...b }));
+    for (const construction of constructionQueue) {
+      if (
+        typeof construction.startedAt !== "number" ||
+        typeof construction.durationMs !== "number" ||
+        typeof construction.targetLevel !== "number" ||
+        typeof construction.buildingType !== "string" ||
+        constructionProgress(construction as ConstructionQueueEntry, now) !== 100
+      ) {
+        continue;
       }
-      return (
-        !docIsSpy &&
-        !doc.isMercenary &&
-        normalizeUnitType(doc.unitType) === unitType &&
-        unitLevelOf(doc) === effectiveLevel
+      const matching = effectiveBuildings.filter(
+        (item: any) => item.buildingType === construction.buildingType
       );
-    });
-    if (existing) {
-      existing.unitType = unitType;
-      existing.count += entry.count;
-      existing.level = effectiveLevel;
-      existing.isSpy = isSpy;
-    } else {
-      effectiveArmyUnits.push({
-        kingdomId: kingdom._id,
-        unitType,
-        level: effectiveLevel,
-        count: entry.count,
-        isSpy,
+      const completion = validateConstructionCompletion({
+        buildingType: construction.buildingType,
+        targetLevel: construction.targetLevel,
+        existingLevels: matching.map((item: any) => item.level),
       });
+      if (!completion.success) continue;
+      if (completion.action === "upgrade" && matching[0]) {
+        matching[0].level = construction.targetLevel;
+      } else if (completion.action === "insert") {
+        effectiveBuildings.push({
+          kingdomId: kingdom._id,
+          buildingType: construction.buildingType,
+          level: construction.targetLevel,
+        });
+      }
     }
-  }
 
-  const completedTechSet = new Set<string>();
-  for (const doc of technologyProgress) {
-    if (typeof doc.technologyId !== "string") continue;
-    const isAlreadyCompleted = doc.status === "completed";
-    const isDueResearch =
-      doc.status === "researching" &&
-      typeof doc.startedAt === "number" &&
-      typeof doc.durationMs === "number" &&
-      researchProgress(doc as ResearchQueueEntry, now) === 100;
-    if (isAlreadyCompleted || isDueResearch) {
-      completedTechSet.add(normalizeTechnologyId(doc.technologyId));
+    const effectiveArmyUnits = storedArmyUnits.map((u: any) => ({ ...u }));
+    for (const entry of trainingQueue) {
+      if (
+        typeof entry.startedAt !== "number" ||
+        typeof entry.durationMs !== "number" ||
+        typeof entry.count !== "number" ||
+        typeof entry.unitType !== "string" ||
+        trainingProgress(entry as TrainingQueueEntry, now) !== 100
+      ) {
+        continue;
+      }
+      const unitType = normalizeUnitType(entry.unitType);
+      if (!unitType) continue;
+      const isSpy = unitType === "espia";
+      const effectiveLevel = unitLevelOf({ level: entry.level });
+      const existing = effectiveArmyUnits.find((doc: any) => {
+        if (doc.migrationAmbiguous) return false;
+        const docIsSpy = doc.isSpy === true || normalizeUnitType(doc.unitType) === "espia";
+        if (isSpy) {
+          return docIsSpy && unitLevelOf(doc) === effectiveLevel;
+        }
+        return (
+          !docIsSpy &&
+          !doc.isMercenary &&
+          normalizeUnitType(doc.unitType) === unitType &&
+          unitLevelOf(doc) === effectiveLevel
+        );
+      });
+      if (existing) {
+        existing.unitType = unitType;
+        existing.count += entry.count;
+        existing.level = effectiveLevel;
+        existing.isSpy = isSpy;
+      } else {
+        effectiveArmyUnits.push({
+          kingdomId: kingdom._id,
+          unitType,
+          level: effectiveLevel,
+          count: entry.count,
+          isSpy,
+        });
+      }
     }
-  }
-  const completedTechnologies = [...completedTechSet];
 
-  if (!populationDoc) {
-    return null;
-  }
-  const effectivePopulation = populationDoc;
+    const completedTechSet = new Set<string>();
+    for (const doc of technologyProgress) {
+      if (typeof doc.technologyId !== "string") continue;
+      const isAlreadyCompleted = doc.status === "completed";
+      const isDueResearch =
+        doc.status === "researching" &&
+        typeof doc.startedAt === "number" &&
+        typeof doc.durationMs === "number" &&
+        researchProgress(doc as ResearchQueueEntry, now) === 100;
+      if (isAlreadyCompleted || isDueResearch) {
+        completedTechSet.add(normalizeTechnologyId(doc.technologyId));
+      }
+    }
+    const completedTechnologies = [...completedTechSet];
 
-  const isFirstInitialization = resourcesDoc.settlementInitialized !== true;
-  const settlement = calculateSettlementProgress({
-    kingdom: effectiveKingdom,
-    resources: resourcesDoc,
-    population: effectivePopulation,
-    populationJobs,
-    armyUnits: effectiveArmyUnits,
-    buildings: effectiveBuildings,
-    currentServerTimeMs: now,
-    options: { isFirstInitialization, callerUserId: userId },
-  });
+    if (!populationDoc) {
+      return null;
+    }
+    const effectivePopulation = populationDoc;
 
-  if (!settlement.success || settlement.updatedFood === undefined) {
-    return null;
-  }
+    const isFirstInitialization = resourcesDoc.settlementInitialized !== true;
+    const settlement = calculateSettlementProgress({
+      kingdom: effectiveKingdom,
+      resources: resourcesDoc,
+      population: effectivePopulation,
+      populationJobs,
+      armyUnits: effectiveArmyUnits,
+      buildings: effectiveBuildings,
+      currentServerTimeMs: now,
+      options: { isFirstInitialization, callerUserId: userId },
+    });
 
-  const collection = validateBuildingCollection(effectiveBuildings);
-  const buildingLevels = collection.success ? collection.levels : {};
-  const techModifiers = computeTechnologyModifiers(completedTechnologies);
-  const civPassive = getCivilizationPassive(effectiveKingdom.civilization);
-  const fallbackMaxCapacity = storageCapacity(
-    buildingLevels.mercado ?? 0,
-    techModifiers.storageCapacity * (civPassive.storageCapacityMultiplier ?? 1.0)
-  );
+    if (!settlement.success || settlement.updatedFood === undefined) {
+      return null;
+    }
 
-  if (isFirstInitialization) {
+    const collection = validateBuildingCollection(effectiveBuildings);
+    const buildingLevels = collection.success ? collection.levels : {};
+    const techModifiers = computeTechnologyModifiers(completedTechnologies);
+    const civPassive = getCivilizationPassive(effectiveKingdom.civilization);
+    const fallbackMaxCapacity = storageCapacity(
+      buildingLevels.mercado ?? 0,
+      techModifiers.storageCapacity * (civPassive.storageCapacityMultiplier ?? 1.0)
+    );
+
+    if (isFirstInitialization) {
+      return {
+        currentResources: {
+          gold: resourcesDoc.gold,
+          wood: resourcesDoc.wood,
+          stone: resourcesDoc.stone,
+          iron: resourcesDoc.iron,
+          food: settlement.updatedFood,
+        },
+        maxCapacity: fallbackMaxCapacity,
+      };
+    }
+
+    const adapted = adaptRemoteDocumentsToEconomicState({
+      kingdom: effectiveKingdom,
+      resources: resourcesDoc,
+      population: effectivePopulation,
+      populationJobs,
+      armyUnits: effectiveArmyUnits,
+      buildings: effectiveBuildings,
+      foodTier: settlement.appliedFoodTier ?? (effectiveKingdom.foodTier || "normal"),
+    });
+
+    if (!adapted.success || !adapted.kingdomState || !adapted.militaryClassification) {
+      return null;
+    }
+
+    const terrainBonuses: Partial<Record<"agriculture" | "wood" | "stone" | "iron" | "gold", number>> = {};
+    for (const territory of territories) {
+      const terrain = (TERRAINS as Record<string, any>)[territory.terrain];
+      if (!terrain) continue;
+      for (const [job, bonus] of Object.entries(terrain.production as Record<string, number>)) {
+        const key = job as keyof typeof terrainBonuses;
+        terrainBonuses[key] = (terrainBonuses[key] ?? 0) + bonus;
+      }
+    }
+
+    const extended = simulateExtendedEconomy({
+      kingdomState: adapted.kingdomState,
+      now,
+      jobCapacities: calculateJobCapacities(effectiveBuildings),
+      residentialCapacity: calculateResidentialCapacity(
+        effectiveBuildings,
+        techModifiers.housingCapacityBonus
+      ),
+      technologyModifiers: techModifiers,
+      terrainBonuses,
+      taxRate: typeof effectiveKingdom.taxRate === "number" ? effectiveKingdom.taxRate : TAXES.INITIAL_RATE,
+      happiness:
+        typeof effectiveKingdom.happiness === "number"
+          ? effectiveKingdom.happiness
+          : WELLBEING.INITIAL_HAPPINESS,
+      moraleEffects: Array.isArray(effectiveKingdom.moraleEffects)
+        ? effectiveKingdom.moraleEffects
+        : [],
+      starvationSeconds:
+        typeof effectivePopulation.starvationSeconds === "number"
+          ? effectivePopulation.starvationSeconds
+          : 0,
+      birthFraction:
+        typeof effectivePopulation.birthFraction === "number" ? effectivePopulation.birthFraction : 0,
+      deathFraction:
+        typeof effectivePopulation.deathFraction === "number" ? effectivePopulation.deathFraction : 0,
+      desertionFraction:
+        typeof effectivePopulation.desertionFraction === "number"
+          ? effectivePopulation.desertionFraction
+          : 0,
+      buildingLevels,
+      militaryPersonnel: adapted.militaryClassification.regularSoldiers,
+      restPolicy:
+        typeof effectiveKingdom.restPolicy === "string"
+          ? (effectiveKingdom.restPolicy as any)
+          : "normal",
+      glory: typeof effectiveKingdom.glory === "number" ? effectiveKingdom.glory : 0,
+      mercenaryCount: effectiveArmyUnits
+        .filter((doc: any) => doc.isMercenary && Number.isInteger(doc.count))
+        .reduce((sum: number, doc: any) => sum + Math.max(0, doc.count), 0),
+      civilization: effectiveKingdom.civilization,
+      bonusProductionMultiplier: activeProductionBonusMultiplier(effectiveKingdom.temporaryBonuses, now),
+    });
+
     return {
-      currentResources: {
-        gold: resourcesDoc.gold,
-        wood: resourcesDoc.wood,
-        stone: resourcesDoc.stone,
-        iron: resourcesDoc.iron,
-        food: settlement.updatedFood,
-      },
-      maxCapacity: fallbackMaxCapacity,
+      currentResources: extended.updatedResources,
+      maxCapacity: extended.storageCapacity,
     };
-  }
-
-  const adapted = adaptRemoteDocumentsToEconomicState({
-    kingdom: effectiveKingdom,
-    resources: resourcesDoc,
-    population: effectivePopulation,
-    populationJobs,
-    armyUnits: effectiveArmyUnits,
-    buildings: effectiveBuildings,
-    foodTier: settlement.appliedFoodTier ?? (effectiveKingdom.foodTier || "normal"),
-  });
-
-  if (!adapted.success || !adapted.kingdomState || !adapted.militaryClassification) {
+  } catch (err) {
     return null;
   }
-
-  const terrainBonuses: Partial<Record<"agriculture" | "wood" | "stone" | "iron" | "gold", number>> = {};
-  for (const territory of territories) {
-    const terrain = (TERRAINS as Record<string, any>)[territory.terrain];
-    if (!terrain) continue;
-    for (const [job, bonus] of Object.entries(terrain.production as Record<string, number>)) {
-      const key = job as keyof typeof terrainBonuses;
-      terrainBonuses[key] = (terrainBonuses[key] ?? 0) + bonus;
-    }
-  }
-
-  const extended = simulateExtendedEconomy({
-    kingdomState: adapted.kingdomState,
-    now,
-    jobCapacities: calculateJobCapacities(effectiveBuildings),
-    residentialCapacity: calculateResidentialCapacity(
-      effectiveBuildings,
-      techModifiers.housingCapacityBonus
-    ),
-    technologyModifiers: techModifiers,
-    terrainBonuses,
-    taxRate: typeof effectiveKingdom.taxRate === "number" ? effectiveKingdom.taxRate : TAXES.INITIAL_RATE,
-    happiness:
-      typeof effectiveKingdom.happiness === "number"
-        ? effectiveKingdom.happiness
-        : WELLBEING.INITIAL_HAPPINESS,
-    moraleEffects: Array.isArray(effectiveKingdom.moraleEffects)
-      ? effectiveKingdom.moraleEffects
-      : [],
-    starvationSeconds:
-      typeof effectivePopulation.starvationSeconds === "number"
-        ? effectivePopulation.starvationSeconds
-        : 0,
-    birthFraction:
-      typeof effectivePopulation.birthFraction === "number" ? effectivePopulation.birthFraction : 0,
-    deathFraction:
-      typeof effectivePopulation.deathFraction === "number" ? effectivePopulation.deathFraction : 0,
-    desertionFraction:
-      typeof effectivePopulation.desertionFraction === "number"
-        ? effectivePopulation.desertionFraction
-        : 0,
-    buildingLevels,
-    militaryPersonnel: adapted.militaryClassification.regularSoldiers,
-    restPolicy:
-      typeof effectiveKingdom.restPolicy === "string"
-        ? (effectiveKingdom.restPolicy as any)
-        : "normal",
-    glory: typeof effectiveKingdom.glory === "number" ? effectiveKingdom.glory : 0,
-    mercenaryCount: effectiveArmyUnits
-      .filter((doc: any) => doc.isMercenary && Number.isInteger(doc.count))
-      .reduce((sum: number, doc: any) => sum + Math.max(0, doc.count), 0),
-    civilization: effectiveKingdom.civilization,
-    bonusProductionMultiplier: activeProductionBonusMultiplier(effectiveKingdom.temporaryBonuses, now),
-  });
-
-  return {
-    currentResources: extended.updatedResources,
-    maxCapacity: extended.storageCapacity,
-  };
 }
 
 function evaluateCompensationStorageCapacity(

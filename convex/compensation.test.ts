@@ -11,6 +11,8 @@ import { createTestBackend } from "./test.setup";
 import { OUTAGE_COMPENSATION, STORAGE } from "./balanceConfig";
 import { DEMO_USER_ID } from "./kingdomAccess";
 import { storageCapacity } from "./economyExtended";
+import * as economyAdapter from "./economyAdapter";
+import * as economy from "./economy";
 
 const TEST_SITE_URL = "https://pruebas-la-conquista.convex.site";
 const T0 = new Date("2026-11-18T12:00:00Z").getTime();
@@ -933,6 +935,117 @@ describe("Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y
     expect(goodStatus.capacityVerifiable).toBe(true);
     expect(goodStatus.canClaim).toBe(true);
     expect(goodStatus.capacityReport?.allSufficient).toBe(true);
+  });
+
+  test("23. adaptRemoteDocumentsToEconomicState devuelve resultado fallido: capacityVerifiable: false, report null, canClaim: false", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-adapter-fail"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Fallo Adaptación");
+
+    const spy = vi.spyOn(economyAdapter, "adaptRemoteDocumentsToEconomicState").mockReturnValue({
+      success: false,
+      error: "Fallo simulado de adaptación",
+    });
+
+    const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(status.capacityVerifiable).toBe(false);
+    expect(status.capacityReport).toBeNull();
+    expect(status.canClaim).toBe(false);
+
+    spy.mockRestore();
+  });
+
+  test("24. calculateSettlementProgress lanza excepción: capacityVerifiable: false, canClaim: false", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-settlement-throw"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Excepción Settlement");
+
+    const spy = vi.spyOn(economy, "calculateSettlementProgress").mockImplementation(() => {
+      throw new Error("Excepción inesperada en settlement");
+    });
+
+    const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(status.capacityVerifiable).toBe(false);
+    expect(status.capacityReport).toBeNull();
+    expect(status.canClaim).toBe(false);
+
+    spy.mockRestore();
+  });
+
+  test("25. adaptRemoteDocumentsToEconomicState lanza excepción: capacityVerifiable: false, canClaim: false", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-adapter-throw"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Excepción Adaptación");
+
+    const spy = vi.spyOn(economyAdapter, "adaptRemoteDocumentsToEconomicState").mockImplementation(() => {
+      throw new Error("Excepción inesperada en adaptación");
+    });
+
+    const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(status.capacityVerifiable).toBe(false);
+    expect(status.capacityReport).toBeNull();
+    expect(status.canClaim).toBe(false);
+
+    spy.mockRestore();
+  });
+
+  test("26. La consulta no modifica los recursos almacenados cuando falla la proyección", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-no-modify"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino No Modificar");
+
+    const before = await getResourcesDoc(t, kingdomId);
+
+    const spy = vi.spyOn(economyAdapter, "adaptRemoteDocumentsToEconomicState").mockImplementation(() => {
+      throw new Error("Fallo forzado");
+    });
+
+    const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(status.capacityVerifiable).toBe(false);
+
+    const after = await getResourcesDoc(t, kingdomId);
+    expect(after).toEqual(before);
+
+    spy.mockRestore();
+  });
+
+  test("27. Recuperación posterior tras fallo de proyección calcula correctamente la capacidad", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-recovery-after-fail"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Recuperación");
+
+    await setBuildingLevel(t, kingdomId, "mercado", 14); // tope 38.000 >= 36.000
+
+    const spy = vi.spyOn(economyAdapter, "adaptRemoteDocumentsToEconomicState").mockImplementation(() => {
+      throw new Error("Fallo temporal");
+    });
+
+    const badStatus = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(badStatus.capacityVerifiable).toBe(false);
+    expect(badStatus.canClaim).toBe(false);
+
+    spy.mockRestore();
+
+    const goodStatus = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(goodStatus.capacityVerifiable).toBe(true);
+    expect(goodStatus.canClaim).toBe(true);
+    expect(goodStatus.capacityReport?.allSufficient).toBe(true);
+  });
+
+  test("28. Una proyección fallida nunca puede habilitar el botón de cobro", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-never-enable"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Nunca Habilitar");
+
+    const spy = vi.spyOn(economyAdapter, "adaptRemoteDocumentsToEconomicState").mockImplementation(() => {
+      throw new Error("Fallo");
+    });
+
+    const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(status.canClaim).toBe(false);
+    expect(status.capacityVerifiable).toBe(false);
+
+    spy.mockRestore();
   });
 });
 

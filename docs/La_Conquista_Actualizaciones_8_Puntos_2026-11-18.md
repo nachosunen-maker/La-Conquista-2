@@ -435,82 +435,31 @@ producción, requisitos y progresión del proyecto.
 
 ## Objetivo
 
-Entregar una compensación de **30.000 unidades de cada recurso** a cada
-jugador afectado, una sola vez, sin duplicados y sin exigir que el
-jugador haya fundado ya su reino.
+Entregar una compensación de **30.000 unidades de cada recurso** a cada jugador elegible, mediante un proceso manual, único y persistente por cuenta, condicionado estrictamente a disponer de capacidad de almacenamiento suficiente para los cinco recursos simultáneamente.
 
-## Importe de la compensación
+## Reglas definitivas y funcionamiento
 
--   30.000 de oro.
--   30.000 de madera.
--   30.000 de piedra.
--   30.000 de hierro.
--   30.000 de comida.
-
-## Trabajo requerido
-
-### 6.1. Identidad y elegibilidad
-
--   Definir la campaña con un identificador único y estable.
--   Identificar al jugador mediante su UID canónico del sistema de
-    autenticación, no por nombre visible ni por un identificador
-    temporal del cliente.
--   Definir y documentar qué cuentas son elegibles.
--   Excluir cuentas de demostración únicamente mediante identificadores
-    inequívocos y documentados.
--   Incluir jugadores que todavía no hayan fundado un reino.
-
-### 6.2. Idempotencia y concurrencia
-
--   Registrar por jugador que la campaña ya se ha concedido.
--   Hacer la comprobación y concesión dentro de una operación atómica o
-    mecanismo equivalente que impida dobles entregas.
--   Proteger contra doble clic, reintentos de red, ejecuciones
-    concurrentes y repetición de la mutación.
--   No confiar en una marca enviada por el cliente.
--   No conceder de nuevo si el jugador vuelve a iniciar sesión, cambia
-    de dispositivo o funda otro reino.
-
-### 6.3. Jugadores sin reino
-
--   Guardar la compensación pendiente asociada al usuario si todavía no
-    existe inventario o reino donde abonarla.
--   Entregarla automáticamente cuando se cree el reino o se inicialice
-    el inventario.
--   Marcarla como entregada solo cuando los cinco recursos hayan quedado
-    abonados correctamente.
--   Evitar que una interrupción a mitad de operación deje una entrega
-    parcial o imposible de recuperar.
-
-### 6.4. Persistencia y compatibilidad
-
--   Revisar reinicios económicos, creación y reinicio de reinos,
-    migraciones internas y reconstrucción de inventarios.
--   La compensación ya concedida no debe desaparecer por una operación
-    ordinaria de reinicio del reino.
--   No permitir que la campaña se reactive accidentalmente por cambiar
-    su nombre o versión.
--   Mantener un registro auditable de concesión, fecha, campaña y
-    cantidades.
-
-### 6.5. Comunicación en el juego
-
--   Mostrar al jugador que ha recibido la compensación o que está
-    pendiente de aplicarse.
--   Evitar mensajes de éxito si el servidor no ha confirmado la entrega.
--   No mostrar repetidamente la notificación como si se tratara de
-    nuevas recompensas.
+- Todos los jugadores con cuenta válida tienen derecho a la compensación, excepto cuentas demo identificadas inequívocamente.
+- El jugador decide cuándo recibirla pulsando el botón «Recibir regalo único».
+- Se entregan exactamente 30.000 unidades de oro, madera, piedra, hierro y comida.
+- El derecho es único y persistente por cuenta.
+- Se exige espacio suficiente para los cinco recursos simultáneamente.
+- Si falta espacio para cualquiera de ellos, no se acredita ninguno (cero entregas parciales).
+- El jugador puede liberar espacio y volver a intentarlo.
+- No existe entrega automática al fundar, inicializar o reiniciar un reino.
+- La capacidad no verificable es un problema técnico transitorio, no una pérdida del derecho.
+- El backend es la autoridad definitiva de validación y acreditación.
+- La consulta de estado de compensación es estrictamente de solo lectura y no modifica recursos almacenados.
 
 ## Pruebas de aceptación
 
--   Cada jugador elegible recibe exactamente 30.000 de cada uno de los
-    cinco recursos.
--   Un jugador sin reino conserva la compensación pendiente y la recibe
-    al fundarlo.
--   Las llamadas repetidas o concurrentes no duplican la recompensa.
--   Los reinicios ordinarios no eliminan la compensación.
--   No se producen entregas parciales sin mecanismo de recuperación.
--   La campaña queda registrada y puede auditarse.
+- Cada jugador elegible con cuenta válida puede reclamar manualmente su compensación pulsando «Recibir regalo único».
+- Se entregan exactamente 30.000 unidades de oro, madera, piedra, hierro y comida de forma atómica.
+- Si falta capacidad para uno o más recursos, el servidor rechaza el cobro íntegramente y no entrega ningún recurso.
+- Las llamadas repetidas, concurrentes o reintentos no duplican la compensación (idempotencia garantizada).
+- No existe entrega automática al fundar, inicializar o reiniciar un reino.
+- Si la proyección económica falla o lanza una excepción, la consulta devuelve `capacityVerifiable: false`, `capacityReport: null` y `canClaim: false` sin modificar los recursos almacenados.
+- Una vez recuperada la proyección y disponible el espacio necesario, el jugador puede volver a verificar y cobrar con éxito.
 
 ------------------------------------------------------------------------
 
