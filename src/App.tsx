@@ -244,6 +244,7 @@ const claimOutageCompensationMutation = makeFunctionReference<"mutation">("compe
 interface OutageCompensationStatus {
   authenticated: boolean;
   eligible: boolean;
+  incidentId?: string;
   campaignId: string;
   status: "unclaimed" | "pending" | "claimed" | "excluded";
   resources: { gold: number; wood: number; stone: number; iron: number; food: number };
@@ -304,7 +305,15 @@ function OutageCompensationCard(props: {
             className="px-4 py-2 bg-[#d4af37] hover:bg-[#e5c158] text-[#110e0a] font-serif font-bold text-xs uppercase tracking-wider rounded-lg shadow transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer flex-shrink-0"
           >
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gift className="w-3.5 h-3.5" />}
-            <span>{busy ? "Acreditando…" : kingdomId ? "Reclamar +30.000 recursos" : "Reservar compensación"}</span>
+            <span>
+              {busy
+                ? kingdomId
+                  ? "Acreditando…"
+                  : "Reservando…"
+                : kingdomId
+                  ? "Reclamar +30.000 recursos"
+                  : "Reservar compensación"}
+            </span>
           </button>
         )}
       </div>
@@ -797,6 +806,13 @@ function KingdomOverviewContent() {
   const [compBusy, setCompBusy] = useState(false);
   const [compFeedback, setCompFeedback] = useState<string | null>(null);
   const [compError, setCompError] = useState<string | null>(null);
+
+  const compAccountKey = isAuthenticated && viewer ? (viewer.userId ?? viewer.subject.split('|')[0]) : null;
+  useEffect(() => {
+    setCompBusy(false);
+    setCompFeedback(null);
+    setCompError(null);
+  }, [compAccountKey]);
 
   const handleClaimOutageCompensation = async (targetKingdomId?: string) => {
     setCompBusy(true);

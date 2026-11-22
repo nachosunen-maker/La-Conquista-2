@@ -3,23 +3,50 @@ import type { Id } from "./_generated/dataModel";
 import { v, ConvexError } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { OUTAGE_COMPENSATION } from "./balanceConfig";
-import { DEMO_USER_ID } from "./kingdomAccess";
+import { isDemoAccountUserId } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
 
 function canonicalUserId(raw?: string | null): string {
   if (!raw) return "";
-  return raw.split("|")[0];
+  return raw.split("|")[0].trim();
 }
 
 async function resolveVerifiedUserId(ctx: QueryCtx | MutationCtx): Promise<string | null> {
   const authId = await getAuthUserId(ctx);
-  if (authId) return canonicalUserId(authId);
+  if (authId) {
+    const clean = canonicalUserId(authId);
+    return clean || null;
+  }
   const identity = await ctx.auth.getUserIdentity();
-  return identity?.subject ? canonicalUserId(identity.subject) : null;
+  const clean = identity?.subject ? canonicalUserId(identity.subject) : "";
+  return clean || null;
 }
 
 function isDemoAccount(userId: string): boolean {
-  return userId === DEMO_USER_ID || userId === "guest_g9ai8cz";
+  return isDemoAccountUserId(userId);
+}
+
+function matchesOutageIncident(record: { campaignId: string; incidentId?: string }): boolean {
+  if (record.incidentId === OUTAGE_COMPENSATION.INCIDENT_ID) return true;
+  if (record.campaignId === OUTAGE_COMPENSATION.CAMPAIGN_ID) return true;
+  if (record.campaignId.startsWith(OUTAGE_COMPENSATION.INCIDENT_ID)) return true;
+  return false;
+}
+
+async function findIncidentCompensationState(ctx: QueryCtx | MutationCtx, userId: string) {
+  const allForUser = await ctx.db
+    .query("outageCompensations")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .collect();
+  const matching = allForUser.filter(matchesOutageIncident);
+  const claimed = matching.find((r) => r.status === "claimed") ?? null;
+  const pending = matching.find((r) => r.status === "pending") ?? null;
+  return {
+    matching,
+    claimed,
+    pending,
+    effective: claimed ?? pending ?? null,
+  };
 }
 
 async function findOwnedFoundedKingdom(ctx: QueryCtx | MutationCtx, userId: string) {
@@ -28,10 +55,13 @@ async function findOwnedFoundedKingdom(ctx: QueryCtx | MutationCtx, userId: stri
     .withIndex("by_user_id", (q) => q.eq("userId", userId))
     .collect();
 
-  let candidates = direct;
-  if (candidates.length === 0) {
-    const all = await ctx.db.query("kingdoms").collect();
-    candidates = all.filter((k) => canonicalUserId(k.userId) === userId);
+  const all = await ctx.db.query("kingdoms").collect();
+  const seen = new Set(direct.map((k) => String(k._id)));
+  const candidates = [...direct];
+  for (const k of all) {
+    if (!seen.has(String(k._id)) && canonicalUserId(k.userId) === userId) {
+      candidates.push(k);
+    }
   }
 
   for (const k of candidates) {
@@ -41,7 +71,7 @@ async function findOwnedFoundedKingdom(ctx: QueryCtx | MutationCtx, userId: stri
       .query("resources")
       .withIndex("by_kingdom", (q) => q.eq("kingdomId", k._id))
       .first();
-    if (resourcesDoc || k.resources) {
+    if (resourcesDoc) {
       return k;
     }
   }
@@ -62,30 +92,25 @@ export async function applyPendingOutageCompensationOnFounding(
   const userId = canonicalUserId(rawUserId);
   if (!userId || isDemoAccount(userId)) return false;
 
-  const record = await ctx.db
-    .query("outageCompensations")
-    .withIndex("by_user_and_campaign", (q) =>
-      q.eq("userId", userId).eq("campaignId", OUTAGE_COMPENSATION.CAMPAIGN_ID)
-    )
-    .first();
-
-  if (!record || record.status !== "pending") {
+  const { claimed, pending } = await findIncidentCompensationState(ctx, userId);
+  if (claimed || !pending) {
     return false;
   }
 
   const resDoc = await ctx.db.get(resourcesId);
-  if (!resDoc) return false;
+  if (!resDoc || resDoc.kingdomId !== kingdomId) return false;
 
   await ctx.db.patch(resourcesId, {
-    gold: resDoc.gold + record.resources.gold,
-    wood: resDoc.wood + record.resources.wood,
-    stone: resDoc.stone + record.resources.stone,
-    iron: resDoc.iron + record.resources.iron,
-    food: resDoc.food + record.resources.food,
+    gold: resDoc.gold + pending.resources.gold,
+    wood: resDoc.wood + pending.resources.wood,
+    stone: resDoc.stone + pending.resources.stone,
+    iron: resDoc.iron + pending.resources.iron,
+    food: resDoc.food + pending.resources.food,
   });
 
-  await ctx.db.patch(record._id, {
+  await ctx.db.patch(pending._id, {
     status: "claimed",
+    incidentId: pending.incidentId ?? OUTAGE_COMPENSATION.INCIDENT_ID,
     claimedKingdomId: kingdomId,
     claimedAt: now,
   });
@@ -101,6 +126,7 @@ export const getOutageCompensationStatus = query({
       return {
         authenticated: false,
         eligible: false,
+        incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
         campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
         status: "excluded" as const,
         resources: OUTAGE_COMPENSATION.RESOURCES,
@@ -114,6 +140,7 @@ export const getOutageCompensationStatus = query({
       return {
         authenticated: true,
         eligible: false,
+        incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
         campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
         status: "excluded" as const,
         resources: OUTAGE_COMPENSATION.RESOURCES,
@@ -123,19 +150,16 @@ export const getOutageCompensationStatus = query({
       };
     }
 
-    const [record, foundedKingdom] = await Promise.all([
-      ctx.db
-        .query("outageCompensations")
-        .withIndex("by_user_and_campaign", (q) =>
-          q.eq("userId", userId).eq("campaignId", OUTAGE_COMPENSATION.CAMPAIGN_ID)
-        )
-        .first(),
+    const [compState, foundedKingdom] = await Promise.all([
+      findIncidentCompensationState(ctx, userId),
       findOwnedFoundedKingdom(ctx, userId),
     ]);
+    const record = compState.effective;
 
     return {
       authenticated: true,
       eligible: !record,
+      incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
       campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
       status: record ? record.status : ("unclaimed" as const),
       resources: record?.resources ?? OUTAGE_COMPENSATION.RESOURCES,
@@ -159,13 +183,21 @@ export const claimOutageCompensation = mutation({
       throw new ConvexError("El reino de demostración Iberia está excluido de la compensación.");
     }
 
-    const existing = await ctx.db
-      .query("outageCompensations")
-      .withIndex("by_user_and_campaign", (q) =>
-        q.eq("userId", userId).eq("campaignId", OUTAGE_COMPENSATION.CAMPAIGN_ID)
-      )
-      .first();
+    let explicitCandidate = null;
+    if (args.kingdomId) {
+      const candidate = await ctx.db.get(args.kingdomId);
+      if (candidate) {
+        if (isDemoAccount(canonicalUserId(candidate.userId))) {
+          throw new ConvexError("El reino de demostración Iberia está excluido de la compensación.");
+        }
+        if (canonicalUserId(candidate.userId) !== userId) {
+          throw new ConvexError("No autorizado: ese reino pertenece a otra cuenta.");
+        }
+        explicitCandidate = candidate;
+      }
+    }
 
+    const { effective: existing } = await findIncidentCompensationState(ctx, userId);
     if (existing) {
       return {
         success: true,
@@ -182,20 +214,16 @@ export const claimOutageCompensation = mutation({
     }
 
     let targetKingdom = null;
-    if (args.kingdomId) {
-      const candidate = await ctx.db.get(args.kingdomId);
-      if (candidate) {
-        if (isDemoAccount(canonicalUserId(candidate.userId))) {
-          throw new ConvexError("El reino de demostración Iberia está excluido de la compensación.");
-        }
-        if (canonicalUserId(candidate.userId) !== userId) {
-          throw new ConvexError("No autorizado: ese reino pertenece a otra cuenta.");
-        }
-        if (candidate.name && candidate.name.trim()) {
-          targetKingdom = candidate;
-        }
+    if (explicitCandidate && explicitCandidate.name && explicitCandidate.name.trim()) {
+      const resourcesDoc = await ctx.db
+        .query("resources")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", explicitCandidate._id))
+        .first();
+      if (resourcesDoc) {
+        targetKingdom = explicitCandidate;
       }
-    } else {
+    }
+    if (!targetKingdom) {
       targetKingdom = await findOwnedFoundedKingdom(ctx, userId);
     }
 
@@ -214,6 +242,7 @@ export const claimOutageCompensation = mutation({
 
       await ctx.db.insert("outageCompensations", {
         userId,
+        incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
         campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
         status: "claimed",
         resources: reward,
@@ -235,6 +264,7 @@ export const claimOutageCompensation = mutation({
 
     await ctx.db.insert("outageCompensations", {
       userId,
+      incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
       campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
       status: "pending",
       resources: reward,

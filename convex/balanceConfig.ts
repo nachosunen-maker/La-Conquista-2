@@ -1207,6 +1207,7 @@ export const CIVILIZATION_ZONES: Readonly<Record<string, { q: number; r: number;
 };
 
 export const OUTAGE_COMPENSATION = {
+  INCIDENT_ID: "outage_2026_general",
   CAMPAIGN_ID: "outage_2026_general_v1",
   RESOURCES: {
     gold: 30_000,

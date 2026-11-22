@@ -374,9 +374,10 @@ export default defineSchema({
       lockedUntil: v.optional(v.number()),
     }).index("by_user", ["userId"]),
 
-    // Compensación extraordinaria por caída de la plataforma: 1 reclamación atómica por cuenta (userId).
+    // Compensación extraordinaria por caída de la plataforma: 1 reclamación atómica por cuenta (userId) e incidente.
     outageCompensations: defineTable({
       userId: v.string(),
+      incidentId: v.optional(v.string()),
       campaignId: v.string(),
       status: v.union(v.literal("pending"), v.literal("claimed")),
       resources: v.object({
@@ -391,7 +392,8 @@ export default defineSchema({
       claimedAt: v.optional(v.number()),
     })
       .index("by_user", ["userId"])
-      .index("by_user_and_campaign", ["userId", "campaignId"]),
+      .index("by_user_and_campaign", ["userId", "campaignId"])
+      .index("by_user_and_incident", ["userId", "incidentId"]),
 
     // Registro persistente e inmutable para usuarios normales de saneamientos del límite de 100 territorios (Punto 2).
     territoryCapAuditLogs: defineTable({
