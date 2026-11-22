@@ -2523,9 +2523,9 @@ function KingdomOverviewContent() {
                   if (entry && !entry.requirementsSatisfied) {
                     blockers.push(`requiere ${formatRequirements(entry.requirements, buildingLabels)}`);
                   }
-                  if (entry && !entry.castleCapSatisfied) {
+                  if (nextLevel !== null && entry && !entry.castleCapSatisfied) {
                     const castleLevel = constructionState?.buildingLevels?.castillo ?? 0;
-                    if (type === 'viviendas' && nextLevel !== null) {
+                    if (type === 'viviendas') {
                       const requiredCastle = nextLevel > 20 ? nextLevel - 18 : 1;
                       blockers.push(`requiere Castillo nivel ${requiredCastle} (Castillo actual: nivel ${castleLevel})`);
                     } else {

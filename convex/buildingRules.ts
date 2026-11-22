@@ -435,9 +435,9 @@ export function describeCatalogForLevels(
       : false;
     const castleLevel = buildingLevels.castillo ?? 0;
     const maxAllowedLevel = getMaxAllowedBuildingLevel(type, castleLevel);
-    const castleCapSatisfied = !CONSTRUCTION.CASTLE_CAPS_LEVELS
+    const castleCapSatisfied = !CONSTRUCTION.CASTLE_CAPS_LEVELS || nextLevel === null
       ? true
-      : nextLevel !== null && nextLevel <= maxAllowedLevel;
+      : nextLevel <= maxAllowedLevel;
     result[type] = {
       label: rule.label,
       role: rule.role,
