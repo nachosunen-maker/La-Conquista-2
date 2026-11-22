@@ -1,20 +1,16 @@
 /**
- * LA CONQUISTA — PRUEBAS EXHAUSTIVAS DEL PUNTO 6:
- * COMPENSACIÓN ÚNICA POR LA CAÍDA DEL SERVIDOR (+30.000 × 5 recursos).
+ * LA CONQUISTA — LAS 17 PRUEBAS OBLIGATORIAS DEL PUNTO 6:
+ * REGALO ÚNICO POR CAÍDA DEL SERVIDOR (+30.000 × 5 CON CAPACIDAD DE ALMACÉN).
  *
- * Cubre elegibilidad, exclusión de invitado/demo Iberia, concurrencia (Promise.all),
- * pérdida de respuesta/reintentos, recuperación tras estado incompleto, recarga de sesión,
- * dos dispositivos reales con Convex Auth (signIn), auditoría persistente en outageCompensations,
- * aislamiento respecto a otros jugadores y economía normal (spendResource/transactions),
- * rechazo de manipulación de argumentos por el cliente, reinicio de reino (resetKingdom),
- * y bloqueo de reactivación ante cambios de nombre o versión de campaña.
+ * Utiliza el backend real de Convex (convex-test) y las reglas reales de almacenamiento
+ * (storageCapacity = floor((10.000 + 2.000 * nivelMercado) * multTecnología * multCivilización)).
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { api } from "./_generated/api";
 import { createTestBackend } from "./test.setup";
-import { OUTAGE_COMPENSATION } from "./balanceConfig";
+import { OUTAGE_COMPENSATION, STORAGE } from "./balanceConfig";
 import { DEMO_USER_ID } from "./kingdomAccess";
-import { applyPendingOutageCompensationOnFounding } from "./compensation";
+import { storageCapacity } from "./economyExtended";
 
 const TEST_SITE_URL = "https://pruebas-la-conquista.convex.site";
 const T0 = new Date("2026-11-18T12:00:00Z").getTime();
@@ -69,14 +65,46 @@ async function signIn(t: Backend, flow: "signUp" | "signIn", username: string, p
   return { asUser, userId, subject };
 }
 
-async function foundKingdom(t: Backend, asUser: ReturnType<Backend["withIdentity"]>, name: string) {
+async function foundKingdom(
+  t: Backend,
+  asUser: ReturnType<Backend["withIdentity"]>,
+  name: string,
+  civilization: string = "romanos"
+) {
   const kingdom = await asUser.mutation(api.economy.getOrInitializeKingdom, {
     name,
-    civilization: "romanos",
+    civilization,
     castleName: `Castillo de ${name}`,
     monarchName: `Monarca de ${name}`,
   });
   return kingdom._id as any;
+}
+
+async function setBuildingLevel(t: Backend, kingdomId: any, buildingType: string, level: number) {
+  await t.run(async (ctx) => {
+    const existing = await ctx.db
+      .query("buildings")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+      .collect();
+    const doc = existing.find((b) => b.buildingType === buildingType);
+    if (doc) await ctx.db.patch(doc._id, { level });
+    else await ctx.db.insert("buildings", { kingdomId, buildingType, level });
+  });
+}
+
+async function setResources(
+  t: Backend,
+  kingdomId: any,
+  values: { gold: number; wood: number; stone: number; iron: number; food: number }
+) {
+  await t.run(async (ctx) => {
+    const doc = await ctx.db
+      .query("resources")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+      .first();
+    if (!doc) throw new Error("No resources doc found");
+    await ctx.db.patch(doc._id, { ...values, lastUpdated: T0, settlementInitialized: true });
+  });
 }
 
 async function getResourcesDoc(t: Backend, kingdomId: any) {
@@ -86,6 +114,64 @@ async function getResourcesDoc(t: Backend, kingdomId: any) {
       .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
       .first();
   });
+}
+
+function getConvexErrorMessage(err: unknown): string {
+  const data = (err as { data?: unknown })?.data;
+  if (typeof data === "string") return data;
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function assertSingleResourceRejected(
+  key: "gold" | "wood" | "stone" | "iron" | "food",
+  label: string,
+  stored: number,
+  expectedNeeded: number
+) {
+  const t = createTestBackend();
+  const userId = `user-p6-single-${key}`;
+  const asUser = t.withIdentity(identity(userId));
+  const kingdomId = await foundKingdom(t, asUser, `Reino ${label}`);
+
+  // Mercado 11 => tope = 32.000
+  await setBuildingLevel(t, kingdomId, "mercado", 11);
+  const initial = { gold: 0, wood: 0, stone: 0, iron: 0, food: 0 };
+  initial[key] = stored;
+  await setResources(t, kingdomId, initial);
+
+  const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+  expect(status.canClaim).toBe(false);
+  expect(status.capacityReport?.allSufficient).toBe(false);
+  expect(status.capacityReport?.insufficientResources).toHaveLength(1);
+  expect(status.capacityReport?.insufficientResources[0].resource).toBe(key);
+  expect(status.capacityReport?.insufficientResources[0].additionalNeeded).toBe(expectedNeeded);
+
+  let caught: unknown = null;
+  try {
+    await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).not.toBeNull();
+  const msg = getConvexErrorMessage(caught);
+  expect(msg).toContain(label);
+  expect(msg).toContain(String(expectedNeeded));
+
+  // Ningún recurso fue acreditado y no se registró compensación
+  const after = await getResourcesDoc(t, kingdomId);
+  expect(after!.gold).toBe(initial.gold);
+  expect(after!.wood).toBe(initial.wood);
+  expect(after!.stone).toBe(initial.stone);
+  expect(after!.iron).toBe(initial.iron);
+  expect(after!.food).toBe(initial.food);
+
+  const rows = await t.run(async (ctx) =>
+    ctx.db
+      .query("outageCompensations")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect()
+  );
+  expect(rows).toHaveLength(0);
 }
 
 beforeAll(async () => {
@@ -101,410 +187,480 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("Punto 6: Compensación única por caída del servidor (+30.000 × 5)", () => {
-  test("1. Jugador elegible recibe exactamente +30.000 de cada uno de los 5 recursos por encima del almacén y se conserva tras tick", async () => {
+describe("Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y atómica de capacidad", () => {
+  test("1. Jugador válido con capacidad suficiente cobra exactamente 30.000 de los cinco recursos (con liquidación económica previa)", async () => {
     const t = createTestBackend();
-    const asUser = t.withIdentity(identity("user-eligible-1"));
-    const kingdomId = await foundKingdom(t, asUser, "Reino Elegible");
+    // Vikingos (+10 %) + storage_1 (+10 %) + Mercado 8 => storageCapacity(8, 1.21) = 31.460
+    const asUser = t.withIdentity(identity("user-p6-1"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Completo", "vikingos");
 
-    const beforeRes = await getResourcesDoc(t, kingdomId);
-    expect(beforeRes).not.toBeNull();
+    await setBuildingLevel(t, kingdomId, "mercado", 8);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("technologyProgress", {
+        kingdomId,
+        technologyId: "storage_1",
+        status: "completed",
+        startedAt: T0 - 10_000,
+        durationMs: 5_000,
+        completedAt: T0 - 5_000,
+      });
+    });
+    await setResources(t, kingdomId, { gold: 1_000, wood: 1_000, stone: 1_000, iron: 1_000, food: 1_000 });
+
+    // Avanzamos 5 minutos para comprobar que primero se liquida la economía pendiente
+    vi.setSystemTime(T0 + 300_000);
 
     const statusBefore = await asUser.query(api.compensation.getOutageCompensationStatus, {});
     expect(statusBefore.authenticated).toBe(true);
     expect(statusBefore.eligible).toBe(true);
-    expect(statusBefore.status).toBe("unclaimed");
-    expect(statusBefore.incidentId).toBe(OUTAGE_COMPENSATION.INCIDENT_ID);
-    expect(statusBefore.campaignId).toBe(OUTAGE_COMPENSATION.CAMPAIGN_ID);
-    expect(statusBefore.resources).toEqual({
-      gold: 30_000,
-      wood: 30_000,
-      stone: 30_000,
-      iron: 30_000,
-      food: 30_000,
-    });
+    expect(statusBefore.canClaim).toBe(true);
+    expect(statusBefore.capacityReport?.maxCapacity).toBe(storageCapacity(8, 1.1 * 1.1));
+    expect(statusBefore.capacityReport?.maxCapacity).toBe(31_460);
+    expect(statusBefore.capacityReport?.allSufficient).toBe(true);
 
     const claim = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
     expect(claim.success).toBe(true);
     expect(claim.alreadyClaimed).toBe(false);
     expect(claim.status).toBe("claimed");
     expect(claim.appliedImmediately).toBe(true);
-    expect(claim.claimedKingdomId).toBe(kingdomId);
     expect(claim.resources).toEqual(OUTAGE_COMPENSATION.RESOURCES);
 
-    const afterRes = await getResourcesDoc(t, kingdomId);
-    expect(afterRes!.gold).toBe(beforeRes!.gold + 30_000);
-    expect(afterRes!.wood).toBe(beforeRes!.wood + 30_000);
-    expect(afterRes!.stone).toBe(beforeRes!.stone + 30_000);
-    expect(afterRes!.iron).toBe(beforeRes!.iron + 30_000);
-    expect(afterRes!.food).toBe(beforeRes!.food + 30_000);
+    const after = await getResourcesDoc(t, kingdomId);
+    // La economía se liquidó primero (lastUpdated == T0 + 300_000) y se sumaron los +30.000 exactos
+    expect(after!.lastUpdated).toBe(T0 + 300_000);
+    expect(after!.gold).toBeGreaterThanOrEqual(31_000);
+    expect(after!.wood).toBeGreaterThanOrEqual(31_000);
+    expect(after!.stone).toBeGreaterThanOrEqual(31_000);
+    expect(after!.iron).toBeGreaterThanOrEqual(31_000);
+    expect(after!.food).toBeGreaterThanOrEqual(31_000);
 
-    // Avanza 10 minutos y ejecuta syncKingdom: el excedente > 10.000 sobre el tope de almacén no se recorta
-    vi.setSystemTime(T0 + 10 * 60 * 1000);
-    const synced = await asUser.mutation(api.economy.syncKingdom, { kingdomId });
-    expect(synced.resources.gold).toBeGreaterThanOrEqual(afterRes!.gold);
-    expect(synced.resources.wood).toBeGreaterThanOrEqual(afterRes!.wood);
-    expect(synced.resources.stone).toBeGreaterThanOrEqual(afterRes!.stone);
-    expect(synced.resources.iron).toBeGreaterThanOrEqual(afterRes!.iron);
-    expect(synced.resources.food).toBeGreaterThanOrEqual(30_000);
+    // También comprobamos suma exacta sin producción adicional cuando el reloj no avanza
+    const asExact = t.withIdentity(identity("user-p6-1-exact"));
+    const kExact = await foundKingdom(t, asExact, "Reino Exacto");
+    await setBuildingLevel(t, kExact, "mercado", 14); // tope 38.000 >= 6.000 + 30.000
+    const beforeExact = await getResourcesDoc(t, kExact);
+    await asExact.mutation(api.compensation.claimOutageCompensation, { kingdomId: kExact });
+    const afterExact = await getResourcesDoc(t, kExact);
+    expect(afterExact!.gold).toBe(beforeExact!.gold + 30_000);
+    expect(afterExact!.wood).toBe(beforeExact!.wood + 30_000);
+    expect(afterExact!.stone).toBe(beforeExact!.stone + 30_000);
+    expect(afterExact!.iron).toBe(beforeExact!.iron + 30_000);
+    expect(afterExact!.food).toBe(beforeExact!.food + 30_000);
+
+    const records = await t.run(async (ctx) =>
+      ctx.db
+        .query("outageCompensations")
+        .withIndex("by_user", (q) => q.eq("userId", "user-p6-1"))
+        .collect()
+    );
+    expect(records).toHaveLength(1);
+    expect(records[0].status).toBe("claimed");
+    expect(records[0].incidentId).toBe(OUTAGE_COMPENSATION.INCIDENT_ID);
+    expect(records[0].campaignId).toBe(OUTAGE_COMPENSATION.CAMPAIGN_ID);
+    expect(records[0].claimedKingdomId).toBe(kingdomId);
   });
 
-  test("2. Jugadores no elegibles (sin sesión, invitado/demo Iberia) no reciben nada y son rechazados", async () => {
+  test("2. Capacidad insuficiente para oro -> no recibe ningún recurso", async () => {
+    await assertSingleResourceRejected("gold", "oro", 5_000, 3_000);
+  });
+
+  test("3. Capacidad insuficiente para madera -> no recibe ningún recurso", async () => {
+    await assertSingleResourceRejected("wood", "madera", 4_500, 2_500);
+  });
+
+  test("4. Capacidad insuficiente para piedra -> no recibe ningún recurso", async () => {
+    await assertSingleResourceRejected("stone", "piedra", 3_000, 1_000);
+  });
+
+  test("5. Capacidad insuficiente para hierro -> no recibe ningún recurso", async () => {
+    await assertSingleResourceRejected("iron", "hierro", 2_001, 1);
+  });
+
+  test("6. Capacidad insuficiente para comida -> no recibe ningún recurso", async () => {
+    await assertSingleResourceRejected("food", "comida", 10_000, 8_000);
+  });
+
+  test("7. Varios recursos sin espacio -> identifica todos y no entrega ninguno", async () => {
     const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-multi"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Múltiple");
 
-    // Sin autenticación
-    const anonStatus = await t.query(api.compensation.getOutageCompensationStatus, {});
-    expect(anonStatus.authenticated).toBe(false);
-    expect(anonStatus.eligible).toBe(false);
-    expect(anonStatus.status).toBe("excluded");
-    await expect(t.mutation(api.compensation.claimOutageCompensation, {})).rejects.toThrow(/iniciar sesión/i);
+    // Mercado 10 => tope = 30.000
+    await setBuildingLevel(t, kingdomId, "mercado", 10);
+    await setResources(t, kingdomId, {
+      gold: 4_000,  // falta 4.000
+      wood: 0,      // suficiente
+      stone: 1_500, // falta 1.500
+      iron: 0,      // suficiente
+      food: 9_000,  // falta 9.000
+    });
 
-    // Sujeto en blanco
-    const blankCaller = t.withIdentity(identity("   "));
-    await expect(blankCaller.mutation(api.compensation.claimOutageCompensation, {})).rejects.toThrow(/iniciar sesión/i);
+    const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(status.canClaim).toBe(false);
+    expect(status.capacityReport?.insufficientResources.map((r) => r.resource)).toEqual([
+      "gold",
+      "stone",
+      "food",
+    ]);
+    expect(status.capacityReport?.resources.gold.additionalNeeded).toBe(4_000);
+    expect(status.capacityReport?.resources.wood.additionalNeeded).toBe(0);
+    expect(status.capacityReport?.resources.stone.additionalNeeded).toBe(1_500);
+    expect(status.capacityReport?.resources.iron.additionalNeeded).toBe(0);
+    expect(status.capacityReport?.resources.food.additionalNeeded).toBe(9_000);
 
-    // Cuenta demo Iberia (directa y con sufijo de sesión)
-    const demoKingdomId = await t.run(async (ctx) => {
-      const kId = await ctx.db.insert("kingdoms", {
-        userId: DEMO_USER_ID,
-        name: "Iberia",
-        civilization: "romanos",
-        createdAt: T0,
-        updatedAt: T0,
+    let caught: unknown = null;
+    try {
+      await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeNull();
+    const msg = getConvexErrorMessage(caught);
+    expect(msg).toContain("oro");
+    expect(msg).toContain("4000");
+    expect(msg).toContain("piedra");
+    expect(msg).toContain("1500");
+    expect(msg).toContain("comida");
+    expect(msg).toContain("9000");
+    expect(msg).not.toContain("madera");
+    expect(msg).not.toContain("hierro");
+
+    const after = await getResourcesDoc(t, kingdomId);
+    expect(after!.gold).toBe(4_000);
+    expect(after!.wood).toBe(0);
+    expect(after!.stone).toBe(1_500);
+    expect(after!.iron).toBe(0);
+    expect(after!.food).toBe(9_000);
+  });
+
+  test("8. Tras liberar espacio suficiente (gasto o ampliación de Mercado), el jugador puede cobrar", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-free-space"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Ampliado");
+
+    // Inicial: Mercado 10 (tope 30.000), oro 2.500 => falta espacio para oro
+    await setBuildingLevel(t, kingdomId, "mercado", 10);
+    await setResources(t, kingdomId, { gold: 2_500, wood: 0, stone: 0, iron: 0, food: 0 });
+
+    await expect(
+      asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId })
+    ).rejects.toThrow(/oro/i);
+
+    // Gasta 2.500 de oro con spendResource real -> ahora oro = 0, disponible = 30.000 >= 30.000
+    await asUser.mutation(api.economy.spendResource, {
+      kingdomId,
+      idempotencyKey: "liberar-oro-1",
+      resourceType: "gold",
+      amount: 2_500,
+      reason: "Liberar espacio en almacén",
+    });
+
+    const statusReady = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(statusReady.canClaim).toBe(true);
+
+    const claim = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    expect(claim.status).toBe("claimed");
+    expect(claim.appliedImmediately).toBe(true);
+
+    const after = await getResourcesDoc(t, kingdomId);
+    expect(after!.gold).toBe(30_000);
+    expect(after!.wood).toBe(30_000);
+    expect(after!.stone).toBe(30_000);
+    expect(after!.iron).toBe(30_000);
+    expect(after!.food).toBe(30_000);
+
+    // También funciona ampliando el Mercado (inicialmente Mercado = 0, sin fila)
+    const asUser2 = t.withIdentity(identity("user-p6-upgrade-market"));
+    const kingdomId2 = await foundKingdom(t, asUser2, "Reino Mercado");
+    await expect(
+      asUser2.mutation(api.compensation.claimOutageCompensation, { kingdomId: kingdomId2 })
+    ).rejects.toThrow(/capacidad de almacenamiento insuficiente/i);
+
+    await setBuildingLevel(t, kingdomId2, "mercado", 14); // tope 38.000
+    const claim2 = await asUser2.mutation(api.compensation.claimOutageCompensation, {
+      kingdomId: kingdomId2,
+    });
+    expect(claim2.status).toBe("claimed");
+    const after2 = await getResourcesDoc(t, kingdomId2);
+    expect(after2!.gold).toBeGreaterThanOrEqual(30_000);
+    expect(after2!.gold).toBeLessThanOrEqual(STORAGE.BASE_CAPACITY + 14 * STORAGE.CAPACITY_PER_MARKET_LEVEL);
+  });
+
+  test("9. Fundar un reino no entrega la compensación", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-founding"));
+
+    // Antes de fundar, existe incluso un registro heredado "pending": tampoco debe auto-aplicarse al fundar
+    await t.run(async (ctx) => {
+      await ctx.db.insert("outageCompensations", {
+        userId: "user-p6-founding",
+        incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
+        campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
+        status: "pending",
+        resources: OUTAGE_COMPENSATION.RESOURCES,
+        createdAt: T0 - 10_000,
       });
-      await ctx.db.insert("resources", {
-        kingdomId: kId,
-        gold: 500,
-        wood: 500,
-        stone: 500,
-        iron: 500,
-        food: 500,
-        lastUpdated: T0,
-        settlementInitialized: true,
+    });
+
+    const kingdomId = await foundKingdom(t, asUser, "Reino Recién Fundado");
+    const resourcesAfterFounding = await getResourcesDoc(t, kingdomId);
+    expect(resourcesAfterFounding!.gold).toBe(6_000);
+    expect(resourcesAfterFounding!.wood).toBe(6_000);
+    expect(resourcesAfterFounding!.stone).toBe(6_000);
+    expect(resourcesAfterFounding!.iron).toBe(6_000);
+    expect(resourcesAfterFounding!.food).toBe(6_000);
+
+    const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(status.status).toBe("unclaimed");
+    expect(status.eligible).toBe(true);
+
+    // Al ampliar Mercado y pulsar «Recibir regalo único» sí cobra una única vez
+    await setBuildingLevel(t, kingdomId, "mercado", 14);
+    const claim = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    expect(claim.status).toBe("claimed");
+    expect((await getResourcesDoc(t, kingdomId))!.gold).toBe(36_000);
+  });
+
+  test("10. Inicializar un reino existente no entrega la compensación", async () => {
+    const t = createTestBackend();
+    const userId = "user-p6-init-existing";
+    const asUser = t.withIdentity(identity(userId));
+
+    // Creamos un reino existente sin fila de resources (estado previo pendiente de inicialización)
+    // y una reserva "pending" heredada para garantizar que inicializar nunca autocobra.
+    const existingKingdomId = await t.run(async (ctx) => {
+      const kId = await ctx.db.insert("kingdoms", {
+        userId,
+        name: "Reino Preexistente",
+        civilization: "romanos",
+        castleName: "Castillo Previo",
+        monarchName: "Monarca Previo",
+      });
+      await ctx.db.insert("outageCompensations", {
+        userId,
+        incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
+        campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
+        status: "pending",
+        resources: OUTAGE_COMPENSATION.RESOURCES,
+        createdAt: T0 - 5_000,
       });
       return kId;
     });
 
-    for (const demoSub of [DEMO_USER_ID, `${DEMO_USER_ID}|session-99`]) {
-      const demoCaller = t.withIdentity(identity(demoSub));
-      const status = await demoCaller.query(api.compensation.getOutageCompensationStatus, {});
-      expect(status.eligible).toBe(false);
-      expect(status.status).toBe("excluded");
-      await expect(demoCaller.mutation(api.compensation.claimOutageCompensation, {})).rejects.toThrow(/excluido/i);
-      await expect(
-        demoCaller.mutation(api.compensation.claimOutageCompensation, { kingdomId: demoKingdomId })
-      ).rejects.toThrow(/excluido/i);
-    }
+    await asUser.mutation(api.economy.getOrInitializeKingdom, {
+      name: "Reino Preexistente",
+      civilization: "romanos",
+    });
 
-    // Recursos de Iberia intactos y 0 registros en outageCompensations
-    const demoRes = await getResourcesDoc(t, demoKingdomId);
-    expect(demoRes!.gold).toBe(500);
-    const records = await t.run(async (ctx) => ctx.db.query("outageCompensations").collect());
-    expect(records).toHaveLength(0);
+    // Segunda llamada de inicialización + sync tras avanzar el tiempo tampoco otorgan el regalo
+    vi.setSystemTime(T0 + 60_000);
+    await asUser.mutation(api.economy.getOrInitializeKingdom, {
+      name: "Reino Preexistente",
+      civilization: "romanos",
+    });
+    await asUser.mutation(api.economy.syncKingdom, { kingdomId: existingKingdomId });
 
-    // Un jugador normal tampoco puede apuntar al reino de Iberia ni al reino de otro jugador
-    const realCaller = t.withIdentity(identity("user-real-1"));
-    await expect(
-      realCaller.mutation(api.compensation.claimOutageCompensation, { kingdomId: demoKingdomId })
-    ).rejects.toThrow(/excluido/i);
+    const resAfterInit = await getResourcesDoc(t, existingKingdomId);
+    expect(resAfterInit!.gold).toBeLessThan(10_000);
+    expect(resAfterInit!.wood).toBeLessThan(10_000);
+    expect(resAfterInit!.stone).toBeLessThan(10_000);
+    expect(resAfterInit!.iron).toBeLessThan(10_000);
+    expect(resAfterInit!.food).toBeLessThan(10_000);
+
+    const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(status.status).toBe("unclaimed");
+    expect(status.eligible).toBe(true);
   });
 
-  test("3. Segunda solicitud consecutiva no concede recursos adicionales", async () => {
+  test("11. Dos solicitudes simultáneas no duplican la compensación", async () => {
     const t = createTestBackend();
-    const asUser = t.withIdentity(identity("user-second-req"));
-    const kingdomId = await foundKingdom(t, asUser, "Reino Segundo");
-
-    const first = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
-    expect(first.alreadyClaimed).toBe(false);
-    const afterFirst = await getResourcesDoc(t, kingdomId);
-
-    const second = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
-    expect(second.success).toBe(true);
-    expect(second.alreadyClaimed).toBe(true);
-    expect(second.appliedImmediately).toBe(false);
-    expect(second.status).toBe("claimed");
-
-    const afterSecond = await getResourcesDoc(t, kingdomId);
-    expect(afterSecond!.gold).toBe(afterFirst!.gold);
-    expect(afterSecond!.wood).toBe(afterFirst!.wood);
-    expect(afterSecond!.stone).toBe(afterFirst!.stone);
-    expect(afterSecond!.iron).toBe(afterFirst!.iron);
-    expect(afterSecond!.food).toBe(afterFirst!.food);
-  });
-
-  test("4. Solicitudes simultáneas (Promise.all) no duplican la concesión ni crean registros duplicados", async () => {
-    const t = createTestBackend();
-    const asUser = t.withIdentity(identity("user-concurrent"));
+    const asUser = t.withIdentity(identity("user-p6-concurrent"));
     const kingdomId = await foundKingdom(t, asUser, "Reino Concurrente");
-    const beforeRes = await getResourcesDoc(t, kingdomId);
+    await setBuildingLevel(t, kingdomId, "mercado", 15); // tope 40.000
+    const before = await getResourcesDoc(t, kingdomId);
 
     const results = await Promise.all([
       asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId }),
       asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId }),
-      asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId }),
-      asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId }),
-      asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId }),
     ]);
 
-    const freshClaims = results.filter((r) => !r.alreadyClaimed);
-    const duplicateClaims = results.filter((r) => r.alreadyClaimed);
-    expect(freshClaims).toHaveLength(1);
-    expect(duplicateClaims).toHaveLength(4);
+    const fresh = results.filter((r) => !r.alreadyClaimed);
+    const dups = results.filter((r) => r.alreadyClaimed);
+    expect(fresh).toHaveLength(1);
+    expect(dups).toHaveLength(1);
 
-    const afterRes = await getResourcesDoc(t, kingdomId);
-    expect(afterRes!.gold).toBe(beforeRes!.gold + 30_000);
-    expect(afterRes!.wood).toBe(beforeRes!.wood + 30_000);
-    expect(afterRes!.stone).toBe(beforeRes!.stone + 30_000);
-    expect(afterRes!.iron).toBe(beforeRes!.iron + 30_000);
-    expect(afterRes!.food).toBe(beforeRes!.food + 30_000);
+    const after = await getResourcesDoc(t, kingdomId);
+    expect(after!.gold).toBe(before!.gold + 30_000);
+    expect(after!.wood).toBe(before!.wood + 30_000);
+    expect(after!.stone).toBe(before!.stone + 30_000);
+    expect(after!.iron).toBe(before!.iron + 30_000);
+    expect(after!.food).toBe(before!.food + 30_000);
 
     const rows = await t.run(async (ctx) =>
       ctx.db
         .query("outageCompensations")
-        .withIndex("by_user", (q) => q.eq("userId", "user-concurrent"))
+        .withIndex("by_user", (q) => q.eq("userId", "user-p6-concurrent"))
         .collect()
     );
     expect(rows).toHaveLength(1);
   });
 
-  test("5. Reintento tras fallo o respuesta perdida y recuperación ante estado incompleto sin duplicar", async () => {
+  test("12. Reintentar una solicitud después de perder la respuesta no duplica la compensación", async () => {
     const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-timeout"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Timeout");
 
-    // 5a. Respuesta perdida en red simulada: el cliente descarta la respuesta del primer intento y reintenta
-    const asLostUser = t.withIdentity(identity("user-lost-response"));
-    const kingdomId = await foundKingdom(t, asLostUser, "Reino Timeout");
-    const beforeRes = await getResourcesDoc(t, kingdomId);
+    // Mercado 13 (tope 36.000) con 6.000 iniciales: tras el primer cobro quedan 0 libres (< 30.000),
+    // pero el reintento responde idempotentemente sin duplicar ni fallar falsamente.
+    await setBuildingLevel(t, kingdomId, "mercado", 13);
+    const before = await getResourcesDoc(t, kingdomId);
 
-    let simulatedTimedOut = false;
-    const invokeWithTimeout = async () => {
-      const response = await asLostUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
-      if (!simulatedTimedOut) {
-        simulatedTimedOut = true;
-        throw new Error("Simulated client timeout before reading response");
+    let droppedOnce = false;
+    const callWithLostResponse = async () => {
+      const res = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+      if (!droppedOnce) {
+        droppedOnce = true;
+        throw new Error("Simulated lost network response");
       }
-      return response;
+      return res;
     };
 
-    await expect(invokeWithTimeout()).rejects.toThrow(/Simulated client timeout/);
-    const retryResponse = await invokeWithTimeout();
-    expect(retryResponse.success).toBe(true);
-    expect(retryResponse.alreadyClaimed).toBe(true);
-    expect(retryResponse.appliedImmediately).toBe(false);
+    await expect(callWithLostResponse()).rejects.toThrow(/Simulated lost network response/);
+    const retry = await callWithLostResponse();
+    expect(retry.success).toBe(true);
+    expect(retry.alreadyClaimed).toBe(true);
+    expect(retry.appliedImmediately).toBe(false);
 
-    const afterRetry = await getResourcesDoc(t, kingdomId);
-    expect(afterRetry!.gold).toBe(beforeRes!.gold + 30_000);
+    const after = await getResourcesDoc(t, kingdomId);
+    expect(after!.gold).toBe(before!.gold + 30_000);
+    expect(after!.food).toBe(before!.food + 30_000);
+  });
 
-    // 5b. Reino con estado relacional incompleto (sin fila en tabla resources todavía):
-    // claimOutageCompensation reserva "pending" sin fallar y getOrInitializeKingdom la aplica al reparar/inicializar.
-    const asBroken = t.withIdentity(identity("user-partial-kingdom"));
-    const brokenKingdomId = await t.run(async (ctx) => {
-      return await ctx.db.insert("kingdoms", {
-        userId: "user-partial-kingdom",
-        name: "Reino Incompleto",
-        civilization: "griegos",
-        createdAt: T0,
-        updatedAt: T0,
+  test("13. Una cuenta que ya cobró no puede volver a cobrar (incluye cambio de nombre/versión de campaña)", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-already"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Ya Cobrado");
+    await setBuildingLevel(t, kingdomId, "mercado", 20); // tope 50.000 -> incluso tras +30.000 queda espacio
+
+    const first = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    expect(first.alreadyClaimed).toBe(false);
+    const afterFirst = await getResourcesDoc(t, kingdomId);
+
+    // Segundo intento con o sin kingdomId
+    const second = await asUser.mutation(api.compensation.claimOutageCompensation, {});
+    expect(second.alreadyClaimed).toBe(true);
+    expect(second.appliedImmediately).toBe(false);
+    expect((await getResourcesDoc(t, kingdomId))!.gold).toBe(afterFirst!.gold);
+
+    // Simula cambio de nombre o versión de campaña para el mismo incidente
+    const renamedUser = t.withIdentity(identity("user-p6-renamed"));
+    const renamedKingdom = await foundKingdom(t, renamedUser, "Reino Campaña");
+    await setBuildingLevel(t, renamedKingdom, "mercado", 20);
+    const beforeRenamed = await getResourcesDoc(t, renamedKingdom);
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("outageCompensations", {
+        userId: "user-p6-renamed",
+        incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
+        campaignId: "campana_renombrada_v99",
+        status: "claimed",
+        resources: OUTAGE_COMPENSATION.RESOURCES,
+        claimedKingdomId: renamedKingdom,
+        createdAt: T0 - 50_000,
+        claimedAt: T0 - 50_000,
       });
     });
 
-    const reserveRes = await asBroken.mutation(api.compensation.claimOutageCompensation, {
-      kingdomId: brokenKingdomId,
-    });
-    expect(reserveRes.status).toBe("pending");
-    expect(reserveRes.appliedImmediately).toBe(false);
+    const renamedStatus = await renamedUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(renamedStatus.eligible).toBe(false);
+    expect(renamedStatus.canClaim).toBe(false);
+    expect(renamedStatus.status).toBe("claimed");
 
-    await asBroken.mutation(api.economy.getOrInitializeKingdom, {
-      name: "Reino Incompleto",
+    const attempt = await renamedUser.mutation(api.compensation.claimOutageCompensation, {
+      kingdomId: renamedKingdom,
+    });
+    expect(attempt.alreadyClaimed).toBe(true);
+    expect((await getResourcesDoc(t, renamedKingdom))!.gold).toBe(beforeRenamed!.gold);
+  });
+
+  test("14. Reiniciar el reino no permite volver a recibir el regalo", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-reset"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Reiniciable");
+    await setBuildingLevel(t, kingdomId, "mercado", 14);
+
+    const claim = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    expect(claim.status).toBe("claimed");
+
+    await asUser.mutation(api.economy.resetKingdom, { kingdomId });
+    await asUser.mutation(api.economy.getOrInitializeKingdom, {
+      name: "Reino Segundo",
       civilization: "griegos",
     });
-    const repairedRes = await getResourcesDoc(t, brokenKingdomId);
-    expect(repairedRes!.gold).toBeGreaterThanOrEqual(30_000);
-    expect(repairedRes!.food).toBeGreaterThanOrEqual(30_000);
+    await setBuildingLevel(t, kingdomId, "mercado", 14);
 
-    // Reintento posterior no duplica
-    const afterRepairClaim = await asBroken.mutation(api.compensation.claimOutageCompensation, {
-      kingdomId: brokenKingdomId,
-    });
-    expect(afterRepairClaim.alreadyClaimed).toBe(true);
-    const repairedResAgain = await getResourcesDoc(t, brokenKingdomId);
-    expect(repairedResAgain!.gold).toBe(repairedRes!.gold);
+    const statusAfterReset = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(statusAfterReset.eligible).toBe(false);
+    expect(statusAfterReset.canClaim).toBe(false);
+    expect(statusAfterReset.status).toBe("claimed");
+
+    const beforeRetry = await getResourcesDoc(t, kingdomId);
+    const retryAfterReset = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    expect(retryAfterReset.alreadyClaimed).toBe(true);
+    expect(retryAfterReset.appliedImmediately).toBe(false);
+    expect((await getResourcesDoc(t, kingdomId))!.gold).toBe(beforeRetry!.gold);
   });
 
-  test("6. Recarga de sesión conserva el estado reclamado y bloquea nuevas concesiones", async () => {
+  test("15. Dos sesiones o dispositivos de la misma cuenta comparten el mismo estado", async () => {
     const t = createTestBackend();
-    const session1 = t.withIdentity(identity("user-reload|tab-1"));
-    const kingdomId = await foundKingdom(t, session1, "Reino Recarga");
-    const initialRes = await getResourcesDoc(t, kingdomId);
+    const dev1 = await signIn(t, "signUp", "Fernán González", "castilla-2026");
+    const dev2 = await signIn(t, "signIn", "fernán gonzález", "castilla-2026");
+    expect(dev1.userId).toBe(dev2.userId);
+    expect(dev1.subject).not.toBe(dev2.subject);
 
-    await session1.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    const kingdomId = await foundKingdom(t, dev1.asUser, "Condado de Castilla");
 
-    // Simula recarga de página / nueva instancia de identidad de la misma cuenta
-    const reloadedSession = t.withIdentity(identity("user-reload|tab-2-reloaded"));
-    const status = await reloadedSession.query(api.compensation.getOutageCompensationStatus, {});
-    expect(status.eligible).toBe(false);
-    expect(status.status).toBe("claimed");
-    expect(status.claimedAt).toBeTypeOf("number");
-    expect(status.claimedKingdomId).toBe(String(kingdomId));
+    // En dispositivo 1 y 2 se ve la misma falta de capacidad (Mercado 0 => tope 10.000)
+    const s1Low = await dev1.asUser.query(api.compensation.getOutageCompensationStatus, {});
+    const s2Low = await dev2.asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(s1Low.canClaim).toBe(false);
+    expect(s2Low.canClaim).toBe(false);
 
-    const claimAfterReload = await reloadedSession.mutation(api.compensation.claimOutageCompensation, { kingdomId });
-    expect(claimAfterReload.alreadyClaimed).toBe(true);
-    expect(claimAfterReload.appliedImmediately).toBe(false);
+    // Tras ampliar Mercado a 14, ambos reflejan canClaim = true; cobra en dispositivo 1
+    await setBuildingLevel(t, kingdomId, "mercado", 14);
+    const s2Ready = await dev2.asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(s2Ready.canClaim).toBe(true);
 
-    const resAfterReload = await getResourcesDoc(t, kingdomId);
-    expect(resAfterReload!.gold).toBe(initialRes!.gold + 30_000);
-  });
-
-  test("7. Dos dispositivos/sesiones reales (Convex Auth signIn) comparten UID canónico y no duplican (tanto tras fundar como pre-fundación)", async () => {
-    const t = createTestBackend();
-
-    // Caso A: Dos sesiones reales con reino ya fundado
-    const device1 = await signIn(t, "signUp", "Isabel de León", "corona-2026");
-    const device2 = await signIn(t, "signIn", "isabel de león", "corona-2026");
-    expect(device1.userId).toBe(device2.userId);
-    expect(device1.subject).not.toBe(device2.subject);
-
-    const kingdomId = await foundKingdom(t, device1.asUser, "Reino de León");
-    const beforeRes = await getResourcesDoc(t, kingdomId);
-
-    const claimDev1 = await device1.asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    const before = await getResourcesDoc(t, kingdomId);
+    const claimDev1 = await dev1.asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
     expect(claimDev1.alreadyClaimed).toBe(false);
     expect(claimDev1.status).toBe("claimed");
 
-    const statusDev2 = await device2.asUser.query(api.compensation.getOutageCompensationStatus, {});
-    expect(statusDev2.eligible).toBe(false);
-    expect(statusDev2.status).toBe("claimed");
+    // Dispositivo 2 ve inmediatamente el estado ya cobrado y no puede duplicar
+    const s2After = await dev2.asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(s2After.eligible).toBe(false);
+    expect(s2After.canClaim).toBe(false);
+    expect(s2After.status).toBe("claimed");
 
-    const claimDev2 = await device2.asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
+    const claimDev2 = await dev2.asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
     expect(claimDev2.alreadyClaimed).toBe(true);
     expect(claimDev2.appliedImmediately).toBe(false);
 
-    const afterRes = await getResourcesDoc(t, kingdomId);
-    expect(afterRes!.gold).toBe(beforeRes!.gold + 30_000);
-
-    // Caso B: Dispositivo 1 reserva antes de fundar ("pending") y Dispositivo 2 intenta reclamar / funda
-    const mob1 = await signIn(t, "signUp", "Pelayo de Asturias", "covadonga-2026");
-    const mob2 = await signIn(t, "signIn", "Pelayo de Asturias", "covadonga-2026");
-    expect(mob1.userId).toBe(mob2.userId);
-
-    const pendingDev1 = await mob1.asUser.mutation(api.compensation.claimOutageCompensation, {});
-    expect(pendingDev1.status).toBe("pending");
-    expect(pendingDev1.alreadyClaimed).toBe(false);
-
-    const pendingDev2 = await mob2.asUser.mutation(api.compensation.claimOutageCompensation, {});
-    expect(pendingDev2.status).toBe("pending");
-    expect(pendingDev2.alreadyClaimed).toBe(true);
-
-    const asturiasId = await foundKingdom(t, mob2.asUser, "Asturias");
-    const asturiasRes = await getResourcesDoc(t, asturiasId);
-    expect(asturiasRes!.gold).toBeGreaterThanOrEqual(30_000);
-    expect(asturiasRes!.gold).toBeLessThan(60_000);
-
-    const finalMob1 = await mob1.asUser.query(api.compensation.getOutageCompensationStatus, {});
-    expect(finalMob1.status).toBe("claimed");
-    expect(finalMob1.eligible).toBe(false);
+    const after = await getResourcesDoc(t, kingdomId);
+    expect(after!.gold).toBe(before!.gold + 30_000);
   });
 
-  test("8. Registro auditable persistente en outageCompensations guarda todos los metadatos exactos", async () => {
+  test("16. Un cliente no puede modificar cantidades, estado ni suplantar identidades", async () => {
     const t = createTestBackend();
-    const asUser = t.withIdentity(identity("user-audit-1|session-a"));
-    const kingdomId = await foundKingdom(t, asUser, "Reino Auditado");
-
-    await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
-
-    const records = await t.run(async (ctx) =>
-      ctx.db
-        .query("outageCompensations")
-        .withIndex("by_user", (q) => q.eq("userId", "user-audit-1"))
-        .collect()
-    );
-    expect(records).toHaveLength(1);
-    const rec = records[0];
-    expect(rec.userId).toBe("user-audit-1");
-    expect(rec.incidentId).toBe(OUTAGE_COMPENSATION.INCIDENT_ID);
-    expect(rec.campaignId).toBe(OUTAGE_COMPENSATION.CAMPAIGN_ID);
-    expect(rec.status).toBe("claimed");
-    expect(rec.resources).toEqual({
-      gold: 30_000,
-      wood: 30_000,
-      stone: 30_000,
-      iron: 30_000,
-      food: 30_000,
-    });
-    expect(rec.claimedKingdomId).toBe(kingdomId);
-    expect(rec.createdAt).toBe(T0);
-    expect(rec.claimedAt).toBe(T0);
-  });
-
-  test("9. Aislamiento entre jugadores: los recursos de otros jugadores no se modifican ni pierden elegibilidad", async () => {
-    const t = createTestBackend();
-    const userA = t.withIdentity(identity("user-iso-a"));
-    const userB = t.withIdentity(identity("user-iso-b"));
-
-    const kingdomA = await foundKingdom(t, userA, "Reino A");
-    const kingdomB = await foundKingdom(t, userB, "Reino B");
-
-    const beforeB = await getResourcesDoc(t, kingdomB);
-    await userA.mutation(api.compensation.claimOutageCompensation, { kingdomId: kingdomA });
-
-    const afterB = await getResourcesDoc(t, kingdomB);
-    expect(afterB!.gold).toBe(beforeB!.gold);
-    expect(afterB!.wood).toBe(beforeB!.wood);
-    expect(afterB!.stone).toBe(beforeB!.stone);
-    expect(afterB!.iron).toBe(beforeB!.iron);
-    expect(afterB!.food).toBe(beforeB!.food);
-
-    const statusB = await userB.query(api.compensation.getOutageCompensationStatus, {});
-    expect(statusB.eligible).toBe(true);
-  });
-
-  test("10. Transacciones económicas normales (spendResource, transactions y liquidación) no se ven alteradas", async () => {
-    const t = createTestBackend();
-    const userA = t.withIdentity(identity("user-econ-a"));
-    const kingdomA = await foundKingdom(t, userA, "Reino Económico");
-
-    await userA.mutation(api.compensation.claimOutageCompensation, { kingdomId: kingdomA });
-    const resABeforeSpend = await getResourcesDoc(t, kingdomA);
-
-    const spend1 = await userA.mutation(api.economy.spendResource, {
-      kingdomId: kingdomA,
-      idempotencyKey: "gasto-normal-1",
-      resourceType: "gold",
-      amount: 500,
-      reason: "Compra de provisiones",
-    });
-    expect(spend1.idempotentDuplicate).toBe(false);
-
-    const spendDup = await userA.mutation(api.economy.spendResource, {
-      kingdomId: kingdomA,
-      idempotencyKey: "gasto-normal-1",
-      resourceType: "gold",
-      amount: 500,
-      reason: "Compra de provisiones",
-    });
-    expect(spendDup.idempotentDuplicate).toBe(true);
-
-    const resAAfterSpend = await getResourcesDoc(t, kingdomA);
-    expect(resAAfterSpend!.gold).toBe(resABeforeSpend!.gold - 500);
-
-    const txsA = await t.run(async (ctx) =>
-      ctx.db
-        .query("transactions")
-        .withIndex("by_kingdom_and_key", (q) => q.eq("kingdomId", kingdomA))
-        .collect()
-    );
-    expect(txsA).toHaveLength(1);
-    expect(txsA[0].idempotencyKey).toBe("gasto-normal-1");
-  });
-
-  test("11. El cliente no puede manipular recursos, cantidades, usuario ni estado", async () => {
-    const t = createTestBackend();
-    const attacker = t.withIdentity(identity("user-attacker"));
-    const victim = t.withIdentity(identity("user-victim"));
+    const attacker = t.withIdentity(identity("user-p6-attacker"));
+    const victim = t.withIdentity(identity("user-p6-victim"));
 
     const attackerKingdom = await foundKingdom(t, attacker, "Reino Atacante");
     const victimKingdom = await foundKingdom(t, victim, "Reino Víctima");
+    await setBuildingLevel(t, attackerKingdom, "mercado", 15);
+    await setBuildingLevel(t, victimKingdom, "mercado", 15);
 
-    // Intentos de inyectar argumentos no autorizados son rechazados por el validador estricto de Convex
+    // Argumentos extra rechazados por el validador estricto de Convex
     await expect(
       attacker.mutation(api.compensation.claimOutageCompensation, {
         kingdomId: attackerKingdom,
@@ -515,126 +671,77 @@ describe("Punto 6: Compensación única por caída del servidor (+30.000 × 5)",
     await expect(
       attacker.mutation(api.compensation.claimOutageCompensation, {
         kingdomId: attackerKingdom,
-        amount: 1_000_000,
+        bypassCapacityCheck: true,
       } as any)
     ).rejects.toThrow();
 
     await expect(
       attacker.mutation(api.compensation.claimOutageCompensation, {
-        userId: "user-victim",
+        userId: "user-p6-victim",
       } as any)
     ).rejects.toThrow();
 
-    await expect(
-      attacker.mutation(api.compensation.claimOutageCompensation, {
-        campaignId: "outage_2026_general_v99",
-        status: "unclaimed",
-      } as any)
-    ).rejects.toThrow();
-
-    // Intentar reclamar sobre el reino de otro usuario es rechazado
     await expect(
       attacker.mutation(api.compensation.claimOutageCompensation, {
         kingdomId: victimKingdom,
       })
     ).rejects.toThrow(/no autorizado/i);
+
+    // Invitados sin sesión y demo Iberia excluidos
+    await expect(t.mutation(api.compensation.claimOutageCompensation, {})).rejects.toThrow(/iniciar sesión/i);
+    const demoCaller = t.withIdentity(identity(DEMO_USER_ID));
+    const demoStatus = await demoCaller.query(api.compensation.getOutageCompensationStatus, {});
+    expect(demoStatus.status).toBe("excluded");
+    expect(demoStatus.canClaim).toBe(false);
+    await expect(demoCaller.mutation(api.compensation.claimOutageCompensation, {})).rejects.toThrow(/excluido/i);
   });
 
-  test("12. Quien ya recibió compensación no puede volver a recibirla por otra vía (sin kingdomId, hook de fundación, resetKingdom o cambio de nombre/versión de campaña)", async () => {
+  test("17. Las cantidades de recursos anteriores a una reclamación fallida permanecen intactas", async () => {
     const t = createTestBackend();
-    const asUser = t.withIdentity(identity("user-all-paths"));
-    const kingdomId = await foundKingdom(t, asUser, "Reino Principal");
+    const asUser = t.withIdentity(identity("user-p6-atomic-rollback"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Rollback");
 
-    // Reclama llamando SIN kingdomId (el servidor resuelve su reino fundado)
-    const initial = await asUser.mutation(api.compensation.claimOutageCompensation, {});
-    expect(initial.alreadyClaimed).toBe(false);
-    expect(initial.appliedImmediately).toBe(true);
-    expect(initial.claimedKingdomId).toBe(kingdomId);
-
-    const afterInitial = await getResourcesDoc(t, kingdomId);
-
-    // 12a. Volver a llamar CON kingdomId -> bloqueado
-    const withId = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
-    expect(withId.alreadyClaimed).toBe(true);
-    expect(withId.appliedImmediately).toBe(false);
-
-    // 12b. Invocar directamente applyPendingOutageCompensationOnFounding -> devuelve false sin modificar recursos
-    const hookApplied = await t.run(async (ctx) => {
-      const resDoc = await ctx.db
+    // Mercado 11 (tope 32.000): 4 recursos con espacio suficiente y 1 recurso (comida) sin espacio.
+    // Con tiempo anterior, settleRelationalKingdomEconomy intentaría actualizar recursos antes del fallo;
+    // al lanzar ConvexError la transacción revierte completamente todos los saldos y lastUpdated.
+    await setBuildingLevel(t, kingdomId, "mercado", 11);
+    const customTime = T0 - 3_600_000;
+    await t.run(async (ctx) => {
+      const doc = await ctx.db
         .query("resources")
         .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
         .first();
-      return await applyPendingOutageCompensationOnFounding(
-        ctx,
-        "user-all-paths|otra-sesion",
-        kingdomId,
-        resDoc!._id,
-        T0 + 5000
-      );
-    });
-    expect(hookApplied).toBe(false);
-    expect((await getResourcesDoc(t, kingdomId))!.gold).toBe(afterInitial!.gold);
-
-    // 12c. Reiniciar reino y refundar -> NO vuelve a conceder
-    await asUser.mutation(api.economy.resetKingdom, { kingdomId });
-    await asUser.mutation(api.economy.getOrInitializeKingdom, {
-      name: "Reino Refundado",
-      civilization: "vikingos",
-    });
-    const afterRefound = await getResourcesDoc(t, kingdomId);
-    expect(afterRefound!.gold).toBeLessThan(10_000);
-    const afterRefoundClaim = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
-    expect(afterRefoundClaim.alreadyClaimed).toBe(true);
-
-    // 12d. Cambio de versión o nombre de campaña para el mismo incidente NO reactiva la compensación:
-    // Simula un registro previo guardado con otro campaignId/versión pero mismo incidentId (o prefijo heredado sin incidentId)
-    const renamedCampUser = t.withIdentity(identity("user-renamed-campaign"));
-    const renamedKingdom = await foundKingdom(t, renamedCampUser, "Reino Campaña");
-    const beforeRenamed = await getResourcesDoc(t, renamedKingdom);
-
-    await t.run(async (ctx) => {
-      await ctx.db.insert("outageCompensations", {
-        userId: "user-renamed-campaign",
-        incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
-        campaignId: "campana_nombre_renombrado_v99",
-        status: "claimed",
-        resources: OUTAGE_COMPENSATION.RESOURCES,
-        claimedKingdomId: renamedKingdom,
-        createdAt: T0 - 100_000,
-        claimedAt: T0 - 100_000,
+      await ctx.db.patch(doc!._id, {
+        gold: 1_000,
+        wood: 1_200,
+        stone: 800,
+        iron: 400,
+        food: 5_000, // disponible = 27.000 < 30.000
+        lastUpdated: customTime,
+        settlementInitialized: true,
       });
     });
 
-    const renamedStatus = await renamedCampUser.query(api.compensation.getOutageCompensationStatus, {});
-    expect(renamedStatus.eligible).toBe(false);
-    expect(renamedStatus.status).toBe("claimed");
+    const snapshotBefore = await getResourcesDoc(t, kingdomId);
 
-    const renamedAttempt = await renamedCampUser.mutation(api.compensation.claimOutageCompensation, {
-      kingdomId: renamedKingdom,
-    });
-    expect(renamedAttempt.alreadyClaimed).toBe(true);
-    expect((await getResourcesDoc(t, renamedKingdom))!.gold).toBe(beforeRenamed!.gold);
+    await expect(
+      asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId })
+    ).rejects.toThrow(/comida/i);
 
-    // También bloquea si un registro heredado carece de incidentId pero su campaignId pertenece al incidente ("outage_2026_general_v0")
-    const legacyNoIncidentUser = t.withIdentity(identity("user-legacy-no-incident"));
-    const legacyKingdom = await foundKingdom(t, legacyNoIncidentUser, "Reino Legacy");
-    await t.run(async (ctx) => {
-      await ctx.db.insert("outageCompensations", {
-        userId: "user-legacy-no-incident",
-        campaignId: `${OUTAGE_COMPENSATION.INCIDENT_ID}_v0`,
-        status: "claimed",
-        resources: OUTAGE_COMPENSATION.RESOURCES,
-        claimedKingdomId: legacyKingdom,
-        createdAt: T0 - 200_000,
-        claimedAt: T0 - 200_000,
-      });
-    });
-    const legacyStatus = await legacyNoIncidentUser.query(api.compensation.getOutageCompensationStatus, {});
-    expect(legacyStatus.eligible).toBe(false);
-    expect(legacyStatus.status).toBe("claimed");
-    const legacyAttempt = await legacyNoIncidentUser.mutation(api.compensation.claimOutageCompensation, {
-      kingdomId: legacyKingdom,
-    });
-    expect(legacyAttempt.alreadyClaimed).toBe(true);
+    const snapshotAfter = await getResourcesDoc(t, kingdomId);
+    expect(snapshotAfter!.gold).toBe(snapshotBefore!.gold);
+    expect(snapshotAfter!.wood).toBe(snapshotBefore!.wood);
+    expect(snapshotAfter!.stone).toBe(snapshotBefore!.stone);
+    expect(snapshotAfter!.iron).toBe(snapshotBefore!.iron);
+    expect(snapshotAfter!.food).toBe(snapshotBefore!.food);
+    expect(snapshotAfter!.lastUpdated).toBe(snapshotBefore!.lastUpdated);
+
+    const records = await t.run(async (ctx) =>
+      ctx.db
+        .query("outageCompensations")
+        .withIndex("by_user", (q) => q.eq("userId", "user-p6-atomic-rollback"))
+        .collect()
+    );
+    expect(records).toHaveLength(0);
   });
 });

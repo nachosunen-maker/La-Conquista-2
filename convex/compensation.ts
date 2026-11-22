@@ -1,10 +1,43 @@
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
 import { v, ConvexError } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { OUTAGE_COMPENSATION } from "./balanceConfig";
 import { isDemoAccountUserId } from "./kingdomAccess";
 import { settleRelationalKingdomEconomy } from "./economy";
+import { storageCapacity } from "./economyExtended";
+import { validateBuildingCollection } from "./buildingRules";
+import { readCompletedTechnologyIds, computeTechnologyModifiers } from "./technologyRules";
+import { getCivilizationPassive } from "./civilizationRules";
+
+const COMPENSATION_RESOURCE_KEYS = ["gold", "wood", "stone", "iron", "food"] as const;
+type CompensationResourceKey = (typeof COMPENSATION_RESOURCE_KEYS)[number];
+
+const COMPENSATION_RESOURCE_LABELS: Record<CompensationResourceKey, string> = {
+  gold: "oro",
+  wood: "madera",
+  stone: "piedra",
+  iron: "hierro",
+  food: "comida",
+};
+
+export interface ResourceCapacityCheck {
+  resource: CompensationResourceKey;
+  label: string;
+  current: number;
+  maxCapacity: number;
+  available: number;
+  required: number;
+  additionalNeeded: number;
+  sufficient: boolean;
+}
+
+export interface CompensationCapacityReport {
+  maxCapacity: number;
+  requiredPerResource: number;
+  allSufficient: boolean;
+  insufficientResources: ResourceCapacityCheck[];
+  resources: Record<CompensationResourceKey, ResourceCapacityCheck>;
+}
 
 function canonicalUserId(raw?: string | null): string {
   if (!raw) return "";
@@ -40,12 +73,11 @@ async function findIncidentCompensationState(ctx: QueryCtx | MutationCtx, userId
     .collect();
   const matching = allForUser.filter(matchesOutageIncident);
   const claimed = matching.find((r) => r.status === "claimed") ?? null;
-  const pending = matching.find((r) => r.status === "pending") ?? null;
+  const legacyPending = matching.find((r) => r.status === "pending") ?? null;
   return {
     matching,
     claimed,
-    pending,
-    effective: claimed ?? pending ?? null,
+    legacyPending,
   };
 }
 
@@ -72,50 +104,68 @@ async function findOwnedFoundedKingdom(ctx: QueryCtx | MutationCtx, userId: stri
       .withIndex("by_kingdom", (q) => q.eq("kingdomId", k._id))
       .first();
     if (resourcesDoc) {
-      return k;
+      return { kingdom: k, resourcesDoc };
     }
   }
   return null;
 }
 
-/**
- * Aplica una compensación en estado "pending" al documento de recursos de un reino recién fundado.
- * Es idempotente y respeta el excedente por encima del tope de almacén.
- */
-export async function applyPendingOutageCompensationOnFounding(
-  ctx: MutationCtx,
-  rawUserId: string,
-  kingdomId: Id<"kingdoms">,
-  resourcesId: Id<"resources">,
-  now: number
-): Promise<boolean> {
-  const userId = canonicalUserId(rawUserId);
-  if (!userId || isDemoAccount(userId)) return false;
+async function computeKingdomStorageCapacity(ctx: QueryCtx | MutationCtx, kingdom: any): Promise<number> {
+  const [buildings, completedTechnologies] = await Promise.all([
+    ctx.db
+      .query("buildings")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+      .collect(),
+    readCompletedTechnologyIds(ctx, kingdom._id),
+  ]);
+  const collection = validateBuildingCollection(buildings);
+  const mercadoLevel = collection.success ? (collection.levels.mercado ?? 0) : 0;
+  const techModifiers = computeTechnologyModifiers(completedTechnologies);
+  const civPassive = getCivilizationPassive(kingdom.civilization);
+  const storageMultiplier =
+    techModifiers.storageCapacity * (civPassive.storageCapacityMultiplier ?? 1.0);
+  return storageCapacity(mercadoLevel, storageMultiplier);
+}
 
-  const { claimed, pending } = await findIncidentCompensationState(ctx, userId);
-  if (claimed || !pending) {
-    return false;
+function evaluateCompensationStorageCapacity(
+  currentResources: Record<CompensationResourceKey, number>,
+  maxCapacity: number,
+  reward: Record<CompensationResourceKey, number>
+): CompensationCapacityReport {
+  const resources = {} as Record<CompensationResourceKey, ResourceCapacityCheck>;
+  const insufficientResources: ResourceCapacityCheck[] = [];
+
+  for (const key of COMPENSATION_RESOURCE_KEYS) {
+    const current = Number.isFinite(currentResources[key]) ? currentResources[key] : 0;
+    const required = reward[key];
+    const rawAvailable = maxCapacity - current;
+    const available = Math.max(0, rawAvailable);
+    const sufficient = rawAvailable >= required;
+    const additionalNeeded = sufficient ? 0 : Math.ceil(Math.max(0, required - rawAvailable));
+
+    const entry: ResourceCapacityCheck = {
+      resource: key,
+      label: COMPENSATION_RESOURCE_LABELS[key],
+      current,
+      maxCapacity,
+      available,
+      required,
+      additionalNeeded,
+      sufficient,
+    };
+    resources[key] = entry;
+    if (!sufficient) {
+      insufficientResources.push(entry);
+    }
   }
 
-  const resDoc = await ctx.db.get(resourcesId);
-  if (!resDoc || resDoc.kingdomId !== kingdomId) return false;
-
-  await ctx.db.patch(resourcesId, {
-    gold: resDoc.gold + pending.resources.gold,
-    wood: resDoc.wood + pending.resources.wood,
-    stone: resDoc.stone + pending.resources.stone,
-    iron: resDoc.iron + pending.resources.iron,
-    food: resDoc.food + pending.resources.food,
-  });
-
-  await ctx.db.patch(pending._id, {
-    status: "claimed",
-    incidentId: pending.incidentId ?? OUTAGE_COMPENSATION.INCIDENT_ID,
-    claimedKingdomId: kingdomId,
-    claimedAt: now,
-  });
-
-  return true;
+  return {
+    maxCapacity,
+    requiredPerResource: reward.gold,
+    allSufficient: insufficientResources.length === 0,
+    insufficientResources,
+    resources,
+  };
 }
 
 export const getOutageCompensationStatus = query({
@@ -126,11 +176,13 @@ export const getOutageCompensationStatus = query({
       return {
         authenticated: false,
         eligible: false,
+        canClaim: false,
         incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
         campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
         status: "excluded" as const,
         resources: OUTAGE_COMPENSATION.RESOURCES,
         hasFoundedKingdom: false,
+        capacityReport: null as CompensationCapacityReport | null,
         claimedAt: null as number | null,
         claimedKingdomId: null as string | null,
       };
@@ -140,32 +192,56 @@ export const getOutageCompensationStatus = query({
       return {
         authenticated: true,
         eligible: false,
+        canClaim: false,
         incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
         campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
         status: "excluded" as const,
         resources: OUTAGE_COMPENSATION.RESOURCES,
         hasFoundedKingdom: true,
+        capacityReport: null as CompensationCapacityReport | null,
         claimedAt: null as number | null,
         claimedKingdomId: null as string | null,
       };
     }
 
-    const [compState, foundedKingdom] = await Promise.all([
+    const [compState, owned] = await Promise.all([
       findIncidentCompensationState(ctx, userId),
       findOwnedFoundedKingdom(ctx, userId),
     ]);
-    const record = compState.effective;
+    const claimedRecord = compState.claimed;
+
+    let capacityReport: CompensationCapacityReport | null = null;
+    if (owned && !claimedRecord) {
+      const maxCapacity = await computeKingdomStorageCapacity(ctx, owned.kingdom);
+      capacityReport = evaluateCompensationStorageCapacity(
+        {
+          gold: owned.resourcesDoc.gold,
+          wood: owned.resourcesDoc.wood,
+          stone: owned.resourcesDoc.stone,
+          iron: owned.resourcesDoc.iron,
+          food: owned.resourcesDoc.food,
+        },
+        maxCapacity,
+        OUTAGE_COMPENSATION.RESOURCES
+      );
+    }
+
+    const status = claimedRecord ? ("claimed" as const) : ("unclaimed" as const);
+    const hasFoundedKingdom = Boolean(owned);
+    const canClaim = !claimedRecord && hasFoundedKingdom && Boolean(capacityReport?.allSufficient);
 
     return {
       authenticated: true,
-      eligible: !record,
+      eligible: !claimedRecord,
+      canClaim,
       incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
       campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
-      status: record ? record.status : ("unclaimed" as const),
-      resources: record?.resources ?? OUTAGE_COMPENSATION.RESOURCES,
-      hasFoundedKingdom: Boolean(foundedKingdom),
-      claimedAt: record?.claimedAt ?? null,
-      claimedKingdomId: record?.claimedKingdomId ? String(record.claimedKingdomId) : null,
+      status,
+      resources: claimedRecord?.resources ?? OUTAGE_COMPENSATION.RESOURCES,
+      hasFoundedKingdom,
+      capacityReport,
+      claimedAt: claimedRecord?.claimedAt ?? null,
+      claimedKingdomId: claimedRecord?.claimedKingdomId ? String(claimedRecord.claimedKingdomId) : null,
     };
   },
 });
@@ -177,7 +253,7 @@ export const claimOutageCompensation = mutation({
   handler: async (ctx, args) => {
     const userId = await resolveVerifiedUserId(ctx);
     if (!userId) {
-      throw new ConvexError("Debes iniciar sesión para reclamar la compensación extraordinaria.");
+      throw new ConvexError("Debes iniciar sesión para recibir el regalo único.");
     }
     if (isDemoAccount(userId)) {
       throw new ConvexError("El reino de demostración Iberia está excluido de la compensación.");
@@ -197,19 +273,16 @@ export const claimOutageCompensation = mutation({
       }
     }
 
-    const { effective: existing } = await findIncidentCompensationState(ctx, userId);
-    if (existing) {
+    const { claimed, legacyPending } = await findIncidentCompensationState(ctx, userId);
+    if (claimed) {
       return {
         success: true,
         alreadyClaimed: true,
-        status: existing.status,
+        status: claimed.status,
         appliedImmediately: false,
-        resources: existing.resources,
-        claimedKingdomId: existing.claimedKingdomId ?? null,
-        message:
-          existing.status === "claimed"
-            ? "La compensación por la caída ya fue acreditada anteriormente en tu cuenta."
-            : "Tu compensación ya está reservada en la cuenta y se acreditará al fundar tu reino.",
+        resources: claimed.resources,
+        claimedKingdomId: claimed.claimedKingdomId ?? null,
+        message: "El regalo único ya fue recibido anteriormente en tu cuenta.",
       };
     }
 
@@ -224,22 +297,58 @@ export const claimOutageCompensation = mutation({
       }
     }
     if (!targetKingdom) {
-      targetKingdom = await findOwnedFoundedKingdom(ctx, userId);
+      const owned = await findOwnedFoundedKingdom(ctx, userId);
+      targetKingdom = owned?.kingdom ?? null;
+    }
+
+    if (!targetKingdom) {
+      throw new ConvexError(
+        "Debes fundar tu reino y disponer de capacidad de almacén suficiente para recibir los 30.000 de cada recurso."
+      );
     }
 
     const now = Date.now();
     const reward = { ...OUTAGE_COMPENSATION.RESOURCES };
+    const settled = await settleRelationalKingdomEconomy(ctx, targetKingdom, userId, now);
+    const maxCapacity =
+      settled.extended?.storageCapacity ?? (await computeKingdomStorageCapacity(ctx, targetKingdom));
 
-    if (targetKingdom) {
-      const settled = await settleRelationalKingdomEconomy(ctx, targetKingdom, userId, now);
-      await ctx.db.patch(settled.resources._id, {
-        gold: settled.settledResources.gold + reward.gold,
-        wood: settled.settledResources.wood + reward.wood,
-        stone: settled.settledResources.stone + reward.stone,
-        iron: settled.settledResources.iron + reward.iron,
-        food: settled.settledResources.food + reward.food,
+    const capacityReport = evaluateCompensationStorageCapacity(
+      settled.settledResources,
+      maxCapacity,
+      reward
+    );
+
+    if (!capacityReport.allSufficient) {
+      const details = capacityReport.insufficientResources
+        .map(
+          (item) =>
+            `${item.label} (necesita ${item.additionalNeeded} de espacio adicional; almacenado ${Math.floor(item.current)}, disponible ${Math.floor(item.available)} de ${item.maxCapacity})`
+        )
+        .join("; ");
+      throw new ConvexError(
+        `Capacidad de almacenamiento insuficiente para recibir el regalo único (+30.000 por recurso). Recursos sin espacio suficiente: ${details}.`
+      );
+    }
+
+    await ctx.db.patch(settled.resources._id, {
+      gold: settled.settledResources.gold + reward.gold,
+      wood: settled.settledResources.wood + reward.wood,
+      stone: settled.settledResources.stone + reward.stone,
+      iron: settled.settledResources.iron + reward.iron,
+      food: settled.settledResources.food + reward.food,
+    });
+
+    if (legacyPending) {
+      await ctx.db.patch(legacyPending._id, {
+        status: "claimed",
+        incidentId: legacyPending.incidentId ?? OUTAGE_COMPENSATION.INCIDENT_ID,
+        campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
+        resources: reward,
+        claimedKingdomId: targetKingdom._id,
+        claimedAt: now,
       });
-
+    } else {
       await ctx.db.insert("outageCompensations", {
         userId,
         incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
@@ -250,35 +359,18 @@ export const claimOutageCompensation = mutation({
         createdAt: now,
         claimedAt: now,
       });
-
-      return {
-        success: true,
-        alreadyClaimed: false,
-        status: "claimed" as const,
-        appliedImmediately: true,
-        resources: reward,
-        claimedKingdomId: targetKingdom._id,
-        message: "Compensación acreditada: +30.000 de oro, madera, piedra, hierro y alimentos añadidos a tus reservas.",
-      };
     }
-
-    await ctx.db.insert("outageCompensations", {
-      userId,
-      incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
-      campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
-      status: "pending",
-      resources: reward,
-      createdAt: now,
-    });
 
     return {
       success: true,
       alreadyClaimed: false,
-      status: "pending" as const,
-      appliedImmediately: false,
+      status: "claimed" as const,
+      appliedImmediately: true,
       resources: reward,
-      claimedKingdomId: null,
-      message: "Compensación reservada en tu cuenta: recibirás +30.000 de cada recurso automáticamente al fundar tu reino.",
+      claimedKingdomId: targetKingdom._id,
+      maxCapacity,
+      message:
+        "Regalo único recibido: +30.000 de oro, madera, piedra, hierro y comida añadidos a tus almacenes.",
     };
   },
 });

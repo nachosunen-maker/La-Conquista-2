@@ -18,7 +18,6 @@ import { getCivilizationPassive, normalizeCivilizationId } from "./civilizationR
 import { CIVILIZATIONS } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
 import { pickRandomUniqueColor } from "./kingdomColors";
-import { applyPendingOutageCompensationOnFounding } from "./compensation";
 import {
   simulateEconomicProgress,
   validatePopulationIntegrity,
@@ -598,10 +597,6 @@ export const getOrInitializeKingdom = mutation({
         }
       }
 
-      if (newResourcesId && existing.name && existing.name.trim()) {
-        await applyPendingOutageCompensationOnFounding(ctx, callerUserId, existing._id, newResourcesId as any, now);
-      }
-
       const settled = await settleRelationalKingdomEconomy(ctx, existing, callerUserId, now);
       return legacyKingdomResponse(existing, settled);
     }
@@ -655,7 +650,6 @@ export const getOrInitializeKingdom = mutation({
     }
     await insertInitialBuildings(ctx, kingdomId);
     await ensureHomeTerritory(ctx, kingdomId);
-    await applyPendingOutageCompensationOnFounding(ctx, callerUserId, kingdomId, resourcesId as any, now);
     const kingdom = await ctx.db.get(kingdomId);
     if (!kingdom) throw new Error("No se pudo recuperar el reino recién inicializado.");
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, callerUserId, now);

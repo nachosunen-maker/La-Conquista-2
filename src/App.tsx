@@ -241,14 +241,33 @@ const cancelConstructionMutation = makeFunctionReference<"mutation">("kingdoms:c
 const getOutageCompensationStatusQuery = makeFunctionReference<"query">("compensation:getOutageCompensationStatus");
 const claimOutageCompensationMutation = makeFunctionReference<"mutation">("compensation:claimOutageCompensation");
 
+interface CompensationResourceCapacityCheck {
+  resource: "gold" | "wood" | "stone" | "iron" | "food";
+  label: string;
+  current: number;
+  maxCapacity: number;
+  available: number;
+  required: number;
+  additionalNeeded: number;
+  sufficient: boolean;
+}
+
 interface OutageCompensationStatus {
   authenticated: boolean;
   eligible: boolean;
+  canClaim: boolean;
   incidentId?: string;
   campaignId: string;
-  status: "unclaimed" | "pending" | "claimed" | "excluded";
+  status: "unclaimed" | "claimed" | "excluded";
   resources: { gold: number; wood: number; stone: number; iron: number; food: number };
   hasFoundedKingdom: boolean;
+  capacityReport: {
+    maxCapacity: number;
+    requiredPerResource: number;
+    allSufficient: boolean;
+    insufficientResources: CompensationResourceCapacityCheck[];
+    resources: Record<string, CompensationResourceCapacityCheck>;
+  } | null;
   claimedAt: number | null;
   claimedKingdomId: string | null;
 }
@@ -264,6 +283,11 @@ function OutageCompensationCard(props: {
   const { status, kingdomId, onClaim, busy, feedback, error } = props;
   if (!status || !status.authenticated || status.status === "excluded") return null;
 
+  const isClaimed = status.status === "claimed";
+  const hasCapacityInfo = Boolean(status.hasFoundedKingdom && status.capacityReport);
+  const insufficient = status.capacityReport?.insufficientResources ?? [];
+  const canClaimNow = !isClaimed && status.canClaim && !busy;
+
   return (
     <section className="bg-gradient-to-r from-[#1c160d] via-[#17130d] to-[#13100b] border border-[#d4af37]/40 rounded-xl p-4 shadow-md space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -276,56 +300,66 @@ function OutageCompensationCard(props: {
               <h3 className="text-sm font-serif font-bold text-[#f7f2e4] uppercase tracking-wider">
                 Compensación del Reino por Caída del Servicio
               </h3>
-              {status.status === "claimed" && (
+              {isClaimed && (
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-700/60 text-emerald-300">
-                  Ya acreditada
-                </span>
-              )}
-              {status.status === "pending" && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-950/60 border border-sky-700/60 text-sky-300">
-                  Reservada para fundación
+                  Regalo recibido
                 </span>
               )}
             </div>
             <p className="text-xs text-[#c7beac]">
-              Cada cuenta recibe por única vez{' '}
+              Cada cuenta puede recibir una única vez{' '}
               <strong className="text-[#d4af37]">
-                +30.000 oro, +30.000 madera, +30.000 piedra, +30.000 hierro y +30.000 alimentos
+                +30.000 oro, +30.000 madera, +30.000 piedra, +30.000 hierro y +30.000 comida
               </strong>{' '}
-              sin recorte por capacidad de almacén.
+              cuando tus almacenes tengan espacio suficiente para los cinco recursos.
             </p>
           </div>
         </div>
 
-        {status.status === "unclaimed" && (
+        {!isClaimed && (
           <button
             type="button"
-            disabled={busy}
+            disabled={!canClaimNow}
+            aria-busy={busy}
             onClick={() => onClaim(kingdomId)}
-            className="px-4 py-2 bg-[#d4af37] hover:bg-[#e5c158] text-[#110e0a] font-serif font-bold text-xs uppercase tracking-wider rounded-lg shadow transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer flex-shrink-0"
+            className="px-4 py-2 bg-[#d4af37] hover:bg-[#e5c158] text-[#110e0a] font-serif font-bold text-xs uppercase tracking-wider rounded-lg shadow transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-shrink-0"
           >
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gift className="w-3.5 h-3.5" />}
-            <span>
-              {busy
-                ? kingdomId
-                  ? "Acreditando…"
-                  : "Reservando…"
-                : kingdomId
-                  ? "Reclamar +30.000 recursos"
-                  : "Reservar compensación"}
-            </span>
+            <span>Recibir regalo único</span>
           </button>
         )}
       </div>
 
-      {status.status === "pending" && (
-        <p className="text-[11px] text-sky-300 bg-sky-950/30 border border-sky-900/50 rounded-lg px-3 py-2">
-          Tu compensación ya está reservada en la cuenta y se acreditará automáticamente en cuanto completes la fundación de tu reino.
+      {!isClaimed && busy && (
+        <p className="text-[11px] text-[#f7f2e4] bg-[#2a2012] border border-[#d4af37]/50 rounded-lg px-3 py-2 flex items-center gap-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-[#d4af37] flex-shrink-0" />
+          <span>Procesando solicitud de regalo único en el servidor…</span>
         </p>
       )}
-      {status.status === "claimed" && !feedback && (
+      {!isClaimed && !status.hasFoundedKingdom && (
+        <p className="text-[11px] text-amber-300/90 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
+          Funda primero tu reino y amplía tu capacidad de almacén hasta disponer de al menos 30.000 de espacio libre en cada recurso para poder cobrar el regalo.
+        </p>
+      )}
+      {!isClaimed && hasCapacityInfo && insufficient.length > 0 && (
+        <div className="text-[11px] text-amber-200 bg-amber-950/35 border border-amber-800/50 rounded-lg px-3 py-2 space-y-1">
+          <p className="font-semibold text-amber-300">
+            Espacio insuficiente en almacenes (tope actual: {status.capacityReport!.maxCapacity.toLocaleString('es-ES')} por recurso). Necesitas más espacio en:
+          </p>
+          <ul className="list-disc list-inside space-y-0.5 text-amber-200/90">
+            {insufficient.map((item) => (
+              <li key={item.resource}>
+                <span className="capitalize font-semibold">{item.label}</span>: necesita{' '}
+                <strong>+{item.additionalNeeded.toLocaleString('es-ES')}</strong> de espacio adicional
+                {' '}(almacenado {Math.floor(item.current).toLocaleString('es-ES')}, disponible {Math.floor(item.available).toLocaleString('es-ES')})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {isClaimed && !feedback && (
         <p className="text-[11px] text-emerald-300/90">
-          Compensación recibida{status.claimedAt ? ` el ${new Date(status.claimedAt).toLocaleString('es-ES')}` : ''}. No puede reclamarse de nuevo.
+          El regalo único ya fue recibido{status.claimedAt ? ` el ${new Date(status.claimedAt).toLocaleString('es-ES')}` : ''}. No puede reclamarse de nuevo.
         </p>
       )}
       {feedback && (
@@ -815,6 +849,7 @@ function KingdomOverviewContent() {
   }, [compAccountKey]);
 
   const handleClaimOutageCompensation = async (targetKingdomId?: string) => {
+    if (compBusy) return;
     setCompBusy(true);
     setCompError(null);
     setCompFeedback(null);
@@ -822,7 +857,7 @@ function KingdomOverviewContent() {
       const res: any = await claimOutageCompensation(
         targetKingdomId ? { kingdomId: targetKingdomId as any } : {}
       );
-      setCompFeedback(res?.message ?? 'Compensación aplicada.');
+      setCompFeedback(res?.message ?? 'Regalo único recibido.');
     } catch (err) {
       setCompError(normalizeErrorMessage(err));
     } finally {

@@ -1545,14 +1545,22 @@ describe("Bloque 3: Edificios hasta nivel 200 y compensación por caída", () =>
     ).rejects.toThrow(/nivel máximo.*200/i);
   });
 
-  test("compensación +30.000 por cuenta: excede almacén, es idempotente, soporta pre-fundación y no se duplica tras resetKingdom", async () => {
+  test("compensación +30.000 por cuenta: exige capacidad de almacén, es idempotente, no se auto-concede al fundar y no se duplica tras resetKingdom", async () => {
     const t = createTestBackend();
     const { asUser, kingdomId } = await foundKingdom(t, "user-comp-1", "Reino Compensado");
 
     const statusBefore = await asUser.query(api.compensation.getOutageCompensationStatus, {});
     expect(statusBefore.eligible).toBe(true);
     expect(statusBefore.status).toBe("unclaimed");
+    expect(statusBefore.canClaim).toBe(false);
 
+    // Con Mercado 0 (tope 10.000), rechaza sin acreditar ningún recurso
+    await expect(
+      asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId })
+    ).rejects.toThrow(/capacidad de almacenamiento insuficiente/i);
+
+    // Con Mercado 14 (tope 38.000), todos los recursos iniciales (6.000) tienen >= 30.000 disponibles
+    await setBuildingLevel(t, kingdomId, "mercado", 14);
     const claim1 = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
     expect(claim1.success).toBe(true);
     expect(claim1.alreadyClaimed).toBe(false);
@@ -1560,8 +1568,8 @@ describe("Bloque 3: Edificios hasta nivel 200 y compensación por caída", () =>
     expect(claim1.appliedImmediately).toBe(true);
 
     const fullAfter = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-comp-1" });
-    // Tope de almacén base sin mercado = 10.000; la compensación (+30.000) debe excederlo intacta
     expect(fullAfter!.resources.gold).toBeGreaterThanOrEqual(30_000);
+    expect(fullAfter!.resources.gold).toBeLessThanOrEqual(38_000);
     expect(fullAfter!.resources.wood).toBeGreaterThanOrEqual(30_000);
     expect(fullAfter!.resources.stone).toBeGreaterThanOrEqual(30_000);
     expect(fullAfter!.resources.iron).toBeGreaterThanOrEqual(30_000);
@@ -1587,21 +1595,27 @@ describe("Bloque 3: Edificios hasta nivel 200 y compensación por caída", () =>
     expect(statusAfterRefound.status).toBe("claimed");
     expect(statusAfterRefound.eligible).toBe(false);
 
-    // Pre-fundación: usuario reclama antes de fundar -> estado "pending" -> auto-aplicado al fundar
+    // Pre-fundación: usuario sin reino no recibe el regalo automáticamente al fundar; debe decidir cuándo cobrar con capacidad suficiente
     const preUser = t.withIdentity(identity("user-comp-pre"));
-    const pendingRes = await preUser.mutation(api.compensation.claimOutageCompensation, {});
-    expect(pendingRes.status).toBe("pending");
-    expect(pendingRes.appliedImmediately).toBe(false);
+    await expect(
+      preUser.mutation(api.compensation.claimOutageCompensation, {})
+    ).rejects.toThrow(/fundar tu reino/i);
 
-    await preUser.mutation(api.economy.getOrInitializeKingdom, {
+    const preKingdom = await preUser.mutation(api.economy.getOrInitializeKingdom, {
       name: "Reino Nuevo",
       civilization: "arabes",
     });
-    const foundedAfterPending = await preUser.query(api.kingdoms.getKingdomFull, { userId: "user-comp-pre" });
-    expect(foundedAfterPending!.resources.gold).toBeGreaterThanOrEqual(30_000);
-    expect(foundedAfterPending!.resources.food).toBeGreaterThanOrEqual(30_000);
-    const preStatusFinal = await preUser.query(api.compensation.getOutageCompensationStatus, {});
-    expect(preStatusFinal.status).toBe("claimed");
+    const foundedNotAutoGranted = await preUser.query(api.kingdoms.getKingdomFull, { userId: "user-comp-pre" });
+    expect(foundedNotAutoGranted!.resources.gold).toBeLessThan(10_000);
+    const preStatusAfterFounding = await preUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(preStatusAfterFounding.status).toBe("unclaimed");
+    expect(preStatusAfterFounding.canClaim).toBe(false);
+
+    await setBuildingLevel(t, preKingdom._id, "mercado", 14);
+    const manualClaim = await preUser.mutation(api.compensation.claimOutageCompensation, {
+      kingdomId: preKingdom._id as any,
+    });
+    expect(manualClaim.status).toBe("claimed");
 
     // Iberia está excluido
     const demoCaller = t.withIdentity(identity(DEMO_USER_ID));
