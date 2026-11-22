@@ -168,54 +168,63 @@ async function projectKingdomCapacityState(
   currentResources: Record<CompensationResourceKey, number>;
   maxCapacity: number;
 } | null> {
+  const normalizedCivilization = normalizeCivilizationId(kingdom.civilization);
+  const effectiveKingdom =
+    normalizedCivilization && normalizedCivilization !== kingdom.civilization
+      ? { ...kingdom, civilization: normalizedCivilization }
+      : kingdom;
+
+  // Las consultas a Convex deben quedar fuera del try/catch para que cualquier
+  // error de acceso a datos o infraestructura se propague normalmente y no se enmascare.
+  const [
+    populationDoc,
+    populationJobs,
+    storedBuildings,
+    constructionQueue,
+    trainingQueue,
+    technologyProgress,
+    storedArmyUnits,
+    territories,
+  ] = await Promise.all([
+    ctx.db
+      .query("population" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+      .first(),
+    ctx.db
+      .query("populationJobs" as any)
+      .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+      .collect(),
+    ctx.db
+      .query("buildings")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("constructionQueue")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("trainingQueue")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+      .collect(),
+    ctx.db
+      .query("technologyProgress")
+      .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
+      .collect(),
+    readArmyUnitDocs(ctx, kingdom._id),
+    ctx.db
+      .query("territories")
+      .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
+      .collect(),
+  ]);
+
+  if (!populationDoc) {
+    return null;
+  }
+  const effectivePopulation = populationDoc;
+
+  // El tratamiento de excepciones se delimita estrictamente a las operaciones
+  // de proyección, adaptación y cálculo económico.
   try {
-    const normalizedCivilization = normalizeCivilizationId(kingdom.civilization);
-    const effectiveKingdom =
-      normalizedCivilization && normalizedCivilization !== kingdom.civilization
-        ? { ...kingdom, civilization: normalizedCivilization }
-        : kingdom;
-
-    const [
-      populationDoc,
-      populationJobs,
-      storedBuildings,
-      constructionQueue,
-      trainingQueue,
-      technologyProgress,
-      storedArmyUnits,
-      territories,
-    ] = await Promise.all([
-      ctx.db
-        .query("population" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-        .first(),
-      ctx.db
-        .query("populationJobs" as any)
-        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-        .collect(),
-      ctx.db
-        .query("buildings")
-        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
-        .collect(),
-      ctx.db
-        .query("constructionQueue")
-        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
-        .collect(),
-      ctx.db
-        .query("trainingQueue")
-        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
-        .collect(),
-      ctx.db
-        .query("technologyProgress")
-        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id))
-        .collect(),
-      readArmyUnitDocs(ctx, kingdom._id),
-      ctx.db
-        .query("territories")
-        .withIndex("by_owner", (q) => q.eq("ownerKingdomId", kingdom._id))
-        .collect(),
-    ]);
-
     const effectiveBuildings = storedBuildings.map((b: any) => ({ ...b }));
     for (const construction of constructionQueue) {
       if (
@@ -305,11 +314,6 @@ async function projectKingdomCapacityState(
       }
     }
     const completedTechnologies = [...completedTechSet];
-
-    if (!populationDoc) {
-      return null;
-    }
-    const effectivePopulation = populationDoc;
 
     const isFirstInitialization = resourcesDoc.settlementInitialized !== true;
     const settlement = calculateSettlementProgress({

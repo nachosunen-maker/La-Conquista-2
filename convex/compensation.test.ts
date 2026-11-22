@@ -13,6 +13,9 @@ import { DEMO_USER_ID } from "./kingdomAccess";
 import { storageCapacity } from "./economyExtended";
 import * as economyAdapter from "./economyAdapter";
 import * as economy from "./economy";
+import * as army from "./army";
+import { renderToStaticMarkup } from "react-dom/server";
+import { OutageCompensationCard, type OutageCompensationStatus } from "../src/App";
 
 const TEST_SITE_URL = "https://pruebas-la-conquista.convex.site";
 const T0 = new Date("2026-11-18T12:00:00Z").getTime();
@@ -1046,6 +1049,338 @@ describe("Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y
     expect(status.capacityVerifiable).toBe(false);
 
     spy.mockRestore();
+  });
+
+  test("29. Errores de consulta o acceso a base de datos en projectKingdomCapacityState se propagan normalmente y no se enmascaran como capacityVerifiable: false", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-dberror-propagate"));
+    await foundKingdom(t, asUser, "Reino Fallo Base Datos");
+
+    // Simulamos un error real de acceso a datos/infraestructura en una consulta a base de datos
+    const spy = vi.spyOn(army, "readArmyUnitDocs").mockImplementation(() => {
+      throw new Error("Fallo de infraestructura / conexión con la base de datos");
+    });
+
+    // El error de base de datos DEBE propagarse normalmente como excepción y NO ser capturado
+    // silenciosamente como { capacityVerifiable: false }
+    await expect(asUser.query(api.compensation.getOutageCompensationStatus, {})).rejects.toThrow(
+      /Fallo de infraestructura \/ conexión con la base de datos/
+    );
+
+    spy.mockRestore();
+  });
+
+  test("30. UI Caso A — Proyección no verificable: botón deshabilitado, acción bloqueada, mensaje de advertencia y derecho preservado", async () => {
+    const mockClaim = vi.fn().mockResolvedValue(undefined);
+    const unverifiableStatus: OutageCompensationStatus = {
+      authenticated: true,
+      eligible: true,
+      canClaim: false,
+      capacityVerifiable: false,
+      incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
+      campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
+      status: "unclaimed",
+      resources: OUTAGE_COMPENSATION.RESOURCES,
+      hasFoundedKingdom: true,
+      capacityReport: null,
+      claimedAt: null,
+      claimedKingdomId: null,
+    };
+
+    const cardElement = OutageCompensationCard({
+      status: unverifiableStatus,
+      kingdomId: "kingdom-test-a" as any,
+      onClaim: mockClaim,
+      busy: false,
+      feedback: null,
+      error: null,
+    });
+
+    expect(cardElement).not.toBeNull();
+    const html = renderToStaticMarkup(cardElement!);
+
+    // 1. El botón aparece deshabilitado en el DOM
+    expect(html).toContain('disabled=""');
+    expect(html).toContain("Recibir regalo único");
+
+    // 2. Se muestra un mensaje comprensible indicando que no se puede verificar temporalmente la capacidad
+    expect(html).toContain(
+      "No se ha podido comprobar temporalmente la disponibilidad de almacenamiento (capacidad no verificable). Vuelve a intentarlo en unos instantes."
+    );
+
+    // 3. No se presenta como ya cobrado ni como pérdida del derecho
+    expect(html).not.toContain("Regalo recibido");
+    expect(html).not.toContain("El regalo único ya fue recibido");
+
+    // 4. No se puede ejecutar la acción de reclamación (onClick deshabilitado / inerte)
+    const buttonElement = cardElement?.props?.children?.[0]?.props?.children?.[1];
+    expect(buttonElement?.props?.disabled).toBe(true);
+    if (typeof buttonElement?.props?.onClick === "function") {
+      buttonElement.props.onClick();
+    }
+    expect(mockClaim).not.toHaveBeenCalled();
+  });
+
+  test("31. UI Caso B — Capacidad insuficiente: botón deshabilitado, informa recursos faltantes y no inicia mutación", async () => {
+    const mockClaim = vi.fn().mockResolvedValue(undefined);
+    const insufficientStatus: OutageCompensationStatus = {
+      authenticated: true,
+      eligible: true,
+      canClaim: false,
+      capacityVerifiable: true,
+      incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
+      campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
+      status: "unclaimed",
+      resources: OUTAGE_COMPENSATION.RESOURCES,
+      hasFoundedKingdom: true,
+      capacityReport: {
+        maxCapacity: 32000,
+        requiredPerResource: 30000,
+        allSufficient: false,
+        insufficientResources: [
+          {
+            resource: "gold",
+            label: "oro",
+            current: 5000,
+            maxCapacity: 32000,
+            available: 27000,
+            required: 30000,
+            additionalNeeded: 3000,
+            sufficient: false,
+          },
+          {
+            resource: "food",
+            label: "comida",
+            current: 8000,
+            maxCapacity: 32000,
+            available: 24000,
+            required: 30000,
+            additionalNeeded: 6000,
+            sufficient: false,
+          },
+        ],
+        resources: {} as any,
+      },
+      claimedAt: null,
+      claimedKingdomId: null,
+    };
+
+    const cardElement = OutageCompensationCard({
+      status: insufficientStatus,
+      kingdomId: "kingdom-test-b" as any,
+      onClaim: mockClaim,
+      busy: false,
+      feedback: null,
+      error: null,
+    });
+
+    const html = renderToStaticMarkup(cardElement!);
+
+    // 1. El botón permanece deshabilitado
+    expect(html).toContain('disabled=""');
+
+    // 2. Se informa con precisión de los recursos que necesitan espacio adicional
+    expect(html).toContain("Espacio insuficiente en almacenes");
+    expect(html).toContain("oro");
+    expect(html).toMatch(/\+3\.?000/);
+    expect(html).toContain("comida");
+    expect(html).toMatch(/\+6\.?000/);
+
+    // 3. No se puede ejecutar la acción de reclamación
+    const buttonElement = cardElement?.props?.children?.[0]?.props?.children?.[1];
+    expect(buttonElement?.props?.disabled).toBe(true);
+    if (typeof buttonElement?.props?.onClick === "function") {
+      buttonElement.props.onClick();
+    }
+    expect(mockClaim).not.toHaveBeenCalled();
+  });
+
+  test("32. UI Caso C — Recuperación: tras recuperar proyección y capacidad, botón habilitado y permite cobro voluntario", async () => {
+    const mockClaim = vi.fn().mockResolvedValue(undefined);
+    const recoverableStatus: OutageCompensationStatus = {
+      authenticated: true,
+      eligible: true,
+      canClaim: true,
+      capacityVerifiable: true,
+      incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
+      campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
+      status: "unclaimed",
+      resources: OUTAGE_COMPENSATION.RESOURCES,
+      hasFoundedKingdom: true,
+      capacityReport: {
+        maxCapacity: 40000,
+        requiredPerResource: 30000,
+        allSufficient: true,
+        insufficientResources: [],
+        resources: {} as any,
+      },
+      claimedAt: null,
+      claimedKingdomId: null,
+    };
+
+    const cardElement = OutageCompensationCard({
+      status: recoverableStatus,
+      kingdomId: "kingdom-test-c" as any,
+      onClaim: mockClaim,
+      busy: false,
+      feedback: null,
+      error: null,
+    });
+
+    const html = renderToStaticMarkup(cardElement!);
+
+    // 1. El botón está habilitado
+    expect(html).not.toContain('disabled=""');
+    expect(html).toContain("Recibir regalo único");
+
+    // 2. El usuario puede accionar el cobro voluntario
+    const buttonElement = cardElement?.props?.children?.[0]?.props?.children?.[1];
+    expect(buttonElement?.props?.disabled).toBe(false);
+    expect(typeof buttonElement?.props?.onClick).toBe("function");
+
+    buttonElement.props.onClick();
+    expect(mockClaim).toHaveBeenCalledTimes(1);
+    expect(mockClaim).toHaveBeenCalledWith("kingdom-test-c");
+  });
+
+  test("33. UI Caso D — Ya cobrado: botón deshabilitado, interfaz refleja regalo ya recibido y bloquea segundo cobro", async () => {
+    const mockClaim = vi.fn().mockResolvedValue(undefined);
+    const claimedStatus: OutageCompensationStatus = {
+      authenticated: true,
+      eligible: false,
+      canClaim: false,
+      capacityVerifiable: true,
+      incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
+      campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
+      status: "claimed",
+      resources: OUTAGE_COMPENSATION.RESOURCES,
+      hasFoundedKingdom: true,
+      capacityReport: null,
+      claimedAt: T0,
+      claimedKingdomId: "kingdom-test-d",
+    };
+
+    const cardElement = OutageCompensationCard({
+      status: claimedStatus,
+      kingdomId: "kingdom-test-d" as any,
+      onClaim: mockClaim,
+      busy: false,
+      feedback: null,
+      error: null,
+    });
+
+    const html = renderToStaticMarkup(cardElement!);
+
+    // 1. El botón permanece deshabilitado
+    expect(html).toContain('disabled=""');
+
+    // 2. La interfaz refleja explícitamente que el regalo ya fue recibido
+    expect(html).toContain("Regalo recibido");
+    expect(html).toContain("El regalo único ya fue recibido");
+    expect(html).toContain("No puede reclamarse de nuevo");
+
+    // 3. No permite segundo cobro
+    const buttonElement = cardElement?.props?.children?.[0]?.props?.children?.[1];
+    expect(buttonElement?.props?.disabled).toBe(true);
+    if (typeof buttonElement?.props?.onClick === "function") {
+      buttonElement.props.onClick();
+    }
+    expect(mockClaim).not.toHaveBeenCalled();
+  });
+
+  test("34. Integración completa de flujo UI con backend: estado real de query alimenta OutageCompensationCard en los 4 casos", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-ui-integration"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Integración UI");
+
+    // CASO B: Capacidad insuficiente inicial (Mercado nivel 1 -> tope 12.000 < 30.000)
+    await setBuildingLevel(t, kingdomId, "mercado", 1);
+    const statusB = (await asUser.query(
+      api.compensation.getOutageCompensationStatus,
+      {}
+    )) as OutageCompensationStatus;
+    const cardB = OutageCompensationCard({
+      status: statusB,
+      kingdomId,
+      onClaim: vi.fn(),
+      busy: false,
+      feedback: null,
+      error: null,
+    });
+    const htmlB = renderToStaticMarkup(cardB!);
+    expect(htmlB).toContain('disabled=""');
+    expect(htmlB).toContain("Espacio insuficiente en almacenes");
+
+    // CASO A: Proyección no verificable (simulamos fallo en adaptación económica)
+    const spy = vi.spyOn(economyAdapter, "adaptRemoteDocumentsToEconomicState").mockImplementation(() => {
+      throw new Error("Error interno simulado");
+    });
+    const statusA = (await asUser.query(
+      api.compensation.getOutageCompensationStatus,
+      {}
+    )) as OutageCompensationStatus;
+    expect(statusA.capacityVerifiable).toBe(false);
+    const cardA = OutageCompensationCard({
+      status: statusA,
+      kingdomId,
+      onClaim: vi.fn(),
+      busy: false,
+      feedback: null,
+      error: null,
+    });
+    const htmlA = renderToStaticMarkup(cardA!);
+    expect(htmlA).toContain('disabled=""');
+    expect(htmlA).toContain("No se ha podido comprobar temporalmente la disponibilidad de almacenamiento");
+    spy.mockRestore();
+
+    // CASO C: Recuperación de proyección y ampliación de Mercado a nivel 14 (tope 38.000 >= 36.000)
+    await setBuildingLevel(t, kingdomId, "mercado", 14);
+    const statusC = (await asUser.query(
+      api.compensation.getOutageCompensationStatus,
+      {}
+    )) as OutageCompensationStatus;
+    expect(statusC.capacityVerifiable).toBe(true);
+    expect(statusC.canClaim).toBe(true);
+
+    const onClaimMock = vi.fn(async (kid?: string) => {
+      await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId: kid as any });
+    });
+    const cardC = OutageCompensationCard({
+      status: statusC,
+      kingdomId,
+      onClaim: onClaimMock,
+      busy: false,
+      feedback: null,
+      error: null,
+    });
+    const htmlC = renderToStaticMarkup(cardC!);
+    expect(htmlC).not.toContain('disabled=""');
+
+    // Ejecutamos el cobro real mediante el handler
+    const buttonC = cardC?.props?.children?.[0]?.props?.children?.[1];
+    expect(buttonC?.props?.disabled).toBe(false);
+    await buttonC.props.onClick();
+    expect(onClaimMock).toHaveBeenCalledTimes(1);
+
+    // CASO D: Ya cobrado tras la mutación exitosa
+    const statusD = (await asUser.query(
+      api.compensation.getOutageCompensationStatus,
+      {}
+    )) as OutageCompensationStatus;
+    expect(statusD.status).toBe("claimed");
+    expect(statusD.canClaim).toBe(false);
+
+    const cardD = OutageCompensationCard({
+      status: statusD,
+      kingdomId,
+      onClaim: vi.fn(),
+      busy: false,
+      feedback: null,
+      error: null,
+    });
+    const htmlD = renderToStaticMarkup(cardD!);
+    expect(htmlD).toContain('disabled=""');
+    expect(htmlD).toContain("Regalo recibido");
   });
 });
 

@@ -252,7 +252,7 @@ interface CompensationResourceCapacityCheck {
   sufficient: boolean;
 }
 
-interface OutageCompensationStatus {
+export interface OutageCompensationStatus {
   authenticated: boolean;
   eligible: boolean;
   canClaim: boolean;
@@ -273,7 +273,7 @@ interface OutageCompensationStatus {
   claimedKingdomId: string | null;
 }
 
-function OutageCompensationCard(props: {
+export function OutageCompensationCard(props: {
   status: OutageCompensationStatus | undefined;
   kingdomId?: string;
   onClaim: (kingdomId?: string) => Promise<void>;
@@ -318,18 +318,16 @@ function OutageCompensationCard(props: {
           </div>
         </div>
 
-        {!isClaimed && (
-          <button
-            type="button"
-            disabled={!canClaimNow}
-            aria-busy={busy}
-            onClick={() => onClaim(kingdomId)}
-            className="px-4 py-2 bg-[#d4af37] hover:bg-[#e5c158] text-[#110e0a] font-serif font-bold text-xs uppercase tracking-wider rounded-lg shadow transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-shrink-0"
-          >
-            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gift className="w-3.5 h-3.5" />}
-            <span>Recibir regalo único</span>
-          </button>
-        )}
+        <button
+          type="button"
+          disabled={!canClaimNow || isClaimed}
+          aria-busy={busy}
+          onClick={canClaimNow && !isClaimed ? () => onClaim(kingdomId) : undefined}
+          className="px-4 py-2 bg-[#d4af37] hover:bg-[#e5c158] text-[#110e0a] font-serif font-bold text-xs uppercase tracking-wider rounded-lg shadow transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex-shrink-0"
+        >
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gift className="w-3.5 h-3.5" />}
+          <span>Recibir regalo único</span>
+        </button>
       </div>
 
       {!isClaimed && busy && (
