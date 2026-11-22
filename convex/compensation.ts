@@ -167,7 +167,7 @@ async function projectKingdomCapacityState(
 ): Promise<{
   currentResources: Record<CompensationResourceKey, number>;
   maxCapacity: number;
-}> {
+} | null> {
   const normalizedCivilization = normalizeCivilizationId(kingdom.civilization);
   const effectiveKingdom =
     normalizedCivilization && normalizedCivilization !== kingdom.civilization
@@ -305,20 +305,10 @@ async function projectKingdomCapacityState(
   }
   const completedTechnologies = [...completedTechSet];
 
-  const effectivePopulation = populationDoc ?? {
-    kingdomId: kingdom._id,
-    total: INITIAL_KINGDOM_CONFIG.population,
-    available: INITIAL_KINGDOM_CONFIG.unassignedCivil,
-  };
-
-  const collection = validateBuildingCollection(effectiveBuildings);
-  const buildingLevels = collection.success ? collection.levels : {};
-  const techModifiers = computeTechnologyModifiers(completedTechnologies);
-  const civPassive = getCivilizationPassive(effectiveKingdom.civilization);
-  const fallbackMaxCapacity = storageCapacity(
-    buildingLevels.mercado ?? 0,
-    techModifiers.storageCapacity * (civPassive.storageCapacityMultiplier ?? 1.0)
-  );
+  if (!populationDoc) {
+    return null;
+  }
+  const effectivePopulation = populationDoc;
 
   const isFirstInitialization = resourcesDoc.settlementInitialized !== true;
   const settlement = calculateSettlementProgress({
@@ -333,17 +323,17 @@ async function projectKingdomCapacityState(
   });
 
   if (!settlement.success || settlement.updatedFood === undefined) {
-    return {
-      currentResources: {
-        gold: resourcesDoc.gold,
-        wood: resourcesDoc.wood,
-        stone: resourcesDoc.stone,
-        iron: resourcesDoc.iron,
-        food: resourcesDoc.food,
-      },
-      maxCapacity: fallbackMaxCapacity,
-    };
+    return null;
   }
+
+  const collection = validateBuildingCollection(effectiveBuildings);
+  const buildingLevels = collection.success ? collection.levels : {};
+  const techModifiers = computeTechnologyModifiers(completedTechnologies);
+  const civPassive = getCivilizationPassive(effectiveKingdom.civilization);
+  const fallbackMaxCapacity = storageCapacity(
+    buildingLevels.mercado ?? 0,
+    techModifiers.storageCapacity * (civPassive.storageCapacityMultiplier ?? 1.0)
+  );
 
   if (isFirstInitialization) {
     return {
@@ -369,16 +359,7 @@ async function projectKingdomCapacityState(
   });
 
   if (!adapted.success || !adapted.kingdomState || !adapted.militaryClassification) {
-    return {
-      currentResources: {
-        gold: resourcesDoc.gold,
-        wood: resourcesDoc.wood,
-        stone: resourcesDoc.stone,
-        iron: resourcesDoc.iron,
-        food: settlement.updatedFood,
-      },
-      maxCapacity: fallbackMaxCapacity,
-    };
+    return null;
   }
 
   const terrainBonuses: Partial<Record<"agriculture" | "wood" | "stone" | "iron" | "gold", number>> = {};
@@ -525,6 +506,7 @@ export const getOutageCompensationStatus = query({
     const claimedRecord = compState.claimed;
 
     let capacityReport: CompensationCapacityReport | null = null;
+    let capacityVerifiable = true;
     if (owned && !claimedRecord) {
       const projected = await projectKingdomCapacityState(
         ctx,
@@ -533,21 +515,27 @@ export const getOutageCompensationStatus = query({
         userId,
         Date.now()
       );
-      capacityReport = evaluateCompensationStorageCapacity(
-        projected.currentResources,
-        projected.maxCapacity,
-        OUTAGE_COMPENSATION.RESOURCES
-      );
+      if (!projected) {
+        capacityVerifiable = false;
+        capacityReport = null;
+      } else {
+        capacityReport = evaluateCompensationStorageCapacity(
+          projected.currentResources,
+          projected.maxCapacity,
+          OUTAGE_COMPENSATION.RESOURCES
+        );
+      }
     }
 
     const status = claimedRecord ? ("claimed" as const) : ("unclaimed" as const);
     const hasFoundedKingdom = Boolean(owned);
-    const canClaim = !claimedRecord && hasFoundedKingdom && Boolean(capacityReport?.allSufficient);
+    const canClaim = !claimedRecord && hasFoundedKingdom && capacityVerifiable && Boolean(capacityReport?.allSufficient);
 
     return {
       authenticated: true,
       eligible: !claimedRecord,
       canClaim,
+      capacityVerifiable,
       incidentId: OUTAGE_COMPENSATION.INCIDENT_ID,
       campaignId: OUTAGE_COMPENSATION.CAMPAIGN_ID,
       status,

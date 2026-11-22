@@ -867,5 +867,72 @@ describe("Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y
     expect(after!.gold).toBe(36_000);
     expect(after!.food).toBe(36_000);
   });
+
+  test("21. Si falla calculateSettlementProgress, la consulta devuelve capacityVerifiable: false y canClaim: false", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-unverifiable"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Fallido");
+
+    // Borramos el documento de población para provocar que calculateSettlementProgress falle (falta población relacional requerida)
+    await t.run(async (ctx) => {
+      const popDoc = await ctx.db
+        .query("population")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+        .first();
+      if (popDoc) await ctx.db.delete(popDoc._id);
+    });
+
+    const status = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(status.hasFoundedKingdom).toBe(true);
+    expect(status.capacityVerifiable).toBe(false);
+    expect(status.canClaim).toBe(false);
+    expect(status.capacityReport).toBeNull();
+  });
+
+  test("22. Cuando la proyección vuelve a funcionar (población restaurada), la consulta recupera la disponibilidad real", async () => {
+    const t = createTestBackend();
+    const asUser = t.withIdentity(identity("user-p6-recoverable"));
+    const kingdomId = await foundKingdom(t, asUser, "Reino Recuperable");
+
+    await setBuildingLevel(t, kingdomId, "mercado", 14); // tope 38.000 >= 36.000
+
+    let savedPop: any = null;
+    await t.run(async (ctx) => {
+      const popDoc = await ctx.db
+        .query("population")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+        .first();
+      if (popDoc) {
+        savedPop = popDoc;
+        await ctx.db.delete(popDoc._id);
+      }
+    });
+
+    const badStatus = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(badStatus.capacityVerifiable).toBe(false);
+    expect(badStatus.canClaim).toBe(false);
+
+    // Restauramos la población (vuelve a funcionar)
+    await t.run(async (ctx) => {
+      if (savedPop) {
+        await ctx.db.insert("population", {
+          kingdomId: savedPop.kingdomId,
+          total: savedPop.total,
+          available: savedPop.available,
+          capacity: savedPop.capacity,
+          starving: savedPop.starving,
+          starvationSeconds: savedPop.starvationSeconds,
+          birthFraction: savedPop.birthFraction,
+          deathFraction: savedPop.deathFraction,
+          desertionFraction: savedPop.desertionFraction,
+        });
+      }
+    });
+
+    const goodStatus = await asUser.query(api.compensation.getOutageCompensationStatus, {});
+    expect(goodStatus.capacityVerifiable).toBe(true);
+    expect(goodStatus.canClaim).toBe(true);
+    expect(goodStatus.capacityReport?.allSufficient).toBe(true);
+  });
 });
 

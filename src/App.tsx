@@ -256,6 +256,7 @@ interface OutageCompensationStatus {
   authenticated: boolean;
   eligible: boolean;
   canClaim: boolean;
+  capacityVerifiable?: boolean;
   incidentId?: string;
   campaignId: string;
   status: "unclaimed" | "claimed" | "excluded";
@@ -284,9 +285,10 @@ function OutageCompensationCard(props: {
   if (!status || !status.authenticated || status.status === "excluded") return null;
 
   const isClaimed = status.status === "claimed";
-  const hasCapacityInfo = Boolean(status.hasFoundedKingdom && status.capacityReport);
+  const capacityVerifiable = status.capacityVerifiable !== false;
+  const hasCapacityInfo = Boolean(status.hasFoundedKingdom && capacityVerifiable && status.capacityReport);
   const insufficient = status.capacityReport?.insufficientResources ?? [];
-  const canClaimNow = !isClaimed && status.canClaim && !busy;
+  const canClaimNow = !isClaimed && capacityVerifiable && status.canClaim && !busy;
 
   return (
     <section className="bg-gradient-to-r from-[#1c160d] via-[#17130d] to-[#13100b] border border-[#d4af37]/40 rounded-xl p-4 shadow-md space-y-3">
@@ -339,6 +341,11 @@ function OutageCompensationCard(props: {
       {!isClaimed && !status.hasFoundedKingdom && (
         <p className="text-[11px] text-amber-300/90 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
           Funda primero tu reino y amplía tu capacidad de almacén hasta disponer de al menos 30.000 de espacio libre en cada recurso para poder cobrar el regalo.
+        </p>
+      )}
+      {!isClaimed && status.hasFoundedKingdom && !capacityVerifiable && (
+        <p className="text-[11px] text-amber-300/90 bg-amber-950/30 border border-amber-900/50 rounded-lg px-3 py-2">
+          No se ha podido comprobar temporalmente la disponibilidad de almacenamiento (capacidad no verificable). Vuelve a intentarlo en unos instantes.
         </p>
       )}
       {!isClaimed && hasCapacityInfo && insufficient.length > 0 && (
