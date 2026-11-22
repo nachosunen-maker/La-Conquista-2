@@ -1,7 +1,7 @@
 # PROGRESIÓN MATEMÁTICA COMPLETA DE EDIFICIOS — NIVELES 1 A 200 (PUNTO 5)
 
 **Proyecto:** La Conquista  
-**Referencia base:** Commit `18d9a841c61e3eab390a335255bb3cc5a1afa191`  
+**Referencia base:** Commit `8d4b07b63565caede8a08196f1df319b2dc8e8a9` (sobre base `18d9a841c61e3eab390a335255bb3cc5a1afa191`)  
 **Documento rector:** `docs/La_Conquista_Actualizaciones_8_Puntos_2026-11-18.md` (Punto 5)  
 **Cobertura verificada:** 18 edificios oficiales × 200 niveles = **3600 casos** (18 tipos × niveles 1..200).
 
@@ -103,46 +103,47 @@
 ## 4. PROGRESIÓN FUNCIONAL REAL POR CATEGORÍA (NIVELES 1–200)
 
 ### 4.1 Administración (`castillo`, `parlamento`)
-- **`castillo`**: Habilita la progresión del resto de edificios (`D-05`). Desbloqueos explícitos en niveles `1..8` (últimos desbloqueos: Militar Nv.5 y tecnologías de `castillo: 8`). Desde nivel `9` hasta `200` su único efecto funcional es elevar el tope máximo permitido del resto de edificios (hasta `200`) y de `viviendas` (`min(200, castleLevel + 18)`, llegando a 200 en Castillo 182); **sin escalado funcional por nivel definido** propio adicional.
-- **`parlamento`**: Desbloqueo binario en nivel `1` (`PARLIAMENT.REQUIRED_PARLIAMENT_LEVEL = 1`) para enviar y recibir desafíos diplomáticos. Niveles `2..200`: **sin escalado funcional por nivel definido**.
+- **`castillo`** *(consumido por `getMaxAllowedBuildingLevel`, `createConstructionPlan`, `describeCatalogForLevels`, `checkBuildingRequirements`)*: Habilita la progresión del resto de edificios (`D-05`). Desbloqueos explícitos en niveles `1..8` (últimos desbloqueos: Militar Nv.5 y tecnologías de `castillo: 8`). Desde nivel `9` hasta `200` su único efecto funcional es elevar el tope máximo permitido del resto de edificios (hasta `200`) y de `viviendas` (`min(200, castleLevel + 18)`, llegando a 200 en Castillo 182); **sin escalado funcional por nivel definido** propio adicional.
+- **`parlamento`** *(consumido por `validateNewChallenge` en `challengeRules.ts` y `parliament.ts`)*: Desbloqueo binario en nivel `1` (`PARLIAMENT.REQUIRED_PARLIAMENT_LEVEL = 1`) para enviar y recibir desafíos diplomáticos. Niveles `2..200`: **sin escalado funcional por nivel definido** (efecto constante).
 
 ### 4.2 Producción (`granja`, `aserradero`, `cantera`, `minaHierro`, `minaOro`)
+- *Consumidos por `calculateBuildingWorkerCapacity`, `calculateJobCapacities` (`buildingRules.ts`) y `simulateExtendedEconomy` (`economyExtended.ts`, junto con `simulateEconomicProgress` en `economyCalculations.ts`)*.
 - Escalado lineal continuo de capacidad de trabajadores de nivel `1` a `200` (`capacidad = nivel * workerCapacityPerLevel`).
-- La producción real es `trabajadoresEfectivos * tasaDiaria * modificadores` (donde `trabajadoresEfectivos = min(asignados, capacidad)` y el excedente sobre `max(storageCapacity, reservaPrevia)` se descarta al liquidar).
-- Máximos base en nivel 200 (modificadores = `1,00`):
-  - `granja`: `20.000` agricultores → `120.000` alimentos/día.
-  - `aserradero`: `16.000` leñadores → `96.000` madera/día.
-  - `cantera`: `16.000` canteros → `96.000` piedra/día.
-  - `minaHierro`: `12.000` mineros de hierro → `72.000` hierro/día.
-  - `minaOro`: `10.000` mineros de oro → `30.000` oro/día (+ base imponible fiscal de impuestos sobre recursos primarios).
+- La producción diaria efectiva en `simulateExtendedEconomy` (`dailyProduction`) es `trabajadoresEfectivos * tasaDiaria * multiplicadores` (donde `trabajadoresEfectivos = min(asignados, capacidad)` y `tasaDiaria` es `6` en `agriculture/wood/stone/iron` y `3` en `gold`). En la acumulación persistida (`updatedResources`), el excedente por encima de `max(storageCapacity(mercado), reservaPrevia)` se descarta (`wastedByStorage`).
+- Máximos de producción diaria efectiva en nivel 200 con plena ocupación (modificadores = `1,00`):
+  - `granja`: `20.000` agricultores → `120.000` alimentos/día (`simulateExtendedEconomy.dailyProduction.food`).
+  - `aserradero`: `16.000` leñadores → `96.000` madera/día (`simulateExtendedEconomy.dailyProduction.wood`).
+  - `cantera`: `16.000` canteros → `96.000` piedra/día (`simulateExtendedEconomy.dailyProduction.stone`).
+  - `minaHierro`: `12.000` mineros de hierro → `72.000` hierro/día (`simulateExtendedEconomy.dailyProduction.iron`).
+  - `minaOro`: `10.000` mineros de oro → `30.000` oro/día (`simulateExtendedEconomy.dailyProduction.gold`, además de la recaudación fiscal sobre producción primaria).
 
 ### 4.3 Infraestructura (`viviendas`, `mercado`, `murallas`)
-- **`viviendas`**: Escalado lineal continuo de capacidad residencial base `100 * nivel` hasta `20.000` plazas en nivel 200 (`Math.round(base * (1 + housingCapacityBonus))` hasta `26.000` con `+30%` tecnológico; y `Math.ceil(cap * 1.05)` = `27.300` en Chinos según `economyExtended.ts:413`).
-- **`mercado`**:
-  - Escalado continuo de almacenamiento base `10.000 + 2.000 * nivel` en niveles `1..200` (de `12.000` en nv.1 a `410.000` base/recurso en nv.200; hasta `902.000` con tec. `+100%` y Vikingos `×1,10`).
-  - Desbloqueo de intercambio comercial en nivel `4`, con comisión decreciente continua `1 / (nivel + 6)` y factor recibido `(nivel + 5) / (nivel + 6)` hasta nivel 200 (de `10,0000%` en nv.4 a `0,4854%` en nv.200).
-  - *Nota*: `workerCapacityPerLevel = 30` no tiene oficio productivo ni profesión asignable activa en el motor.
-- **`murallas`**: Bonificación defensiva `min(0.50, nivel * 0.05)` (+5 %/nivel en `1..10`, tope `+50%` en nv.10) y activación del daño pleno de asedio atacante cuando `murallas > 0`. Niveles `11..200`: **sin escalado funcional por nivel definido** (permanece en `+50%`).
+- **`viviendas`** *(consumido por `calculateResidentialCapacity` y `simulateExtendedEconomy` / `buildings.ts`)*: Escalado lineal continuo de capacidad residencial base `100 * nivel` hasta `20.000` plazas en nivel 200 (`Math.round(base * (1 + housingCapacityBonus))` hasta `26.000` con `+30%` tecnológico; y `Math.ceil(cap * 1.05)` = `27.300` en Chinos según `economyExtended.ts:413`), limitando `growth.cappedByHousing` y la penalización por hacinamiento (`WELLBEING.OVERCROWDING_PENALTY = -2/día`).
+- **`mercado`** *(consumido por `storageCapacity`, `simulateExtendedEconomy`, `getMarketFee`, `calculateExchange`, `getMarketInfo`)*:
+  - Escalado continuo de almacenamiento base `10.000 + 2.000 * nivel` en niveles `1..200` (de `12.000` en nv.1 a `410.000` base/recurso en nv.200; hasta `902.000` con tec. `+100%` y Vikingos `×1,10`), aplicado en `simulateExtendedEconomy.storageCapacity` y `updatedResources`.
+  - Desbloqueo de intercambio comercial en nivel `4` (`UNLOCK_MERCADO_MIN_LEVEL = 4`), con comisión decreciente continua `1 / (nivel + 6)` y factor recibido `(nivel + 5) / (nivel + 6)` hasta nivel 200 (de `10,0000%` en nv.4 a `0,4854%` en nv.200).
+  - *Nota*: `workerCapacityPerLevel = 30` no tiene oficio productivo ni profesión asignable activa en `calculateJobCapacities` ni `PROFESSION_EFFECTS`.
+- **`murallas`** *(consumido por `wallsDefenseBonus` y `computeSideFactors` en `battleRules.ts`)*: Bonificación defensiva `min(0.50, nivel * 0.05)` (+5 %/nivel en `1..10`, tope `+50%` en nv.10) y activación del daño pleno de asedio atacante cuando `murallas > 0`. Niveles `11..200`: **sin escalado funcional por nivel definido** (permanece constante en `+50%`).
 
 ### 4.4 Militar (`cuartel`, `herreria`, `hospitalMilitar`)
-- **`cuartel`**:
-  - Ranuras de entrenamiento: `min(4, 1 + floor(nivel / 3))` → `1` (nv.1–2), `2` (nv.3–5), `3` (nv.6–8), `4` (nv.9–200; sin escalado adicional desde nv.9).
-  - Capacidad de espías: escalado continuo `floor(nivel / 2)` hasta `100` espías en nivel 200.
+- **`cuartel`** *(consumido por `trainingQueueSlots`, `createTrainingPlan`, `createSpyRecruitmentPlan`, `getArmyState`, `recruitSpy`, `availableMilitaryLevels`)*:
+  - Ranuras de entrenamiento: `min(4, 1 + floor(nivel / 3))` → `1` (nv.1–2), `2` (nv.3–5), `3` (nv.6–8), `4` (nv.9–200; constante desde nv.9).
+  - Capacidad de espías (`createSpyRecruitmentPlan` y `getArmyState`): bloqueada en nv. 1 (`UNITS.espia.requirements.cuartel = 2`, capacidad efectiva `0` para reclutamiento), escalado continuo `floor(nivel / 2)` en nv. `2..200` (`1` en nv.2–3, `2` en nv.4–5, ..., hasta `100` espías en nivel 200).
   - Desbloqueos de unidades/niveles militares/tecnologías hasta nivel `7`.
-- **`herreria`**: Desbloqueos de equipamiento, asedio, Militar Nv.5 y tecnologías hasta nivel `5`. Posee `workerCapacityPerLevel = 50` sin oficio asignable en `calculateJobCapacities` ni en `PROFESSION_EFFECTS`. Niveles `6..200`: **sin escalado funcional por nivel definido**.
-- **`hospitalMilitar`**:
+- **`herreria`** *(consumido por `availableWeaponTiers`, `availableArmorTiers`, `availableMilitaryLevels`, `validateEquipmentSelection`)*: Desbloqueos de equipamiento, asedio, Militar Nv.5 y tecnologías hasta nivel `5`. Posee `workerCapacityPerLevel = 50` sin oficio asignable en `calculateJobCapacities` ni en `PROFESSION_EFFECTS`. Niveles `6..200`: **sin escalado funcional por nivel definido** (efecto constante).
+- **`hospitalMilitar`** *(consumido por `calculateHospitalRecovery` en `battleRules.ts` y `computeProfessionEffects` en `economyExtended.ts`)*:
   - Capacidad de camas: escalado lineal continuo `100 * nivel` hasta `20.000` camas en nivel 200 (el exceso usa `5%` de triaje de campaña).
-  - Recuperación base anual por nivel: `15%` (nv.1), `22%` (nv.2), `30%` (nv.3), `40%` (nv.4), `50%` (nv.5–200; tope total `60%` sumando tecnologías/médicos/civilización).
-  - Profesión `medicine`: `50 * nivel` plazas hasta `10.000` en nv.200, aunque el efecto médico se satura en `+0,10` (`100` médicos, accesible desde nv.2).
+  - Recuperación base anual por nivel: `15%` (nv.1), `22%` (nv.2), `30%` (nv.3), `40%` (nv.4), `50%` (nv.5–200; constante en `5..200`, tope total `60%` sumando tecnologías/médicos/civilización).
+  - Profesión `medicine`: `50 * nivel` plazas hasta `10.000` en nv.200, aunque el efecto médico se satura en `+0,10` (`100` médicos, accesible desde nv.2; constante en `2..200`).
 
 ### 4.5 Conocimiento (`universidad`)
-- **`universidad`**: Ranuras de investigación simultánea `1` (nv.1–2), `2` (nv.3–4), `3` (nv.5–200; `RESEARCH.MAX_SLOTS = 3`) y desbloqueo de nodos tecnológicos hasta nivel `5`. Niveles `6..200`: **sin escalado funcional por nivel definido**.
+- **`universidad`** *(consumido por `researchSlots`, `evaluateTechnologyStatus`, `createResearchPlan` en `technologyRules.ts` y `technologies.ts`)*: Ranuras de investigación simultánea `1` (nv.1–2), `2` (nv.3–4), `3` (nv.5–200; `RESEARCH.MAX_SLOTS = 3`) y desbloqueo de nodos tecnológicos hasta nivel `5`. Niveles `6..200`: **sin escalado funcional por nivel definido** (efecto constante).
 
 ### 4.6 Servicios y bienestar (`taberna`, `panaderia`, `iglesia`, `circo`)
-- **`taberna`**: Capacidad máxima de mercenarios activos continua `50 * nivel` hasta `10.000` en nivel 200; desbloqueos de tipos de mercenarios y tecnologías hasta nivel `5`. Posee `workerCapacityPerLevel = 30` sin oficio asignable activo.
-- **`panaderia`**: Profesión `bakery` con `40 * nivel` plazas hasta `8.000` en nv.200; efecto `-5%` consumo de comida por cada 20 trabajadores con tope `-15%` (saturado en `60` panaderos desde nv.2; por encima **sin escalado funcional por nivel definido**).
-- **`iglesia`**: `+1` felicidad/día por edificio construido (`nivel > 0`), requisitos tecnológicos hasta nv.4, y profesión `religion` `40 * nivel` hasta `8.000` plazas (tope `+3` fel./día con `60` trabajadores desde nv.2; exceso **sin escalado funcional por nivel definido**).
-- **`circo`**: `+1` felicidad/día por edificio construido (`nivel > 0`), requisitos tecnológicos hasta nv.4, y profesión `entertainment` `40 * nivel` hasta `8.000` plazas (tope `+3` fel./día con `60` trabajadores desde nv.2; exceso **sin escalado funcional por nivel definido**).
+- **`taberna`** *(consumido por `availableMercenaryTypes`, `validateMercenaryHire` en `armyRules.ts` y `getArmyState`)*: Capacidad máxima de mercenarios activos continua `50 * nivel` hasta `10.000` en nivel 200; desbloqueos de tipos de mercenarios y tecnologías hasta nivel `5`. Posee `workerCapacityPerLevel = 30` sin oficio asignable activo.
+- **`panaderia`** *(consumido por `computeProfessionEffects` y `simulateExtendedEconomy`)*: Profesión `bakery` con `40 * nivel` plazas hasta `8.000` en nv.200; efecto `-5%` consumo de comida por cada 20 trabajadores con tope `-15%` (saturado en `60` panaderos desde nv.2; en `2..200` el multiplicador efectivo permanece constante en `0,85` y por encima **sin escalado funcional por nivel definido**).
+- **`iglesia`** *(consumido por `simulateExtendedEconomy` y `computeProfessionEffects`)*: `+1` felicidad/día constante por edificio construido (`nivel > 0` en `1..200`), requisitos tecnológicos hasta nv.4, y profesión `religion` `40 * nivel` hasta `8.000` plazas (tope `+3` fel./día con `60` trabajadores desde nv.2; constante en `2..200` y por encima **sin escalado funcional por nivel definido**).
+- **`circo`** *(consumido por `simulateExtendedEconomy` y `computeProfessionEffects`)*: `+1` felicidad/día constante por edificio construido (`nivel > 0` en `1..200`), requisitos tecnológicos hasta nv.4, y profesión `entertainment` `40 * nivel` hasta `8.000` plazas (tope `+3` fel./día con `60` trabajadores desde nv.2; constante en `2..200` y por encima **sin escalado funcional por nivel definido**).
 
 ---
 
