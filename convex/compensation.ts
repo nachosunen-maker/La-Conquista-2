@@ -9,7 +9,7 @@ import {
   settleRelationalKingdomEconomy,
 } from "./economy";
 import { adaptRemoteDocumentsToEconomicState } from "./economyAdapter";
-import { simulateExtendedEconomy, storageCapacity } from "./economyExtended";
+import { effectiveKingdomStorageCapacity, simulateExtendedEconomy } from "./economyExtended";
 import {
   calculateJobCapacities,
   calculateResidentialCapacity,
@@ -33,7 +33,7 @@ import {
 } from "./armyRules";
 import { readArmyUnitDocs } from "./army";
 import { activeProductionBonusMultiplier } from "./missionRules";
-import { getCivilizationPassive, normalizeCivilizationId } from "./civilizationRules";
+import { normalizeCivilizationId } from "./civilizationRules";
 
 const COMPENSATION_RESOURCE_KEYS = ["gold", "wood", "stone", "iron", "food"] as const;
 type CompensationResourceKey = (typeof COMPENSATION_RESOURCE_KEYS)[number];
@@ -147,10 +147,11 @@ async function computeKingdomStorageCapacity(ctx: QueryCtx | MutationCtx, kingdo
   const collection = validateBuildingCollection(buildings);
   const mercadoLevel = collection.success ? (collection.levels.mercado ?? 0) : 0;
   const techModifiers = computeTechnologyModifiers(completedTechnologies);
-  const civPassive = getCivilizationPassive(kingdom.civilization);
-  const storageMultiplier =
-    techModifiers.storageCapacity * (civPassive.storageCapacityMultiplier ?? 1.0);
-  return storageCapacity(mercadoLevel, storageMultiplier);
+  return effectiveKingdomStorageCapacity({
+    marketLevel: mercadoLevel,
+    technologyMultiplier: techModifiers.storageCapacity,
+    civilization: kingdom.civilization,
+  });
 }
 
 /**
@@ -334,11 +335,11 @@ async function projectKingdomCapacityState(
     const collection = validateBuildingCollection(effectiveBuildings);
     const buildingLevels = collection.success ? collection.levels : {};
     const techModifiers = computeTechnologyModifiers(completedTechnologies);
-    const civPassive = getCivilizationPassive(effectiveKingdom.civilization);
-    const fallbackMaxCapacity = storageCapacity(
-      buildingLevels.mercado ?? 0,
-      techModifiers.storageCapacity * (civPassive.storageCapacityMultiplier ?? 1.0)
-    );
+    const fallbackMaxCapacity = effectiveKingdomStorageCapacity({
+      marketLevel: buildingLevels.mercado ?? 0,
+      technologyMultiplier: techModifiers.storageCapacity,
+      civilization: effectiveKingdom.civilization,
+    });
 
     if (isFirstInitialization) {
       return {

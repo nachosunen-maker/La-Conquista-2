@@ -57,13 +57,58 @@ export function researchSlots(universityLevel: number = 0): number {
   return Math.min(RESEARCH.MAX_SLOTS, Math.max(RESEARCH.BASE_SLOTS, slots));
 }
 
+/** Calcula duración final de investigación estabilizando ruido IEEE-754 y unificando segundos y milisegundos. */
+export function computeResearchDuration(
+  baseDurationSeconds: number,
+  techResearchDurationMultiplier: number = 1,
+  civResearchDurationMultiplier: number = 1
+): { durationSeconds: number; durationMs: number } {
+  const base = Number.isFinite(baseDurationSeconds) && baseDurationSeconds > 0 ? baseDurationSeconds : 60;
+  const techMul = Number.isFinite(techResearchDurationMultiplier) && techResearchDurationMultiplier > 0
+    ? techResearchDurationMultiplier
+    : 1;
+  const civMul = Number.isFinite(civResearchDurationMultiplier) && civResearchDurationMultiplier > 0
+    ? civResearchDurationMultiplier
+    : 1;
+  const combinedMultiplier = Math.round(techMul * civMul * 1e9) / 1e9;
+  const rawSeconds = Math.round(base * combinedMultiplier * 1e9) / 1e9;
+  const durationSeconds = Math.max(1, Math.ceil(rawSeconds));
+  return { durationSeconds, durationMs: durationSeconds * 1000 };
+}
+
+/** Determina si una tecnología debe ser visible e investigable para la civilización del reino (independiente de la rama). */
+export function isTechnologyVisibleForCivilization(
+  technology: Pick<TechnologyBalance, "civilizationRequirement">,
+  kingdomCivilization?: string | null
+): boolean {
+  return validateCivilizationTechAccess(technology.civilizationRequirement, kingdomCivilization).allowed;
+}
+
+/** Filtra el catálogo tecnológico dejando visibles únicamente las tecnologías universales y las de la civilización del reino. */
+export function filterVisibleTechnologiesForCivilization(
+  catalog: ReadonlyArray<TechnologyBalance>,
+  kingdomCivilization?: string | null
+): TechnologyBalance[] {
+  return catalog.filter((technology) => isTechnologyVisibleForCivilization(technology, kingdomCivilization));
+}
+
+/** Consulta individual de tecnología respetando el aislamiento estricto por civilización. */
+export function getVisibleTechnologyForCivilization(
+  id: string,
+  kingdomCivilization?: string | null
+): TechnologyBalance | null {
+  const technology = getTechnology(id);
+  if (!technology) return null;
+  return isTechnologyVisibleForCivilization(technology, kingdomCivilization) ? technology : null;
+}
+
 /** Modificadores agregados de las tecnologías completadas. Idempotente: cada tecnología cuenta una vez. */
 export interface TechnologyModifiers {
   agricultureProduction: number; // multiplicador (1,05 = +5 %)
   miningProduction: number; // multiplicador aplicado a madera, piedra y hierro
   storageCapacity: number; // multiplicador
   woundedRecoveryBonus: number; // puntos porcentuales adicionales (0,05 = +5 pp)
-  espionageLevel: number; // 0, 1 o 2
+  espionageLevel: number; // 0..4 (TECH_EFFECT_CAPS.espionageAccuracyMax)
   trainingDuration: number; // multiplicador (0,95 = −5 %)
   constructionDuration: number; // multiplicador (0,95 = −5 %)
   happinessBase: number; // puntos
@@ -226,9 +271,12 @@ export function evaluateTechnologyStatus(input: {
   buildingLevels: Readonly<Record<string, number>>;
   kingdomCivilization?: string | null;
 }): { status: TechnologyStatus; blockers: string[] } {
-  const { technology, completedIds, researchingIds, buildingLevels, kingdomCivilization } = input;
-  if (completedIds.has(technology.id)) return { status: "completed", blockers: [] };
-  if (researchingIds.has(technology.id)) return { status: "researching", blockers: [] };
+  const { technology, buildingLevels, kingdomCivilization } = input;
+  const completedIds = new Set(Array.from(input.completedIds, (id) => normalizeTechnologyId(id)));
+  const researchingIds = new Set(Array.from(input.researchingIds, (id) => normalizeTechnologyId(id)));
+  const techId = normalizeTechnologyId(technology.id);
+  if (completedIds.has(techId)) return { status: "completed", blockers: [] };
+  if (researchingIds.has(techId)) return { status: "researching", blockers: [] };
   const blockers: string[] = [];
 
   // Validación de civilización exclusiva (P62)
@@ -255,9 +303,10 @@ export function evaluateTechnologyStatus(input: {
     }
   }
 
-  for (const requiredId of technology.technologyRequirements) {
+  for (const rawRequiredId of technology.technologyRequirements) {
+    const requiredId = normalizeTechnologyId(rawRequiredId);
     if (!completedIds.has(requiredId)) {
-      blockers.push(`Requiere ${TECHNOLOGY_CATALOG[requiredId]?.name ?? requiredId}`);
+      blockers.push(`Requiere ${TECHNOLOGY_CATALOG[requiredId]?.name ?? rawRequiredId}`);
     }
   }
   return { status: blockers.length === 0 ? "available" : "locked", blockers };
@@ -284,8 +333,9 @@ export function createResearchPlan(input: {
   if (!technology) return { success: false, error: `La tecnología '${input.technologyId}' no existe en el catálogo.` };
   if (!Number.isFinite(input.now) || input.now < 0) return { success: false, error: "Marca temporal inválida." };
 
-  const completedIds = new Set(input.completedIds);
-  const researchingIds = new Set(input.activeResearch.map((entry) => entry.technologyId));
+  const normalizedCompletedIds = input.completedIds.map((id) => normalizeTechnologyId(id));
+  const completedIds = new Set(normalizedCompletedIds);
+  const researchingIds = new Set(input.activeResearch.map((entry) => normalizeTechnologyId(entry.technologyId)));
   if (input.activeResearch.some((entry) =>
     !entry.technologyId || !Number.isFinite(entry.startedAt) || !Number.isFinite(entry.durationMs) || entry.durationMs <= 0
   )) {
@@ -321,9 +371,13 @@ export function createResearchPlan(input: {
     }
   }
 
-  const techModifiers = computeTechnologyModifiers(input.completedIds);
+  const techModifiers = computeTechnologyModifiers(normalizedCompletedIds);
   const civPassive = getCivilizationPassive(input.kingdomCivilization);
-  const durationMs = Math.ceil(technology.durationSeconds * 1000 * techModifiers.researchDuration * civPassive.researchDurationMultiplier);
+  const { durationMs } = computeResearchDuration(
+    technology.durationSeconds,
+    techModifiers.researchDuration,
+    civPassive.researchDurationMultiplier
+  );
 
   return {
     success: true,

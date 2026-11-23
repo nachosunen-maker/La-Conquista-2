@@ -196,13 +196,18 @@ export function computeMorale(input: {
   now: number;
   glory?: number;
   taxToleranceReduction?: number;
+  moraleBase?: number;
 }): number {
   const foodBonus = (MORALE.FOOD_TIER_BONUS as Record<string, number>)[input.foodTier] ?? 0;
   const battleEffects = (input.moraleEffects ?? [])
     .filter((effect) => Number.isFinite(effect.amount) && effect.expiresAt > input.now)
     .reduce((sum, effect) => sum + effect.amount, 0);
   const starvationPenalty = input.starvationPhase >= 2 ? STARVATION.MORALE_PENALTY_POINTS : 0;
+  const techMoraleBonus = Number.isFinite(input.moraleBase) && (input.moraleBase as number) > 0
+    ? Math.min(TECH_EFFECT_CAPS.moraleBase, input.moraleBase as number)
+    : 0;
   const morale = MORALE.BASE
+    + techMoraleBonus
     + MORALE.HAPPINESS_COEFFICIENT * (input.happiness - 50)
     + foodBonus
     + battleEffects
@@ -263,11 +268,25 @@ export function computePopulationGrowth(input: {
   return { births, cappedByHousing, nextBirthFraction };
 }
 
-/** [M-06 opción A] Tope de almacén por recurso: base + nivel de Mercado, multiplicado por tecnología. */
+/** [M-06 opción A] Tope de almacén por recurso: base + nivel de Mercado, multiplicado por tecnología y civilización. */
 export function storageCapacity(marketLevel: number, technologyMultiplier: number = 1): number {
   const level = Number.isInteger(marketLevel) && marketLevel > 0 ? marketLevel : 0;
   const multiplier = Number.isFinite(technologyMultiplier) && technologyMultiplier > 0 ? technologyMultiplier : 1;
   return Math.floor((STORAGE.BASE_CAPACITY + STORAGE.CAPACITY_PER_MARKET_LEVEL * level) * multiplier);
+}
+
+/** Calcula la capacidad efectiva del almacén unificando nivel de mercado, multiplicador tecnológico y pasiva de civilización. */
+export function effectiveKingdomStorageCapacity(input: {
+  marketLevel: number;
+  technologyMultiplier?: number;
+  civilization?: string | null;
+}): number {
+  const civPassive = getCivilizationPassive(input.civilization);
+  const techMultiplier = Number.isFinite(input.technologyMultiplier) && (input.technologyMultiplier as number) > 0
+    ? (input.technologyMultiplier as number)
+    : 1;
+  const civMultiplier = civPassive.storageCapacityMultiplier ?? 1.0;
+  return storageCapacity(input.marketLevel, techMultiplier * civMultiplier);
 }
 
 /**
@@ -378,9 +397,12 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   const unpaid = false;
   const totalGoldAfterIncome = state.resources.gold + dailyProduction.gold * elapsedDays + taxesCollected;
 
-  // 3c. [M-06] Tope de almacén (con bonificación de civilización si procede).
-  const storageTechMultiplier = input.technologyModifiers.storageCapacity * (civPassive.storageCapacityMultiplier ?? 1.0);
-  const capacity = storageCapacity(input.buildingLevels.mercado ?? 0, storageTechMultiplier);
+  // 3c. [M-06] Tope de almacén (con bonificación tecnológica y de civilización).
+  const capacity = effectiveKingdomStorageCapacity({
+    marketLevel: input.buildingLevels.mercado ?? 0,
+    technologyMultiplier: input.technologyModifiers.storageCapacity,
+    civilization: input.civilization,
+  });
   const rawResources: KingdomResources = {
     gold: totalGoldAfterIncome,
     wood: state.resources.wood + dailyProduction.wood * elapsedDays,
@@ -501,7 +523,7 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
   const gloryBefore = Number.isFinite(input.glory) && (input.glory as number) > 0 ? (input.glory as number) : 0;
   const gloryAfter = Math.max(0, Math.round((gloryBefore - BATTLE_REWARDS.GLORY_DECAY_PER_DAY * elapsedDays) * 100) / 100);
 
-  // 8. Moral militar (P33, D-49, M-01)
+  // 8. Moral militar (P33, D-49, M-01, tecnologías de moral base)
   const morale = computeMorale({
     happiness: happinessAfter,
     foodTier: state.foodTier,
@@ -511,6 +533,7 @@ export function simulateExtendedEconomy(input: ExtendedEconomyInput): ExtendedEc
     now: input.now,
     glory: gloryAfter,
     taxToleranceReduction: taxTolerance,
+    moraleBase: input.technologyModifiers.moraleBase,
   });
 
   return {

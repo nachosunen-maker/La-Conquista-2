@@ -11,8 +11,10 @@ import type { Id } from "./_generated/dataModel";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { MISSIONS, TIME, UNITS, UNIT_TYPES, type MissionCounterKey, type MissionReward } from "./balanceConfig";
 import { isKingdomOwner } from "./kingdomAccess";
-import { storageCapacity } from "./economyExtended";
+import { effectiveKingdomStorageCapacity } from "./economyExtended";
 import { isSpyUnitDoc, normalizeUnitType } from "./armyRules";
+import { normalizeCivilizationId } from "./civilizationRules";
+import { computeTechnologyModifiers, normalizeTechnologyId, readCompletedTechnologyIds } from "./technologyRules";
 import {
   allSecretMissions,
   conditionProgress,
@@ -91,7 +93,13 @@ async function buildSnapshot(ctx: Ctx, kingdomId: Id<"kingdoms">, now: number): 
   const snapshot: MissionSnapshot = {
     buildingLevels,
     population: typeof (population as any)?.total === "number" ? (population as any).total : kingdomAny.population ?? 0,
-    completedTechnologyIds: (technologies as any[]).filter((t) => t.status === "completed").map((t) => t.technologyId as string),
+    completedTechnologyIds: Array.from(
+      new Set(
+        (technologies as any[])
+          .filter((t) => t.status === "completed" && typeof t.technologyId === "string")
+          .map((t) => normalizeTechnologyId(t.technologyId as string))
+      )
+    ),
     armySize: (units as any[]).reduce((sum, u) => {
       if (isSpyUnitDoc(u)) return sum;
       const norm = normalizeUnitType(u.unitType);
@@ -101,7 +109,7 @@ async function buildSnapshot(ctx: Ctx, kingdomId: Id<"kingdoms">, now: number): 
     honor: typeof kingdomAny.honor === "number" ? kingdomAny.honor : 0,
     resources: resourceMap,
     territoriesOwned: territories.length,
-    civilization: kingdomAny.civilization ?? null,
+    civilization: normalizeCivilizationId(kingdomAny.civilization) ?? null,
     lifetime,
     daily,
   };
@@ -115,9 +123,17 @@ async function grantReward(ctx: MutationCtx, kingdomId: Id<"kingdoms">, reward: 
   if (reward.resources) {
     const resources = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).first();
     if (resources) {
-      const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).collect();
+      const [buildings, completedTech] = await Promise.all([
+        ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId)).collect(),
+        readCompletedTechnologyIds(ctx, kingdomId),
+      ]);
       const market = Math.max(0, ...(buildings as any[]).filter((b) => b.buildingType === "mercado").map((b) => b.level ?? 0));
-      const cap = storageCapacity(market);
+      const techModifiers = computeTechnologyModifiers(completedTech);
+      const cap = effectiveKingdomStorageCapacity({
+        marketLevel: market,
+        technologyMultiplier: techModifiers.storageCapacity,
+        civilization: (kingdom as any).civilization,
+      });
       const patch: Record<string, number> = {};
       for (const [resource, amount] of Object.entries(reward.resources)) {
         if (!amount) continue;
@@ -261,10 +277,18 @@ export const claimMissionReward = mutation({
     if (!details) throw new Error("Misión no encontrada.");
 
     if (details.reward.resources) {
-      const resources = await ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).first();
-      const buildings = await ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect();
+      const [resources, buildings, completedTech] = await Promise.all([
+        ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).first(),
+        ctx.db.query("buildings").withIndex("by_kingdom", (q) => q.eq("kingdomId", args.kingdomId)).collect(),
+        readCompletedTechnologyIds(ctx, args.kingdomId),
+      ]);
       const market = Math.max(0, ...(buildings as any[]).filter((b) => b.buildingType === "mercado").map((b) => b.level ?? 0));
-      const cap = storageCapacity(market);
+      const techModifiers = computeTechnologyModifiers(completedTech);
+      const cap = effectiveKingdomStorageCapacity({
+        marketLevel: market,
+        technologyMultiplier: techModifiers.storageCapacity,
+        civilization: built.snapshot.civilization,
+      });
       for (const [resource, amount] of Object.entries(details.reward.resources)) {
         if (!amount) continue;
         const current = typeof (resources as any)?.[resource] === "number" ? (resources as any)[resource] : 0;
@@ -296,7 +320,9 @@ export const getMissions = query({
     const completedAt = new Map(progress.map((doc) => [doc.progressId, doc.completedAt]));
     const stage = MISSIONS.STAGES.find((s) => !s.missions.every((m) => finishedIds.has(m.id)) || !finishedIds.has(stageProgressId(s.stage))) ?? null;
     const completedStages = MISSIONS.STAGES.filter((s) => finishedIds.has(stageProgressId(s.stage))).map((s) => ({ stage: s.stage, title: s.title, rewardSummary: describeReward(s.reward) }));
-    const secrets = allSecretMissions().filter((m) => !m.civilization || m.civilization === built.snapshot.civilization);
+    const secrets = allSecretMissions().filter(
+      (m) => !m.civilization || normalizeCivilizationId(m.civilization) === built.snapshot.civilization
+    );
 
     const describe = (mission: (typeof MISSIONS.STAGES)[number]["missions"][number], progressId: string) => {
       const doc = progressMap.get(progressId);

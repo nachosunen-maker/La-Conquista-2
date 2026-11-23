@@ -13,16 +13,19 @@ import { settleRelationalKingdomEconomy } from "./economy";
 import { requireOwner } from "./buildings";
 import { validateBuildingCollection } from "./buildingRules";
 import {
-  TECHNOLOGY_CATALOG,
   calculateResearchCancellationRefund,
+  computeResearchDuration,
   computeTechnologyModifiers,
   createResearchPlan,
   evaluateTechnologyStatus,
+  getTechnology,
+  isTechnologyVisibleForCivilization,
+  normalizeTechnologyId,
   researchProgress,
   researchSlots,
   type ResearchQueueEntry,
 } from "./technologyRules";
-import { getCivilizationPassive, normalizeCivilizationId } from "./civilizationRules";
+import { getCivilizationPassive } from "./civilizationRules";
 import { TECHNOLOGIES } from "./balanceConfig";
 import type { ResourceType } from "./economyCalculations";
 
@@ -49,56 +52,63 @@ export const getTechnologies = query({
     ]);
     const collection = validateBuildingCollection(buildings);
     const buildingLevels = collection.success ? collection.levels : {};
-    const completedIds = new Set<string>(progress.filter((doc) => doc.status === "completed").map((doc) => doc.technologyId));
-    const researching = progress.filter((doc) => doc.status === "researching");
-    const researchingIds = new Set<string>(researching.map((doc) => doc.technologyId));
+    const completedIds = new Set<string>(
+      progress
+        .filter((doc) => doc.status === "completed" && typeof doc.technologyId === "string")
+        .map((doc) => normalizeTechnologyId(doc.technologyId))
+    );
+    const researching = progress.filter((doc) => doc.status === "researching" && typeof doc.technologyId === "string");
+    const researchingIds = new Set<string>(researching.map((doc) => normalizeTechnologyId(doc.technologyId)));
     const serverTimeMs = Date.now();
     const slots = researchSlots(buildingLevels.universidad ?? 0);
+    const techModifiers = computeTechnologyModifiers([...completedIds]);
+    const civPassive = getCivilizationPassive(kingdom.civilization);
+    const civMultiplier = typeof civPassive.researchDurationMultiplier === "number" ? civPassive.researchDurationMultiplier : 1.0;
+
     return {
       serverTimeMs,
       writable: isKingdomOwner(kingdom.userId, identity?.subject),
       slots,
       slotsFree: Math.max(0, slots - researching.length),
-      modifiers: (() => computeTechnologyModifiers([...completedIds]))(),
-      researching: researching.map((doc) => ({
-        ...doc,
-        name: TECHNOLOGY_CATALOG[doc.technologyId]?.name ?? doc.technologyId,
-        progressPercent: typeof doc.startedAt === "number" && typeof doc.durationMs === "number"
-          ? researchProgress(doc as ResearchQueueEntry, serverTimeMs)
-          : null,
-        completesAt: typeof doc.startedAt === "number" && typeof doc.durationMs === "number"
-          ? doc.startedAt + doc.durationMs
-          : null,
-      })),
-      catalog: (() => {
-        const techModifiers = computeTechnologyModifiers([...completedIds]);
-        const civPassive = getCivilizationPassive(kingdom.civilization);
-        const civMultiplier = typeof civPassive.researchDurationMultiplier === "number" ? civPassive.researchDurationMultiplier : 1.0;
-        const combinedMultiplier = techModifiers.researchDuration * civMultiplier;
-        return TECHNOLOGIES
-          .filter((technology) => {
-            if (technology.branch !== "civilizacion") return true;
-            return !technology.civilizationRequirement || normalizeCivilizationId(technology.civilizationRequirement) === normalizeCivilizationId(kingdom.civilization);
-          })
-          .map((technology) => {
-            const evaluation = evaluateTechnologyStatus({
-              technology,
-              completedIds,
-              researchingIds,
-              buildingLevels,
-              kingdomCivilization: kingdom.civilization,
-            });
-            const baseDuration = typeof technology.durationSeconds === "number" ? technology.durationSeconds : 60;
-            const bonifiedDurationSeconds = Math.max(1, Math.ceil(baseDuration * combinedMultiplier));
-
-            return {
-              ...technology,
-              status: evaluation.status,
-              blockers: evaluation.blockers,
-              bonifiedDurationSeconds,
-            };
+      modifiers: techModifiers,
+      researching: researching.map((doc) => {
+        const canonicalId = normalizeTechnologyId(doc.technologyId);
+        return {
+          ...doc,
+          technologyId: canonicalId,
+          name: getTechnology(canonicalId)?.name ?? doc.technologyId,
+          progressPercent: typeof doc.startedAt === "number" && typeof doc.durationMs === "number"
+            ? researchProgress(doc as ResearchQueueEntry, serverTimeMs)
+            : null,
+          completesAt: typeof doc.startedAt === "number" && typeof doc.durationMs === "number"
+            ? doc.startedAt + doc.durationMs
+            : null,
+        };
+      }),
+      catalog: TECHNOLOGIES
+        .filter((technology) => isTechnologyVisibleForCivilization(technology, kingdom.civilization))
+        .map((technology) => {
+          const evaluation = evaluateTechnologyStatus({
+            technology,
+            completedIds,
+            researchingIds,
+            buildingLevels,
+            kingdomCivilization: kingdom.civilization,
           });
-      })(),
+          const baseDuration = typeof technology.durationSeconds === "number" ? technology.durationSeconds : 60;
+          const { durationSeconds: bonifiedDurationSeconds } = computeResearchDuration(
+            baseDuration,
+            techModifiers.researchDuration,
+            civMultiplier
+          );
+
+          return {
+            ...technology,
+            status: evaluation.status,
+            blockers: evaluation.blockers,
+            bonifiedDurationSeconds,
+          };
+        }),
     };
   },
 });
@@ -185,14 +195,25 @@ async function finalizeResearch(ctx: MutationCtx, doc: any, now: number, evaluat
   if (doc.status !== "researching") return false;
   if (typeof doc.startedAt !== "number" || typeof doc.durationMs !== "number") return false;
   if (researchProgress(doc as ResearchQueueEntry, now) !== 100) return false;
-  // Idempotencia: si ya existe un documento completado de la misma tecnología, se elimina el duplicado.
+  // Idempotencia: si ya existe un documento completado de la misma tecnología (incluyendo alias heredados), se elimina el duplicado.
+  const canonicalId = typeof doc.technologyId === "string" ? normalizeTechnologyId(doc.technologyId) : doc.technologyId;
   const siblings = await readProgress(ctx, doc.kingdomId);
-  const alreadyCompleted = siblings.some((other) => other._id !== doc._id && other.technologyId === doc.technologyId && other.status === "completed");
+  const alreadyCompleted = siblings.some(
+    (other) =>
+      other._id !== doc._id &&
+      typeof other.technologyId === "string" &&
+      normalizeTechnologyId(other.technologyId) === canonicalId &&
+      other.status === "completed"
+  );
   if (alreadyCompleted) {
     await ctx.db.delete(doc._id);
     return true;
   }
-  await ctx.db.patch(doc._id, { status: "completed", completedAt: now });
+  await ctx.db.patch(doc._id, {
+    status: "completed",
+    completedAt: now,
+    ...(canonicalId && canonicalId !== doc.technologyId ? { technologyId: canonicalId } : {}),
+  });
   await recordMissionEvent(ctx, doc.kingdomId, "researchCompleted", 1, evaluateMissionsNow);
   return true;
 }

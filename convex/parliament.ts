@@ -281,7 +281,7 @@ export const acceptChallenge = mutation({
     const marchSeconds = marchTimeSeconds(
       challenge.distance ?? 0,
       terrainMultiplier,
-      armyMarchMultiplier(activeComposition(attackerUnits)),
+      armyMarchMultiplier(activeComposition(attackerUnits), attackerKingdom?.civilization),
       civPassive?.marchSpeedMultiplier ?? 1.0,
       attackerTechModifiers.marchSpeedBonus
     );
@@ -436,7 +436,7 @@ export const expireChallenge = internalMutation({
 export async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, role: "attacker" | "defender", distance: number, terrainMultiplier: number = 1): Promise<BattleSide> {
   const kingdom = await ctx.db.get(kingdomId);
   if (!kingdom) throw new Error("Reino participante no encontrado.");
-  await settleRelationalKingdomEconomy(ctx, kingdom, kingdom.userId, Date.now());
+  const settled = await settleRelationalKingdomEconomy(ctx, kingdom, kingdom.userId, Date.now());
   const refreshed = (await ctx.db.get(kingdomId)) ?? kingdom;
   const units = await readArmyUnitsWithMigration(ctx, kingdomId);
   const summary = summarizeArmy(units);
@@ -464,12 +464,21 @@ export async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, 
     tacticalFormation: isTacticalFormation(refreshed.tacticalFormation ?? "") ? (refreshed.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
     morale: typeof refreshed.militaryMorale === "number" ? refreshed.militaryMorale : WELLBEING.INITIAL_MORALE,
     foodTier: refreshed.foodTier ?? "normal",
-    fatigue: role === "attacker" ? marchFatigue(currentFatigue, distance, terrainMultiplier, civPassive.fatigueAccrualMultiplier, techModifiers.marchFatigueReduction) : currentFatigue,
+    fatigue: role === "attacker"
+      ? marchFatigue(
+          currentFatigue,
+          distance,
+          terrainMultiplier,
+          civPassive.fatigueAccrualMultiplier,
+          techModifiers.marchFatigueReduction,
+          techModifiers.fatigueAccrualReduction
+        )
+      : currentFatigue,
     wallsLevel: role === "defender" ? levels.murallas ?? 0 : 0,
     terrainDefenseBonus: role === "defender" ? terrainDefenseBonus : 0,
     combatAttackBonus: techModifiers.combatAttackBonus,
     combatDefenseBonus: techModifiers.combatDefenseBonus,
-    moraleBase: techModifiers.moraleBase,
+    moraleBase: settled.extended ? 0 : techModifiers.moraleBase,
     unitEfficiencyInf: techModifiers.unitEfficiencyInf,
     unitEfficiencyArc: techModifiers.unitEfficiencyArc,
     unitEfficiencyCav: techModifiers.unitEfficiencyCav,

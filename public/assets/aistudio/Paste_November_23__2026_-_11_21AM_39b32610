@@ -1,0 +1,524 @@
+IMPLEMENTACIÓN CORRECTIVA DEFINITIVA — SISTEMA DE INVESTIGACIONES
+
+OBJETIVO
+
+Corregir de una sola vez los defectos funcionales, matemáticos, de aplicación de bonificaciones, persistencia, compatibilidad histórica y aislamiento por civilización identificados en:
+
+"docs/AUDITORIA_COMPLETA_INVESTIGACIONES_Y_PROGRESION_MATEMATICA.md"
+
+Repositorio: "nachosunen-maker/La-Conquista-2".
+
+La implementación debe conseguir que todas las investigaciones existentes produzcan exactamente los efectos que establecen sus definiciones, que esos efectos se apliquen en todos los sistemas correspondientes y que los valores mostrados al jugador coincidan con los resultados reales del backend.
+
+No se trata de rehacer el sistema de investigaciones ni de rediseñar su equilibrio. Se trata de corregirlo completamente, respetando su arquitectura, sus reglas y su progresión actual.
+
+Debes modificar directamente los archivos necesarios, implementar las correcciones, crear o actualizar las pruebas y ejecutar la validación completa. No entregues únicamente un informe o una propuesta.
+
+---
+
+1. REGLAS INNEGOCIABLES
+
+1. No eliminar, sustituir ni renombrar arbitrariamente ninguna de las 135 investigaciones existentes.
+2. No cambiar las civilizaciones, sus investigaciones exclusivas ni sus efectos históricos, salvo los ajustes matemáticos estrictamente necesarios para corregir defectos demostrados.
+3. No modificar arbitrariamente costes, duración, requisitos, niveles máximos, dependencias o bonificaciones.
+4. No aumentar topes de efectos sin demostrar matemáticamente por qué es necesario y qué consecuencias tiene.
+5. No reducir ni eliminar bonificaciones que actualmente funcionan correctamente.
+6. No modificar la economía, el combate, el movimiento o la progresión general del juego fuera de lo necesario para aplicar correctamente los efectos tecnológicos.
+7. No confiar en valores de bonificaciones enviados por el cliente. Los cálculos definitivos deben realizarse en el backend con los datos reales del reino.
+8. Mantener compatibilidad con investigaciones históricas y sus identificadores antiguos.
+9. No modificar infraestructura, hosting, credenciales, variables de entorno, base de datos de producción ni realizar migraciones destructivas.
+10. No introducir imágenes ni modificar el diseño gráfico.
+11. Mantener intacto el mapa de 7.651 hexágonos, radio 50, y su rendimiento.
+12. No dar por resuelto ningún defecto sin una prueba que reproduzca el caso y demuestre su corrección.
+
+Antes de modificar código, inspecciona las implementaciones actuales y confirma cada hallazgo de la auditoría. Si una línea o comportamiento ya ha cambiado desde el commit auditado, adapta la corrección al código actual sin duplicar soluciones.
+
+2. CORRECCIONES FUNCIONALES OBLIGATORIAS
+
+2.1. Velocidad de marcha: aplicar las investigaciones en los desplazamientos reales
+
+Defecto identificado:
+
+"convex/army.ts:1185"
+
+La operación "launchAttack" no transmite "techModifiers.marchSpeedBonus" al cálculo de "marchTimeSeconds".
+
+Esto provoca que las investigaciones de velocidad de marcha no tengan efecto en las marchas reales, aunque el sistema calcule correctamente sus bonificaciones.
+
+Investigaciones afectadas identificadas en la auditoría:
+
+- "logistics_2"
+- "logistics_5"
+- "spy_2"
+- "tech_civ_mongoles"
+- "tech_civ_mongoles_b"
+- "tech_civ_navajos_c"
+
+Implementación:
+
+- Obtener los modificadores tecnológicos efectivos del reino atacante en el backend.
+- Transmitir el modificador real de velocidad al cálculo de duración de la marcha.
+- Utilizar la misma fórmula y las mismas reglas de límites que el motor de movimiento establecido en "territoryRules.ts".
+- Evitar que las marchas de ataque utilicen una fórmula diferente a los demás desplazamientos equivalentes.
+- Mantener los modificadores de civilización, terreno y demás factores existentes.
+- No aplicar dos veces el mismo multiplicador.
+- Mantener las protecciones contra velocidades cero, negativas, infinitas o valores no válidos.
+- Garantizar que el tiempo mostrado, el tiempo programado y el desplazamiento efectivo coincidan.
+
+Resultado obligatorio: investigar una mejora de velocidad debe reducir realmente el tiempo de desplazamiento correspondiente en el mapa, tanto en los casos generales como en las investigaciones exclusivas.
+
+Crear pruebas para cada una de las investigaciones afectadas y para combinaciones de bonificaciones tecnológicas y culturales.
+
+2.2. Proyecciones económicas: igualdad entre valores mostrados y liquidación real
+
+Defectos identificados:
+
+- "economy.ts:1015"
+- "economy.ts:1103"
+- "economyAdapter.ts:636"
+- "economyExtended.ts:331-335"
+
+Las consultas "economy:getKingdom" y "economy:getSimulatedKingdomResources" no incorporan correctamente todos los modificadores tecnológicos que sí se aplican en la liquidación económica real.
+
+Afecta especialmente a:
+
+- "agricultureProduction"
+- "foodConsumption"
+
+Implementación:
+
+- Localizar todos los puntos donde se calcula, simula, proyecta, muestra o liquida la producción y el consumo.
+- Identificar la función de cálculo económico canónica y reutilizarla siempre que sea viable.
+- Incorporar los modificadores tecnológicos efectivos en las proyecciones.
+- Mantener los multiplicadores de terreno, civilización, profesiones, productividad y demás factores existentes.
+- Respetar el orden matemático de aplicación de los multiplicadores.
+- No sumar bonificaciones que deben multiplicarse.
+- No multiplicar dos veces un modificador.
+- Mantener idénticos los criterios de redondeo y precisión entre proyección y liquidación.
+- Garantizar que una misma situación inicial, con los mismos modificadores y el mismo intervalo temporal, produzca resultados equivalentes en todos los sistemas.
+
+Fórmulas de referencia de la auditoría:
+
+Agricultura:
+
+"RESOURCE_PRODUCTION_MULTIPLIERS.agriculture × tech.agricultureProduction × (1 + terrain.agriculture) × (1 + civ.agriculture) × productivity"
+
+Consumo de alimentos:
+
+"professions.foodConsumptionMultiplier × (1 - min(0.15, tech.foodConsumptionReduction))"
+
+Estas expresiones son referencias del comportamiento auditado. Comprueba las implementaciones actuales y conserva las reglas reales del proyecto.
+
+Resultado obligatorio: el jugador no debe ver una producción o un consumo que contradiga la liquidación económica efectiva.
+
+Crear pruebas que comparen los resultados de proyección y liquidación con tecnologías activadas y desactivadas, incluyendo modificadores de civilización y terreno.
+
+2.3. Capacidad de almacenamiento: aplicar los modificadores al cobrar recompensas
+
+Defecto identificado:
+
+"convex/missions.ts:120,267"
+
+Las operaciones "claimMissionReward" y "grantReward" utilizan "storageCapacity(market)" sin incorporar correctamente los modificadores tecnológicos y culturales.
+
+Esto puede provocar que el jugador no pueda cobrar una recompensa aunque su capacidad efectiva real sea suficiente.
+
+Implementación:
+
+- Identificar la función canónica que calcula la capacidad efectiva de almacenamiento.
+- Reutilizar la misma capacidad que utiliza la economía real.
+- Incorporar el nivel efectivo del mercado, la bonificación tecnológica "storageCapacity" y el multiplicador cultural correspondiente.
+- Mantener el mismo orden de operaciones, precisión y redondeo que el cálculo económico.
+- Comprobar por separado cada recurso que se va a entregar.
+- No permitir que una recompensa supere la capacidad efectiva de ningún almacén.
+- Mantener la operación transaccional: o se entregan todos los recursos de la recompensa o no se entrega ninguno.
+- Evitar que la comprobación y la acreditación utilicen capacidades diferentes.
+- No cambiar las reglas generales de almacenamiento ni permitir sobrepasar los límites.
+
+Resultado obligatorio: las recompensas deben poder cobrarse cuando existe capacidad efectiva suficiente y deben rechazarse cuando no existe.
+
+Crear pruebas para:
+
+- Capacidad base.
+- Capacidad aumentada por investigación.
+- Capacidad aumentada por civilización.
+- Combinación de ambos modificadores.
+- Almacén lleno.
+- Capacidad suficiente para unos recursos e insuficiente para otros.
+- Dos intentos simultáneos de cobro.
+
+2.4. Costes de construcción: coherencia matemática del límite
+
+Defecto identificado:
+
+"buildingRules.ts:94"
+
+La fórmula utiliza un límite mínimo de "0.75" codificado directamente, mientras que el sistema dispone de "TECH_EFFECT_CAPS.constructionCost".
+
+Además, la suma de la rama general alcanza una reducción del 31 %, mientras que el límite efectivo permite solamente un 25 %. Esto provoca que parte de la progresión tecnológica no aporte beneficio real.
+
+Implementación:
+
+- Eliminar duplicidades entre límites definidos en configuraciones y límites codificados en funciones.
+- Establecer una única fuente de verdad para el límite.
+- Mantener coherencia entre "TECH_EFFECT_CAPS", "buildingRules.ts" y "buildings.ts".
+- Analizar los valores acumulados de las investigaciones existentes y calcular qué niveles quedan anulados por saturación.
+- No resolver el problema aumentando el límite automáticamente.
+- No modificar el coste final de los edificios de forma indiscriminada.
+
+Debes realizar una decisión matemática fundamentada:
+
+1. Calcular el efecto individual y acumulado de cada investigación que modifica "constructionCost".
+2. Identificar exactamente qué niveles dejan de aportar beneficio.
+3. Comparar el efecto efectivo actual con el efecto que representa la progresión diseñada.
+4. Si existe una solución que conserva el límite y evita niveles inútiles, utilizarla.
+5. Si es matemáticamente imposible conservar simultáneamente el límite y todos los efectos individuales, documentar la incompatibilidad y aplicar la solución de menor impacto sobre el equilibrio histórico.
+
+No introducir bonificaciones ficticias ni permitir que el coste quede por debajo del límite efectivo establecido.
+
+2.5. Duración de investigaciones: una única fórmula y un único redondeo
+
+Defectos identificados:
+
+- "technologies.ts:77,92"
+- "technologyRules.ts:326"
+- Discrepancia entre "ceil(s*m)" y "ceil(s*1000*m)".
+- Saturación del efecto "researchDuration" en el límite "0.40".
+
+Implementación:
+
+- Localizar todos los cálculos de duración de investigaciones.
+- Establecer una única función canónica de cálculo.
+- Determinar explícitamente si las unidades internas son segundos o milisegundos.
+- No mezclar unidades en ninguna parte del proceso.
+- Aplicar los modificadores tecnológicos y culturales en el orden correcto.
+- Utilizar el mismo resultado para mostrar la duración, crear la cola, programar la finalización y calcular el tiempo restante.
+- Aplicar el redondeo una sola vez, al final del cálculo, con la regla adecuada para impedir duraciones negativas o inferiores al mínimo permitido.
+- Mantener compatibilidad con investigaciones ya iniciadas y sus marcas temporales persistidas. No recalcular ni alterar arbitrariamente las colas históricas.
+
+Respecto a la saturación:
+
+- Analizar individualmente las ocho investigaciones que modifican "researchDuration".
+- Calcular el beneficio marginal de cada una.
+- Determinar qué puntos porcentuales quedan anulados por el límite actual.
+- No elevar el límite sin un análisis completo de progresión.
+- Evitar que las investigaciones posteriores sean inútiles por saturación prematura.
+- Si es necesario ajustar la distribución de bonificaciones, conservar el efecto total máximo previsto y la progresión relativa tanto como sea matemáticamente posible.
+- No alterar las bonificaciones exclusivas de civilización sin evaluar expresamente su equilibrio.
+
+El resultado debe ser una progresión coherente en la que cada nivel tenga un efecto real y las duraciones mostradas sean exactamente las que utiliza el backend.
+
+Crear pruebas con duraciones pequeñas, grandes, decimales, combinaciones de bonificaciones y límites máximos.
+
+2.6. Bonificación de capacidad residencial: efecto existente sin investigaciones que lo otorguen
+
+Defecto identificado:
+
+"housingCapacity" tiene infraestructura de aplicación y un límite definido, pero ninguna investigación del catálogo concede esta bonificación.
+
+Implementación:
+
+- No crear una investigación improvisada ni modificar una tecnología existente sin analizar el diseño.
+- Confirmar que el efecto puede recibirse, acumularse, persistirse y aplicarse correctamente.
+- Corregir cualquier defecto técnico que impida su aplicación.
+- Dejar documentada su ausencia en el catálogo para el diseño de la futura ampliación tecnológica.
+
+En esta corrección no se debe introducir todavía una nueva investigación residencial.
+
+3. CORRECCIONES DE EFECTOS EN SISTEMAS CONSUMIDORES
+
+3.1. Fatiga en batallas del Parlamento
+
+Defecto identificado:
+
+"parliament.ts:467"
+
+"snapshotSide" omite el parámetro "techModifiers.fatigueAccrualReduction".
+
+Implementación:
+
+- Transmitir el modificador efectivo al cálculo correspondiente.
+- Comprobar la firma de "territoryRules.ts".
+- Mantener el mismo cálculo de fatiga que en los demás enfrentamientos.
+- Evitar diferencias entre combate ordinario y combate del Parlamento cuando las condiciones sean equivalentes.
+- No duplicar el modificador ni alterar los efectos de civilización.
+
+Crear pruebas donde el mismo ejército, terreno y modificadores produzcan la fatiga esperada en ambos motores.
+
+3.2. Moral militar: coherencia entre combate y panel del reino
+
+Defecto identificado:
+
+"economyExtended.ts:computeMorale"
+
+La bonificación "moraleBase" se aplica en combate, pero no se refleja correctamente en "kingdom.militaryMorale" y el panel general.
+
+Implementación:
+
+- Localizar el cálculo canónico de moral.
+- Incorporar "tech.moraleBase" en el cálculo que alimenta el resumen del reino.
+- Respetar los límites existentes, incluido el máximo de moral de 100 cuando corresponda.
+- Mantener la suma aditiva con las bonificaciones culturales previstas.
+- Evitar que la moral se incremente dos veces en combate.
+- Diferenciar correctamente la moral económica del reino y la moral de cada ejército cuando sus reglas sean distintas.
+- Asegurar que la información mostrada represente los efectos que realmente se aplican.
+
+Crear pruebas de moral base, bonificación tecnológica, cultural, combinación de ambas y saturación.
+
+3.3. Espionaje contra bots: respetar los cuatro niveles
+
+Defecto identificado:
+
+"bots.ts:72-74,149-150"
+
+El espionaje contra bots limita su cálculo al nivel 2, aunque existen investigaciones que permiten alcanzar los niveles 3 y 4 y una bonificación exclusiva Navajo.
+
+Implementación:
+
+- Utilizar el mismo cálculo de nivel efectivo de espionaje que el sistema de Parlamento cuando las reglas del modo de juego sean equivalentes.
+- Eliminar el límite artificial de nivel 2.
+- Respetar el límite real de nivel 4.
+- Incorporar las bonificaciones tecnológicas y exclusivas correspondientes.
+- Aplicar correctamente los requisitos y niveles necesarios.
+- Actualizar el cálculo de costes de las operaciones de espionaje contra bots para que corresponda con el nivel efectivo real.
+- No introducir ventajas adicionales frente a bots que no existan en el sistema PvP.
+- No permitir que una tecnología exclusiva de otra civilización modifique el espionaje del jugador.
+
+Crear pruebas específicas para niveles 1, 2, 3 y 4, incluyendo la bonificación Navajo y los límites máximos.
+
+3.4. Fatiga, moral y demás modificadores: evitar divergencias entre motores
+
+Revisar los puntos donde los modificadores tecnológicos se convierten en parámetros de combate, Parlamento, movimiento o economía.
+
+Establecer un criterio uniforme:
+
+- Los modificadores se obtienen del reino real.
+- Se transmiten al motor consumidor.
+- Se aplican una sola vez.
+- Se respetan los topes establecidos.
+- Los valores mostrados y los resultados efectivos deben ser coherentes.
+
+No alterar el funcionamiento de efectos que la auditoría identifica como correctos.
+
+4. IDENTIFICADORES HISTÓRICOS Y COMPATIBILIDAD
+
+Defecto identificado:
+
+La normalización de "LEGACY_TECHNOLOGY_IDS" no se aplica en todos los lectores.
+
+Archivos identificados:
+
+- "technologies.ts:52-54"
+- "technologyRules.ts:287-288"
+- "missions.ts:94"
+- "missionRules.ts:208,278"
+- "missions.ts:299"
+
+Implementación:
+
+- Utilizar "normalizeTechnologyId" como mecanismo central para todos los identificadores tecnológicos históricos.
+- Normalizar los IDs antes de construir "completedIds", "researchingIds" o comparar requisitos.
+- Aplicar la normalización también a las comprobaciones de misiones que dependan de tecnologías o civilizaciones.
+- Utilizar "normalizeCivilizationId" para comparar civilizaciones, incluidas las referencias históricas.
+- No borrar registros antiguos ni realizar migraciones destructivas.
+- No permitir que una tecnología histórica ya completada vuelva a aparecer como disponible por una diferencia de nomenclatura.
+- No permitir que un ID antiguo bloquee incorrectamente una investigación sucesora.
+- Mantener los modificadores pasivos de investigaciones históricas.
+
+Pruebas obligatorias:
+
+- IDs antiguos de Navajos.
+- IDs antiguos de Masáis.
+- Investigación completada con ID histórico.
+- Investigación en curso con ID histórico.
+- Requisitos dependientes de investigaciones históricas.
+- Misiones que comprueban investigaciones exclusivas.
+- Normalización de alias de civilización.
+
+La normalización debe ser idempotente: aplicarla varias veces no debe cambiar el resultado.
+
+5. AISLAMIENTO ESTRICTO DE INVESTIGACIONES POR CIVILIZACIÓN
+
+Este apartado es crítico y no puede quedar parcialmente implementado.
+
+Actualmente las investigaciones exclusivas se filtran en función de "branch === "civilizacion"". Esa dependencia es frágil para futuras ampliaciones.
+
+Implementar un control de acceso basado directamente en la propiedad "civilizationRequirement", independientemente de la rama tecnológica.
+
+Reglas obligatorias:
+
+1. Todas las investigaciones generales deben permanecer visibles para las civilizaciones que tengan derecho a ellas.
+2. Cada civilización solo debe recibir las investigaciones exclusivas que le correspondan.
+3. No se debe devolver información de tecnologías exclusivas ajenas en consultas de catálogo.
+4. No basta con devolverlas como "locked": no deben aparecer ni revelar nombres, costes, efectos, requisitos o metadatos.
+5. El backend debe comprobar siempre la civilización real del reino autenticado.
+6. No confiar en la civilización, el reino o los modificadores proporcionados por el cliente.
+7. Las mutaciones deben rechazar intentos de iniciar investigaciones exclusivas ajenas.
+8. Las consultas individuales también deben respetar el aislamiento.
+9. Los requisitos de investigaciones sucesoras deben comprobarse con el mismo criterio.
+10. Las investigaciones exclusivas deben seguir siendo visibles únicamente para su civilización incluso si en el futuro se clasifican en ramas como militar, económica, científica o cualquier otra.
+
+Utilizar las funciones centrales de normalización y autorización existentes, ampliándolas solo cuando sea necesario.
+
+No cambiar la regla de inmutabilidad de civilización ni el procedimiento de fundación o reinicio del reino.
+
+Pruebas de seguridad obligatorias
+
+Crear pruebas para las 12 civilizaciones existentes:
+
+- Cada civilización puede consultar las 87 investigaciones generales.
+- Cada civilización puede consultar sus cuatro investigaciones exclusivas.
+- Ninguna civilización puede consultar las investigaciones exclusivas de las otras once.
+- Un reino sin civilización no recibe investigaciones exclusivas.
+- Cambiar manualmente parámetros del cliente no permite acceder a tecnologías ajenas.
+- Solicitar directamente el ID de una tecnología ajena no revela sus metadatos.
+- Intentar iniciar una investigación ajena falla en backend.
+- Una investigación exclusiva registrada en una rama distinta de "civilizacion" continúa protegida.
+- Los IDs históricos normalizados mantienen el aislamiento.
+
+No basta con probar los componentes visuales. Las pruebas deben ejecutar las funciones de consulta y mutación reales o sus equivalentes de integración.
+
+6. TOPES, ACUMULACIÓN Y CONSISTENCIA MATEMÁTICA
+
+Revisar todos los efectos tecnológicos y su relación con "TECH_EFFECT_CAPS" en "convex/balanceConfig.ts".
+
+Especial atención a:
+
+- "constructionCost"
+- "researchDuration"
+- "marchSpeed"
+- "housingCapacity"
+- "espionageAccuracy"
+- "moraleBase"
+- "unitEfficiencyInf"
+- "unitEfficiencyArc"
+- "unitEfficiencyCav"
+
+Para cada efecto:
+
+1. Identificar todas las investigaciones que lo conceden.
+2. Calcular la suma de bonificaciones generales.
+3. Calcular la suma máxima posible para cada civilización.
+4. Aplicar los límites reales.
+5. Determinar el efecto efectivo de cada nivel.
+6. Detectar bonificaciones anuladas, duplicadas o aplicadas en orden incorrecto.
+7. Comprobar si el motor consumidor utiliza el mismo límite que la configuración.
+8. Comprobar si la representación del efecto coincide con su aplicación real.
+
+No asumir que todos los efectos se acumulan de la misma manera.
+
+Mantener las reglas existentes:
+
+- Multiplicadores multiplicativos donde corresponda.
+- Bonificaciones aditivas donde corresponda.
+- Porcentajes expresados en la misma unidad.
+- Redondeos únicamente en los puntos necesarios.
+- Límites aplicados de forma centralizada.
+- Protección frente a valores no finitos y negativos cuando corresponda.
+
+No introducir límites nuevos ni cambiar el equilibrio por conveniencia técnica.
+
+Si una bonificación se encuentra anulada por saturación, resolverlo únicamente con una decisión matemáticamente justificada, conservando tanto como sea posible el equilibrio histórico y la progresión diseñada.
+
+7. ARQUITECTURA DE CÁLCULO
+
+Evitar que existan varias fórmulas independientes para el mismo efecto.
+
+Cuando sea técnicamente viable, establecer funciones canónicas reutilizables para:
+
+- Cálculo de modificadores tecnológicos.
+- Duración de investigaciones.
+- Capacidad efectiva de almacenamiento.
+- Producción y consumo proyectados.
+- Velocidad y duración de marcha.
+- Costes de construcción.
+- Cálculo de moral y fatiga.
+- Normalización de IDs y civilizaciones.
+- Comprobación de acceso a investigaciones exclusivas.
+
+Los motores consumidores deben utilizar estos resultados sin duplicar cálculos ni introducir valores manuales.
+
+Mantener la separación entre reglas de negocio, consultas, mutaciones y presentación.
+
+No crear una abstracción global innecesaria ni rehacer módulos completos cuando una modificación localizada resuelva el problema.
+
+8. PRUEBAS DE REGRESIÓN Y ACEPTACIÓN
+
+Crear o ampliar pruebas automatizadas para todos los defectos de este documento.
+
+Las pruebas deben cubrir:
+
+- Las 135 investigaciones existentes y sus identificadores.
+- Los efectos tecnológicos individuales.
+- Las combinaciones de efectos generales y exclusivos.
+- Los topes y saturaciones.
+- Los cinco recursos y sus proyecciones.
+- Las duraciones y los redondeos.
+- Las marchas reales.
+- El espionaje contra bots.
+- La moral y fatiga.
+- El cobro de recompensas.
+- La normalización histórica.
+- El aislamiento entre las 12 civilizaciones.
+- La manipulación de peticiones del cliente.
+- La persistencia de investigaciones terminadas y en curso.
+- La ausencia de duplicación de efectos.
+
+Las pruebas deben verificar resultados numéricos concretos, no limitarse a comprobar que una función devuelve un valor o que no lanza errores.
+
+Cuando una fórmula tenga varios multiplicadores, incluir pruebas de cálculo manual independiente para confirmar el resultado esperado.
+
+Incluir casos límite: cero, mínimo, máximo, valores decimales, saturación, valores históricos y operaciones simultáneas cuando proceda.
+
+9. VALIDACIÓN FINAL OBLIGATORIA
+
+Una vez implementadas todas las correcciones:
+
+1. Ejecutar instalación limpia con "npm ci".
+2. Ejecutar las pruebas específicas del sistema de investigaciones.
+3. Ejecutar todas las pruebas de integración.
+4. Ejecutar la suite completa de pruebas.
+5. Ejecutar "npm run lint".
+6. Ejecutar "npm run build".
+
+No declarar finalizado el trabajo si cualquiera de estos comandos falla.
+
+Si aparece un fallo causado por las modificaciones, corregirlo antes de finalizar. No ocultar errores, no eliminar pruebas para conseguir resultados positivos y no sustituir pruebas reales por simulaciones superficiales.
+
+Comprobar también que no se han modificado archivos ajenos al alcance de esta tarea.
+
+10. INFORME FINAL Y CRITERIO DE CIERRE
+
+Crear:
+
+"docs/CORRECCION_DEFINITIVA_INVESTIGACIONES.md"
+
+El informe debe contener:
+
+- Defectos confirmados.
+- Archivos y funciones modificados.
+- Solución aplicada a cada defecto.
+- Fórmulas matemáticas definitivas.
+- Límites y redondeos utilizados.
+- Resultados numéricos de los casos de prueba.
+- Tratamiento de IDs históricos.
+- Resultado de las pruebas de aislamiento de las 12 civilizaciones.
+- Investigaciones cuyo efecto se ha corregido.
+- Confirmación de que no se han introducido investigaciones nuevas.
+- Comandos ejecutados y códigos de salida reales.
+- Número de pruebas aprobadas, fallidas y omitidas.
+- Commit final y estado de Git.
+
+CONDICIÓN DE CIERRE:
+
+El trabajo solo se considera terminado cuando todos los defectos confirmados en esta especificación estén corregidos, sus pruebas sean satisfactorias, las bonificaciones se apliquen realmente en el juego y el sistema conserve sus reglas y equilibrio.
+
+No entregar un informe de tareas pendientes como sustituto de la implementación.
+
+No dejar correcciones a medias para otra fase.
+
+No limitarse a corregir la interfaz: corregir el cálculo y su aplicación real en backend.
+
+No añadir nuevas investigaciones todavía. La ampliación del catálogo será una fase posterior, sobre este sistema ya corregido y verificado.
+
+Ejecuta ahora la implementación completa, de forma localizada, rigurosa y sin rehacer innecesariamente el código existente.

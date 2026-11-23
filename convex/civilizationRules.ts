@@ -127,7 +127,8 @@ export function applyCivilizationResearchDuration(
 ): number {
   if (!Number.isFinite(baseDurationSeconds) || baseDurationSeconds <= 0) return 0;
   const passive = getCivilizationPassive(civId);
-  return Math.ceil(baseDurationSeconds * passive.researchDurationMultiplier);
+  const rawSeconds = Math.round(baseDurationSeconds * passive.researchDurationMultiplier * 1e9) / 1e9;
+  return Math.max(1, Math.ceil(rawSeconds));
 }
 
 /** Aplica bonificaciones pasivas de exploración territorial (coste y duración). */

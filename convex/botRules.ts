@@ -11,6 +11,7 @@ import {
   type BotDifficulty,
 } from "./botConfig";
 import {
+  TECH_EFFECT_CAPS,
   UNIT_TYPES,
   type UnitType,
 } from "./balanceConfig";
@@ -72,9 +73,11 @@ export interface BotEspionageEstimate {
  * Nivel 0 (sin Espionaje I): ±25 %
  * Nivel 1 (Espionaje I): ±15 %
  * Nivel 2 (Espionaje II): ±7 %
+ * Nivel 3 (Espionaje III): ±3 %
+ * Nivel 4 (Espionaje IV / Navajo bonus): ±0 % (exacto)
  */
 export function estimateBotArmy(bot: BotDefinition, espionageLevel: number): BotEspionageEstimate {
-  const level = Math.max(0, Math.min(2, espionageLevel));
+  const level = Math.max(0, Math.min(TECH_EFFECT_CAPS.espionageAccuracyMax, espionageLevel));
   const comp = bot.army.composition;
   const total = totalBotUnits(comp);
 

@@ -38,7 +38,7 @@ import {
   applyCasualtiesToArmy,
   removeDeadFromPopulation,
 } from "./parliament";
-import { MORALE, PARLIAMENT } from "./balanceConfig";
+import { MORALE, PARLIAMENT, TECH_EFFECT_CAPS } from "./balanceConfig";
 
 export const listBots = query({
   args: { kingdomId: v.id("kingdoms") },
@@ -66,11 +66,16 @@ export const listBots = query({
     const parliamentLevel = levels.parlamento ?? 0;
 
     const techModifiers = computeTechnologyModifiers(completedTech);
-    const playerEspionageLevel = techModifiers.espionageLevel;
+    const playerEspionageLevel = Math.min(
+      TECH_EFFECT_CAPS.espionageAccuracyMax,
+      Math.max(0, techModifiers.espionageLevel)
+    );
     const hasEspionage1 = playerEspionageLevel >= 1;
     const hasEspionage2 = playerEspionageLevel >= 2;
-    const espionageCost = playerEspionageLevel === 2
-      ? PARLIAMENT.ESPIONAGE.costByLevel[2]
+    const hasEspionage3 = playerEspionageLevel >= 3;
+    const hasEspionage4 = playerEspionageLevel >= 4;
+    const espionageCost = playerEspionageLevel >= 1
+      ? (PARLIAMENT.ESPIONAGE.costByLevel[playerEspionageLevel] ?? PARLIAMENT.ESPIONAGE.costByLevel[1])
       : PARLIAMENT.ESPIONAGE.costByLevel[1];
 
     // Mapeo de informes de espionaje vigentes sobre bots
@@ -122,6 +127,8 @@ export const listBots = query({
       cycleExpiresAtMs,
       hasEspionage1,
       hasEspionage2,
+      hasEspionage3,
+      hasEspionage4,
       playerEspionageLevel,
       espionageCost,
       bots: formattedBots,
@@ -135,7 +142,7 @@ export const requestBotEspionage = mutation({
     botId: v.string(),
   },
   handler: async (ctx, args) => {
-    const kingdom = await requireOwner(ctx, args.kingdomId);
+    const { kingdom, userId } = await requireOwner(ctx, args.kingdomId);
     const bot = getBotById(args.botId);
     if (!bot) throw new Error(`Bot militar "${args.botId}" no encontrado.`);
 
@@ -146,11 +153,11 @@ export const requestBotEspionage = mutation({
       throw new Error("Requiere la tecnología Espionaje I investigada en la Universidad.");
     }
 
-    const level = playerEspionageLevel >= 2 ? 2 : 1;
-    const cost = level === 2 ? PARLIAMENT.ESPIONAGE.costByLevel[2] : PARLIAMENT.ESPIONAGE.costByLevel[1];
+    const level = Math.min(TECH_EFFECT_CAPS.espionageAccuracyMax, playerEspionageLevel);
+    const cost = PARLIAMENT.ESPIONAGE.costByLevel[level] ?? PARLIAMENT.ESPIONAGE.costByLevel[1];
 
     const now = Date.now();
-    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, kingdom.userId, now);
+    const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
     if (settled.settledResources.gold < cost) {
       throw new Error(
         `Oro insuficiente: el informe cuesta ${cost} y hay ${Math.floor(settled.settledResources.gold)}.`
@@ -196,7 +203,7 @@ export const attackBot = mutation({
     botId: v.string(),
   },
   handler: async (ctx, args) => {
-    const kingdom = await requireOwner(ctx, args.kingdomId);
+    await requireOwner(ctx, args.kingdomId);
     const bot = getBotById(args.botId);
     if (!bot) throw new Error(`Bot militar "${args.botId}" no encontrado.`);
 

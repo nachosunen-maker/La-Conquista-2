@@ -21,9 +21,17 @@ import {
   validateKingdomResources,
   simulateEconomicProgress,
 } from "./economyCalculations";
-import { calculateBuildingWorkerCapacity, MAX_BUILDING_LEVEL } from "./buildingRules";
-import { UNITS, type UnitType } from "./balanceConfig";
+import {
+  calculateBuildingWorkerCapacity,
+  calculateJobCapacities,
+  calculateResidentialCapacity,
+  MAX_BUILDING_LEVEL,
+  validateBuildingCollection,
+} from "./buildingRules";
+import { TAXES, UNITS, WELLBEING, type ProductiveJob, type RestPolicy, type UnitType } from "./balanceConfig";
 import { isSpyUnitDoc } from "./armyRules";
+import { simulateExtendedEconomy, type ExtendedEconomyResult, type MoraleEffect } from "./economyExtended";
+import { computeTechnologyModifiers, type TechnologyModifiers } from "./technologyRules";
 
 export function isMatchingUserId(kingdomUserId: string, callerUserId: string): boolean {
   if (!kingdomUserId || !callerUserId) return false;
@@ -44,10 +52,13 @@ export interface RemoteKingdomDoc {
   militaryMorale?: number;
   taxPolicy?: string;
   taxRate?: number;
+  restPolicy?: string;
+  glory?: number;
   foodTier?: string;
   createdAt?: number;
   updatedAt?: number;
   moraleEffects?: Array<{ amount: number; expiresAt: number }>;
+  temporaryBonuses?: Array<{ type: string; multiplier: number; expiresAt: number }>;
 }
 
 export interface RemoteResourcesDoc {
@@ -210,6 +221,7 @@ export interface RemoteArmyUnitDoc {
   count: number;
   level?: number;   // Nivel militar P29 (1-5); ausente = 1
   wounded?: number; // Heridos P44, separados de los activos
+  isMercenary?: boolean;
 }
 
 export type ValidFoodTier = "minima" | "normal" | "abundante" | "excelente";
@@ -545,6 +557,27 @@ export function adaptRemoteDocumentsToEconomicState(
  *    - Si targetTime > lastUpdated con déficit: detecta agotamiento exacto y tiempo en inanición (suelo en 0).
  * 6. Tratamiento explícito de foodTier (P17) y clasificación militar (P18, asedio segregado).
  */
+export interface SimulatedKingdomExtendedProjectionInput {
+  completedTechnologyIds?: ReadonlyArray<string>;
+  technologyModifiers?: TechnologyModifiers;
+  terrainBonuses?: Partial<Record<ProductiveJob, number>>;
+  bonusProductionMultiplier?: number;
+  jobCapacities?: Record<ProductiveJob, number> | null;
+  residentialCapacity?: number | null;
+  buildingLevels?: Readonly<Record<string, number>>;
+  taxRate?: number;
+  happiness?: number;
+  moraleEffects?: ReadonlyArray<MoraleEffect>;
+  starvationSeconds?: number;
+  birthFraction?: number;
+  deathFraction?: number;
+  desertionFraction?: number;
+  restPolicy?: RestPolicy;
+  glory?: number;
+  mercenaryCount?: number;
+  civilization?: string;
+}
+
 export interface SimulatedKingdomResourcesInput {
   kingdom: RemoteKingdomDoc | null | undefined;
   resources: RemoteResourcesDoc | null | undefined;
@@ -555,6 +588,7 @@ export interface SimulatedKingdomResourcesInput {
   foodTier: string; // Parámetro explícito requerido (P17)
   targetTime?: number; // Hora de referencia inyectable (ms UTC). Si se omite, Date.now()
   callerUserId?: string; // Identificador del usuario que solicita la consulta (P1)
+  extendedProjection?: SimulatedKingdomExtendedProjectionInput;
   options?: {
     bypassAuthCheck?: boolean; // Permite omitir control de usuario en pruebas puras aisladas
   };
@@ -583,6 +617,7 @@ export interface SimulatedKingdomResourcesResult {
     isStarving: boolean;
   };
   militaryClassification?: MilitaryClassification;
+  extended?: ExtendedEconomyResult;
 }
 
 export function calculateSimulatedKingdomResources(
@@ -632,7 +667,138 @@ export function calculateSimulatedKingdomResources(
     };
   }
 
-  // 4. Ejecución autoritativa de la simulación continua (P2, P66, P67)
+  // 4. Si se solicita proyección ampliada coherente con settleRelationalKingdomEconomy y el reino ya fue inicializado:
+  if (input.extendedProjection) {
+    if (input.resources?.settlementInitialized !== true) {
+      const orig = adapterResult.kingdomState.resources;
+      return {
+        success: true,
+        kingdomId: input.kingdom!._id,
+        userId: adapterResult.kingdomState.userId,
+        targetTime,
+        lastUpdated: adapterResult.kingdomState.lastUpdated,
+        elapsedSeconds: 0,
+        simulatedResources: { ...orig },
+        originalResources: orig,
+        productionAndConsumption: {
+          dailyFoodProduction: 0,
+          dailyFoodConsumption: 0,
+          dailyFoodNetSurplus: 0,
+          effectiveAgricultureWorkers: adapterResult.kingdomState.workers.agriculture,
+        },
+        foodProductionCapacityPending: adapterResult.kingdomState.foodProductionWorkerLimit === null,
+        exhaustionMetrics: {
+          secondsToExhaustion: null,
+          starvationSeconds: 0,
+          isStarving: orig.food <= 0,
+        },
+        militaryClassification: adapterResult.militaryClassification,
+      };
+    }
+
+    const proj = input.extendedProjection;
+    const buildings = input.buildings ?? [];
+    const collection = validateBuildingCollection(buildings);
+    const buildingLevels = proj.buildingLevels ?? (collection.success ? collection.levels : {});
+    const techModifiers = proj.technologyModifiers ?? computeTechnologyModifiers(proj.completedTechnologyIds ?? []);
+    const mercenaryCount =
+      typeof proj.mercenaryCount === "number"
+        ? proj.mercenaryCount
+        : (input.armyUnits ?? [])
+            .filter((doc) => doc.isMercenary && Number.isInteger(doc.count))
+            .reduce((sum, doc) => sum + Math.max(0, doc.count), 0);
+
+    const ext = simulateExtendedEconomy({
+      kingdomState: adapterResult.kingdomState,
+      now: targetTime,
+      jobCapacities: proj.jobCapacities !== undefined ? proj.jobCapacities : calculateJobCapacities(buildings),
+      residentialCapacity:
+        proj.residentialCapacity !== undefined
+          ? proj.residentialCapacity
+          : calculateResidentialCapacity(buildings, techModifiers.housingCapacityBonus),
+      technologyModifiers: techModifiers,
+      terrainBonuses: proj.terrainBonuses,
+      taxRate:
+        typeof proj.taxRate === "number"
+          ? proj.taxRate
+          : typeof input.kingdom?.taxRate === "number"
+            ? input.kingdom.taxRate
+            : TAXES.INITIAL_RATE,
+      happiness:
+        typeof proj.happiness === "number"
+          ? proj.happiness
+          : typeof input.kingdom?.happiness === "number"
+            ? input.kingdom.happiness
+            : WELLBEING.INITIAL_HAPPINESS,
+      moraleEffects:
+        proj.moraleEffects ?? (Array.isArray(input.kingdom?.moraleEffects) ? input.kingdom!.moraleEffects : []),
+      starvationSeconds:
+        typeof proj.starvationSeconds === "number"
+          ? proj.starvationSeconds
+          : typeof input.population?.starvationSeconds === "number"
+            ? input.population.starvationSeconds
+            : 0,
+      birthFraction:
+        typeof proj.birthFraction === "number"
+          ? proj.birthFraction
+          : typeof input.population?.birthFraction === "number"
+            ? input.population.birthFraction
+            : 0,
+      deathFraction:
+        typeof proj.deathFraction === "number"
+          ? proj.deathFraction
+          : typeof input.population?.deathFraction === "number"
+            ? input.population.deathFraction
+            : 0,
+      desertionFraction:
+        typeof proj.desertionFraction === "number"
+          ? proj.desertionFraction
+          : typeof input.population?.desertionFraction === "number"
+            ? input.population.desertionFraction
+            : 0,
+      buildingLevels,
+      militaryPersonnel: adapterResult.militaryClassification?.regularSoldiers ?? adapterResult.kingdomState.regularSoldiers,
+      restPolicy:
+        proj.restPolicy ??
+        (typeof input.kingdom?.restPolicy === "string" ? (input.kingdom.restPolicy as RestPolicy) : "normal"),
+      glory:
+        typeof proj.glory === "number"
+          ? proj.glory
+          : typeof input.kingdom?.glory === "number"
+            ? input.kingdom.glory
+            : 0,
+      mercenaryCount,
+      civilization: proj.civilization ?? input.kingdom?.civilization,
+      bonusProductionMultiplier: proj.bonusProductionMultiplier,
+    });
+
+    return {
+      success: true,
+      kingdomId: input.kingdom!._id,
+      userId: adapterResult.kingdomState.userId,
+      targetTime,
+      lastUpdated: adapterResult.kingdomState.lastUpdated,
+      elapsedSeconds: ext.elapsedSeconds,
+      simulatedResources: ext.updatedResources,
+      originalResources: adapterResult.kingdomState.resources,
+      productionAndConsumption: {
+        dailyFoodProduction: ext.dailyProduction.food,
+        dailyFoodConsumption: ext.dailyFoodConsumption,
+        dailyFoodNetSurplus: ext.dailyFoodNetSurplus,
+        effectiveAgricultureWorkers: ext.effectiveWorkers.agriculture,
+      },
+      foodProductionCapacityPending: adapterResult.kingdomState.foodProductionWorkerLimit === null,
+      exhaustionMetrics: {
+        secondsToExhaustion: ext.secondsToExhaustion,
+        starvationSeconds: ext.starvation.secondsAfter,
+        isStarving: ext.starvation.phaseAfter > 0 || ext.updatedResources.food <= 0,
+      },
+      militaryClassification: adapterResult.militaryClassification,
+      extended: ext,
+    };
+  }
+
+  // 5. Ejecución autoritativa de simulación base (compatibilidad con llamadas sin contexto ampliado)
   const sim = simulateEconomicProgress(adapterResult.kingdomState, targetTime);
 
   return {

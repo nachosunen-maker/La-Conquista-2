@@ -4,7 +4,7 @@
  * contiene lógica determinista, sin acceso a Convex.
  */
 import type { ResourceType } from "./economyCalculations";
-import { BUILDINGS, CONSTRUCTION, INITIAL_BUILDINGS, resourceNameSpanish, type ProductiveJob } from "./balanceConfig";
+import { BUILDINGS, CONSTRUCTION, INITIAL_BUILDINGS, TECH_EFFECT_CAPS, resourceNameSpanish, type ProductiveJob } from "./balanceConfig";
 
 export interface BuildingRule {
   label: string;
@@ -83,7 +83,14 @@ export function durationForTargetLevel(
   return Math.ceil(baseDurationMs * (1 + DURATION_INCREASE_PER_LEVEL * (targetLevel - 1)) * durationModifier);
 }
 
-/** [COMPLEMENTO D-02] coste(n) = redondear(base × 1,15^(n−1)). */
+export const MIN_CONSTRUCTION_COST_MULTIPLIER = 1 - TECH_EFFECT_CAPS.constructionCost;
+
+export function clampConstructionCostMultiplier(costMultiplier: number = 1): number {
+  if (!Number.isFinite(costMultiplier)) return 1;
+  return Math.max(MIN_CONSTRUCTION_COST_MULTIPLIER, Math.min(1, costMultiplier));
+}
+
+/** [COMPLEMENTO D-02] coste(n) = redondear(base × 1,15^(n−1) × clamp(multiplicador)). */
 export function costsForTargetLevel(
   baseCosts: Record<ResourceType, number>,
   targetLevel: number,
@@ -91,7 +98,7 @@ export function costsForTargetLevel(
 ): Record<ResourceType, number> | null {
   if (!Number.isInteger(targetLevel) || targetLevel < 1 || targetLevel > MAX_BUILDING_LEVEL) return null;
   const growth = (1 + COST_GROWTH_PER_LEVEL) ** (targetLevel - 1);
-  const multiplier = growth * Math.max(0.75, Math.min(1, costMultiplier));
+  const multiplier = growth * clampConstructionCostMultiplier(costMultiplier);
   const result = {} as Record<ResourceType, number>;
   for (const resource of ["gold", "wood", "stone", "iron", "food"] as const) {
     const base = baseCosts[resource];

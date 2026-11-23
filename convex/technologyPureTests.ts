@@ -8,10 +8,18 @@ import {
   RESEARCH,
   INITIAL_BUILDINGS,
   TECH_EFFECT_CAPS,
+  LEGACY_CIVILIZATION_IDS,
+  LEGACY_TECHNOLOGY_IDS,
   type ResourceCosts,
 } from "./balanceConfig";
 import {
   computeTechnologyModifiers,
+  computeResearchDuration,
+  evaluateTechnologyStatus,
+  filterVisibleTechnologiesForCivilization,
+  getVisibleTechnologyForCivilization,
+  isTechnologyVisibleForCivilization,
+  normalizeTechnologyId,
   researchSlots,
   TECHNOLOGY_CATALOG,
   createResearchPlan,
@@ -20,6 +28,19 @@ import {
 } from "./technologyRules";
 import { computeSideFactors, emptyComposition, type BattleSide } from "./battleRules";
 import { marchTimeSeconds, marchFatigue } from "./territoryRules";
+import {
+  calculateResidentialCapacity,
+  clampConstructionCostMultiplier,
+  costsForTargetLevel,
+  MIN_CONSTRUCTION_COST_MULTIPLIER,
+} from "./buildingRules";
+import { calculateSimulatedKingdomResources } from "./economyAdapter";
+import { effectiveKingdomStorageCapacity } from "./economyExtended";
+import { SECONDS_PER_GAME_YEAR } from "./economyCalculations";
+import { estimateBotArmy } from "./botRules";
+import type { BotDefinition } from "./botConfig";
+import { conditionProgress, emptyCounters } from "./missionRules";
+import { normalizeCivilizationId } from "./civilizationRules";
 
 export interface TechnologyTestResult {
   category: string;
@@ -891,6 +912,373 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       details: isolationOk
         ? "Verificado en las 12 civilizaciones: exactamente 4 nodos propios y 0 ajenos en cliente"
         : `Violaciones detectadas: ${violations.join("; ")}`,
+    });
+  }
+
+  // 30. Integridad estricta del catálogo (135 nodos invariables; housingCapacity = 0 nodos en catálogo pero motor listo)
+  {
+    const housingNodes = TECHNOLOGIES.filter((t) => t.effect.key === "housingCapacity");
+    const capNoTech = calculateResidentialCapacity([{ buildingType: "viviendas", level: 2 }], 0);
+    const capWithBonus = calculateResidentialCapacity([{ buildingType: "viviendas", level: 2 }], 0.20);
+    const passed = TECHNOLOGIES.length === 135 && housingNodes.length === 0 && capNoTech === 200 && capWithBonus === 240;
+    results.push({
+      category: "INTEGRIDAD DEL CATÁLOGO (CORRECCIÓN DEFINITIVA)",
+      test: "30. Exactamente 135 tecnologías sin añadidos; housingCapacity tiene 0 nodos pero su multiplicador funciona sin desbordamiento",
+      passed,
+      details: `Total: ${TECHNOLOGIES.length}, housingCapacity nodos: ${housingNodes.length}, capacidad casas nv2 (0% vs +20%): ${capNoTech} vs ${capWithBonus}`,
+    });
+  }
+
+  // 31. Rebalanceo constructionCost y researchDuration: cada nivel reduce efectivamente y converge al tope sin desperdicio
+  {
+    const c4 = computeTechnologyModifiers(["construction_4"]).constructionCost;
+    const c5 = computeTechnologyModifiers(["construction_4", "construction_5"]).constructionCost;
+    const c6 = computeTechnologyModifiers(["construction_4", "construction_5", "construction_6"]).constructionCost;
+    const c7 = computeTechnologyModifiers(["construction_4", "construction_5", "construction_6", "construction_7"]).constructionCost;
+    const c8 = computeTechnologyModifiers(["construction_4", "construction_5", "construction_6", "construction_7", "construction_8"]).constructionCost;
+    const constructionProgressionOk =
+      Math.abs(c4 - 0.94) < 1e-9 &&
+      Math.abs(c5 - 0.89) < 1e-9 &&
+      Math.abs(c6 - 0.84) < 1e-9 &&
+      Math.abs(c7 - 0.79) < 1e-9 &&
+      Math.abs(c8 - 0.75) < 1e-9 &&
+      MIN_CONSTRUCTION_COST_MULTIPLIER === 0.75 &&
+      clampConstructionCostMultiplier(0.50) === 0.75;
+
+    const r1 = computeTechnologyModifiers(["educ_1"]).researchDuration;
+    const r2 = computeTechnologyModifiers(["educ_1", "educ_2"]).researchDuration;
+    const r3 = computeTechnologyModifiers(["educ_1", "educ_2", "educ_3"]).researchDuration;
+    const r4 = computeTechnologyModifiers(["educ_1", "educ_2", "educ_3", "educ_4"]).researchDuration;
+    const r6 = computeTechnologyModifiers(["educ_1", "educ_2", "educ_3", "educ_4", "educ_6"]).researchDuration;
+    const rGriegos = computeTechnologyModifiers(["educ_1", "educ_2", "educ_3", "educ_4", "educ_6", "tech_civ_griegos_b"]).researchDuration;
+    const rChinos = computeTechnologyModifiers(["educ_1", "educ_2", "educ_3", "educ_4", "educ_6", "tech_civ_chinos_a"]).researchDuration;
+    const rArabes = computeTechnologyModifiers(["educ_1", "educ_2", "educ_3", "educ_4", "educ_6", "tech_civ_arabes_a"]).researchDuration;
+
+    const researchProgressionOk =
+      Math.abs(r1 - 0.92) < 1e-9 &&
+      Math.abs(r2 - 0.85) < 1e-9 &&
+      Math.abs(r3 - 0.78) < 1e-9 &&
+      Math.abs(r4 - 0.72) < 1e-9 &&
+      Math.abs(r6 - 0.66) < 1e-9 &&
+      Math.abs(rGriegos - 0.61) < 1e-9 &&
+      Math.abs(rChinos - 0.61) < 1e-9 &&
+      Math.abs(rArabes - 0.60) < 1e-9;
+
+    const castleL2BaseCost = costsForTargetLevel({ gold: 200, wood: 200, stone: 200, iron: 100, food: 0 }, 2, 1.0);
+    const castleL2MaxDiscount = costsForTargetLevel({ gold: 200, wood: 200, stone: 200, iron: 100, food: 0 }, 2, c8);
+    const buildingCostApplied = castleL2BaseCost?.gold === 230 && castleL2MaxDiscount?.gold === 173; // round(200*1.15*0.75=172.5)=173
+
+    results.push({
+      category: "REBALANCEO DE TOPES Y SATURACIÓN (§6)",
+      test: "31. construction_4..8 convergen exactamente a 0.75 y educ_1..6 + exclusivas convergen hasta 0.60 sin niveles muertos",
+      passed: constructionProgressionOk && researchProgressionOk && buildingCostApplied,
+      details: `Const: ${c4}->${c5}->${c6}->${c7}->${c8}; Research gen=${r6}, griegos=${rGriegos}, chinos=${rChinos}, arabes=${rArabes}`,
+    });
+  }
+
+  // 32. computeResearchDuration: unificación segundos/ms, estabilización IEEE-754 y límites
+  {
+    const edgeFloat = computeResearchDuration(30, 0.60, 0.90); // 30 * 0.54 = 16.2 -> ceil = 17
+    const exactInt = computeResearchDuration(420, 1.0, 0.90); // 420 * 0.9 = 378 exacto
+    const arabFull = computeResearchDuration(420, 0.60, 1.0); // 420 * 0.60 = 252 exacto
+    const minOne = computeResearchDuration(1, 0.50, 0.50); // ceil(0.25) = 1
+    const zeroSafe = computeResearchDuration(-5, 0, NaN); // base fallback 60, muls 1 -> 60s
+    const passed =
+      edgeFloat.durationSeconds === 17 &&
+      edgeFloat.durationMs === 17_000 &&
+      exactInt.durationSeconds === 378 &&
+      exactInt.durationMs === 378_000 &&
+      arabFull.durationSeconds === 252 &&
+      arabFull.durationMs === 252_000 &&
+      minOne.durationSeconds === 1 &&
+      zeroSafe.durationSeconds === 60;
+
+    results.push({
+      category: "DURACIÓN DE INVESTIGACIÓN CANÓNICA (§2.4)",
+      test: "32. computeResearchDuration estabiliza coma flotante IEEE-754 y unifica durationSeconds × 1000 === durationMs",
+      passed,
+      details: `30×0.60×0.90=${edgeFloat.durationSeconds}s, 420×0.90=${exactInt.durationSeconds}s, 420×0.60=${arabFull.durationSeconds}s, mín=${minOne.durationSeconds}s`,
+    });
+  }
+
+  // 33. Proyección ampliada en calculateSimulatedKingdomResources: paridad matemática exacta con los 5 recursos y moral
+  {
+    const baseTime = 1_700_000_000_000;
+    const elapsedDays = 0.5;
+    const targetTime = baseTime + Math.round(elapsedDays * SECONDS_PER_GAME_YEAR * 1000);
+    const buildings = [
+      { kingdomId: "k_test", buildingType: "castillo", level: 5 },
+      { kingdomId: "k_test", buildingType: "granja", level: 10 },
+      { kingdomId: "k_test", buildingType: "aserradero", level: 10 },
+      { kingdomId: "k_test", buildingType: "cantera", level: 10 },
+      { kingdomId: "k_test", buildingType: "minaHierro", level: 10 },
+      { kingdomId: "k_test", buildingType: "minaOro", level: 10 },
+      { kingdomId: "k_test", buildingType: "mercado", level: 2 },
+      { kingdomId: "k_test", buildingType: "viviendas", level: 5 },
+      { kingdomId: "k_test", buildingType: "hospitalMilitar", level: 1 },
+    ];
+    const simResult = calculateSimulatedKingdomResources({
+      kingdom: {
+        _id: "k_test",
+        name: "Reino Simulado",
+        userId: "u1",
+        civilization: "romanos",
+        happiness: 75,
+        militaryMorale: 50,
+        taxRate: 0.10,
+        restPolicy: "normal",
+        glory: 0,
+      },
+      resources: {
+        kingdomId: "k_test",
+        gold: 1000,
+        wood: 1000,
+        stone: 1000,
+        iron: 1000,
+        food: 5000,
+        lastUpdated: baseTime,
+        settlementInitialized: true,
+      },
+      population: { kingdomId: "k_test", total: 1000, available: 500, starvationSeconds: 0 },
+      populationJobs: [
+        { kingdomId: "k_test", jobType: "agriculture", assignedCount: 100 },
+        { kingdomId: "k_test", jobType: "wood", assignedCount: 100 },
+        { kingdomId: "k_test", jobType: "stone", assignedCount: 100 },
+        { kingdomId: "k_test", jobType: "iron", assignedCount: 100 },
+        { kingdomId: "k_test", jobType: "gold", assignedCount: 100 },
+      ],
+      armyUnits: [],
+      buildings,
+      foodTier: "normal",
+      targetTime,
+      options: { bypassAuthCheck: true },
+      extendedProjection: {
+        completedTechnologyIds: ["agri_1", "agri_5", "mining_1", "mining_4", "mining_5", "mining_6", "mining_7", "trade_1", "happiness_3"],
+      },
+    });
+
+    const baseResult = calculateSimulatedKingdomResources({
+      kingdom: {
+        _id: "k_test",
+        name: "Reino Simulado",
+        userId: "u1",
+        civilization: "romanos",
+        happiness: 75,
+        militaryMorale: 50,
+        taxRate: 0.10,
+        restPolicy: "normal",
+        glory: 0,
+      },
+      resources: {
+        kingdomId: "k_test",
+        gold: 1000,
+        wood: 1000,
+        stone: 1000,
+        iron: 1000,
+        food: 5000,
+        lastUpdated: baseTime,
+        settlementInitialized: true,
+      },
+      population: { kingdomId: "k_test", total: 1000, available: 500, starvationSeconds: 0 },
+      populationJobs: [
+        { kingdomId: "k_test", jobType: "agriculture", assignedCount: 100 },
+        { kingdomId: "k_test", jobType: "wood", assignedCount: 100 },
+        { kingdomId: "k_test", jobType: "stone", assignedCount: 100 },
+        { kingdomId: "k_test", jobType: "iron", assignedCount: 100 },
+        { kingdomId: "k_test", jobType: "gold", assignedCount: 100 },
+      ],
+      buildings,
+      foodTier: "normal",
+      targetTime,
+      options: { bypassAuthCheck: true },
+      extendedProjection: { completedTechnologyIds: [] },
+    });
+
+    // Cálculo manual de capacidad de almacén con mercado nv2 + trade_1 (+15 %) + romanos (×1.00):
+    // (10000 + 2*2000) * 1.15 = 14000 * 1.15 = 16100
+    const expectedCap = effectiveKingdomStorageCapacity({ marketLevel: 2, technologyMultiplier: 1.15, civilization: "romanos" });
+    const c1 = simResult.success;
+    const c2 = baseResult.success;
+    const c3 = !!simResult.extended;
+    const c4 = !!baseResult.extended;
+    const c5 = expectedCap === 16099;
+    const c6 = simResult.extended?.storageCapacity === 16099;
+    const c7 = (simResult.extended?.dailyProduction.food ?? 0) > (baseResult.extended?.dailyProduction.food ?? 0);
+    const c8 = (simResult.extended?.dailyProduction.wood ?? 0) > (baseResult.extended?.dailyProduction.wood ?? 0);
+    const c9 = (simResult.extended?.dailyProduction.stone ?? 0) > (baseResult.extended?.dailyProduction.stone ?? 0);
+    const c10 = (simResult.extended?.dailyProduction.iron ?? 0) > (baseResult.extended?.dailyProduction.iron ?? 0);
+    const c11 = (simResult.extended?.dailyProduction.gold ?? 0) > (baseResult.extended?.dailyProduction.gold ?? 0);
+    const c12 = (simResult.extended?.dailyFoodConsumption ?? 0) < (baseResult.extended?.dailyFoodConsumption ?? 0);
+    const c13 = Math.abs((simResult.extended?.morale ?? 0) - (baseResult.extended?.morale ?? 0) - 3) < 0.5;
+
+    const passed = c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12 && c13;
+
+    results.push({
+      category: "PROYECCIÓN ECONÓMICA AMPLIADA (§2.2 + §2.3)",
+      test: "33. calculateSimulatedKingdomResources con extendedProjection aplica los 5 recursos, consumo, almacén y moralBase",
+      passed,
+      details: passed
+        ? `Cap=${simResult.extended?.storageCapacity}, Food ${baseResult.extended?.dailyProduction.food.toFixed(1)}->${simResult.extended?.dailyProduction.food.toFixed(1)}, Moral ${baseResult.extended?.morale}->${simResult.extended?.morale}`
+        : `Fallo almacén: expectedCap=${expectedCap}, actualCap=${simResult.extended?.storageCapacity}, c5=${c5}, c6=${c6}`,
+    });
+  }
+
+  // 34. Espionaje contra bots niveles 0..4 (soporte completo para 3 ±3% y 4 exacto ±0%)
+  {
+    const dummyBot: BotDefinition = {
+      id: "bot_test",
+      monarchName: "Monarca Prueba",
+      name: "Ejército de Prueba",
+      civilization: "romanos",
+      difficulty: "media",
+      isPermanent: true,
+      description: "Bot de prueba matemática",
+      army: {
+        composition: {
+          infanteria: 1000,
+          arqueria: 0,
+          caballeria: 0,
+          asedio: 0,
+          onagro_campana: 0,
+          carrobalista: 0,
+          espringarda_movil: 0,
+          trabuchet_traccion: 0,
+          arcuballista: 0,
+          fustibalo_campo: 0,
+          mangonel_tactico: 0,
+          carros_artillados: 0,
+          ariete_movil: 0,
+          torres_asalto: 0,
+          espia: 0,
+        },
+        militaryLevel: 2,
+        trainingMultiplier: 1.15,
+        weaponTier: "espadaHierro",
+        armorTier: "cueroReforzado",
+        morale: 75,
+        fatigue: 0,
+        strategy: "defensiva",
+        tacticalFormation: "equilibrada",
+        foodTier: "normal",
+        wallsLevel: 0,
+      },
+    };
+    const e0 = estimateBotArmy(dummyBot, 0);
+    const e1 = estimateBotArmy(dummyBot, 1);
+    const e2 = estimateBotArmy(dummyBot, 2);
+    const e3 = estimateBotArmy(dummyBot, 3);
+    const e4 = estimateBotArmy(dummyBot, 4);
+    const e5 = estimateBotArmy(dummyBot, 9);
+    const passed =
+      e0.errorRatio === 0.25 && e0.total.min === 750 && e0.total.max === 1250 &&
+      e1.errorRatio === 0.15 && e1.total.min === 850 && e1.total.max === 1150 &&
+      e2.errorRatio === 0.07 && e2.total.min === 930 && e2.total.max === 1070 &&
+      e3.errorRatio === 0.03 && e3.total.min === 970 && e3.total.max === 1030 &&
+      e4.errorRatio === 0 && e4.total.min === 1000 && e4.total.max === 1000 &&
+      e5.level === 4 && e5.errorRatio === 0;
+
+    results.push({
+      category: "ESPIONAJE CONTRA BOTS (§3.3)",
+      test: "34. estimateBotArmy aplica niveles 0 (±25%), 1 (±15%), 2 (±7%), 3 (±3%) y 4 (exacto) respetando tope 4",
+      passed,
+      details: `N0=[${e0.total.min},${e0.total.max}], N3=[${e3.total.min},${e3.total.max}], N4=[${e4.total.min},${e4.total.max}]`,
+    });
+  }
+
+  // 35. Normalización histórica idempotente en tecnologías y misiones
+  {
+    const idempNav1 = normalizeTechnologyId("tech_civ_indiosAmericanos");
+    const idempNav2 = normalizeTechnologyId(idempNav1);
+    const idempMas1 = normalizeTechnologyId("tech_civ_keniatas");
+    const idempMas2 = normalizeTechnologyId(idempMas1);
+    const civNav = normalizeCivilizationId("indiosAmericanos");
+    const civMas = normalizeCivilizationId("keniatas");
+
+    const modsLegacy = computeTechnologyModifiers(["tech_civ_indiosAmericanos", "tech_civ_keniatas"]);
+    const modsCanon = computeTechnologyModifiers(["tech_civ_navajos", "tech_civ_masais"]);
+
+    const evalSuccessor = evaluateTechnologyStatus({
+      technology: TECHNOLOGY_CATALOG.tech_civ_masais_a,
+      completedIds: new Set(["tech_civ_keniatas"]),
+      researchingIds: new Set(),
+      buildingLevels: { castillo: 5, universidad: 3, cuartel: 3 },
+      kingdomCivilization: "keniatas",
+    });
+
+    const evalCompleted = evaluateTechnologyStatus({
+      technology: TECHNOLOGY_CATALOG.tech_civ_navajos,
+      completedIds: new Set(["tech_civ_indiosAmericanos"]),
+      researchingIds: new Set(),
+      buildingLevels: { castillo: 5, universidad: 2 },
+      kingdomCivilization: "indiosAmericanos",
+    });
+
+    const prog = conditionProgress(
+      { type: "technologyCompleted", technologyId: "tech_civ_masais", value: 1 },
+      {
+        buildingLevels: {},
+        population: 1000,
+        completedTechnologyIds: ["tech_civ_keniatas"],
+        armySize: 0,
+        happiness: 50,
+        honor: 0,
+        resources: {},
+        territoriesOwned: 1,
+        civilization: "keniatas",
+        lifetime: emptyCounters(),
+        daily: emptyCounters(),
+      }
+    );
+
+    const passed =
+      Boolean(LEGACY_TECHNOLOGY_IDS.tech_civ_indiosAmericanos) &&
+      Boolean(LEGACY_CIVILIZATION_IDS.keniatas) &&
+      idempNav1 === "tech_civ_navajos" && idempNav2 === "tech_civ_navajos" &&
+      idempMas1 === "tech_civ_masais" && idempMas2 === "tech_civ_masais" &&
+      civNav === "navajos" && civMas === "masais" &&
+      Math.abs(modsLegacy.marchSpeedBonus - modsCanon.marchSpeedBonus) < 1e-9 &&
+      evalSuccessor.status === "available" &&
+      evalCompleted.status === "completed" &&
+      prog.current === 1 && prog.target === 1;
+
+    results.push({
+      category: "COMPATIBILIDAD DE IDENTIFICADORES HISTÓRICOS (§4)",
+      test: "35. normalizeTechnologyId y normalizeCivilizationId son idempotentes y cubren sucesoras, efectos y misiones",
+      passed,
+      details: `Navajos=${idempNav1}, Masáis=${idempMas1}, sucesora=${evalSuccessor.status}, misión=${prog.current}/${prog.target}`,
+    });
+  }
+
+  // 36. Aislamiento estricto por civilizationRequirement (independiente de branch) para las 12 civilizaciones y reino nulo
+  {
+    const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes", "mongoles", "chinos", "japoneses", "navajos", "aztecas", "masais"];
+    const syntheticForeignTech = {
+      ...TECHNOLOGY_CATALOG.tech_civ_griegos,
+      id: "tech_sintetica_militar_griega",
+      branch: "militar" as const,
+      civilizationRequirement: "griegos",
+    };
+
+    const all12Pass = civs.every((civ) => {
+      const visible = filterVisibleTechnologiesForCivilization(TECHNOLOGIES, civ);
+      const alien = visible.filter((t) => t.civilizationRequirement && t.civilizationRequirement !== civ);
+      const own = visible.filter((t) => t.civilizationRequirement === civ);
+      const foreignProbe = civ === "griegos"
+        ? isTechnologyVisibleForCivilization(syntheticForeignTech, civ)
+        : !isTechnologyVisibleForCivilization(syntheticForeignTech, civ);
+      return visible.length === 91 && own.length === 4 && alien.length === 0 && foreignProbe;
+    });
+
+    const nullCivVisible = filterVisibleTechnologiesForCivilization(TECHNOLOGIES, null);
+    const individualBlocked = getVisibleTechnologyForCivilization("tech_civ_romanos", "japoneses") === null;
+    const individualAllowed = getVisibleTechnologyForCivilization("tech_civ_romanos", "romanos")?.id === "tech_civ_romanos";
+
+    const passed = all12Pass && nullCivVisible.length === 87 && individualBlocked && individualAllowed;
+    results.push({
+      category: "AISLAMIENTO ESTRICTO POR CIVILIZACIÓN (§5)",
+      test: "36. Todas las civilizaciones ven 87 generales + 4 propias = 91; rama distinta protegida; reino sin civ ve 87",
+      passed,
+      details: `12 civs ok=${all12Pass}, sin civ=${nullCivVisible.length}, consulta individual bloqueada=${individualBlocked}`,
     });
   }
 

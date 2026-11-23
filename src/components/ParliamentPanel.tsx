@@ -226,6 +226,8 @@ export function ParliamentPanel(props: {
       cycleExpiresAtMs: localRotation.cycleExpiresAtMs,
       hasEspionage1: true,
       hasEspionage2: false,
+      hasEspionage3: false,
+      hasEspionage4: false,
       playerEspionageLevel: 1,
       espionageCost: 100,
       bots: localActiveBots.map((bot) => {

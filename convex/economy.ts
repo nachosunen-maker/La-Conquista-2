@@ -996,20 +996,27 @@ export const getKingdom = query({
       throw new Error("No autorizado: el reino pertenece a otro usuario.");
     }
 
-    const resources = await ctx.db
-      .query("resources" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-      .first();
-    const population = await ctx.db
-      .query("population" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-      .first();
-    const populationJobs = await ctx.db
-      .query("populationJobs" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
-      .collect();
-
-    const armyUnits: any[] = await readArmyUnitDocs(ctx, kingdom._id);
+    const [resources, population, populationJobs, armyUnits, buildings, terrainBonuses, completedTechnologyIds] = await Promise.all([
+      ctx.db
+        .query("resources" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+        .first(),
+      ctx.db
+        .query("population" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+        .first(),
+      ctx.db
+        .query("populationJobs" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+        .collect(),
+      readArmyUnitDocs(ctx, kingdom._id),
+      ctx.db
+        .query("buildings" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), kingdom._id))
+        .collect(),
+      readTerrainBonuses(ctx, kingdom._id),
+      readCompletedTechnologyIds(ctx, kingdom._id),
+    ]);
 
     const now = Date.now();
     const simulation = calculateSimulatedKingdomResources({
@@ -1018,9 +1025,15 @@ export const getKingdom = query({
       population,
       populationJobs,
       armyUnits,
+      buildings,
       foodTier: kingdom.foodTier ?? "normal",
       targetTime: now,
       callerUserId,
+      extendedProjection: {
+        completedTechnologyIds,
+        terrainBonuses,
+        bonusProductionMultiplier: activeProductionBonusMultiplier(kingdom.temporaryBonuses, now),
+      },
     });
     if (!simulation.success || !simulation.simulatedResources || !simulation.productionAndConsumption) {
       throw new Error(simulation.error ?? "No se pudo proyectar la economía relacional.");
@@ -1028,6 +1041,8 @@ export const getKingdom = query({
 
     return {
       ...kingdom,
+      happiness: simulation.extended?.happiness.after ?? kingdom.happiness,
+      militaryMorale: simulation.extended?.morale ?? kingdom.militaryMorale,
       simulatedResources: simulation.simulatedResources,
       metrics: {
         dailyFoodProduction: simulation.productionAndConsumption.dailyFoodProduction,
@@ -1036,6 +1051,10 @@ export const getKingdom = query({
         secondsSinceLastSync: simulation.elapsedSeconds,
         secondsToExhaustion: simulation.exhaustionMetrics?.secondsToExhaustion ?? null,
         starvationSeconds: simulation.exhaustionMetrics?.starvationSeconds ?? 0,
+        dailyProduction: simulation.extended?.dailyProduction ?? null,
+        storageCapacity: simulation.extended?.storageCapacity ?? null,
+        taxesCollected: simulation.extended?.taxesCollected ?? 0,
+        dailyTaxIncome: simulation.extended?.dailyTaxIncome ?? 0,
       },
     };
   },
@@ -1078,37 +1097,50 @@ export const getSimulatedKingdomResources = query({
     if (!kingdom) {
       throw new Error(`Reino no encontrado con ID '${args.kingdomId}'.`);
     }
-    if (kingdom.userId !== callerUserId) {
+    if (!isKingdomOwner(kingdom.userId, callerUserId)) {
       throw new Error("No autorizado: el reino no pertenece al usuario autenticado.");
     }
 
-    const resources = await ctx.db
-      .query("resources" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
-      .first();
+    const [resources, population, populationJobs, armyUnits, buildings, terrainBonuses, completedTechnologyIds] = await Promise.all([
+      ctx.db
+        .query("resources" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
+        .first(),
+      ctx.db
+        .query("population" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
+        .first(),
+      ctx.db
+        .query("populationJobs" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
+        .collect(),
+      readArmyUnitDocs(ctx, args.kingdomId as any),
+      ctx.db
+        .query("buildings" as any)
+        .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
+        .collect(),
+      readTerrainBonuses(ctx, kingdom._id),
+      readCompletedTechnologyIds(ctx, kingdom._id),
+    ]);
 
-    const population = await ctx.db
-      .query("population" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
-      .first();
+    const effectiveNow = typeof args.targetTime === "number" ? args.targetTime : Date.now();
 
-    const populationJobs = await ctx.db
-      .query("populationJobs" as any)
-      .filter((q: any) => q.eq(q.field("kingdomId"), args.kingdomId))
-      .collect();
-
-    const armyUnits: any[] = await readArmyUnitDocs(ctx, args.kingdomId as any);
-
-    // 3. Proyección analítica mediante el adaptador y motor puro
+    // 3. Proyección analítica mediante el adaptador y motor extendido
     const result = calculateSimulatedKingdomResources({
       kingdom,
       resources,
       population,
       populationJobs,
       armyUnits,
+      buildings,
       foodTier: args.foodTier,
       targetTime: args.targetTime,
       callerUserId,
+      extendedProjection: {
+        completedTechnologyIds,
+        terrainBonuses,
+        bonusProductionMultiplier: activeProductionBonusMultiplier(kingdom.temporaryBonuses, effectiveNow),
+      },
       options: {
       },
     });

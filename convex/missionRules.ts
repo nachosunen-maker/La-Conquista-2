@@ -12,6 +12,8 @@ import {
   type MissionReward,
   type MissionStage,
 } from "./balanceConfig";
+import { normalizeCivilizationId } from "./civilizationRules";
+import { normalizeTechnologyId } from "./technologyRules";
 
 export const MISSION_COUNTER_KEYS: readonly MissionCounterKey[] = [
   "buildingsCompleted", "troopsTrained", "researchStarted", "researchCompleted", "battlesFought",
@@ -106,9 +108,14 @@ export function conditionProgress(condition: MissionCondition, snapshot: Mission
     case "population":
       return { current: snapshot.population, target };
     case "technologiesCompleted":
-      return { current: snapshot.completedTechnologyIds.length, target };
-    case "technologyCompleted":
-      return { current: snapshot.completedTechnologyIds.includes(condition.technologyId ?? "") ? 1 : 0, target: 1 };
+      return { current: new Set(snapshot.completedTechnologyIds.map((id) => normalizeTechnologyId(id))).size, target };
+    case "technologyCompleted": {
+      const targetTechId = normalizeTechnologyId(condition.technologyId ?? "");
+      return {
+        current: snapshot.completedTechnologyIds.some((id) => normalizeTechnologyId(id) === targetTechId) ? 1 : 0,
+        target: 1,
+      };
+    }
     case "armySize":
       return { current: snapshot.armySize, target };
     case "happiness":
@@ -204,8 +211,9 @@ export function evaluateMissions(snapshot: MissionSnapshot, completedIds: Readon
     done.add(progressId);
   }
 
+  const snapshotCivilization = normalizeCivilizationId(snapshot.civilization);
   for (const mission of allSecretMissions()) {
-    if (mission.civilization && mission.civilization !== snapshot.civilization) continue;
+    if (mission.civilization && normalizeCivilizationId(mission.civilization) !== snapshotCivilization) continue;
     if (done.has(mission.id) || !isConditionMet(mission.condition, snapshot)) continue;
     completions.push({ progressId: mission.id, mission, kind: "secret", reward: mission.reward });
     done.add(mission.id);
@@ -273,9 +281,10 @@ export function findMissionDetails(progressId: string, dayKey: string, civilizat
       }
     }
   }
+  const normalizedCivilization = normalizeCivilizationId(civilization);
   for (const mission of allSecretMissions()) {
     if (mission.id === progressId) {
-      if (mission.civilization && mission.civilization !== civilization) continue;
+      if (mission.civilization && normalizeCivilizationId(mission.civilization) !== normalizedCivilization) continue;
       return {
         title: mission.title,
         description: mission.description,

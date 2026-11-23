@@ -37,8 +37,9 @@ import {
   validateMercenaryHire,
   type TrainingQueueEntry,
 } from "./armyRules";
-import { ARMORS, DEFAULT_TACTICAL_FORMATION, MAP, MERCENARIES, MILITARY_LEVELS, REGULAR_UNIT_TYPES, STRATEGIES, TACTICAL_FORMATIONS, TERRAINS, TERRITORIES, TIME, UNITS, UNIT_TYPES, WEAPONS, type ArmorTier, type UnitType, type WeaponTier } from "./balanceConfig";
+import { ARMORS, DEFAULT_TACTICAL_FORMATION, MAP, MERCENARIES, MILITARY_LEVELS, REGULAR_UNIT_TYPES, STRATEGIES, TACTICAL_FORMATIONS, TAXES, TERRAINS, TERRITORIES, TIME, UNITS, UNIT_TYPES, WEAPONS, WELLBEING, type ArmorTier, type UnitType, type WeaponTier } from "./balanceConfig";
 import { civilizationArmorLabel, civilizationTrainingCostMultiplier, civilizationTrainingDurationMultiplier, civilizationUnitLabel, civilizationWeaponLabel, getCivilizationIdentity, getCivilizationPassive } from "./civilizationRules";
+import { computeMorale, starvationPhase } from "./economyExtended";
 import type { ResourceType } from "./economyCalculations";
 import { getOrCreateTerritoryCell, patchTerritoryCell, readHomeCoord, readKnownCellIds, readPathTerrainMultiplier, readTerritoryCell } from "./territories";
 import {
@@ -1182,7 +1183,14 @@ export const launchAttack = mutation({
     const terrainMul = await readPathTerrainMultiplier(ctx, homeCoord, { q: target.q, r: target.r });
     const unitMul = armyMarchMultiplier(requestedComposition, kingdom.civilization);
     const civPassive = getCivilizationPassive(kingdom.civilization);
-    const durationSeconds = marchTimeSeconds(distance, terrainMul, unitMul, civPassive?.marchSpeedMultiplier ?? 1.0);
+    const attackerTech = computeTechnologyModifiers(await readCompletedTechnologyIds(ctx, args.kingdomId));
+    const durationSeconds = marchTimeSeconds(
+      distance,
+      terrainMul,
+      unitMul,
+      civPassive?.marchSpeedMultiplier ?? 1.0,
+      attackerTech.marchSpeedBonus
+    );
     const durationMs = Math.round(durationSeconds * 1000);
     const completesAt = now + durationMs;
 
@@ -1231,6 +1239,58 @@ export const launchAttack = mutation({
     };
   },
 });
+
+async function resolveBattleSideMorale(
+  ctx: MutationCtx,
+  kingdom: any,
+  techModifiers: ReturnType<typeof computeTechnologyModifiers>,
+  now: number
+): Promise<{ morale: number; moraleBase: number }> {
+  const storedMorale = typeof kingdom.militaryMorale === "number" ? kingdom.militaryMorale : WELLBEING.INITIAL_MORALE;
+  const [resources, population] = await Promise.all([
+    ctx.db.query("resources").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id)).first(),
+    ctx.db.query("population").withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdom._id)).first(),
+  ]);
+  if (!resources || resources.settlementInitialized !== true || !population) {
+    return { morale: storedMorale, moraleBase: techModifiers.moraleBase };
+  }
+  const taxRate = typeof kingdom.taxRate === "number" ? kingdom.taxRate : TAXES.INITIAL_RATE;
+  const happiness = typeof kingdom.happiness === "number" ? kingdom.happiness : WELLBEING.INITIAL_HAPPINESS;
+  const starvPhase = starvationPhase(typeof population.starvationSeconds === "number" ? population.starvationSeconds : 0);
+  const moraleEffects = Array.isArray(kingdom.moraleEffects) ? kingdom.moraleEffects : [];
+  const glory = typeof kingdom.glory === "number" ? kingdom.glory : 0;
+  const foodTier = kingdom.foodTier ?? "normal";
+
+  const baseMorale = computeMorale({
+    happiness,
+    foodTier,
+    taxRate,
+    starvationPhase: starvPhase,
+    moraleEffects,
+    now,
+    glory,
+    taxToleranceReduction: techModifiers.taxToleranceReduction,
+  });
+  const withTechMorale = computeMorale({
+    happiness,
+    foodTier,
+    taxRate,
+    starvationPhase: starvPhase,
+    moraleEffects,
+    now,
+    glory,
+    taxToleranceReduction: techModifiers.taxToleranceReduction,
+    moraleBase: techModifiers.moraleBase,
+  });
+
+  if (Math.abs(storedMorale - withTechMorale) <= 0.05) {
+    return { morale: storedMorale, moraleBase: 0 };
+  }
+  if (Math.abs(storedMorale - baseMorale) <= 0.05) {
+    return { morale: storedMorale, moraleBase: techModifiers.moraleBase };
+  }
+  return { morale: storedMorale, moraleBase: techModifiers.moraleBase };
+}
 
 export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">) {
   const march = await ctx.db.get(marchId);
@@ -1386,6 +1446,8 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   const defLevels = defCollection.success ? defCollection.levels : {};
 
 
+  const battleNow = Date.now();
+  const attackerMorale = await resolveBattleSideMorale(ctx, attackerKingdom, attackerTech, battleNow);
   const attackerSide: BattleSide = {
     kingdomId: march.kingdomId,
     name: attackerKingdom.name,
@@ -1395,7 +1457,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     armorTier: (attackerKingdom.armorTier as any) ?? "ninguna",
     strategy: (attackerKingdom.strategy as any) ?? "defensiva",
     tacticalFormation: isTacticalFormation(attackerKingdom.tacticalFormation ?? "") ? (attackerKingdom.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
-    morale: typeof attackerKingdom.militaryMorale === "number" ? attackerKingdom.militaryMorale : 70,
+    morale: attackerMorale.morale,
     foodTier: attackerKingdom.foodTier ?? "normal",
     fatigue: newFatigue,
     wallsLevel: 0,
@@ -1403,7 +1465,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     civilization: attackerKingdom.civilization,
     combatAttackBonus: attackerTech.combatAttackBonus,
     combatDefenseBonus: attackerTech.combatDefenseBonus,
-    moraleBase: attackerTech.moraleBase,
+    moraleBase: attackerMorale.moraleBase,
     unitEfficiencyInf: attackerTech.unitEfficiencyInf,
     unitEfficiencyArc: attackerTech.unitEfficiencyArc,
     unitEfficiencyCav: attackerTech.unitEfficiencyCav,
@@ -1411,6 +1473,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
   };
 
   const defenderTech = computeTechnologyModifiers(await readCompletedTechnologyIds(ctx, defenderKingdomId));
+  const defenderMorale = await resolveBattleSideMorale(ctx, defenderKingdom, defenderTech, battleNow);
   const terrainDefBonus = (TERRAINS as any)[targetCell.terrain]?.defense ?? 0;
   const defenderSide: BattleSide = {
     kingdomId: defenderKingdomId,
@@ -1421,7 +1484,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     armorTier: (defenderKingdom.armorTier as any) ?? "ninguna",
     strategy: (defenderKingdom.strategy as any) ?? "defensiva",
     tacticalFormation: isTacticalFormation(defenderKingdom.tacticalFormation ?? "") ? (defenderKingdom.tacticalFormation as BattleSide["tacticalFormation"]) : DEFAULT_TACTICAL_FORMATION,
-    morale: typeof defenderKingdom.militaryMorale === "number" ? defenderKingdom.militaryMorale : 70,
+    morale: defenderMorale.morale,
     foodTier: defenderKingdom.foodTier ?? "normal",
     fatigue: typeof defenderKingdom.armyFatigue === "number" ? defenderKingdom.armyFatigue : 0,
     wallsLevel: defLevels.murallas ?? 0,
@@ -1429,7 +1492,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     civilization: defenderKingdom.civilization,
     combatAttackBonus: defenderTech.combatAttackBonus,
     combatDefenseBonus: defenderTech.combatDefenseBonus,
-    moraleBase: defenderTech.moraleBase,
+    moraleBase: defenderMorale.moraleBase,
     unitEfficiencyInf: defenderTech.unitEfficiencyInf,
     unitEfficiencyArc: defenderTech.unitEfficiencyArc,
     unitEfficiencyCav: defenderTech.unitEfficiencyCav,
