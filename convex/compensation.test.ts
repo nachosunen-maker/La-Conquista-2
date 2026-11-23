@@ -1366,8 +1366,15 @@ describe("Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y
     expect(statusC.capacityVerifiable).toBe(true);
     expect(statusC.canClaim).toBe(true);
 
-    const onClaimMock = vi.fn(async (kid?: string) => {
-      await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId: kid as any });
+    const claimHolder: { promise: Promise<{ status: string; alreadyClaimed?: boolean }> | null } = {
+      promise: null,
+    };
+    const onClaimMock = vi.fn((kid?: string): Promise<void> => {
+      const mutationPromise = asUser.mutation(api.compensation.claimOutageCompensation, {
+        kingdomId: kid as any,
+      });
+      claimHolder.promise = mutationPromise;
+      return mutationPromise.then(() => undefined);
     });
     const { container: containerC, unmount: unmountC } = render(
       React.createElement(OutageCompensationCard, {
@@ -1386,9 +1393,15 @@ describe("Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y
     fireEvent.click(buttonC);
     expect(onClaimMock).toHaveBeenCalledTimes(1);
     expect(onClaimMock).toHaveBeenCalledWith(kingdomId);
+    expect(claimHolder.promise).toBeInstanceOf(Promise);
+
+    // Espera con await a que termine correctamente la mutación iniciada por el clic
+    const claimResult = await claimHolder.promise!;
+    expect(claimResult.status).toBe("claimed");
+    expect(claimResult.alreadyClaimed).toBe(false);
     unmountC();
 
-    // CASO D: Ya cobrado tras la mutación exitosa en backend
+    // Solo después consulta getOutageCompensationStatus y comprueba que el estado es "claimed"
     const statusD = (await asUser.query(
       api.compensation.getOutageCompensationStatus,
       {}
@@ -1416,9 +1429,16 @@ describe("Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y
     fireEvent.click(buttonD);
     expect(mockClaimD).not.toHaveBeenCalled();
 
-    // Comprobación de que una segunda llamada a la mutación en backend es rechazada y no duplica
+    // Comprobación de que una segunda llamada a la mutación en backend es rechazada y no duplica los recursos
+    const resourcesBeforeSecond = await getResourcesDoc(t, kingdomId);
     const secondClaimResult = await asUser.mutation(api.compensation.claimOutageCompensation, { kingdomId });
     expect(secondClaimResult.alreadyClaimed).toBe(true);
+    const resourcesAfterSecond = await getResourcesDoc(t, kingdomId);
+    expect(resourcesAfterSecond!.gold).toBe(resourcesBeforeSecond!.gold);
+    expect(resourcesAfterSecond!.wood).toBe(resourcesBeforeSecond!.wood);
+    expect(resourcesAfterSecond!.stone).toBe(resourcesBeforeSecond!.stone);
+    expect(resourcesAfterSecond!.iron).toBe(resourcesBeforeSecond!.iron);
+    expect(resourcesAfterSecond!.food).toBe(resourcesBeforeSecond!.food);
 
     unmountD();
     cleanup();
