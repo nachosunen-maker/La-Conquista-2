@@ -7,6 +7,7 @@
  */
 import type { ResourceType } from "./economyCalculations";
 import {
+  PARLIAMENT,
   RESEARCH,
   RESEARCH_SLOTS_BY_UNIVERSITY,
   TECHNOLOGIES,
@@ -131,11 +132,14 @@ export interface TechnologyModifiers {
   unitEfficiencyInf: number;
   unitEfficiencyArc: number;
   unitEfficiencyCav: number;
+  unitEfficiencySiege: number;
   mercenaryCostReduction: number; // reducción de coste (e.g. 0.08 = -8 %, máx 0.30)
   woundedRateBonus: number; // puntos porcentuales adicionales (0,05 = +5 pp)
   fatigueAccrualReduction: number; // reducción de fatiga acumulada (0,05 = −5 %)
   counterEspionage: number; // probabilidad de contrainteligencia (e.g. 0.10 = 10 %, máx 0.60)
   explorationSpeedBonus: number; // bonificación de velocidad en expediciones de exploración (+0,10 = +10 %)
+  espionageCostReduction: number; // reducción de coste en oro de informes de espionaje (máx 0,40)
+  explorationCostReduction: number; // reducción de coste en expediciones de exploración (máx 0,35)
 }
 
 export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>): TechnologyModifiers {
@@ -165,11 +169,14 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
   let sumEffInf = 0;
   let sumEffArc = 0;
   let sumEffCav = 0;
+  let sumEffSiege = 0;
   let sumMercCost = 0;
   let sumWoundedRate = 0;
   let sumFatigueAccrual = 0;
   let sumCounterEspionage = 0;
   let sumExplorationSpeed = 0;
+  let sumEspionageCost = 0;
+  let sumExplorationCost = 0;
   const unlockedWeapons: string[] = [];
   const unlockedArmors: string[] = [];
 
@@ -220,11 +227,14 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
         case "unitEfficiencyArc": sumEffArc += value; break;
         case "unitEfficiencyCav": sumEffCav += value; break;
         case "unitEfficiencyAll": sumEffInf += value; sumEffArc += value; sumEffCav += value; break;
+        case "unitEfficiencySiege": sumEffSiege += value; break;
         case "mercenaryCost": sumMercCost += Math.abs(value); break;
         case "woundedRate": sumWoundedRate += value; break;
         case "fatigueAccrual": sumFatigueAccrual += Math.abs(value); break;
         case "counterEspionage": sumCounterEspionage += value; break;
         case "explorationSpeed": sumExplorationSpeed += value; break;
+        case "espionageCost": sumEspionageCost += Math.abs(value); break;
+        case "explorationCost": sumExplorationCost += Math.abs(value); break;
       }
     }
   }
@@ -259,12 +269,25 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     unitEfficiencyInf: Math.min(TECH_EFFECT_CAPS.unitEfficiency, Math.max(0, sumEffInf)),
     unitEfficiencyArc: Math.min(TECH_EFFECT_CAPS.unitEfficiency, Math.max(0, sumEffArc)),
     unitEfficiencyCav: Math.min(TECH_EFFECT_CAPS.unitEfficiency, Math.max(0, sumEffCav)),
+    unitEfficiencySiege: Math.min(TECH_EFFECT_CAPS.unitEfficiency, Math.max(0, sumEffSiege)),
     mercenaryCostReduction: Math.min(TECH_EFFECT_CAPS.mercenaryCost, Math.max(0, sumMercCost)),
     woundedRateBonus: Math.min(TECH_EFFECT_CAPS.woundedRate, Math.max(0, sumWoundedRate)),
     fatigueAccrualReduction: Math.min(TECH_EFFECT_CAPS.fatigueAccrual, Math.max(0, sumFatigueAccrual)),
     counterEspionage: Math.min(TECH_EFFECT_CAPS.counterEspionage, Math.max(0, sumCounterEspionage)),
-    explorationSpeedBonus: Math.max(0, sumExplorationSpeed),
+    explorationSpeedBonus: Math.min(TECH_EFFECT_CAPS.explorationSpeed, Math.max(0, sumExplorationSpeed)),
+    espionageCostReduction: Math.min(TECH_EFFECT_CAPS.espionageCost, Math.max(0, sumEspionageCost)),
+    explorationCostReduction: Math.min(TECH_EFFECT_CAPS.explorationCost, Math.max(0, sumExplorationCost)),
   };
+}
+
+/** Calcula el coste en oro de un informe de espionaje aplicando la reducción tecnológica acumulada. */
+export function calculateEspionageCost(espionageLevel: number, espionageCostReduction: number = 0): number {
+  const level = Math.max(1, Math.min(TECH_EFFECT_CAPS.espionageAccuracyMax, Math.floor(espionageLevel || 1)));
+  const baseCost = PARLIAMENT.ESPIONAGE.costByLevel[level] ?? PARLIAMENT.ESPIONAGE.costByLevel[1];
+  const safeReduction = Number.isFinite(espionageCostReduction)
+    ? Math.max(0, Math.min(TECH_EFFECT_CAPS.espionageCost, espionageCostReduction))
+    : 0;
+  return Math.max(1, Math.round(baseCost * (1 - safeReduction)));
 }
 
 export function getConstructionDurationModifier(completedIds: ReadonlyArray<string>): number {

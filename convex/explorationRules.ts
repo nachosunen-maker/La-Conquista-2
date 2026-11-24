@@ -104,6 +104,7 @@ export function computeExplorationPlan(input: {
   distance: number;
   civilization?: string;
   explorationSpeedBonus?: number;
+  explorationCostReduction?: number;
 }): ExplorationPlan {
   const distance = Math.max(1, input.distance);
   const baseCosts = calculateBaseExplorationCosts(distance);
@@ -111,6 +112,17 @@ export function computeExplorationPlan(input: {
 
   // Aplicar bonificaciones pasivas culturales (Navajos: Math.floor(costeBase * 0.80), Vikingos: duration * 0.85)
   const civExploration = applyCivilizationExploration(baseCosts, baseDurationMs, input.civilization);
+
+  // Aplicar reducción tecnológica de coste de exploración
+  const safeCostReduction = Number.isFinite(input.explorationCostReduction)
+    ? Math.max(0, Math.min(1, input.explorationCostReduction as number))
+    : 0;
+  const costs: ExplorationCosts = safeCostReduction > 0
+    ? {
+        gold: Math.max(1, Math.floor(civExploration.costs.gold * (1 - safeCostReduction) + 1e-9)),
+        food: Math.max(1, Math.floor(civExploration.costs.food * (1 - safeCostReduction) + 1e-9)),
+      }
+    : civExploration.costs;
 
   // Aplicar bonificación tecnológica centralizada de velocidad de exploración
   const durationMs = calculateExplorationDurationMs(
@@ -123,7 +135,7 @@ export function computeExplorationPlan(input: {
     distance,
     durationSeconds,
     durationMs,
-    costs: civExploration.costs,
+    costs,
     scoutsRequired: EXPLORATION.SCOUTS_REQUIRED,
   };
 }
@@ -151,6 +163,7 @@ export function canStartExploration(input: {
   worldRadius?: number;
   civilization?: string;
   explorationSpeedBonus?: number;
+  explorationCostReduction?: number;
 }): { success: true; plan: ExplorationPlan } | { success: false; error: string } {
   const worldRadius = input.worldRadius ?? MAP.RADIUS;
 
@@ -193,6 +206,7 @@ export function canStartExploration(input: {
     distance,
     civilization: input.civilization,
     explorationSpeedBonus: input.explorationSpeedBonus,
+    explorationCostReduction: input.explorationCostReduction,
   });
   const costs: ExplorationCosts = plan.costs;
 

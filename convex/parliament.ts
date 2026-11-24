@@ -15,7 +15,7 @@ import { readArmyUnitDocs, readArmyUnitsWithMigration, addUnits, applyCasualties
 export { applyCasualtiesToArmy };
 import { isSpyUnitDoc, normalizeUnitType, summarizeArmy, unitLevelOf } from "./armyRules";
 import { validateBuildingCollection } from "./buildingRules";
-import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
+import { calculateEspionageCost, computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import { distanceBetweenKingdoms, pathTerrainBetweenKingdoms, readHomeCoord, readDiscoveredKingdomIds } from "./territories";
 import { marchFatigue, marchTimeSeconds, armyMarchMultiplier } from "./territoryRules";
 import { applyFormation, emptyComposition, simulateBattle, type BattleSide, type Composition } from "./battleRules";
@@ -371,7 +371,7 @@ export const requestEspionageReport = mutation({
         effectiveLevel = Math.max(1, effectiveLevel - 1);
       }
 
-      const cost = PARLIAMENT.ESPIONAGE.costByLevel[spyLevel] ?? PARLIAMENT.ESPIONAGE.costByLevel[1];
+      const cost = calculateEspionageCost(spyLevel, modifiers.espionageCostReduction);
       const now = Date.now();
       const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);
       if (settled.settledResources.gold < cost) throw new Error(`Oro insuficiente: el informe cuesta ${cost} y hay ${Math.floor(settled.settledResources.gold)}.`);
@@ -482,6 +482,7 @@ export async function snapshotSide(ctx: MutationCtx, kingdomId: Id<"kingdoms">, 
     unitEfficiencyInf: techModifiers.unitEfficiencyInf,
     unitEfficiencyArc: techModifiers.unitEfficiencyArc,
     unitEfficiencyCav: techModifiers.unitEfficiencyCav,
+    unitEfficiencySiege: techModifiers.unitEfficiencySiege,
     woundedRateBonus: techModifiers.woundedRateBonus,
   };
 }

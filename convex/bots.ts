@@ -13,7 +13,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { isKingdomOwner } from "./kingdomAccess";
 import { requireOwner } from "./buildings";
 import { settleRelationalKingdomEconomy } from "./economy";
-import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
+import { calculateEspionageCost, computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import { validateBuildingCollection } from "./buildingRules";
 import { simulateBattle } from "./battleRules";
 import { evaluateKingdomMissions, recordMissionEvent } from "./missions";
@@ -74,9 +74,10 @@ export const listBots = query({
     const hasEspionage2 = playerEspionageLevel >= 2;
     const hasEspionage3 = playerEspionageLevel >= 3;
     const hasEspionage4 = playerEspionageLevel >= 4;
-    const espionageCost = playerEspionageLevel >= 1
-      ? (PARLIAMENT.ESPIONAGE.costByLevel[playerEspionageLevel] ?? PARLIAMENT.ESPIONAGE.costByLevel[1])
-      : PARLIAMENT.ESPIONAGE.costByLevel[1];
+    const espionageCost = calculateEspionageCost(
+      Math.max(1, playerEspionageLevel),
+      techModifiers.espionageCostReduction
+    );
 
     // Mapeo de informes de espionaje vigentes sobre bots
     const validReports = espionageDocs.filter(
@@ -154,7 +155,7 @@ export const requestBotEspionage = mutation({
     }
 
     const level = Math.min(TECH_EFFECT_CAPS.espionageAccuracyMax, playerEspionageLevel);
-    const cost = PARLIAMENT.ESPIONAGE.costByLevel[level] ?? PARLIAMENT.ESPIONAGE.costByLevel[1];
+    const cost = calculateEspionageCost(level, techModifiers.espionageCostReduction);
 
     const now = Date.now();
     const settled = await settleRelationalKingdomEconomy(ctx, kingdom, userId, now);

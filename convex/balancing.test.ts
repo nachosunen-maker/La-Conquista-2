@@ -7,8 +7,8 @@ import { durationForTargetLevel, BUILDING_RULES } from "./buildingRules";
 import { applyFormation, emptyComposition } from "./battleRules";
 
 describe("Equilibrio Definitivo: Catálogo y Tiempos de Investigación", () => {
-  it("contiene todas las tecnologías del catálogo (135) y todas tienen duración positiva", () => {
-    expect(TECHNOLOGIES.length).toBe(135);
+  it("contiene todas las tecnologías del catálogo (191) y todas tienen duración positiva", () => {
+    expect(TECHNOLOGIES.length).toBe(191);
     for (const tech of TECHNOLOGIES) {
       expect(tech.durationSeconds).toBeGreaterThan(0);
       expect(Number.isFinite(tech.durationSeconds)).toBe(true);
@@ -45,15 +45,46 @@ describe("Equilibrio Definitivo: Catálogo y Tiempos de Investigación", () => {
       expect(tech!.durationSeconds).toBeLessThanOrEqual(480);
     }
 
-    // Tecnologías de civilización: 12 base (420 s) + 36 de fases 6a/6b (480 s / 900 s) = 48 en total
-    expect(civs.length).toBe(48);
+    // Tecnologías de civilización: 12 base (420 s) + 36 (480 s / 900 s) + 36 de niveles 6-8 (1200 s / 1500 s / 1800 s) = 84 en total
+    expect(civs.length).toBe(84);
     for (const tech of civs) {
       expect(tech.civilizationRequirement).toBeDefined();
-      if (tech.id.endsWith("_a") || tech.id.endsWith("_b") || tech.id.endsWith("_c")) {
+      if (tech.id.endsWith("_d")) {
+        expect(tech.durationSeconds).toBe(1200);
+        expect(tech.universityLevel).toBe(6);
+      } else if (tech.id.endsWith("_e")) {
+        expect(tech.durationSeconds).toBe(1500);
+        expect(tech.universityLevel).toBe(7);
+      } else if (tech.id.endsWith("_f")) {
+        expect(tech.durationSeconds).toBe(1800);
+        expect(tech.universityLevel).toBe(8);
+      } else if (tech.id.endsWith("_a") || tech.id.endsWith("_b") || tech.id.endsWith("_c")) {
         expect([480, 900]).toContain(tech.durationSeconds);
       } else {
         expect(tech.durationSeconds).toBe(420);
       }
+    }
+  });
+
+  it("estructura exactamente 56 tecnologías nuevas en niveles 6, 7 y 8 (20 universales + 36 exclusivas)", () => {
+    const universal = TECHNOLOGIES.filter((t) => !t.civilizationRequirement);
+    const tier68 = TECHNOLOGIES.filter((t) => t.universityLevel >= 6);
+    const tier68Universal = tier68.filter((t) => !t.civilizationRequirement);
+    const tier68Exclusive = tier68.filter((t) => Boolean(t.civilizationRequirement));
+
+    expect(universal.length).toBe(107);
+    expect(tier68.length).toBe(56);
+    expect(tier68Universal.length).toBe(20);
+    expect(tier68Exclusive.length).toBe(36);
+
+    for (const branch of ["economica", "civil", "militar", "inteligencia"] as const) {
+      expect(tier68Universal.filter((t) => t.branch === branch).length).toBe(5);
+    }
+
+    for (const tech of tier68) {
+      expect([6, 7, 8]).toContain(tech.universityLevel);
+      expect(tech.buildingRequirements.universidad).toBe(tech.universityLevel);
+      expect(tech.buildingRequirements.castillo).toBeGreaterThanOrEqual(tech.universityLevel);
     }
   });
 
@@ -307,8 +338,8 @@ describe("Aislamiento de Civilización en Cliente y Consultas", () => {
       });
 
       const civBranch = visibleCatalog.filter((t) => t.branch === "civilizacion");
-      // Cada cliente debe recibir exactamente 4 nodos en la rama civilización
-      expect(civBranch.length).toBe(4);
+      // Cada cliente debe recibir exactamente 7 nodos en la rama civilización
+      expect(civBranch.length).toBe(7);
 
       // Ningún nodo de la rama civilización puede pertenecer a otra civilización
       const alienNodes = civBranch.filter((t) => t.civilizationRequirement?.toLowerCase() !== civ.toLowerCase());

@@ -699,6 +699,7 @@ export const getWorldMap = query({
             worldRadius: MAP.RADIUS,
             civilization: kingdom.civilization,
             explorationSpeedBonus: techModifiers.explorationSpeedBonus,
+            explorationCostReduction: techModifiers.explorationCostReduction,
           });
           if (planRes.success) {
             explorationPlan = {
@@ -1276,6 +1277,7 @@ async function executeWorldMapCompactQuery(
         distance: minDist,
         civilization: kingdom.civilization,
         explorationSpeedBonus: techModifiers.explorationSpeedBonus,
+        explorationCostReduction: techModifiers.explorationCostReduction,
       });
       explorationPlan = {
         distance: plan.distance,
@@ -2390,6 +2392,7 @@ async function executeExplorationStart(
     worldRadius: MAP.RADIUS,
     civilization: kingdom.civilization,
     explorationSpeedBonus: techModifiers.explorationSpeedBonus,
+    explorationCostReduction: techModifiers.explorationCostReduction,
   });
 
   if (!check.success) {

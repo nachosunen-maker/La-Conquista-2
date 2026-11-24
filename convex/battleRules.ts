@@ -64,6 +64,7 @@ export interface BattleSide {
   unitEfficiencyInf?: number;
   unitEfficiencyArc?: number;
   unitEfficiencyCav?: number;
+  unitEfficiencySiege?: number;
   /** Bonificación tecnológica a la proporción de heridos aditiva (+0,04 = +4 pp). */
   woundedRateBonus?: number;
 }
@@ -169,7 +170,8 @@ function strengths(side: BattleSide, composition: Composition, enemyComposition:
     if (type === "infanteria") efficiency = side.unitEfficiencyInf ?? 0;
     else if (type === "arqueria") efficiency = side.unitEfficiencyArc ?? 0;
     else if (type === "caballeria") efficiency = side.unitEfficiencyCav ?? 0;
-    
+    else if (!unit.isLivingTroop) efficiency = side.unitEfficiencySiege ?? 0;
+
     attack *= (1 + efficiency);
     defense *= (1 + efficiency);
 

@@ -13,6 +13,7 @@ import {
   type ResourceCosts,
 } from "./balanceConfig";
 import {
+  calculateEspionageCost,
   computeTechnologyModifiers,
   computeResearchDuration,
   evaluateTechnologyStatus,
@@ -26,6 +27,7 @@ import {
   calculateResearchCancellationRefund,
   type ResearchQueueEntry,
 } from "./technologyRules";
+import { computeExplorationPlan } from "./explorationRules";
 import { computeSideFactors, emptyComposition, type BattleSide } from "./battleRules";
 import { marchTimeSeconds, marchFatigue } from "./territoryRules";
 import {
@@ -401,10 +403,13 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       "combatDefense", "marchSpeed", "marchFatigue",
       "foodConsumption", "woodProduction", "stoneProduction", "ironProduction", "goldProduction",
       "researchDuration", "constructionCost", "housingCapacity", "taxTolerance",
-      "moraleBase", "unitEfficiencyInf", "unitEfficiencyArc", "unitEfficiencyCav", "unitEfficiencyAll", "mercenaryCost",
-      "woundedRate", "fatigueAccrual", "counterEspionage",
+      "moraleBase", "unitEfficiencyInf", "unitEfficiencyArc", "unitEfficiencyCav", "unitEfficiencyAll", "unitEfficiencySiege", "mercenaryCost",
+      "woundedRate", "fatigueAccrual", "counterEspionage", "explorationSpeed", "espionageCost", "explorationCost",
     ]);
-    const allEffectsKnown = TECHNOLOGIES.every((t) => KNOWN_EFFECT_KEYS.has(t.effect.key));
+    const allEffectsKnown = TECHNOLOGIES.every((t) =>
+      KNOWN_EFFECT_KEYS.has(t.effect.key) &&
+      (t.secondaryEffects ?? []).every((sec) => KNOWN_EFFECT_KEYS.has(sec.key))
+    );
 
     const allIds = TECHNOLOGIES.map((t) => t.id);
     const maxModifiers = computeTechnologyModifiers(allIds);
@@ -430,16 +435,26 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       maxModifiers.constructionCost >= 1 - TECH_EFFECT_CAPS.constructionCost - 1e-9 &&
       maxModifiers.housingCapacityBonus <= TECH_EFFECT_CAPS.housingCapacity + 1e-9 &&
       maxModifiers.taxToleranceReduction <= TECH_EFFECT_CAPS.taxTolerance + 1e-9 &&
+      maxModifiers.moraleBase <= TECH_EFFECT_CAPS.moraleBase &&
+      maxModifiers.unitEfficiencyInf <= TECH_EFFECT_CAPS.unitEfficiency + 1e-9 &&
+      maxModifiers.unitEfficiencyArc <= TECH_EFFECT_CAPS.unitEfficiency + 1e-9 &&
+      maxModifiers.unitEfficiencyCav <= TECH_EFFECT_CAPS.unitEfficiency + 1e-9 &&
+      maxModifiers.unitEfficiencySiege <= TECH_EFFECT_CAPS.unitEfficiency + 1e-9 &&
+      maxModifiers.mercenaryCostReduction <= TECH_EFFECT_CAPS.mercenaryCost + 1e-9 &&
       maxModifiers.woundedRateBonus <= TECH_EFFECT_CAPS.woundedRate + 1e-9 &&
-      maxModifiers.fatigueAccrualReduction <= TECH_EFFECT_CAPS.fatigueAccrual + 1e-9;
+      maxModifiers.fatigueAccrualReduction <= TECH_EFFECT_CAPS.fatigueAccrual + 1e-9 &&
+      maxModifiers.counterEspionage <= TECH_EFFECT_CAPS.counterEspionage + 1e-9 &&
+      maxModifiers.explorationSpeedBonus <= TECH_EFFECT_CAPS.explorationSpeed + 1e-9 &&
+      maxModifiers.espionageCostReduction <= TECH_EFFECT_CAPS.espionageCost + 1e-9 &&
+      maxModifiers.explorationCostReduction <= TECH_EFFECT_CAPS.explorationCost + 1e-9;
 
     const allValid = uniqueIds && allPrereqsExist && !hasCycle && univLevelValid && allEffectsKnown && capsRespected;
 
     results.push({
-      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (E6b)",
-      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, 26 tipos de efectos conocidos y topes respetados",
+      category: "VALIDACIÓN ÍNTEGRA DEL ÁRBOL (AMPLIACIÓN 191)",
+      test: "12. IDs únicos, previas existentes, sin ciclos, Univ >= previas, efectos conocidos y topes respetados (191 tecnologías)",
       passed: allValid,
-      details: `Total tecnologías: ${TECHNOLOGIES.length} (32 iniciales + 16 E1 + 12 E2 + 12 E3 + 13 E4a + 2 E4b + 7 E4c + 5 E5 + 18 E6a + 18 E6b = 135). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
+      details: `Total tecnologías: ${TECHNOLOGIES.length} (135 base + 56 nuevas = 191). IDs únicos: ${uniqueIds}, Previas: ${allPrereqsExist}, Sin ciclos: ${!hasCycle}, Univ>=previas: ${univLevelValid}, Efectos conocidos: ${allEffectsKnown}, Topes respetados: ${capsRespected}`,
     });
   }
 
@@ -669,7 +684,7 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       });
   }
 
-  // 24. (PASO 3.1) Cada una de las 12 civilizaciones tiene exactamente 4 investigaciones propias con estructura base -> _a, _b -> _c
+  // 24. (PASO 3.1 + AMPLIACIÓN) Cada una de las 12 civilizaciones tiene exactamente 7 investigaciones propias: base -> _a, _b -> _c -> _d -> _e -> _f
   {
     const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes", "mongoles", "chinos", "japoneses", "navajos", "aztecas", "masais"];
     let all12Valid = true;
@@ -677,17 +692,20 @@ export function runTechnologyTests(): TechnologyTestResult[] {
 
     for (const civ of civs) {
       const civTechs = TECHNOLOGIES.filter((t) => t.branch === "civilizacion" && t.civilizationRequirement === civ);
-      if (civTechs.length !== 4) {
+      if (civTechs.length !== 7) {
         all12Valid = false;
-        errors.push(`${civ} tiene ${civTechs.length} nodos (esperado: 4)`);
+        errors.push(`${civ} tiene ${civTechs.length} nodos (esperado: 7)`);
         continue;
       }
       const base = civTechs.find((t) => t.id === `tech_civ_${civ}`);
       const nodeA = civTechs.find((t) => t.id === `tech_civ_${civ}_a`);
       const nodeB = civTechs.find((t) => t.id === `tech_civ_${civ}_b`);
       const nodeC = civTechs.find((t) => t.id === `tech_civ_${civ}_c`);
+      const nodeD = civTechs.find((t) => t.id === `tech_civ_${civ}_d`);
+      const nodeE = civTechs.find((t) => t.id === `tech_civ_${civ}_e`);
+      const nodeF = civTechs.find((t) => t.id === `tech_civ_${civ}_f`);
 
-      if (!base || !nodeA || !nodeB || !nodeC) {
+      if (!base || !nodeA || !nodeB || !nodeC || !nodeD || !nodeE || !nodeF) {
         all12Valid = false;
         errors.push(`${civ} falta algún nodo con id canónico`);
         continue;
@@ -709,17 +727,29 @@ export function runTechnologyTests(): TechnologyTestResult[] {
         all12Valid = false;
         errors.push(`${civ}_c requisitos/nivel incorrectos`);
       }
+      if (nodeD.universityLevel !== 6 || !nodeD.technologyRequirements.includes(nodeC.id)) {
+        all12Valid = false;
+        errors.push(`${civ}_d requisitos/nivel incorrectos`);
+      }
+      if (nodeE.universityLevel !== 7 || !nodeE.technologyRequirements.includes(nodeD.id)) {
+        all12Valid = false;
+        errors.push(`${civ}_e requisitos/nivel incorrectos`);
+      }
+      if (nodeF.universityLevel !== 8 || !nodeF.technologyRequirements.includes(nodeE.id)) {
+        all12Valid = false;
+        errors.push(`${civ}_f requisitos/nivel incorrectos`);
+      }
     }
 
     results.push({
-      category: "CADENAS DE CIVILIZACIÓN (PASO 3.1)",
-      test: "24. Cada una de las 12 civilizaciones tiene exactamente 4 investigaciones propias con estructura base -> _a, _b -> _c",
+      category: "CADENAS DE CIVILIZACIÓN (7 NODOS × 12 CIVS)",
+      test: "24. Cada una de las 12 civilizaciones tiene exactamente 7 investigaciones propias con estructura base -> _a, _b -> _c -> _d -> _e -> _f",
       passed: all12Valid,
-      details: all12Valid ? "12 civilizaciones con exactamente 4 nodos estructurados (48 nodos totales)" : `Fallos: ${errors.join("; ")}`,
+      details: all12Valid ? "12 civilizaciones con exactamente 7 nodos estructurados (84 nodos totales)" : `Fallos: ${errors.join("; ")}`,
     });
   }
 
-  // 25. (PASO 3.2) Para cada civilización, la rama civilización que ve su reino contiene solo sus 4 y ninguna ajena
+  // 25. (PASO 3.2) Para cada civilización, la rama civilización que ve su reino contiene solo sus 7 y ninguna ajena
   {
     const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes", "mongoles", "chinos", "japoneses", "navajos", "aztecas", "masais"];
     let visibilityOk = true;
@@ -731,9 +761,9 @@ export function runTechnologyTests(): TechnologyTestResult[] {
         return !t.civilizationRequirement || t.civilizationRequirement === civ;
       });
 
-      if (visibleBranchCiv.length !== 4) {
+      if (visibleBranchCiv.length !== 7) {
         visibilityOk = false;
-        errors.push(`${civ} ve ${visibleBranchCiv.length} nodos (esperado: 4)`);
+        errors.push(`${civ} ve ${visibleBranchCiv.length} nodos (esperado: 7)`);
       }
       const alienTechs = visibleBranchCiv.filter((t) => t.civilizationRequirement !== civ);
       if (alienTechs.length > 0) {
@@ -744,9 +774,9 @@ export function runTechnologyTests(): TechnologyTestResult[] {
 
     results.push({
       category: "VISIBILIDAD FILTRADA EN SERVIDOR (PASO 3.2)",
-      test: "25. Para cada civilización, la rama civilización que ve su reino contiene solo sus 4 y ninguna ajena",
+      test: "25. Para cada civilización, la rama civilización que ve su reino contiene solo sus 7 y ninguna ajena",
       passed: visibilityOk,
-      details: visibilityOk ? "Todas las civilizaciones ven exactamente 4 nodos propios y 0 ajenos en la rama civilización" : `Fallos: ${errors.join("; ")}`,
+      details: visibilityOk ? "Todas las civilizaciones ven exactamente 7 nodos propios y 0 ajenos en la rama civilización" : `Fallos: ${errors.join("; ")}`,
     });
   }
 
@@ -793,7 +823,7 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     });
   }
 
-  // 27. (PASO 3.4) Con todo el árbol completado, ningún efecto con tope calibrado tiene una suma sin recortar mayor que su tope
+  // 27. (PASO 3.4) Con todo el árbol completado, NINGÚN efecto con tope en ninguna de las 12 civilizaciones supera su tope
   {
     const civs = ["ingleses", "romanos", "griegos", "vikingos", "bizantinos", "arabes", "mongoles", "chinos", "japoneses", "navajos", "aztecas", "masais"];
     const genericTechs = TECHNOLOGIES.filter((t) => t.branch !== "civilizacion");
@@ -803,48 +833,64 @@ export function runTechnologyTests(): TechnologyTestResult[] {
     for (const civ of civs) {
       const civTechs = TECHNOLOGIES.filter((t) => t.branch === "civilizacion" && t.civilizationRequirement === civ);
       const allTechs = [...genericTechs, ...civTechs];
-
-      let sumEffInf = 0;
-      let sumEffArc = 0;
-      let sumEffCav = 0;
-      let sumMarchSpeed = 0;
+      const sums: Record<string, number> = {};
 
       for (const t of allTechs) {
-        if (t.effect.key === "unitEfficiencyInf") sumEffInf += t.effect.value;
-        else if (t.effect.key === "unitEfficiencyArc") sumEffArc += t.effect.value;
-        else if (t.effect.key === "unitEfficiencyCav") sumEffCav += t.effect.value;
-        else if (t.effect.key === "unitEfficiencyAll") {
-          sumEffInf += t.effect.value;
-          sumEffArc += t.effect.value;
-          sumEffCav += t.effect.value;
-        } else if (t.effect.key === "marchSpeed") {
-          sumMarchSpeed += t.effect.value;
+        const entries = t.secondaryEffects ? [t.effect, ...t.secondaryEffects] : [t.effect];
+        for (const { key, value } of entries) {
+          sums[key] = (sums[key] ?? 0) + value;
         }
       }
 
-      if (sumEffInf > TECH_EFFECT_CAPS.unitEfficiency + 1e-6) {
-        capsOk = false;
-        errors.push(`${civ} unitEfficiencyInf ${sumEffInf.toFixed(2)} > ${TECH_EFFECT_CAPS.unitEfficiency}`);
-      }
-      if (sumEffArc > TECH_EFFECT_CAPS.unitEfficiency + 1e-6) {
-        capsOk = false;
-        errors.push(`${civ} unitEfficiencyArc ${sumEffArc.toFixed(2)} > ${TECH_EFFECT_CAPS.unitEfficiency}`);
-      }
-      if (sumEffCav > TECH_EFFECT_CAPS.unitEfficiency + 1e-6) {
-        capsOk = false;
-        errors.push(`${civ} unitEfficiencyCav ${sumEffCav.toFixed(2)} > ${TECH_EFFECT_CAPS.unitEfficiency}`);
-      }
-      if (sumMarchSpeed > TECH_EFFECT_CAPS.marchSpeed + 1e-6) {
-        capsOk = false;
-        errors.push(`${civ} marchSpeed ${sumMarchSpeed.toFixed(2)} > ${TECH_EFFECT_CAPS.marchSpeed}`);
+      const effAll = sums.unitEfficiencyAll ?? 0;
+      const checks: Array<[string, number, number]> = [
+        ["agricultureProduction", sums.agricultureProduction ?? 0, TECH_EFFECT_CAPS.agricultureProduction],
+        ["miningProduction", sums.miningProduction ?? 0, TECH_EFFECT_CAPS.miningProduction],
+        ["storageCapacity", sums.storageCapacity ?? 0, TECH_EFFECT_CAPS.storageCapacity],
+        ["happinessBase", sums.happinessBase ?? 0, TECH_EFFECT_CAPS.happinessBase],
+        ["combatAttack", sums.combatAttack ?? 0, TECH_EFFECT_CAPS.combatAttack],
+        ["combatDefense", sums.combatDefense ?? 0, TECH_EFFECT_CAPS.combatDefense],
+        ["marchSpeed", sums.marchSpeed ?? 0, TECH_EFFECT_CAPS.marchSpeed],
+        ["marchFatigue", Math.abs(sums.marchFatigue ?? 0), TECH_EFFECT_CAPS.marchFatigue],
+        ["woundedRecovery", sums.woundedRecovery ?? 0, TECH_EFFECT_CAPS.woundedRecovery],
+        ["trainingDuration", Math.abs(sums.trainingDuration ?? 0), 1 - TECH_EFFECT_CAPS.trainingDurationFloor],
+        ["constructionDuration", Math.abs(sums.constructionDuration ?? 0), 1 - TECH_EFFECT_CAPS.constructionDurationFloor],
+        ["foodConsumption", Math.abs(sums.foodConsumption ?? 0), TECH_EFFECT_CAPS.foodConsumption],
+        ["woodProduction", sums.woodProduction ?? 0, TECH_EFFECT_CAPS.woodProduction],
+        ["stoneProduction", sums.stoneProduction ?? 0, TECH_EFFECT_CAPS.stoneProduction],
+        ["ironProduction", sums.ironProduction ?? 0, TECH_EFFECT_CAPS.ironProduction],
+        ["goldProduction", sums.goldProduction ?? 0, TECH_EFFECT_CAPS.goldProduction],
+        ["researchDuration", Math.abs(sums.researchDuration ?? 0), TECH_EFFECT_CAPS.researchDuration],
+        ["constructionCost", Math.abs(sums.constructionCost ?? 0), TECH_EFFECT_CAPS.constructionCost],
+        ["housingCapacity", sums.housingCapacity ?? 0, TECH_EFFECT_CAPS.housingCapacity],
+        ["taxTolerance", Math.abs(sums.taxTolerance ?? 0), TECH_EFFECT_CAPS.taxTolerance],
+        ["moraleBase", sums.moraleBase ?? 0, TECH_EFFECT_CAPS.moraleBase],
+        ["unitEfficiencyInf", (sums.unitEfficiencyInf ?? 0) + effAll, TECH_EFFECT_CAPS.unitEfficiency],
+        ["unitEfficiencyArc", (sums.unitEfficiencyArc ?? 0) + effAll, TECH_EFFECT_CAPS.unitEfficiency],
+        ["unitEfficiencyCav", (sums.unitEfficiencyCav ?? 0) + effAll, TECH_EFFECT_CAPS.unitEfficiency],
+        ["unitEfficiencySiege", sums.unitEfficiencySiege ?? 0, TECH_EFFECT_CAPS.unitEfficiency],
+        ["mercenaryCost", Math.abs(sums.mercenaryCost ?? 0), TECH_EFFECT_CAPS.mercenaryCost],
+        ["woundedRate", sums.woundedRate ?? 0, TECH_EFFECT_CAPS.woundedRate],
+        ["fatigueAccrual", Math.abs(sums.fatigueAccrual ?? 0), TECH_EFFECT_CAPS.fatigueAccrual],
+        ["counterEspionage", sums.counterEspionage ?? 0, TECH_EFFECT_CAPS.counterEspionage],
+        ["explorationSpeed", sums.explorationSpeed ?? 0, TECH_EFFECT_CAPS.explorationSpeed],
+        ["explorationCost", Math.abs(sums.explorationCost ?? 0), TECH_EFFECT_CAPS.explorationCost],
+        ["espionageCost", Math.abs(sums.espionageCost ?? 0), TECH_EFFECT_CAPS.espionageCost],
+      ];
+
+      for (const [label, actual, cap] of checks) {
+        if (actual > cap + 1e-6) {
+          capsOk = false;
+          errors.push(`${civ} ${label} ${actual.toFixed(4)} > ${cap}`);
+        }
       }
     }
 
     results.push({
-      category: "CALIBRACIÓN DE TOPES (PASO 3.4)",
-      test: "27. Con todo el árbol completado, ningún efecto con tope calibrado (unitEfficiency y marchSpeed) tiene suma mayor que su tope",
+      category: "CALIBRACIÓN DE TOPES (12 CIVS × 114 TECHS)",
+      test: "27. Con todo el árbol completado (107 universales + 7 exclusivas), ningún efecto con tope en ninguna de las 12 civilizaciones desborda su tope",
       passed: capsOk,
-      details: capsOk ? "Topes respetados en las 12 civs (unitEfficiency máx 0.30, marchSpeed máx 0.55; Romanos inf: 0.30 exacto)" : `Superan tope: ${errors.join("; ")}`,
+      details: capsOk ? "Cero desbordamientos en todos los modificadores con tope de las 12 civilizaciones" : `Superan tope: ${errors.join("; ")}`,
     });
   }
 
@@ -890,9 +936,9 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       // Componente cliente renderizando rama civilización
       const civBranchRendered = clientCatalog.filter((t) => t.branch === "civilizacion");
 
-      if (civBranchRendered.length !== 4) {
+      if (civBranchRendered.length !== 7) {
         isolationOk = false;
-        violations.push(`${clientCiv}: renderiza ${civBranchRendered.length} nodos (esperado 4)`);
+        violations.push(`${clientCiv}: renderiza ${civBranchRendered.length} nodos (esperado 7)`);
       }
 
       const alienNodes = civBranchRendered.filter(
@@ -910,22 +956,28 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       test: "29. Ningún componente cliente recibe ni muestra nodos de otra civilización",
       passed: isolationOk,
       details: isolationOk
-        ? "Verificado en las 12 civilizaciones: exactamente 4 nodos propios y 0 ajenos en cliente"
+        ? "Verificado en las 12 civilizaciones: exactamente 7 nodos propios y 0 ajenos en cliente"
         : `Violaciones detectadas: ${violations.join("; ")}`,
     });
   }
 
-  // 30. Integridad estricta del catálogo (135 nodos invariables; housingCapacity = 0 nodos en catálogo pero motor listo)
+  // 30. Integridad estricta del catálogo ampliado (191 nodos; housingCapacity = 4 nodos universales +0.24)
   {
     const housingNodes = TECHNOLOGIES.filter((t) => t.effect.key === "housingCapacity");
     const capNoTech = calculateResidentialCapacity([{ buildingType: "viviendas", level: 2 }], 0);
-    const capWithBonus = calculateResidentialCapacity([{ buildingType: "viviendas", level: 2 }], 0.20);
-    const passed = TECHNOLOGIES.length === 135 && housingNodes.length === 0 && capNoTech === 200 && capWithBonus === 240;
+    const modHousing = computeTechnologyModifiers(["housing_1", "housing_2", "housing_3", "housing_4"]);
+    const capWithBonus = calculateResidentialCapacity([{ buildingType: "viviendas", level: 2 }], modHousing.housingCapacityBonus);
+    const passed =
+      TECHNOLOGIES.length === 191 &&
+      housingNodes.length === 4 &&
+      Math.abs(modHousing.housingCapacityBonus - 0.24) < 1e-9 &&
+      capNoTech === 200 &&
+      capWithBonus === 248;
     results.push({
-      category: "INTEGRIDAD DEL CATÁLOGO (CORRECCIÓN DEFINITIVA)",
-      test: "30. Exactamente 135 tecnologías sin añadidos; housingCapacity tiene 0 nodos pero su multiplicador funciona sin desbordamiento",
+      category: "INTEGRIDAD DEL CATÁLOGO (AMPLIACIÓN 191)",
+      test: "30. Exactamente 191 tecnologías; housingCapacity tiene 4 nodos universales (+24 %) y escala capacidad residencial",
       passed,
-      details: `Total: ${TECHNOLOGIES.length}, housingCapacity nodos: ${housingNodes.length}, capacidad casas nv2 (0% vs +20%): ${capNoTech} vs ${capWithBonus}`,
+      details: `Total: ${TECHNOLOGIES.length}, housingCapacity nodos: ${housingNodes.length}, bonus=${modHousing.housingCapacityBonus.toFixed(2)}, capacidad casas nv2 (0% vs +24%): ${capNoTech} vs ${capWithBonus}`,
     });
   }
 
@@ -1266,19 +1318,69 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       const foreignProbe = civ === "griegos"
         ? isTechnologyVisibleForCivilization(syntheticForeignTech, civ)
         : !isTechnologyVisibleForCivilization(syntheticForeignTech, civ);
-      return visible.length === 91 && own.length === 4 && alien.length === 0 && foreignProbe;
+      return visible.length === 114 && own.length === 7 && alien.length === 0 && foreignProbe;
     });
 
     const nullCivVisible = filterVisibleTechnologiesForCivilization(TECHNOLOGIES, null);
     const individualBlocked = getVisibleTechnologyForCivilization("tech_civ_romanos", "japoneses") === null;
     const individualAllowed = getVisibleTechnologyForCivilization("tech_civ_romanos", "romanos")?.id === "tech_civ_romanos";
 
-    const passed = all12Pass && nullCivVisible.length === 87 && individualBlocked && individualAllowed;
+    const passed = all12Pass && nullCivVisible.length === 107 && individualBlocked && individualAllowed;
     results.push({
       category: "AISLAMIENTO ESTRICTO POR CIVILIZACIÓN (§5)",
-      test: "36. Todas las civilizaciones ven 87 generales + 4 propias = 91; rama distinta protegida; reino sin civ ve 87",
+      test: "36. Todas las civilizaciones ven 107 generales + 7 propias = 114; rama distinta protegida; reino sin civ ve 107",
       passed,
       details: `12 civs ok=${all12Pass}, sin civ=${nullCivVisible.length}, consulta individual bloqueada=${individualBlocked}`,
+    });
+  }
+
+  // 37. Nuevos consumidores reales de la ampliación de 56 tecnologías (unitEfficiencySiege, espionageCost, explorationCost, niveles 6-8)
+  {
+    // Asedio en battleRules: siege_1 (+8 %) + siege_2 (+10 %) = +18 %; tactics_all NO altera asedio
+    const modSiege = computeTechnologyModifiers(["siege_1", "siege_2", "tactics_all"]);
+    const baseSiegeComp = { ...emptyComposition(), asedio: 20, onagro_campana: 10 };
+    const baseSide: BattleSide = {
+      kingdomId: "k1", name: "Base", composition: baseSiegeComp, trainingMultiplier: 1,
+      weaponTier: "palo", armorTier: "ninguna", strategy: "agresiva", tacticalFormation: "equilibrada",
+      morale: 75, foodTier: "normal", fatigue: 0, wallsLevel: 0, terrainDefenseBonus: 0,
+      unitEfficiencyInf: 0, unitEfficiencyArc: 0, unitEfficiencyCav: 0, unitEfficiencySiege: 0,
+    };
+    const techSide: BattleSide = { ...baseSide, unitEfficiencySiege: modSiege.unitEfficiencySiege };
+    const fBase = computeSideFactors(baseSide, baseSiegeComp, baseSide, baseSiegeComp);
+    const fTech = computeSideFactors(techSide, baseSiegeComp, baseSide, baseSiegeComp);
+    const siegeOk =
+      Math.abs(modSiege.unitEfficiencySiege - 0.18) < 1e-9 &&
+      Math.abs(fTech.offensiveStrength - fBase.offensiveStrength * 1.18) < 1e-6 &&
+      Math.abs(fTech.defensiveStrength - fBase.defensiveStrength * 1.18) < 1e-6;
+
+    // Coste de espionaje: base nivel 4 = 1000; con spy_5 (-10%) + spy_7 (-12%) + spy_9 (-8%) = -30% -> 700
+    const modSpyCosts = computeTechnologyModifiers(["spy_5", "spy_7", "spy_9"]);
+    const espBase = calculateEspionageCost(4, 0);
+    const espDisc = calculateEspionageCost(4, modSpyCosts.espionageCostReduction);
+    const espionageOk = espBase === 1000 && Math.abs(modSpyCosts.espionageCostReduction - 0.30) < 1e-9 && espDisc === 700;
+
+    // Exploración: spy_6 (+12% vel, -8% coste) + spy_7 (-10% coste) con Navajos
+    const modExp = computeTechnologyModifiers(["spy_2", "spy_6", "spy_7"]);
+    const planNav = computeExplorationPlan({
+      distance: 2,
+      civilization: "navajos",
+      explorationSpeedBonus: modExp.explorationSpeedBonus,
+      explorationCostReduction: modExp.explorationCostReduction,
+    });
+    const expOk =
+      Math.abs(modExp.explorationSpeedBonus - 0.22) < 1e-9 &&
+      Math.abs(modExp.explorationCostReduction - 0.18) < 1e-9 &&
+      planNav.costs.gold === 19 && // floor(24 * 0.82 = 19.68) = 19
+      planNav.costs.food === 26;   // floor(32 * 0.82 = 26.24) = 26
+
+    // Ranuras constantes en niveles 6, 7 y 8 de Universidad
+    const slotsOk = researchSlots(5) === 3 && researchSlots(6) === 3 && researchSlots(7) === 3 && researchSlots(8) === 3 && RESEARCH.MAX_SLOTS === 3;
+
+    results.push({
+      category: "AMPLIACIÓN DE 56 TECNOLOGÍAS (NIVELES 6–8)",
+      test: "37. unitEfficiencySiege, espionageCost, explorationCost y niveles 6–8 con 3 ranuras funcionan con precisión",
+      passed: siegeOk && espionageOk && expOk && slotsOk,
+      details: `Siege=${modSiege.unitEfficiencySiege.toFixed(2)}, EspCost=${espBase}->${espDisc}, ExpNavajo=${JSON.stringify(planNav.costs)}, Slots6-8=${researchSlots(8)}`,
     });
   }
 

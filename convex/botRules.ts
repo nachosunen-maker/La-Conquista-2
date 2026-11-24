@@ -56,6 +56,7 @@ export function createBotBattleSide(bot: BotDefinition): BattleSide {
     unitEfficiencyInf: 0,
     unitEfficiencyArc: 0,
     unitEfficiencyCav: 0,
+    unitEfficiencySiege: 0,
     woundedRateBonus: 0,
   };
 }

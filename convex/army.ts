@@ -1469,6 +1469,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     unitEfficiencyInf: attackerTech.unitEfficiencyInf,
     unitEfficiencyArc: attackerTech.unitEfficiencyArc,
     unitEfficiencyCav: attackerTech.unitEfficiencyCav,
+    unitEfficiencySiege: attackerTech.unitEfficiencySiege,
     woundedRateBonus: attackerTech.woundedRateBonus,
   };
 
@@ -1496,6 +1497,7 @@ export async function resolveMarch(ctx: MutationCtx, marchId: Id<"armyMarches">)
     unitEfficiencyInf: defenderTech.unitEfficiencyInf,
     unitEfficiencyArc: defenderTech.unitEfficiencyArc,
     unitEfficiencyCav: defenderTech.unitEfficiencyCav,
+    unitEfficiencySiege: defenderTech.unitEfficiencySiege,
     woundedRateBonus: defenderTech.woundedRateBonus,
   };
 

@@ -18,6 +18,7 @@ import { costsForTargetLevel, BUILDING_RULES } from "./buildingRules";
 import { getCivilizationPassive } from "./civilizationRules";
 import { effectiveKingdomStorageCapacity } from "./economyExtended";
 import {
+  calculateEspionageCost,
   computeResearchDuration,
   computeTechnologyModifiers,
   filterVisibleTechnologiesForCivilization,
@@ -32,7 +33,7 @@ import {
 import { armyMarchMultiplier, marchFatigue, marchTimeSeconds } from "./territoryRules";
 import { getAllActiveBots } from "./botConfig";
 import { createBotBattleSide, estimateBotArmy } from "./botRules";
-import { computeSideFactors, emptyComposition, type BattleSide } from "./battleRules";
+import { computeSideFactors, emptyComposition, simulateBattle, type BattleSide } from "./battleRules";
 
 const modules = import.meta.glob("./**/*.ts");
 const T0 = Date.UTC(2026, 9, 25, 12, 0, 0);
@@ -718,11 +719,11 @@ describe("§4 — Normalización de LEGACY_TECHNOLOGY_IDS y LEGACY_CIVILIZATION_
 // §5 AISLAMIENTO ESTRICTO DE INVESTIGACIONES POR CIVILIZACIÓN (12 CIVILIZACIONES)
 // ============================================================================
 describe("§5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente", () => {
-  test("cada una de las 12 civilizaciones ve 87 generales + 4 propias = 91 y nunca puede investigar ni consultar ajenas", async () => {
+  test("cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas", async () => {
     const t = createTestBackend();
     const generalCount = TECHNOLOGIES.filter((tech) => !tech.civilizationRequirement).length;
-    expect(generalCount).toBe(87);
-    expect(TECHNOLOGIES.length).toBe(135);
+    expect(generalCount).toBe(107);
+    expect(TECHNOLOGIES.length).toBe(191);
 
     const kOther = await foundKingdom(t, "u-iso-other", "Reino Romano Ajeno", "romanos");
     await seedBuildings(t, kOther.kingdomId, { castillo: 6, universidad: 5 });
@@ -734,13 +735,13 @@ describe("§5 — Aislamiento estricto por civilizationRequirement para las 12 c
       await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
 
       const res = await asUser.query(api.technologies.getTechnologies, { kingdomId });
-      expect(res.catalog).toHaveLength(91);
+      expect(res.catalog).toHaveLength(114);
 
       const ownExclusives = res.catalog.filter((c: any) => c.civilizationRequirement === civ.id);
       const foreignExclusives = res.catalog.filter(
         (c: any) => c.civilizationRequirement && c.civilizationRequirement !== civ.id
       );
-      expect(ownExclusives).toHaveLength(4);
+      expect(ownExclusives).toHaveLength(7);
       expect(foreignExclusives).toHaveLength(0);
 
       // Elegir una tecnología exclusiva de otra civilización e intentar iniciarla manipulando el parámetro techType
@@ -756,7 +757,7 @@ describe("§5 — Aislamiento estricto por civilizationRequirement para las 12 c
       ).rejects.toThrow(/No autorizado/i);
     }
 
-    // Reino sin civilización asignada (0 exclusivas, solo 87 generales)
+    // Reino sin civilización asignada (0 exclusivas, solo 107 generales)
     const noCivKingdomId = await t.run(async (ctx) => {
       const kId = await ctx.db.insert("kingdoms", { userId: "u-nociv", name: "Reino Apátrida" });
       await ctx.db.insert("buildings", { kingdomId: kId, buildingType: "castillo", level: 2 });
@@ -765,7 +766,7 @@ describe("§5 — Aislamiento estricto por civilizationRequirement para las 12 c
     });
     const asNoCiv = t.withIdentity({ subject: "u-nociv", tokenIdentifier: "https://test.auth|u-nociv", issuer: "https://test.auth" });
     const noCivCatalog = await asNoCiv.query(api.technologies.getTechnologies, { kingdomId: noCivKingdomId });
-    expect(noCivCatalog.catalog).toHaveLength(87);
+    expect(noCivCatalog.catalog).toHaveLength(107);
     expect(noCivCatalog.catalog.every((c: any) => !c.civilizationRequirement)).toBe(true);
 
     // Consulta individual directa + tecnología exclusiva en rama distinta de "civilizacion"
@@ -980,3 +981,202 @@ describe("§6 — Bonificación centralizada de exploración (+10 % velocidad) d
     expect(vikStart.durationSeconds).toBe(vikPlanCompact?.durationSeconds);
   });
 });
+
+// ============================================================================
+// §7 AMPLIACIÓN INTEGRAL DE 56 TECNOLOGÍAS (191 TOTALES), NIVELES 6–8 Y CONSUMIDORES REALES
+// ============================================================================
+describe("§7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales", () => {
+  test("niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "u-exp-slots", "Reino Maestría", "romanos");
+    await seedBuildings(t, kingdomId, {
+      castillo: 8,
+      universidad: 8,
+      viviendas: 8,
+      cuartel: 8,
+      herreria: 8,
+      hospitalMilitar: 6,
+      mercado: 7,
+      taberna: 6,
+      aserradero: 6,
+      cantera: 6,
+      minaHierro: 6,
+      minaOro: 7,
+    });
+    await patchResources(t, kingdomId, { gold: 80_000, wood: 80_000, stone: 80_000, iron: 80_000, food: 80_000 });
+    await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+
+    // Prerrequisitos de nivel 5 necesarios para los nodos de niveles 6-8
+    await seedCompletedTechs(t, kingdomId, [
+      "mining_8",
+      "mining_9",
+      "storage_3",
+      "trade_4",
+      "construction_8",
+      "tactics_all",
+      "advanced_steel",
+      "training_5",
+      "medical_5",
+      "logistics_6",
+      "spy_4",
+      "espionage_4",
+      "tech_civ_romanos",
+      "tech_civ_romanos_a",
+      "tech_civ_romanos_b",
+      "tech_civ_romanos_c",
+    ]);
+
+    const initialCatalog = await asUser.query(api.technologies.getTechnologies, { kingdomId });
+    expect(initialCatalog.slots).toBe(3);
+    expect(initialCatalog.slotsFree).toBe(3);
+    expect(initialCatalog.catalog).toHaveLength(114);
+
+    // Iniciar 3 tecnologías simultáneas en Universidad nivel 8 (mining_10 nv6, siege_1 nv6, tech_civ_romanos_d nv6)
+    const r1 = await asUser.mutation(api.technologies.researchTechnology, { kingdomId, techType: "mining_10" });
+    const r2 = await asUser.mutation(api.technologies.researchTechnology, { kingdomId, techType: "siege_1" });
+    const r3 = await asUser.mutation(api.technologies.researchTechnology, { kingdomId, techType: "tech_civ_romanos_d" });
+    expect(r1.success).toBe(true);
+    expect(r2.success).toBe(true);
+    expect(r3.success).toBe(true);
+
+    // La 4ª ranura debe rechazarse porque el máximo sigue siendo 3
+    await expect(
+      asUser.mutation(api.technologies.researchTechnology, { kingdomId, techType: "housing_1" })
+    ).rejects.toThrow(/No hay ranuras de investigación libres/i);
+
+    // Completar las 3 e investigar luego nivel 7 y nivel 8 (tech_civ_romanos_e y _f)
+    vi.setSystemTime(Math.max(r1.completesAt, r2.completesAt, r3.completesAt) + 1000);
+    await t.mutation(internal.technologies.completeResearch, { progressId: r1.progressId });
+    await t.mutation(internal.technologies.completeResearch, { progressId: r2.progressId });
+    await t.mutation(internal.technologies.completeResearch, { progressId: r3.progressId });
+
+    const rE = await asUser.mutation(api.technologies.researchTechnology, { kingdomId, techType: "tech_civ_romanos_e" });
+    vi.setSystemTime(rE.completesAt + 1000);
+    await t.mutation(internal.technologies.completeResearch, { progressId: rE.progressId });
+
+    const rF = await asUser.mutation(api.technologies.researchTechnology, { kingdomId, techType: "tech_civ_romanos_f" });
+    vi.setSystemTime(rF.completesAt + 1000);
+    await t.mutation(internal.technologies.completeResearch, { progressId: rF.progressId });
+
+    const afterState = await asUser.query(api.technologies.getTechnologies, { kingdomId });
+    expect(afterState.modifiers.unitEfficiencySiege).toBeCloseTo(0.20, 9); // siege_1 (0.08) + tech_civ_romanos_f (0.12)
+  });
+
+  test("consumidores reales: unitEfficiencySiege en combate, housingCapacity en población, espionageCost en Parlamento y Bots, y explorationCost + explorationSpeed en mapa", async () => {
+    const t = createTestBackend();
+
+    // 1) housingCapacity real en buildings:getConstructionState y economy:settleKingdomEconomy
+    const kHousing = await foundKingdom(t, "u-housing", "Reino Residencial", "romanos");
+    await seedBuildings(t, kHousing.kingdomId, { castillo: 8, universidad: 8, viviendas: 20 });
+    const baseState = await kHousing.asUser.query(api.buildings.getConstructionState, { kingdomId: kHousing.kingdomId });
+    expect(baseState.residentialCapacity).toBe(2000);
+
+    await seedCompletedTechs(t, kHousing.kingdomId, ["housing_1", "housing_2", "housing_3", "housing_4"]);
+    const boostedState = await kHousing.asUser.query(api.buildings.getConstructionState, { kingdomId: kHousing.kingdomId });
+    expect(boostedState.residentialCapacity).toBe(2480); // 2000 * 1.24 = 2480
+
+    // 2) unitEfficiencySiege real en batalla (tactics_all NO altera asedio; siege_1 + siege_2 + tech_civ_romanos_e sí)
+    const siegeComp = { ...emptyComposition(), asedio: 30, trabuchet_traccion: 15 };
+    const modsBaseSiege = computeTechnologyModifiers(["tactics_all"]);
+    const modsMaxSiege = computeTechnologyModifiers(["tactics_all", "siege_1", "siege_2", "tech_civ_romanos_e"]);
+    expect(modsBaseSiege.unitEfficiencySiege).toBe(0);
+    expect(modsMaxSiege.unitEfficiencySiege).toBeCloseTo(0.30, 9);
+
+    const sideBase: BattleSide = {
+      kingdomId: "k-base", name: "Sin Asedio Tech", composition: siegeComp, trainingMultiplier: 1,
+      weaponTier: "palo", armorTier: "ninguna", strategy: "agresiva", tacticalFormation: "equilibrada",
+      morale: 75, foodTier: "normal", fatigue: 0, wallsLevel: 0, terrainDefenseBonus: 0,
+      unitEfficiencyInf: modsBaseSiege.unitEfficiencyInf,
+      unitEfficiencyArc: modsBaseSiege.unitEfficiencyArc,
+      unitEfficiencyCav: modsBaseSiege.unitEfficiencyCav,
+      unitEfficiencySiege: modsBaseSiege.unitEfficiencySiege,
+    };
+    const sideSiege: BattleSide = { ...sideBase, kingdomId: "k-siege", name: "Con Asedio Tech", unitEfficiencySiege: modsMaxSiege.unitEfficiencySiege };
+    const factorsBase = computeSideFactors(sideBase, siegeComp, sideSiege);
+    const factorsSiege = computeSideFactors(sideSiege, siegeComp, sideBase);
+    expect(factorsSiege.offensiveStrength).toBeCloseTo(factorsBase.offensiveStrength * 1.30, 6);
+    const report = simulateBattle(sideSiege, sideBase);
+    expect(report.winnerKingdomId).toBe("k-siege");
+
+    // 3) espionageCost real en bots (listBots + requestBotEspionage) y Parlamento (requestEspionageReport)
+    const kSpy = await foundKingdom(t, "u-esp-cost", "Reino Espía Bizantino", "bizantinos");
+    const kTarget = await foundKingdom(t, "u-esp-target", "Reino Blanco", "ingleses");
+    await seedBuildings(t, kSpy.kingdomId, { castillo: 8, universidad: 8, parlamento: 2, cuartel: 2 });
+    await patchResources(t, kSpy.kingdomId, { gold: 5_000 });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId: kSpy.kingdomId, unitType: "espia", level: 1, count: 5, isSpy: true });
+    });
+
+    // Con espionage_2 (coste base nivel 2 = 250) + spy_5 (-10%), spy_7 (-12%), spy_9 (-8%), bizantinos_d (-10%) = -40 % -> 150 oro
+    await seedCompletedTechs(t, kSpy.kingdomId, ["espionage_1", "espionage_2", "spy_5", "spy_7", "spy_9", "tech_civ_bizantinos_d"]);
+    const botsListed = await kSpy.asUser.query(api.bots.listBots, { kingdomId: kSpy.kingdomId });
+    expect(botsListed.espionageCost).toBe(150);
+
+    const activeBots = getAllActiveBots(T0);
+    const botEsp = await kSpy.asUser.mutation(api.bots.requestBotEspionage, {
+      kingdomId: kSpy.kingdomId,
+      botId: activeBots[0].id,
+    });
+    expect(botEsp.cost).toBe(150);
+
+    const rivalEsp = await kSpy.asUser.mutation(api.parliament.requestEspionageReport, {
+      kingdomId: kSpy.kingdomId,
+      targetKingdomId: kTarget.kingdomId,
+      spiesCount: 1,
+    });
+    expect(rivalEsp.cost).toBe(150);
+    expect(calculateEspionageCost(2, 0.40)).toBe(150);
+
+    // 4) explorationCost + explorationSpeed reales en mapa y startExploration (Navajos)
+    const kNav = await foundKingdom(t, "u-nav-exp", "Reino Navajo Avanzado", "navajos");
+    await seedBuildings(t, kNav.kingdomId, { castillo: 8, universidad: 8, cuartel: 2 });
+    const navHome = await kNav.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: kNav.kingdomId });
+    const [nq, nr] = navHome.homeTerritoryId!.split(",").map(Number);
+    const targetCell = `${nq + (nq >= 0 ? -2 : 2)},${nr}`;
+    await patchResources(t, kNav.kingdomId, { gold: 10_000, food: 10_000 });
+    await seedCompletedTechs(t, kNav.kingdomId, ["spy_2", "spy_6", "spy_7", "tech_civ_navajos_d"]);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId: kNav.kingdomId, unitType: "espia", level: 1, count: 4, isSpy: true });
+    });
+
+    // Modificadores Navajos: explorationSpeedBonus = 0.10 + 0.12 + 0.12 = 0.34; explorationCostReduction = 0.08 + 0.10 + 0.15 = 0.33
+    // Base d=2 Navajos: gold=24, food=32 -> con -33% (*0.67): gold=floor(16.08)=16, food=floor(21.44)=21
+    const navMap = await kNav.asUser.query(api.territories.getWorldMapCompact, { kingdomId: kNav.kingdomId });
+    const cellPlan = navMap.visibleCells.find((c: any) => c.cellId === targetCell)?.explorationPlan;
+    expect(cellPlan?.costs).toEqual({ gold: 16, food: 21 });
+    expect(cellPlan?.durationSeconds).toBe(Math.ceil(Math.ceil(3_600_000 / 1.34) / 1000));
+
+    const startedNavExp = await kNav.asUser.mutation(api.territories.startExploration, {
+      kingdomId: kNav.kingdomId,
+      cellId: targetCell,
+      spiesCount: 1,
+    });
+    expect(startedNavExp.durationMs).toBe(Math.ceil(3_600_000 / 1.34));
+    const navResAfter = await kNav.asUser.query(api.economy.getKingdom, { kingdomId: kNav.kingdomId });
+    expect(navResAfter!.simulatedResources.gold).toBeLessThanOrEqual(10_000 - 16);
+    expect(navResAfter!.simulatedResources.food).toBeLessThanOrEqual(10_000 - 21);
+  });
+
+  test("aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones", async () => {
+    const t = createTestBackend();
+    const romanKingdom = await foundKingdom(t, "u-iso-new", "Reino Romano Aislado", "romanos");
+    await seedBuildings(t, romanKingdom.kingdomId, { castillo: 8, universidad: 8 });
+    await patchResources(t, romanKingdom.kingdomId, { gold: 50_000, wood: 50_000, stone: 50_000, iron: 50_000, food: 50_000 });
+    await asSettled(romanKingdom);
+
+    for (const civ of CIVILIZATIONS) {
+      if (civ.id === "romanos") continue;
+      await seedCompletedTechs(t, romanKingdom.kingdomId, [`tech_civ_${civ.id}_c`]);
+      await expect(
+        romanKingdom.asUser.mutation(api.technologies.researchTechnology, {
+          kingdomId: romanKingdom.kingdomId,
+          techType: `tech_civ_${civ.id}_d`,
+        })
+      ).rejects.toThrow(/Exclusiva de/i);
+    }
+  });
+});
+
+async function asSettled(k: { asUser: any; kingdomId: Id<"kingdoms"> }) {
+  await k.asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId: k.kingdomId });
+}
