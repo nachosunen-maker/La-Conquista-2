@@ -1,0 +1,5 @@
+
+> la-conquista@1.0.0 lint
+> tsc --noEmit && tsc --noEmit -p convex
+
+EXIT_CODE=0

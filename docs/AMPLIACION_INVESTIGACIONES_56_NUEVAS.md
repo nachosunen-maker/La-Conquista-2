@@ -672,29 +672,32 @@ Se comprobó automáticamente mediante lectura directa de `convex/balanceConfig.
 
 ## VALIDACIÓN TÉCNICA Y CIERRE DEFINITIVO
 
-- **Commit exacto validado:** Sin directorio `.git` en el entorno de trabajo (`/app/applet`); validación ejecutada íntegramente sobre el estado actual del directorio tras `npm ci` (sin modificaciones funcionales de código).
-- **Fecha y entorno de ejecución:** `2026-11-24` (`11:06–11:10 UTC` / `03:06–03:10 -08:00`) · `Linux 4.19.0-gvisor x86_64` · `Node.js v22.23.5` · `npm 10.9.9`.
-- **Instalación limpia (`npm ci`):**
-  - Comando: `npm ci`
-  - Resultado: `added 142 packages, and audited 143 packages in 31s`
-  - Código de salida: `0`
-- **Pruebas específicas de investigaciones, motor tecnológico y dominios afectados:**
-  - Comando 1 (Vitest equilibrio + investigación): `npx vitest run convex/balancing.test.ts convex/researchFixes.test.ts`
-    - Resultado: **27 ejecutadas · 27 aprobadas · 0 fallidas · 0 omitidas** (`Test Files 2 passed (2)`, duración `6.17s`), código de salida `0`.
-  - Comando 2 (Batería pura completa — incluye `convex/technologyPureTests.ts` pruebas 1–37, economía, militar, exploración, civilizaciones, parlamento y bots): `npm run test` (`tsx scripts/runEconomicTests.ts`)
-    - Resultado: **264 ejecutadas · 264 aprobadas · 0 fallidas · 0 omitidas** (duración `784 ms`), código de salida `0`.
-  - Comando 3 (Integración específica de economía, investigación, combate/asedio, espionaje, exploración, civilizaciones, Parlamento, bots y seguridad): `npx vitest run convex/balancing.test.ts convex/researchFixes.test.ts convex/civilizations.test.ts convex/parliamentDiscovery.test.ts convex/territories.test.ts convex/spySystem.test.ts convex/integration.test.ts convex/complianceFixes.test.ts convex/phase2Fixes.test.ts convex/phase3Fixes.test.ts convex/missions.test.ts convex/market.test.ts convex/conquestRewards.test.ts`
-    - Resultado: **177 ejecutadas · 177 aprobadas · 0 fallidas · 0 omitidas** (`Test Files 13 passed (13)`, duración `26.89s`), código de salida `0`.
-- **Suite completa de pruebas del proyecto:**
-  - Suite de integración completa (`npm run test:integration` -> `vitest run`): **21 archivos · 330 pruebas ejecutadas · 330 aprobadas · 0 fallidas · 0 omitidas** (duración `72.25s`), código de salida `0`.
-  - Suite pura completa (`npm run test` -> `tsx scripts/runEconomicTests.ts`): **264 pruebas ejecutadas · 264 aprobadas · 0 fallidas · 0 omitidas**, código de salida `0`.
-- **TypeScript y Lint completo (`npm run lint`):**
-  - Comando real configurado en `package.json`: `npm run lint` (`tsc --noEmit && tsc --noEmit -p convex`)
-  - Resultado: **0 errores en cliente (`tsconfig.json`) y 0 errores en backend Convex (`convex/tsconfig.json`)**, sin exclusiones ni desactivación de reglas.
-  - Código de salida: `0`
-- **Build de producción (`npm run build`):**
-  - Comando real configurado en `package.json`: `npm run build` (`tsc && vite build`)
-  - Resultado: **1.772 módulos transformados**, artefactos generados en `dist/` (`built in 1.83s`).
-  - Código de salida: `0`
-- **Correcciones efectuadas durante el cierre:** Ninguna corrección funcional ni de equilibrio en el código de juego; únicamente ampliación y verificación exacta de este documento (`docs/AMPLIACION_INVESTIGACIONES_56_NUEVAS.md`).
-- **Confirmación de integridad:** No se han modificado las 135 investigaciones anteriores ni las 56 nuevas, ni sus costes, duraciones, efectos, topes, fórmulas, consumidores, Universidad (máx. 3 ranuras), interfaz, mapa de 7.651 hexágonos (radio 50), base de datos, migraciones, infraestructura, hosting, variables de entorno ni recursos gráficos.
+- **Commit y estado validado:** Revisión de referencia `1b24b6a5d6538a9454cbe7edc32b246971bbd421` (actualización documental sobre el árbol de 191 tecnologías). Nota de entorno: en `/app/applet` no existe directorio `.git` (`git rev-parse HEAD` devuelve código `128: fatal: not a git repository`), por lo que todas las ejecuciones siguientes se han realizado directamente sobre el árbol de trabajo completo en `/app/applet` sin alterar ningún archivo funcional.
+- **Fecha y entorno de ejecución:** `2026-11-24` (`11:16–11:19 UTC` / `03:16–03:19 -08:00`) · `Linux 4.19.0-gvisor x86_64` · `Node.js v22.23.5` · `npm 10.9.9`.
+
+### Evidencias reales de ejecución y logs conservados
+
+| # | Paso / Alcance | Comando exacto | Código de salida | Ejecutadas | Aprobadas | Fallidas | Omitidas | Log completo conservado |
+| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | Instalación limpia | `npm ci` | `0` | — | 142 paquetes (`13s`) | 0 errores | — | [`docs/logs/01_npm_ci.log`](./logs/01_npm_ci.log) |
+| 2 | Pruebas específicas de investigación y balance | `npx vitest run convex/balancing.test.ts convex/researchFixes.test.ts` | `0` | 27 (2 archivos) | 27 | 0 | 0 | [`docs/logs/02_vitest_investigacion_balance.log`](./logs/02_vitest_investigacion_balance.log) |
+| 3 | Batería de pruebas matemáticas y de integridad | `npm run test` (`tsx scripts/runEconomicTests.ts`, incluye `convex/technologyPureTests.ts`) | `0` | 264 | 264 | 0 | 0 | [`docs/logs/03_pruebas_matematicas_integridad.log`](./logs/03_pruebas_matematicas_integridad.log) |
+| 4 | Integración de dominios relacionados (economía, investigación, combate, asedio, espionaje, exploración, civilizaciones, Parlamento y bots) | `npx vitest run convex/balancing.test.ts convex/researchFixes.test.ts convex/civilizations.test.ts convex/parliamentDiscovery.test.ts convex/territories.test.ts convex/spySystem.test.ts convex/integration.test.ts convex/complianceFixes.test.ts convex/phase2Fixes.test.ts convex/phase3Fixes.test.ts convex/missions.test.ts convex/market.test.ts convex/conquestRewards.test.ts` | `0` | 177 (13 archivos) | 177 | 0 | 0 | [`docs/logs/04_vitest_dominios_relacionados.log`](./logs/04_vitest_dominios_relacionados.log) |
+| 5 | Suite completa de integración del proyecto | `npm run test:integration` (`vitest run`) | `0` | 330 (21 archivos) | 330 | 0 | 0 | [`docs/logs/05_vitest_suite_completa.log`](./logs/05_vitest_suite_completa.log) |
+| 6 | TypeScript cliente (`tsconfig.json`) | `npx tsc --noEmit` | `0` | — | 0 errores | 0 | — | [`docs/logs/06_tsc_cliente.log`](./logs/06_tsc_cliente.log) |
+| 7 | TypeScript backend Convex (`convex/tsconfig.json`) | `npx tsc --noEmit -p convex` | `0` | — | 0 errores | 0 | — | [`docs/logs/07_tsc_convex.log`](./logs/07_tsc_convex.log) |
+| 8 | Script `"lint"` de `package.json` | `npm run lint` (`tsc --noEmit && tsc --noEmit -p convex`) | `0` | — | 0 errores | 0 | — | [`docs/logs/08_npm_run_lint.log`](./logs/08_npm_run_lint.log) |
+| 9 | Build de producción | `npm run build` (`tsc && vite build`) | `0` | — | 1.772 módulos (`1.28s`) | 0 | — | [`docs/logs/09_npm_run_build.log`](./logs/09_npm_run_build.log) |
+
+### Precisión sobre TypeScript y el script `"lint"` de `package.json`
+
+- En `package.json` (línea 10), el script `"lint"` está definido exactamente como:
+  ```json
+  "lint": "tsc --noEmit && tsc --noEmit -p convex"
+  ```
+- Por tanto, **`npm run lint` ejecuta únicamente comprobaciones estáticas de tipos TypeScript** sobre el cliente (`tsconfig.json`) y sobre el código de Convex (`convex/tsconfig.json`), sin ejecutar ESLint ni ningún otro linter de reglas de estilo independiente. No se ha instalado ningún paquete adicional ni se ha añadido ni desactivado ninguna regla de configuración.
+
+### Confirmación expresa de inmutabilidad funcional
+
+- No se ha realizado ninguna modificación de código funcional, fórmulas, costes, duraciones, requisitos, efectos, topes, consumidores, Universidad, tres ranuras de investigación, mapa de 7.651 hexágonos (radio 50), base de datos, migraciones, infraestructura ni recursos gráficos; únicamente se ha completado este documento y se han conservado los logs íntegros de validación en `docs/logs/`.
+

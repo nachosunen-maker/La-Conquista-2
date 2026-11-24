@@ -1,0 +1,540 @@
+
+ RUN  v3.2.7 /app/applet
+
+stdout | convex/researchFixes.test.ts > §2.4 y §2.5 — Paridad bonifiedDurationSeconds/durationMs, inmutabilidad en cola y costes de construcción > bonifiedDurationSeconds * 1000 === durationMs real en researchTechnology y las investigaciones en curso no se recalculan
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología agri_1
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010017kingdoms, Tecnología tech_civ_romanos
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010017kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Romanos (el reino pertenece a Ingleses)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Romanos (el reino pertenece a Ingleses)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_romanos'[39m,
+  kingdomName: [32m'Reino ingleses'[39m,
+  civilization: [32m'ingleses'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010034kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010034kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Romanos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Romanos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino romanos'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010051kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010051kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Griegos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Griegos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino griegos'[39m,
+  civilization: [32m'griegos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010068kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010068kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Vikingos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Vikingos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino vikingos'[39m,
+  civilization: [32m'vikingos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010085kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010085kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Bizantinos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Bizantinos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino bizantinos'[39m,
+  civilization: [32m'bizantinos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010102kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010102kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Árabes).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Árabes).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino arabes'[39m,
+  civilization: [32m'arabes'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010119kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010119kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Mongoles).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Mongoles).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino mongoles'[39m,
+  civilization: [32m'mongoles'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010136kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010136kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Chinos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Chinos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino chinos'[39m,
+  civilization: [32m'chinos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010153kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010153kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Japoneses).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Japoneses).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino japoneses'[39m,
+  civilization: [32m'japoneses'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010170kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010170kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Navajos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Navajos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino navajos'[39m,
+  civilization: [32m'navajos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010187kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010187kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Aztecas).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Aztecas).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino aztecas'[39m,
+  civilization: [32m'aztecas'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010204kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010204kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Masáis).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Masáis).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino masais'[39m,
+  civilization: [32m'masais'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §6 — Bonificación centralizada de exploración (+10 % velocidad) de spy_2 > integración convex-test: completar spy_2, consultar mapa (getWorldMap + getWorldMapCompact) e iniciar expedición persiste exactamente durationMs y completesAt sin alterar expediciones previas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología spy_2
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología mining_10
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología siege_1
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_romanos_d
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología housing_1
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'No hay ranuras de investigación libres (3 con Universidad nivel 8).'[39m,
+  stack: [32m'ConvexError: No hay ranuras de investigación libres (3 con Universidad nivel 8).\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1043:5\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'housing_1'[39m,
+  kingdomName: [32m'Reino Maestría'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_romanos_e
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_romanos_f
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_ingleses_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_griegos_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Griegos (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Griegos (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_griegos_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_vikingos_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Vikingos (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Vikingos (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_vikingos_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_bizantinos_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Bizantinos (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Bizantinos (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_bizantinos_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_arabes_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Árabes (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Árabes (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_arabes_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_mongoles_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Mongoles (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Mongoles (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_mongoles_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_chinos_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Chinos (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Chinos (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_chinos_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_japoneses_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Japoneses (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Japoneses (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_japoneses_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_navajos_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Navajos (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Navajos (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_navajos_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_aztecas_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Aztecas (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Aztecas (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_aztecas_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_masais_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Masáis (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Masáis (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_masais_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+ ✓ convex/researchFixes.test.ts (15 tests) 3007ms
+   ✓ §2.1 — Velocidad y duración real de marchas militares > launchAttack aplica logistics_2, logistics_5, spy_2 y exclusivas de velocidad más pasiva cultural  865ms
+   ✓ §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas  521ms
+   ✓ §6 — Bonificación centralizada de exploración (+10 % velocidad) de spy_2 > integración convex-test: completar spy_2, consultar mapa (getWorldMap + getWorldMapCompact) e iniciar expedición persiste exactamente durationMs y completesAt sin alterar expediciones previas  428ms
+ ✓ convex/balancing.test.ts (12 tests) 56ms
+
+ Test Files  2 passed (2)
+      Tests  27 passed (27)
+   Start at  11:16:39
+   Duration  5.77s (transform 1.32s, setup 0ms, collect 1.42s, tests 3.06s, environment 144ms, prepare 337ms)
+
+EXIT_CODE=0

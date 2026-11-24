@@ -1,0 +1,1244 @@
+
+> la-conquista@1.0.0 test:integration
+> vitest run
+
+
+ RUN  v3.2.7 /app/applet
+
+ ✓ convex/territoryCapPoint2.test.ts (40 tests) 7006ms
+   ✓ Punto 2 — Tareas 2–5: Autorización administrativa, auditoría persistente, integridad referencial, capital histórica y cuentas demo > 6–12 y 17–19. Admin en dryRun sin mutar, saneamiento efectivo con auditoría persistente, idempotencia, integridad referencial e historiales intactos  388ms
+   ✓ Punto 2 — Tareas 2–5: Autorización administrativa, auditoría persistente, integridad referencial, capital histórica y cuentas demo > 20. Auditoría referencial completa: explorationQueue, activeMarches, challenges y buildings bloquean referencias activas incompatibles  474ms
+   ✓ Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tamaños, verificación exacta de conjuntos y rollback transaccional > C2-A. Saneamiento exacto de 101, 108 y 150 territorios: K_real===K_planificado, R_real===R_planificado, propiedad individual, capital, territorios ajenos intactos e idempotencia  662ms
+   ✓ Punto 2 — Corrección 1 y Corrección 2: Duplicados en todos los tamaños, verificación exacta de conjuntos y rollback transaccional > V1. Escenarios límite completos en Convex (dryRun): tamaños {0, 1, 99, 100, 101, 105, 108, 150, 200} y capital lejos del centro geométrico (30,-15)  924ms
+stdout | convex/mapPerformance.test.ts > Bloque 1 — Convex: consultas agrupadas por columna axial q, coste acotado (<=101) y concurrencia (<=8) > Escenarios obligatorios (10/500 contiguos, 10/500/2000 dispersos adversos, 7651 completo): <=101 consultas, <=8 concurrentes, 0 fugas y métricas exactas
+[Bloque 1 — Escenarios obligatorios] [{"scenario":"10_contiguos","queries":4,"retrieved":10,"discarded":1,"accepted":9,"maxConcurrency":4,"upperBoundDocs":400,"elapsedMs":1},{"scenario":"10_dispersos","queries":9,"retrieved":9,"discarded":0,"accepted":9,"maxConcurrency":8,"upperBoundDocs":732,"elapsedMs":0},{"scenario":"500_contiguos","queries":26,"retrieved":500,"discarded":1,"accepted":499,"maxConcurrency":8,"upperBoundDocs":2457,"elapsedMs":1},{"scenario":"500_dispersos","queries":101,"retrieved":5843,"discarded":5344,"accepted":499,"maxConcurrency":8,"upperBoundDocs":7651,"elapsedMs":12},{"scenario":"2000_dispersos","queries":101,"retrieved":7249,"discarded":5250,"accepted":1999,"maxConcurrency":8,"upperBoundDocs":7651,"elapsedMs":8},{"scenario":"7651_completo","queries":101,"retrieved":7650,"discarded":0,"accepted":7650,"maxConcurrency":8,"upperBoundDocs":7651,"elapsedMs":6}]
+
+ ✓ convex/mapPerformance.test.ts (50 tests) 10674ms
+   ✓ Bloque 1 — Convex: consultas agrupadas por columna axial q, coste acotado (<=101) y concurrencia (<=8) > Escenarios obligatorios (10/500 contiguos, 10/500/2000 dispersos adversos, 7651 completo): <=101 consultas, <=8 concurrentes, 0 fugas y métricas exactas  493ms
+   ✓ Bloque A — Distribución geográfica, anclas, geometría por intersección y auditoría de reinos existentes > Optimizador multi-reino determinista separa solución en banda, solo separación mínima e inviabilidad demostrada (N > 76)  314ms
+   ✓ Redistribución quirúrgica de reinos existentes — 15 pruebas obligatorias > 3. Reino a menos de 20 hexágonos: se detecta y se recoloca respetando d >= 20  328ms
+   ✓ Redistribución quirúrgica de reinos existentes — 15 pruebas obligatorias > 4. Reinos de la misma civilización separados por más de 30: se detectan y se agrupan en [20, 30]  324ms
+   ✓ Redistribución quirúrgica de reinos existentes — 15 pruebas obligatorias > 5. Varios reinos de una misma civilización y múltiples civilizaciones: distribución global correcta y determinista  822ms
+   ✓ Redistribución quirúrgica de reinos existentes — 15 pruebas obligatorias > 9. Celda de destino ocupada: operación rechazada sin cambios parciales  313ms
+   ✓ Redistribución quirúrgica de reinos existentes — 15 pruebas obligatorias > 10. Límite de 100 territorios: nunca se supera (reino con 100 conserva 100; reino con >100 se bloquea)  322ms
+   ✓ Redistribución quirúrgica de reinos existentes — 15 pruebas obligatorias > 14. Distribución completa multi-civilización: todas las distancias por parejas verificadas matemáticamente  1217ms
+   ✓ Validación quirúrgica commit 241686b — 13 pruebas obligatorias > 5. Rechazo si existe conflicto entre dos movimientos del mismo lote  470ms
+   ✓ Validación quirúrgica commit 241686b — 13 pruebas obligatorias > 6. Reino con 2..99 territorios reserva su antigua capital en el optimizador y la conserva tras recolocar  365ms
+   ✓ Validación quirúrgica commit 241686b — 13 pruebas obligatorias > 7. Reino con 100 territorios libera su antigua capital al sustituirla, conservando los otros 99  311ms
+   ✓ Validación quirúrgica commit 241686b — 13 pruebas obligatorias > 8. Reino con 1 territorio libera limpiamente su antigua capital y permite orden seguro multi-reino  304ms
+   ✓ Validación quirúrgica commit 241686b — 13 pruebas obligatorias > 9. Invalidación de huella si cambian las coordenadas de la capital  406ms
+   ✓ Validación quirúrgica commit 241686b — 13 pruebas obligatorias > 12. Preservación íntegra de territorios, recursos, edificios, colas, ejército, investigaciones e historiales tras recolocación válida  300ms
+stderr | convex/integration.test.ts > Fundación del reino (P4-P10, H) > un invitado o atacante con DEMO_USER_ID no puede ejecutar mutaciones ni alterar datos
+Fallo de autenticación en requireAuthenticatedUser {
+  hasIdentity: [33mfalse[39m,
+  issuer: [90mundefined[39m,
+  subject: [90mundefined[39m,
+  tokenIdentifier: [90mundefined[39m
+}
+
+stdout | convex/integration.test.ts > Investigación (Bloque C) > exige Universidad, cobra el coste y aplica el efecto al completarse
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología agri_1
+
+stderr | convex/integration.test.ts > Investigación (Bloque C) > exige Universidad, cobra el coste y aplica el efecto al completarse
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'No hay ranuras de investigación libres (0 con Universidad nivel 0).'[39m,
+  stack: [32m'ConvexError: No hay ranuras de investigación libres (0 con Universidad nivel 0).\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/integration.test.ts:277:5\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'agri_1'[39m,
+  kingdomName: [32m'Reino A'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/integration.test.ts > Investigación (Bloque C) > exige Universidad, cobra el coste y aplica el efecto al completarse
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología agri_1
+
+stderr | convex/integration.test.ts > Autenticación y seguridad de identidad (P1, P4, T-01): identidad simulada del servidor > getViewer devuelve null para invitados anónimos y la identidad verificada para usuarios con sesión
+[getViewer] No se detectó identidad en la petición.
+
+stdout | convex/integration.test.ts > Autenticación y seguridad de identidad (P1, P4, T-01): identidad simulada del servidor > getViewer devuelve null para invitados anónimos y la identidad verificada para usuarios con sesión
+[getViewer] Identidad detectada. Emisor: https://accounts.google.com Subject: 198291664207-user-12345
+
+stderr | convex/integration.test.ts > Autenticación y seguridad de identidad (P1, P4, T-01): identidad simulada del servidor > todas las mutaciones económicas y de gobierno rechazan llamadas sin identidad verificada
+Fallo de autenticación en requireAuthenticatedUser {
+  hasIdentity: [33mfalse[39m,
+  issuer: [90mundefined[39m,
+  subject: [90mundefined[39m,
+  tokenIdentifier: [90mundefined[39m
+}
+
+stderr | convex/integration.test.ts > Autenticación y seguridad de identidad (P1, P4, T-01): identidad simulada del servidor > todas las mutaciones económicas y de gobierno rechazan llamadas sin identidad verificada
+Fallo de autenticación en requireAuthenticatedUser {
+  hasIdentity: [33mfalse[39m,
+  issuer: [90mundefined[39m,
+  subject: [90mundefined[39m,
+  tokenIdentifier: [90mundefined[39m
+}
+
+stderr | convex/integration.test.ts > Autenticación y seguridad de identidad (P1, P4, T-01): identidad simulada del servidor > todas las mutaciones económicas y de gobierno rechazan llamadas sin identidad verificada
+Fallo de autenticación en requireAuthenticatedUser {
+  hasIdentity: [33mfalse[39m,
+  issuer: [90mundefined[39m,
+  subject: [90mundefined[39m,
+  tokenIdentifier: [90mundefined[39m
+}
+
+stderr | convex/integration.test.ts > Autenticación y seguridad de identidad (P1, P4, T-01): identidad simulada del servidor > todas las mutaciones económicas y de gobierno rechazan llamadas sin identidad verificada
+Fallo de autenticación en requireAuthenticatedUser {
+  hasIdentity: [33mfalse[39m,
+  issuer: [90mundefined[39m,
+  subject: [90mundefined[39m,
+  tokenIdentifier: [90mundefined[39m
+}
+
+ ✓ convex/integration.test.ts (42 tests) 3443ms
+   ✓ Exploración del mapa y territorios libres (P22, P49) > inicia expedición, reserva espía profesional, completa autoritativamente y revela la celda con hallazgo  518ms
+   ✓ Campañas militares y marchas sobre el mapa (Bloque G, P34-P41) > seguridad getWorldMap: consulta neutral sin kingdomId no expone datos privados de ningún reino  430ms
+ ✓ convex/buildingProgression200.test.ts (11 tests) 2340ms
+   ✓ Punto 5 — Auditoría de catálogo, constantes y matriz completa 18 × 200 (3.600 casos) > valida los 3.600 casos de costes y duraciones (18 edificios × niveles 1..200) frente a cálculo independiente  1227ms
+ ✓ convex/phase3Fixes.test.ts (6 tests) 3064ms
+   ✓ Fase 3 — Bloque A: Mapa mundial canónico de exactamente 7.651 celdas (radio 50) > configuración, determinismo, unicidad, geometría hexagonal completa y ausencia de celdas exteriores  388ms
+   ✓ Fase 3 — Bloque A: Mapa mundial canónico de exactamente 7.651 celdas (radio 50) > ensureWorld valida correspondencia real (no solo conteo), es idempotente y readWorld proyecta siempre 7.651 celdas  1800ms
+   ✓ Fase 3 — Bloque D: Privacidad del mapa, orden de autorización y equivalencia full/compact > controla acceso para anónimo, usuario sin reino, reino propio, reino ajeno, espionaje y equivalencia completa/compacta  589ms
+stdout | convex/researchFixes.test.ts > §2.4 y §2.5 — Paridad bonifiedDurationSeconds/durationMs, inmutabilidad en cola y costes de construcción > bonifiedDurationSeconds * 1000 === durationMs real en researchTechnology y las investigaciones en curso no se recalculan
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología agri_1
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010017kingdoms, Tecnología tech_civ_romanos
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010017kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Romanos (el reino pertenece a Ingleses)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Romanos (el reino pertenece a Ingleses)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_romanos'[39m,
+  kingdomName: [32m'Reino ingleses'[39m,
+  civilization: [32m'ingleses'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010034kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010034kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Romanos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Romanos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino romanos'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010051kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010051kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Griegos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Griegos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino griegos'[39m,
+  civilization: [32m'griegos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010068kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010068kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Vikingos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Vikingos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino vikingos'[39m,
+  civilization: [32m'vikingos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010085kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010085kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Bizantinos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Bizantinos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino bizantinos'[39m,
+  civilization: [32m'bizantinos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010102kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010102kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Árabes).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Árabes).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino arabes'[39m,
+  civilization: [32m'arabes'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010119kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010119kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Mongoles).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Mongoles).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino mongoles'[39m,
+  civilization: [32m'mongoles'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010136kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010136kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Chinos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Chinos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino chinos'[39m,
+  civilization: [32m'chinos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010153kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010153kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Japoneses).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Japoneses).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino japoneses'[39m,
+  civilization: [32m'japoneses'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010170kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010170kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Navajos).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Navajos).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino navajos'[39m,
+  civilization: [32m'navajos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010187kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010187kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Aztecas).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Aztecas).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino aztecas'[39m,
+  civilization: [32m'aztecas'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010204kingdoms, Tecnología tech_civ_ingleses
+
+stderr | convex/researchFixes.test.ts > §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010204kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Masáis).; Cuartel/Barracones nivel 2.'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Masáis).; Cuartel/Barracones nivel 2.\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:750:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses'[39m,
+  kingdomName: [32m'Reino masais'[39m,
+  civilization: [32m'masais'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §6 — Bonificación centralizada de exploración (+10 % velocidad) de spy_2 > integración convex-test: completar spy_2, consultar mapa (getWorldMap + getWorldMapCompact) e iniciar expedición persiste exactamente durationMs y completesAt sin alterar expediciones previas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología spy_2
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología mining_10
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología siege_1
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_romanos_d
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología housing_1
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'No hay ranuras de investigación libres (3 con Universidad nivel 8).'[39m,
+  stack: [32m'ConvexError: No hay ranuras de investigación libres (3 con Universidad nivel 8).\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1043:5\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'housing_1'[39m,
+  kingdomName: [32m'Reino Maestría'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_romanos_e
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > niveles 6, 7 y 8 de Universidad mantienen máximo 3 ranuras y permiten investigar/completar las nuevas tecnologías universales y exclusivas
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_romanos_f
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_ingleses_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Ingleses (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_ingleses_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_griegos_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Griegos (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Griegos (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_griegos_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_vikingos_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Vikingos (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Vikingos (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_vikingos_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_bizantinos_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Bizantinos (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Bizantinos (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_bizantinos_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_arabes_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Árabes (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Árabes (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_arabes_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_mongoles_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Mongoles (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Mongoles (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_mongoles_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_chinos_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Chinos (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Chinos (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_chinos_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_japoneses_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Japoneses (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Japoneses (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_japoneses_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_navajos_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Navajos (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Navajos (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_navajos_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_aztecas_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Aztecas (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Aztecas (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_aztecas_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología tech_civ_masais_d
+
+stderr | convex/researchFixes.test.ts > §7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3 ranuras y consumidores reales > aislamiento estricto de los nuevos nodos exclusivos _d, _e y _f en las 12 civilizaciones
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'Bloqueada: Tecnología exclusiva de los Masáis (el reino pertenece a Romanos)..'[39m,
+  stack: [32m'ConvexError: Bloqueada: Tecnología exclusiva de los Masáis (el reino pertenece a Romanos)..\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/researchFixes.test.ts:1170:7\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'tech_civ_masais_d'[39m,
+  kingdomName: [32m'Reino Romano Aislado'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+ ✓ convex/researchFixes.test.ts (15 tests) 2076ms
+   ✓ §2.1 — Velocidad y duración real de marchas militares > launchAttack aplica logistics_2, logistics_5, spy_2 y exclusivas de velocidad más pasiva cultural  399ms
+   ✓ §5 — Aislamiento estricto por civilizationRequirement para las 12 civilizaciones y manipulación de cliente > cada una de las 12 civilizaciones ve 107 generales + 7 propias = 114 y nunca puede investigar ni consultar ajenas  443ms
+   ✓ §6 — Bonificación centralizada de exploración (+10 % velocidad) de spy_2 > integración convex-test: completar spy_2, consultar mapa (getWorldMap + getWorldMapCompact) e iniciar expedición persiste exactamente durationMs y completesAt sin alterar expediciones previas  397ms
+stdout | convex/phase2Fixes.test.ts > Corrección 2 — Ranuras de investigación por nivel de Universidad (M-03 opción B / P25) > respeta 0 ranuras sin Universidad, 1/2/3 por nivel y rechaza exceso en mutación directa y concurrencia
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología agri_1
+
+stderr | convex/phase2Fixes.test.ts > Corrección 2 — Ranuras de investigación por nivel de Universidad (M-03 opción B / P25) > respeta 0 ranuras sin Universidad, 1/2/3 por nivel y rechaza exceso en mutación directa y concurrencia
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'No hay ranuras de investigación libres (0 con Universidad nivel 0).'[39m,
+  stack: [32m'ConvexError: No hay ranuras de investigación libres (0 con Universidad nivel 0).\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/phase2Fixes.test.ts:294:5\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'agri_1'[39m,
+  kingdomName: [32m'Reino Académico'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/phase2Fixes.test.ts > Corrección 2 — Ranuras de investigación por nivel de Universidad (M-03 opción B / P25) > respeta 0 ranuras sin Universidad, 1/2/3 por nivel y rechaza exceso en mutación directa y concurrencia
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología agri_1
+
+stdout | convex/phase2Fixes.test.ts > Corrección 2 — Ranuras de investigación por nivel de Universidad (M-03 opción B / P25) > respeta 0 ranuras sin Universidad, 1/2/3 por nivel y rechaza exceso en mutación directa y concurrencia
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología mining_1
+
+stderr | convex/phase2Fixes.test.ts > Corrección 2 — Ranuras de investigación por nivel de Universidad (M-03 opción B / P25) > respeta 0 ranuras sin Universidad, 1/2/3 por nivel y rechaza exceso en mutación directa y concurrencia
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'No hay ranuras de investigación libres (1 con Universidad nivel 1).'[39m,
+  stack: [32m'ConvexError: No hay ranuras de investigación libres (1 con Universidad nivel 1).\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at async Promise.allSettled (index 1)\n'[39m +
+    [32m'    at /app/applet/convex/phase2Fixes.test.ts:303:24\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'mining_1'[39m,
+  kingdomName: [32m'Reino Académico'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+stdout | convex/phase2Fixes.test.ts > Corrección 2 — Ranuras de investigación por nivel de Universidad (M-03 opción B / P25) > respeta 0 ranuras sin Universidad, 1/2/3 por nivel y rechaza exceso en mutación directa y concurrencia
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología mining_1
+
+stdout | convex/phase2Fixes.test.ts > Corrección 2 — Ranuras de investigación por nivel de Universidad (M-03 opción B / P25) > respeta 0 ranuras sin Universidad, 1/2/3 por nivel y rechaza exceso en mutación directa y concurrencia
+[CONVEX M(technologies:researchTechnology)] Inicio: Reino 000000000000000000010000kingdoms, Tecnología storage_1
+
+stderr | convex/phase2Fixes.test.ts > Corrección 2 — Ranuras de investigación por nivel de Universidad (M-03 opción B / P25) > respeta 0 ranuras sin Universidad, 1/2/3 por nivel y rechaza exceso en mutación directa y concurrencia
+[CONVEX M(technologies:researchTechnology)] ERROR en Reino 000000000000000000010000kingdoms: {
+  message: [32m'No hay ranuras de investigación libres (2 con Universidad nivel 3).'[39m,
+  stack: [32m'ConvexError: No hay ranuras de investigación libres (2 con Universidad nivel 3).\n'[39m +
+    [32m'    at handler (/app/applet/convex/technologies.ts:142:38)\n'[39m +
+    [32m'    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n'[39m +
+    [32m'    at invokeFunction (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:90:14)\n'[39m +
+    [32m'    at invokeMutation (file:///app/applet/node_modules/convex/src/server/impl/registration_impl.ts:70:18)\n'[39m +
+    [32m'    at runMutationWithHandler (/app/applet/node_modules/convex-test/dist/index.js:2061:31)\n'[39m +
+    [32m'    at Object.mutationFromPath (/app/applet/node_modules/convex-test/dist/index.js:2205:32)\n'[39m +
+    [32m'    at mutation (/app/applet/node_modules/convex-test/dist/index.js:2253:20)\n'[39m +
+    [32m'    at /app/applet/convex/phase2Fixes.test.ts:328:5\n'[39m +
+    [32m'    at file:///app/applet/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20'[39m,
+  techType: [32m'storage_1'[39m,
+  kingdomName: [32m'Reino Académico'[39m,
+  civilization: [32m'romanos'[39m
+}
+
+ ✓ convex/phase2Fixes.test.ts (5 tests) 1672ms
+   ✓ Corrección 1 — Parlamento y fechas de combate (P38) > rechaza desafío ACCEPTED con scheduledAt futuro, sin scheduledAt, FROZEN, REJECTED, EXPIRED, RESOLVED, reinos distintos y reutilización  410ms
+   ✓ Corrección 3 — Niebla de guerra coherente en getWorldMap y getWorldMapCompact > impide eludir niebla vía consulta global, oculta celdas en exploración y filtra leyenda de reinos  1017ms
+stderr | convex/spySystem.test.ts > Defecto 2 — Cuarentena y preservación de registros heredados con tipos no reconocidos > 1, 2, 3 y 4. Tipos desconocidos (cantidad, heridos, mercenario, isSpy) se conservan íntegros sin convertirse ni contabilizarse
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010016Armyunits'[39m,
+  rawUnitType: [32m'lancero_heredado_v0'[39m,
+  reason: [32m"Tipo de unidad heredado no reconocido ('lancero_heredado_v0'). Conservado en cuarentena sin conversión ni borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010017Armyunits'[39m,
+  rawUnitType: [32m'ballestero_beta'[39m,
+  reason: [32m"Tipo de unidad heredado no reconocido ('ballestero_beta'). Conservado en cuarentena sin conversión ni borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010018Armyunits'[39m,
+  rawUnitType: [32m'corsario_antiguo'[39m,
+  reason: [32m"Tipo de unidad heredado no reconocido ('corsario_antiguo'). Conservado en cuarentena sin conversión ni borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010019Armyunits'[39m,
+  rawUnitType: [32m'agente_experimental_v0'[39m,
+  reason: [32m"Tipo de unidad heredado no reconocido ('agente_experimental_v0'). Conservado en cuarentena sin conversión ni borrado."[39m
+}
+
+stderr | convex/spySystem.test.ts > Defecto 2 — Cuarentena y preservación de registros heredados con tipos no reconocidos > 5, 6 y 7. Vacío se limpia, válidos migran junto a inválido en cuarentena, y repetir migración es idempotente
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010019Armyunits'[39m,
+  rawUnitType: [32m'unidad_misteriosa'[39m,
+  reason: [32m"Tipo de unidad heredado no reconocido ('unidad_misteriosa'). Conservado en cuarentena sin conversión ni borrado."[39m
+}
+
+stderr | convex/spySystem.test.ts > Defecto 2 — Cuarentena y preservación de registros heredados con tipos no reconocidos > 5, 6 y 7. Vacío se limpia, válidos migran junto a inválido en cuarentena, y repetir migración es idempotente
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010019Armyunits'[39m,
+  rawUnitType: [32m'unidad_misteriosa'[39m,
+  reason: [32m"Tipo de unidad heredado no reconocido ('unidad_misteriosa'). Conservado en cuarentena sin conversión ni borrado."[39m
+}
+
+stderr | convex/spySystem.test.ts > Defecto residual 2: clasificación conservadora y preservación de registros heredados inválidos o parciales > Migración transaccional real: preserva intactos en Armyunits los registros inválidos, migra count=0 con wounded>0 y es idempotente
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010016Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'count' inválido o no interpretable (1.5). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010017Armyunits'[39m,
+  rawUnitType: [32m'espia'[39m,
+  reason: [32m"Valor de 'count' inválido o no interpretable (7). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010018Armyunits'[39m,
+  rawUnitType: [32m'arqueria'[39m,
+  reason: [32m"Valor de 'count' inválido o no interpretable (-3). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010019Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m'Registro sin cantidad activa pero con atributos relevantes o metadatos de procedencia/herencia que no deben perderse. Conservado en cuarentena.'[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010020Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'wounded' inválido o no interpretable (3). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010021Armyunits'[39m,
+  rawUnitType: [1mnull[22m,
+  reason: [32m'Registro sin cantidad activa pero con atributos relevantes o metadatos de procedencia/herencia que no deben perderse. Conservado en cuarentena.'[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010022Armyunits'[39m,
+  rawUnitType: [32m'piquero_antiguo'[39m,
+  reason: [32m"Tipo de unidad heredado no reconocido ('piquero_antiguo'). Conservado en cuarentena sin conversión ni borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010023Armyunits'[39m,
+  rawUnitType: [32m'espia'[39m,
+  reason: [32m"Valor de 'level' inválido o fuera de rango (9). Conservado en cuarentena sin borrado."[39m
+}
+
+stderr | convex/spySystem.test.ts > Defecto residual 2: clasificación conservadora y preservación de registros heredados inválidos o parciales > Migración transaccional real: preserva intactos en Armyunits los registros inválidos, migra count=0 con wounded>0 y es idempotente
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010016Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'count' inválido o no interpretable (1.5). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010017Armyunits'[39m,
+  rawUnitType: [32m'espia'[39m,
+  reason: [32m"Valor de 'count' inválido o no interpretable (7). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010018Armyunits'[39m,
+  rawUnitType: [32m'arqueria'[39m,
+  reason: [32m"Valor de 'count' inválido o no interpretable (-3). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010019Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m'Registro sin cantidad activa pero con atributos relevantes o metadatos de procedencia/herencia que no deben perderse. Conservado en cuarentena.'[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010020Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'wounded' inválido o no interpretable (3). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010021Armyunits'[39m,
+  rawUnitType: [1mnull[22m,
+  reason: [32m'Registro sin cantidad activa pero con atributos relevantes o metadatos de procedencia/herencia que no deben perderse. Conservado en cuarentena.'[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010022Armyunits'[39m,
+  rawUnitType: [32m'piquero_antiguo'[39m,
+  reason: [32m"Tipo de unidad heredado no reconocido ('piquero_antiguo'). Conservado en cuarentena sin conversión ni borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010023Armyunits'[39m,
+  rawUnitType: [32m'espia'[39m,
+  reason: [32m"Valor de 'level' inválido o fuera de rango (9). Conservado en cuarentena sin borrado."[39m
+}
+
+stderr | convex/spySystem.test.ts > Protección integral de registros heredados: validación de todos los campos conocidos, procedencia y atributos adicionales > 3.2 Migración transaccional real: preserva bit a bit todos los documentos en cuarentena en Armyunits, migra válidos, limpia solo vacíos y es idempotente
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010016Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'isSpy' inválido (true). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010017Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'isSpy' inválido (1). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010018Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'isMercenary' inválido (false). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010019Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'isMercenary' inválido (1). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010020Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'legacy' inválido (v0_historico). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010021Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m'Registro sin cantidad activa pero con atributos relevantes o metadatos de procedencia/herencia que no deben perderse. Conservado en cuarentena.'[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010022Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'level' inválido o fuera de rango (9). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010023Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'level' inválido o fuera de rango (-1). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010024Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'level' inválido o fuera de rango (1.5). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010025Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'recoveryProgress' inválido o fuera de [0, 1) (1.25). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010026Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'recoveryProgress' inválido o fuera de [0, 1) (0.3). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010027Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'contractEndsAt' inválido (2026-12-31). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010028Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'mercenaryTypeId' inválido (999). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010029Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Atributo adicional desconocido 'campoDesconocido' presente en el documento heredado. Conservado íntegro en cuarentena."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010030Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'migrated' inválido (true). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010031Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'migratedFromLegacyIds' inválido (invalido). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010032Armyunits'[39m,
+  rawUnitType: [32m'espia'[39m,
+  reason: [32m"Contradicción entre 'unitType: espia' e 'isSpy: false'. Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010033Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'count' inválido o no interpretable (0). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010034Armyunits'[39m,
+  rawUnitType: [32m'ballestero_v0'[39m,
+  reason: [32m"Tipo de unidad heredado no reconocido ('ballestero_v0'). Conservado en cuarentena sin conversión ni borrado."[39m
+}
+
+stderr | convex/spySystem.test.ts > Protección integral de registros heredados: validación de todos los campos conocidos, procedencia y atributos adicionales > 3.2 Migración transaccional real: preserva bit a bit todos los documentos en cuarentena en Armyunits, migra válidos, limpia solo vacíos y es idempotente
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010016Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'isSpy' inválido (true). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010017Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'isSpy' inválido (1). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010018Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'isMercenary' inválido (false). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010019Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'isMercenary' inválido (1). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010020Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'legacy' inválido (v0_historico). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010021Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m'Registro sin cantidad activa pero con atributos relevantes o metadatos de procedencia/herencia que no deben perderse. Conservado en cuarentena.'[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010022Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'level' inválido o fuera de rango (9). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010023Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'level' inválido o fuera de rango (-1). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010024Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'level' inválido o fuera de rango (1.5). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010025Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'recoveryProgress' inválido o fuera de [0, 1) (1.25). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010026Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'recoveryProgress' inválido o fuera de [0, 1) (0.3). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010027Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'contractEndsAt' inválido (2026-12-31). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010028Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'mercenaryTypeId' inválido (999). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010029Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Atributo adicional desconocido 'campoDesconocido' presente en el documento heredado. Conservado íntegro en cuarentena."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010030Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'migrated' inválido (true). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010031Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'migratedFromLegacyIds' inválido (invalido). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010032Armyunits'[39m,
+  rawUnitType: [32m'espia'[39m,
+  reason: [32m"Contradicción entre 'unitType: espia' e 'isSpy: false'. Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010033Armyunits'[39m,
+  rawUnitType: [32m'infanteria'[39m,
+  reason: [32m"Valor de 'count' inválido o no interpretable (0). Conservado en cuarentena sin borrado."[39m
+}
+[MIGRACIÓN CUARENTENA] Registro heredado conservado en Armyunits sin conversión ni borrado: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  legacyId: [32m'00000000000000000010034Armyunits'[39m,
+  rawUnitType: [32m'ballestero_v0'[39m,
+  reason: [32m"Tipo de unidad heredado no reconocido ('ballestero_v0'). Conservado en cuarentena sin conversión ni borrado."[39m
+}
+
+stderr | convex/spySystem.test.ts > Pruebas de regresión del sistema militar y parches de lanzamiento de ataque > 4. Marcha cancelada o resuelta sin combate devuelve las tropas correctamente a través de refundMarchUnitsToGarrison sin convertir espías
+[DEVOLUCIÓN MARCHA] Entradas inválidas o de espía rechazadas sin conversión: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  rejectedUnits: [ { unit: [36m[Object][39m, reason: [32m'spy_not_allowed'[39m } ]
+}
+
+stderr | convex/spySystem.test.ts > Pruebas de regresión del sistema militar y parches de lanzamiento de ataque > 7. refundMarchUnitsToGarrison: modo estricto evita devoluciones parciales y modo cuarentena rechaza niveles inválidos y espías sin convertirlos
+[DEVOLUCIÓN MARCHA] Entradas inválidas o de espía rechazadas sin conversión: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  rejectedUnits: [
+    { unit: [36m[Object][39m, reason: [32m'invalid_level'[39m },
+    { unit: [36m[Object][39m, reason: [32m'invalid_count'[39m },
+    { unit: [36m[Object][39m, reason: [32m'invalid_count'[39m },
+    { unit: [36m[Object][39m, reason: [32m'invalid_count'[39m },
+    { unit: [36m[Object][39m, reason: [32m'spy_not_allowed'[39m },
+    { unit: [36m[Object][39m, reason: [32m'unknown_unit_type'[39m }
+  ]
+}
+
+stderr | convex/spySystem.test.ts > Pruebas de regresión del sistema militar y parches de lanzamiento de ataque > 8. Idempotencia real de devoluciones en todas las rutas: conquista neutral, carrera, desafío cancelado, reducción de mapa y concurrencia
+[DEVOLUCIÓN MARCHA] Entradas inválidas o de espía rechazadas sin conversión: {
+  kingdomId: [32m'000000000000000000010000kingdoms'[39m,
+  rejectedUnits: [ { unit: [36m[Object][39m, reason: [32m'spy_not_allowed'[39m } ]
+}
+
+ ✓ convex/spySystem.test.ts (55 tests) 1603ms
+ ✓ convex/missions.test.ts (7 tests) 573ms
+ ✓ convex/complianceFixes.test.ts (10 tests) 611ms
+ ✓ convex/mapPoints34.test.ts (8 tests) 777ms
+   ✓ Puntos 3+4 — Geometría hexagonal, culling, cámara y arquitectura visual > Disco hexagonal canónico R=50 exacto: 7.651 celdas, sin duplicados, determinista y cacheado  342ms
+ ✓ convex/conquestRewards.test.ts (3 tests) 188ms
+ ✓ convex/territories.test.ts (3 tests) 174ms
+ ✓ convex/balancing.test.ts (12 tests) 53ms
+stdout | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > crea la cuenta, inicia sesión desde otro dispositivo y el nombre es único sin distinguir mayúsculas ni acentos
+`auth:store` type: createAccountFromCredentials
+
+stdout | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > crea la cuenta, inicia sesión desde otro dispositivo y el nombre es único sin distinguir mayúsculas ni acentos
+`auth:store` type: signIn
+
+stdout | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > crea la cuenta, inicia sesión desde otro dispositivo y el nombre es único sin distinguir mayúsculas ni acentos
+[getViewer] Identidad detectada. Emisor: https://pruebas-la-conquista.convex.site Subject: 000000000000000000000010000users|00000000000000010002authSessions
+
+stdout | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > crea la cuenta, inicia sesión desde otro dispositivo y el nombre es único sin distinguir mayúsculas ni acentos
+`auth:store` type: retrieveAccountWithCredentials
+
+stdout | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > crea la cuenta, inicia sesión desde otro dispositivo y el nombre es único sin distinguir mayúsculas ni acentos
+`auth:store` type: signIn
+
+stdout | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > crea la cuenta, inicia sesión desde otro dispositivo y el nombre es único sin distinguir mayúsculas ni acentos
+`auth:store` type: createAccountFromCredentials
+
+stdout | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > rechaza contraseñas cortas, nombres inválidos y credenciales incorrectas; la contraseña nunca se guarda en claro
+`auth:store` type: createAccountFromCredentials
+
+stdout | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > rechaza contraseñas cortas, nombres inválidos y credenciales incorrectas; la contraseña nunca se guarda en claro
+`auth:store` type: signIn
+
+stdout | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > rechaza contraseñas cortas, nombres inválidos y credenciales incorrectas; la contraseña nunca se guarda en claro
+`auth:store` type: retrieveAccountWithCredentials
+
+stdout | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > rechaza contraseñas cortas, nombres inválidos y credenciales incorrectas; la contraseña nunca se guarda en claro
+`auth:store` type: retrieveAccountWithCredentials
+
+stderr | convex/account.test.ts > Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > el invitado no tiene identidad: getViewer es null y no puede pedir código ni fundar reino
+[getViewer] No se detectó identidad en la petición.
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > se emite una vez al crear la cuenta, solo se guarda su hash y no se vuelve a entregar
+`auth:store` type: createAccountFromCredentials
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > se emite una vez al crear la cuenta, solo se guarda su hash y no se vuelve a entregar
+`auth:store` type: signIn
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: createAccountFromCredentials
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: signIn
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: modifyAccount
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: invalidateSessions
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: retrieveAccountWithCredentials
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: retrieveAccountWithCredentials
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: signIn
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: modifyAccount
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: invalidateSessions
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: retrieveAccountWithCredentials
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones
+`auth:store` type: signIn
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > mensajes genéricos, contraseña nueva válida y bloqueo temporal tras varios fallos seguidos
+`auth:store` type: createAccountFromCredentials
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > mensajes genéricos, contraseña nueva válida y bloqueo temporal tras varios fallos seguidos
+`auth:store` type: signIn
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > mensajes genéricos, contraseña nueva válida y bloqueo temporal tras varios fallos seguidos
+`auth:store` type: modifyAccount
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > mensajes genéricos, contraseña nueva válida y bloqueo temporal tras varios fallos seguidos
+`auth:store` type: invalidateSessions
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > mensajes genéricos, contraseña nueva válida y bloqueo temporal tras varios fallos seguidos
+`auth:store` type: retrieveAccountWithCredentials
+
+stdout | convex/account.test.ts > Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > mensajes genéricos, contraseña nueva válida y bloqueo temporal tras varios fallos seguidos
+`auth:store` type: signIn
+
+ ✓ convex/account.test.ts (6 tests) 4401ms
+   ✓ Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > crea la cuenta, inicia sesión desde otro dispositivo y el nombre es único sin distinguir mayúsculas ni acentos  1079ms
+   ✓ Cuenta: nombre de gobernante + contraseña (sección 5, T-01) > rechaza contraseñas cortas, nombres inválidos y credenciales incorrectas; la contraseña nunca se guarda en claro  582ms
+   ✓ Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > con nombre + clave se fija una contraseña nueva, se cierran las sesiones y la clave se mantiene reutilizable para futuras recuperaciones  1604ms
+   ✓ Código de recuperación mostrado una sola vez [DECISIÓN 21-10-2026] > mensajes genéricos, contraseña nueva válida y bloqueo temporal tras varios fallos seguidos  766ms
+ ✓ convex/parliamentDiscovery.test.ts (2 tests) 142ms
+ ✓ convex/market.test.ts (9 tests) 102ms
+ ✓ convex/civilizations.test.ts (8 tests) 12ms
+ ✓ convex/kingdomColors.test.ts (3 tests) 41ms
+stdout | convex/mapAudit.test.ts > AUDITORÍA DE REDUCCIÓN DEL MAPA > Audit cells to delete
+Total cells: [33m0[39m
+Cells to delete: [33m0[39m
+Lost territories by kingdom: {}
+
+ ✓ convex/mapAudit.test.ts (1 test) 21ms
+stdout | convex/compensation.test.ts > Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y atómica de capacidad > 15. Dos sesiones o dispositivos de la misma cuenta comparten el mismo estado
+`auth:store` type: createAccountFromCredentials
+
+stdout | convex/compensation.test.ts > Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y atómica de capacidad > 15. Dos sesiones o dispositivos de la misma cuenta comparten el mismo estado
+`auth:store` type: signIn
+
+stdout | convex/compensation.test.ts > Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y atómica de capacidad > 15. Dos sesiones o dispositivos de la misma cuenta comparten el mismo estado
+`auth:store` type: retrieveAccountWithCredentials
+
+stdout | convex/compensation.test.ts > Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y atómica de capacidad > 15. Dos sesiones o dispositivos de la misma cuenta comparten el mismo estado
+`auth:store` type: signIn
+
+ ✓ convex/compensation.test.ts (34 tests) 1715ms
+   ✓ Punto 6: Regalo único de +30.000 × 5 con comprobación obligatoria y atómica de capacidad > 15. Dos sesiones o dispositivos de la misma cuenta comparten el mismo estado  651ms
+
+ Test Files  21 passed (21)
+      Tests  330 passed (330)
+   Start at  11:17:41
+   Duration  65.35s (transform 4.49s, setup 0ms, collect 13.78s, tests 40.69s, environment 1.82s, prepare 2.48s)
+
+EXIT_CODE=0

@@ -1,0 +1,36 @@
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: @vitest/mocker@3.2.7
+npm warn Found: vite@8.3.4
+npm warn node_modules/vite
+npm warn   dev vite@"^8.3.2" from the root project
+npm warn   2 more (@tailwindcss/vite, @vitejs/plugin-react)
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional vite@"^5.0.0 || ^6.0.0 || ^7.0.0-0" from @vitest/mocker@3.2.7
+npm warn node_modules/@vitest/mocker
+npm warn   @vitest/mocker@"3.2.7" from vitest@3.2.7
+npm warn   node_modules/vitest
+npm warn
+npm warn Conflicting peer dependency: vite@7.3.8
+npm warn node_modules/vite
+npm warn   peerOptional vite@"^5.0.0 || ^6.0.0 || ^7.0.0-0" from @vitest/mocker@3.2.7
+npm warn   node_modules/@vitest/mocker
+npm warn     @vitest/mocker@"3.2.7" from vitest@3.2.7
+npm warn     node_modules/vitest
+npm warn deprecated @oslojs/asn1@1.0.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+npm warn deprecated @oslojs/binary@1.0.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+npm warn deprecated lucia@3.2.2: This package has been deprecated. Please see https://lucia-auth.com/lucia-v3/migrate.
+npm warn deprecated @oslojs/crypto@1.0.1: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+
+added 142 packages, and audited 143 packages in 13s
+
+34 packages are looking for funding
+  run `npm fund` for details
+
+3 vulnerabilities (1 moderate, 2 critical)
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+EXIT_CODE=0
