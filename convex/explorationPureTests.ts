@@ -5,6 +5,7 @@
  */
 import { EXPLORATION, MAP } from "./balanceConfig";
 import {
+  calculateExplorationDurationMs,
   calculateExplorationRefund,
   canStartExploration,
   explorationProgress,
@@ -12,7 +13,9 @@ import {
   generateExplorationDiscovery,
   getInitialSightCellIds,
   isKingdomDiscoveredOnMap,
+  MIN_EXPLORATION_DURATION_MS,
 } from "./explorationRules";
+import { computeTechnologyModifiers } from "./technologyRules";
 import { canClaimTerritory, generateWorldCells, hexDistance } from "./territoryRules";
 import { summarizeArmy } from "./armyRules";
 
@@ -338,23 +341,42 @@ export function runExplorationValidationTests(): ExplorationTestResult[] {
     },
     {
       category: "BONIFICACIÓN ESPIONAJE 2 (spy_2)",
-      test: "18. Reducción de duración del 10 % por tecnología spy_2 (multiplicador 0.90)",
+      test: "18. División por velocidad (1 + explorationSpeedBonus = 1.10) para spy_2 y casos 3.600.000 / 7.200.000 ms + mínimo global",
       passed: (() => {
-        const checkBase = canStartExploration({ targetCoord: { q: 10, r: 0 }, targetCellId: "10,0", knownCellIds: new Set(["9,0"]), activeCellIds: new Set(), ownedCoords: [{ q: 0, r: 0 }], availableCivil: 5, currentResources: { gold: 1000, food: 1000 }, activeExpeditionsCount: 0, worldRadius: 100 });
-        const checkSpy2 = canStartExploration({ targetCoord: { q: 10, r: 0 }, targetCellId: "10,0", knownCellIds: new Set(["9,0"]), activeCellIds: new Set(), ownedCoords: [{ q: 0, r: 0 }], availableCivil: 5, currentResources: { gold: 1000, food: 1000 }, activeExpeditionsCount: 0, hasSpy2Tech: true, worldRadius: 100 });
+        const modWithout = computeTechnologyModifiers([]);
+        const modWith = computeTechnologyModifiers(["spy_2"]);
+        const modDuplicate = computeTechnologyModifiers(["spy_2", "spy_2"]);
 
-        // Base 10 hex = 18000s = 18000000ms. spy_2 = 18000000 * 0.90 = 16200000ms = 16200s
+        const dur1hNoTech = calculateExplorationDurationMs(3_600_000, modWithout.explorationSpeedBonus);
+        const dur1hWithTech = calculateExplorationDurationMs(3_600_000, modWith.explorationSpeedBonus);
+        const dur2hNoTech = calculateExplorationDurationMs(7_200_000, modWithout.explorationSpeedBonus);
+        const dur2hWithTech = calculateExplorationDurationMs(7_200_000, modWith.explorationSpeedBonus);
+        const durFloor = calculateExplorationDurationMs(10_000, modWith.explorationSpeedBonus);
+
+        const checkBase = canStartExploration({ targetCoord: { q: 10, r: 0 }, targetCellId: "10,0", knownCellIds: new Set(["9,0"]), activeCellIds: new Set(), ownedCoords: [{ q: 0, r: 0 }], availableCivil: 5, currentResources: { gold: 1000, food: 1000 }, activeExpeditionsCount: 0, worldRadius: 100, explorationSpeedBonus: modWithout.explorationSpeedBonus });
+        const checkSpy2 = canStartExploration({ targetCoord: { q: 10, r: 0 }, targetCellId: "10,0", knownCellIds: new Set(["9,0"]), activeCellIds: new Set(), ownedCoords: [{ q: 0, r: 0 }], availableCivil: 5, currentResources: { gold: 1000, food: 1000 }, activeExpeditionsCount: 0, explorationSpeedBonus: modWith.explorationSpeedBonus, worldRadius: 100 });
+
         return (
-          checkBase.success && checkBase.plan.durationMs === 18000000 &&
-          checkSpy2.success && checkSpy2.plan.durationMs === 16200000 && checkSpy2.plan.durationSeconds === 16200
+          modWithout.explorationSpeedBonus === 0 &&
+          modWith.explorationSpeedBonus === 0.10 &&
+          modDuplicate.explorationSpeedBonus === 0.10 &&
+          modWith.marchSpeedBonus === 0.05 &&
+          dur1hNoTech === 3_600_000 &&
+          dur1hWithTech === 3_272_728 &&
+          dur2hNoTech === 7_200_000 &&
+          dur2hWithTech === 6_545_455 &&
+          durFloor === MIN_EXPLORATION_DURATION_MS &&
+          checkBase.success && checkBase.plan.durationMs === 18_000_000 &&
+          checkSpy2.success && checkSpy2.plan.durationMs === 16_363_637 && checkSpy2.plan.durationSeconds === 16_364
         );
       })(),
-      details: "Duración base d=10: 5h (18.000s). Con spy_2: 4h 30m (16.200s).",
+      details: "3.600.000 ms -> 3.272.728 ms; 7.200.000 ms -> 6.545.455 ms; d=10: 18.000.000 ms -> 16.363.637 ms (16.364s); marchSpeedBonus=+0.05; mínimo 60.000 ms respetado.",
     },
     {
       category: "APILAMIENTO VIKINGO + SPY_2",
-      test: "19. Apilamiento multiplicativo Vikingo (0.85) y spy_2 (0.90) para distancias 1, 5, 10, 20, 30, 50",
+      test: "19. Apilamiento Vikingo (0.85) y spy_2 (/ 1.10) para distancias 1, 5, 10, 20, 30, 50",
       passed: (() => {
+        const modWith = computeTechnologyModifiers(["spy_2"]);
         const runTest = (d: number) => canStartExploration({
           targetCoord: { q: d, r: 0 },
           targetCellId: `${d},0`,
@@ -365,27 +387,27 @@ export function runExplorationValidationTests(): ExplorationTestResult[] {
           currentResources: { gold: 10000, food: 10000 },
           activeExpeditionsCount: 0,
           civilization: "vikingos",
-          hasSpy2Tech: true,
+          explorationSpeedBonus: modWith.explorationSpeedBonus,
           worldRadius: 100,
         });
 
-        const c1 = runTest(1);   // 1800 * 1 * 0.85 * 0.90 = 1377 s = 22m 57s (1377000ms)
-        const c5 = runTest(5);   // 1800 * 5 * 0.85 * 0.90 = 6885 s = 1h 54m 45s (6885000ms)
-        const c10 = runTest(10); // 1800 * 10 * 0.85 * 0.90 = 13770 s = 3h 49m 30s (13770000ms)
-        const c20 = runTest(20); // 1800 * 20 * 0.85 * 0.90 = 27540 s = 7h 39m 0s (27540000ms)
-        const c30 = runTest(30); // 1800 * 30 * 0.85 * 0.90 = 41310 s = 11h 28m 30s (41310000ms)
-        const c50 = runTest(50); // 1800 * 50 * 0.85 * 0.90 = 68850 s = 19h 7m 30s (68850000ms)
+        const c1 = runTest(1);   // ceil(1_530_000 / 1.10) = 1_390_910 ms -> 1391 s
+        const c5 = runTest(5);   // ceil(7_650_000 / 1.10) = 6_954_546 ms -> 6955 s
+        const c10 = runTest(10); // ceil(15_300_000 / 1.10) = 13_909_091 ms -> 13910 s
+        const c20 = runTest(20); // ceil(30_600_000 / 1.10) = 27_818_182 ms -> 27819 s
+        const c30 = runTest(30); // ceil(45_900_000 / 1.10) = 41_727_273 ms -> 41728 s
+        const c50 = runTest(50); // ceil(76_500_000 / 1.10) = 69_545_455 ms -> 69546 s
 
         return (
-          c1.success && c1.plan.durationSeconds === 1377 &&
-          c5.success && c5.plan.durationSeconds === 6885 &&
-          c10.success && c10.plan.durationSeconds === 13770 &&
-          c20.success && c20.plan.durationSeconds === 27540 &&
-          c30.success && c30.plan.durationSeconds === 41310 &&
-          c50.success && c50.plan.durationSeconds === 68850
+          c1.success && c1.plan.durationMs === 1_390_910 && c1.plan.durationSeconds === 1391 &&
+          c5.success && c5.plan.durationMs === 6_954_546 && c5.plan.durationSeconds === 6955 &&
+          c10.success && c10.plan.durationMs === 13_909_091 && c10.plan.durationSeconds === 13910 &&
+          c20.success && c20.plan.durationMs === 27_818_182 && c20.plan.durationSeconds === 27819 &&
+          c30.success && c30.plan.durationMs === 41_727_273 && c30.plan.durationSeconds === 41728 &&
+          c50.success && c50.plan.durationMs === 69_545_455 && c50.plan.durationSeconds === 69546
         );
       })(),
-      details: "Tiempos Vikingo + spy_2: d=1 (22m 57s), d=5 (1h 54m 45s), d=10 (3h 49m 30s), d=20 (7h 39m), d=30 (11h 28m 30s), d=50 (19h 7m 30s). Exacto.",
+      details: "Tiempos Vikingo + spy_2 (/ 1.10): d=1 (1391s), d=5 (6955s), d=10 (13910s), d=20 (27819s), d=30 (41728s), d=50 (69546s). Exacto.",
     },
     {
       category: "REEMBOLSO EN LARGAS DISTANCIAS",

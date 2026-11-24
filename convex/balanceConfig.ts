@@ -919,7 +919,8 @@ export type TechnologyEffectKey =
   | "mercenaryCost"
   | "woundedRate"
   | "fatigueAccrual"
-  | "counterEspionage";
+  | "counterEspionage"
+  | "explorationSpeed";
 
 export interface TechnologyBalance {
   id: string;
@@ -933,6 +934,7 @@ export interface TechnologyBalance {
   technologyRequirements: readonly string[];
   civilizationRequirement?: string;
   effect: { key: TechnologyEffectKey; value: number; description: string };
+  secondaryEffects?: ReadonlyArray<{ key: TechnologyEffectKey; value: number }>;
 }
 
 export const RESEARCH_TIME_SCALE = 1.0;
@@ -1040,7 +1042,7 @@ export const TECHNOLOGIES: readonly TechnologyBalance[] = [
   { id: "espionage_3", name: "Informantes en la corte III", branch: "inteligencia", universityLevel: 4, costs: { gold: 800, wood: 320, stone: 300, iron: 90, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 5 }, technologyRequirements: ["espionage_2", "spy_2"], effect: { key: "espionageAccuracy", value: 3, description: "Informe militar detallado (±3 %)" } },
   { id: "espionage_4", name: "Maestros del espionaje IV", branch: "inteligencia", universityLevel: 5, costs: { gold: 2340, wood: 640, stone: 700, iron: 230, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8 }, technologyRequirements: ["espionage_3", "spy_3"], effect: { key: "espionageAccuracy", value: 4, description: "Informe militar exacto" } },
   { id: "spy_1", name: "Ojos y oídos en el reino", branch: "inteligencia", universityLevel: 2, costs: { gold: 250, wood: 150, stone: 100, iron: 40, food: 0 }, durationSeconds: 240, buildingRequirements: { castillo: 2 }, technologyRequirements: [], effect: { key: "counterEspionage", value: 0.10, description: "+10 % probabilidad de contrainteligencia" } },
-  { id: "spy_2", name: "Exploradores y atalayas", branch: "inteligencia", universityLevel: 3, costs: { gold: 480, wood: 160, stone: 160, iron: 60, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3 }, technologyRequirements: ["espionage_1"], effect: { key: "marchSpeed", value: 0.05, description: "+5 % velocidad de marcha y +10 % velocidad en expediciones de exploración" } },
+  { id: "spy_2", name: "Exploradores y atalayas", branch: "inteligencia", universityLevel: 3, costs: { gold: 480, wood: 160, stone: 160, iron: 60, food: 0 }, durationSeconds: Math.round(360 * RESEARCH_TIME_SCALE), buildingRequirements: { castillo: 3, universidad: 3 }, technologyRequirements: ["espionage_1"], effect: { key: "marchSpeed", value: 0.05, description: "+5 % velocidad de marcha y +10 % velocidad en expediciones de exploración" }, secondaryEffects: [{ key: "explorationSpeed", value: 0.10 }] },
   { id: "spy_3", name: "Guardia del silencio", branch: "inteligencia", universityLevel: 4, costs: { gold: 750, wood: 300, stone: 280, iron: 80, food: 0 }, durationSeconds: 480, buildingRequirements: { castillo: 4 }, technologyRequirements: ["spy_1", "spy_2"], effect: { key: "counterEspionage", value: 0.12, description: "+12 % probabilidad de contrainteligencia" } },
   { id: "spy_4", name: "Sombras del trono", branch: "inteligencia", universityLevel: 5, costs: { gold: 2100, wood: 600, stone: 700, iron: 220, food: 0 }, durationSeconds: 1080, buildingRequirements: { castillo: 8 }, technologyRequirements: ["spy_3", "espionage_3"], effect: { key: "counterEspionage", value: 0.15, description: "+15 % probabilidad de contrainteligencia" } },
 
@@ -1235,6 +1237,8 @@ export const EXPLORATION = {
   SCOUTS_REQUIRED: 1,
   /** [COMPLEMENTO §5 / D-26] Segundos reales de marcha por hexágono de distancia */
   SECONDS_PER_HEX: MAP.MARCH_SECONDS_PER_HEX,
+  /** Duración mínima de una expedición de exploración en ms (60 s reales) */
+  MIN_DURATION_MS: 60_000,
   /** Radio de visión inicial alrededor del territorio principal (distancia <= 1, 7 celdas conocidas) */
   INITIAL_SIGHT_RADIUS: 1,
   /** Límite de expediciones de exploración concurrentes por reino */

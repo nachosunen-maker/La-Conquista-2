@@ -53,13 +53,15 @@ import {
 } from "./territoryRules";
 import type { UnitType } from "./balanceConfig";
 import { getCivilizationPassive } from "./civilizationRules";
-import { readCompletedTechnologyIds } from "./technologyRules";
+import { computeTechnologyModifiers, readCompletedTechnologyIds } from "./technologyRules";
 import {
   canStartExploration,
   calculateExplorationRefund,
+  computeExplorationPlan,
   explorationProgress,
   generateExplorationDiscovery,
   getInitialSightCellIds,
+  MIN_EXPLORATION_DURATION_MS,
   type CellExplorationState,
 } from "./explorationRules";
 import { settleRelationalKingdomEconomy } from "./economy";
@@ -587,7 +589,7 @@ export const getWorldMap = query({
     ]);
 
     const ownedCells = world.filter((c) => c.ownerKingdomId && String(c.ownerKingdomId) === String(kingdomId));
-    const hasSpy2Tech = completedTech.includes("spy_2");
+    const techModifiers = computeTechnologyModifiers(completedTech);
     const ownedIds = new Set<string>();
     for (const c of ownedCells) ownedIds.add(String(c.cellId));
     if (kingdom.homeTerritoryId) {
@@ -696,7 +698,7 @@ export const getWorldMap = query({
             activeExpeditionsCount,
             worldRadius: MAP.RADIUS,
             civilization: kingdom.civilization,
-            hasSpy2Tech,
+            explorationSpeedBonus: techModifiers.explorationSpeedBonus,
           });
           if (planRes.success) {
             explorationPlan = {
@@ -1089,7 +1091,7 @@ async function executeWorldMapCompactQuery(
       .collect(),
   ]);
 
-  const hasSpy2Tech = completedTech.includes("spy_2");
+  const techModifiers = computeTechnologyModifiers(completedTech);
   const homeCoord = kingdom.homeTerritoryId ? parseCellId(kingdom.homeTerritoryId) : null;
 
   const coordById = new Map<string, HexCoord>();
@@ -1270,18 +1272,15 @@ async function executeWorldMapCompactQuery(
       }
       if (!Number.isFinite(minDist)) minDist = 1;
 
-      const spySpeedMult = hasSpy2Tech ? 0.75 : 1;
-      const durationSeconds = Math.max(
-        60,
-        Math.round(EXPLORATION.SECONDS_PER_HEX * minDist * spySpeedMult)
-      );
-      explorationPlan = {
+      const plan = computeExplorationPlan({
         distance: minDist,
-        durationSeconds,
-        costs: {
-          gold: Math.round(EXPLORATION.BASE_COSTS.gold * minDist),
-          food: Math.round(EXPLORATION.BASE_COSTS.food * minDist),
-        },
+        civilization: kingdom.civilization,
+        explorationSpeedBonus: techModifiers.explorationSpeedBonus,
+      });
+      explorationPlan = {
+        distance: plan.distance,
+        durationSeconds: plan.durationSeconds,
+        costs: plan.costs,
       };
     }
 
@@ -2314,7 +2313,7 @@ export const ensureMyHomeTerritory = mutation({
 /**
  * [P22] Lógica autoritativa unificada para iniciar una expedición de exploración con espías.
  * Aplica siempre canStartExploration (límite de expediciones concurrentes, costes progresivos,
- * bonificaciones de civilización y tecnología spy_2) y reserva atómica de espías y recursos.
+ * bonificaciones de civilización y modificadores tecnológicos centralizados) y reserva atómica de espías y recursos.
  */
 async function executeExplorationStart(
   ctx: MutationCtx,
@@ -2356,7 +2355,7 @@ async function executeExplorationStart(
     readCompletedTechnologyIds(ctx, args.kingdomId),
   ]);
 
-  const hasSpy2Tech = completedTech.includes("spy_2");
+  const techModifiers = computeTechnologyModifiers(completedTech);
   const availableSpies = units
     .filter((u) => isSpyUnitDoc(u))
     .reduce((sum, u) => sum + Math.max(0, u.count ?? 0), 0);
@@ -2390,7 +2389,7 @@ async function executeExplorationStart(
     activeExpeditionsCount: activeQueue.length,
     worldRadius: MAP.RADIUS,
     civilization: kingdom.civilization,
-    hasSpy2Tech,
+    explorationSpeedBonus: techModifiers.explorationSpeedBonus,
   });
 
   if (!check.success) {
@@ -2403,9 +2402,12 @@ async function executeExplorationStart(
 
   const { plan } = check;
 
-  // Duración con colaboración multi-espía
+  // Duración con colaboración multi-espía (respetando el mínimo global de exploración)
   const collaborationFactor = 1 / Math.sqrt(spiesCount);
-  const durationMs = Math.ceil(plan.durationMs * collaborationFactor);
+  const durationMs = Math.max(
+    MIN_EXPLORATION_DURATION_MS,
+    Math.ceil(plan.durationMs * collaborationFactor)
+  );
   const durationSeconds = Math.ceil(durationMs / 1000);
 
   // 6. Deducir costes de recursos de forma atómica

@@ -135,6 +135,7 @@ export interface TechnologyModifiers {
   woundedRateBonus: number; // puntos porcentuales adicionales (0,05 = +5 pp)
   fatigueAccrualReduction: number; // reducción de fatiga acumulada (0,05 = −5 %)
   counterEspionage: number; // probabilidad de contrainteligencia (e.g. 0.10 = 10 %, máx 0.60)
+  explorationSpeedBonus: number; // bonificación de velocidad en expediciones de exploración (+0,10 = +10 %)
 }
 
 export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>): TechnologyModifiers {
@@ -168,6 +169,7 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
   let sumWoundedRate = 0;
   let sumFatigueAccrual = 0;
   let sumCounterEspionage = 0;
+  let sumExplorationSpeed = 0;
   const unlockedWeapons: string[] = [];
   const unlockedArmors: string[] = [];
 
@@ -178,47 +180,52 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     seen.add(id);
     const technology = TECHNOLOGY_CATALOG[id];
     if (!technology) continue;
-    const { key, value } = technology.effect;
-    switch (key as TechnologyEffectKey) {
-      case "agricultureProduction": sumAgri += value; break;
-      case "miningProduction": sumMining += value; break;
-      case "storageCapacity": sumStorage += value; break;
-      case "woundedRecovery": sumWounded += value; break;
-      case "espionageAccuracy":
-        if (id === "tech_civ_navajos_a") {
-          navajoEspionageBonus += value;
-        } else {
-          baseEspionage = Math.max(baseEspionage, value);
-        }
-        break;
-      case "trainingDuration": sumTraining += value; break; // Convención: valor negativo e.g. -0.05
-      case "constructionDuration": sumConstruction += value; break; // Convención: valor negativo e.g. -0.05
-      case "happinessBase": sumHappiness += value; break;
-      case "unlockWeaponSteel": unlockedWeapons.push("acero"); break;
-      case "unlockWeaponAdvancedSteel": unlockedWeapons.push("aceroAvanzado"); break;
-      case "unlockArmorSteel": unlockedArmors.push("acero"); break;
-      case "combatAttack": sumCombatAttack += value; break;
-      case "combatDefense": sumCombatDefense += value; break;
-      case "marchSpeed": sumMarchSpeed += value; break;
-      case "marchFatigue": sumMarchFatigue += Math.abs(value); break;
-      case "foodConsumption": sumFoodCons += Math.abs(value); break; // Convención: e.g. -0.04 -> 0.04
-      case "woodProduction": sumWoodProd += value; break;
-      case "stoneProduction": sumStoneProd += value; break;
-      case "ironProduction": sumIronProd += value; break;
-      case "goldProduction": sumGoldProd += value; break;
-      case "researchDuration": sumResearchDuration += value; break; // Convención: valor negativo e.g. -0.08
-      case "constructionCost": sumConstructionCost += value; break; // Convención: valor negativo e.g. -0.06
-      case "housingCapacity": sumHousingCapacity += value; break;
-      case "taxTolerance": sumTaxTolerance += Math.abs(value); break; // Convención: e.g. -0.50 -> 0.50
-      case "moraleBase": sumMorale += value; break;
-      case "unitEfficiencyInf": sumEffInf += value; break;
-      case "unitEfficiencyArc": sumEffArc += value; break;
-      case "unitEfficiencyCav": sumEffCav += value; break;
-      case "unitEfficiencyAll": sumEffInf += value; sumEffArc += value; sumEffCav += value; break;
-      case "mercenaryCost": sumMercCost += Math.abs(value); break;
-      case "woundedRate": sumWoundedRate += value; break;
-      case "fatigueAccrual": sumFatigueAccrual += Math.abs(value); break;
-      case "counterEspionage": sumCounterEspionage += value; break;
+    const effectEntries = technology.secondaryEffects
+      ? [technology.effect, ...technology.secondaryEffects]
+      : [technology.effect];
+    for (const { key, value } of effectEntries) {
+      switch (key as TechnologyEffectKey) {
+        case "agricultureProduction": sumAgri += value; break;
+        case "miningProduction": sumMining += value; break;
+        case "storageCapacity": sumStorage += value; break;
+        case "woundedRecovery": sumWounded += value; break;
+        case "espionageAccuracy":
+          if (id === "tech_civ_navajos_a") {
+            navajoEspionageBonus += value;
+          } else {
+            baseEspionage = Math.max(baseEspionage, value);
+          }
+          break;
+        case "trainingDuration": sumTraining += value; break; // Convención: valor negativo e.g. -0.05
+        case "constructionDuration": sumConstruction += value; break; // Convención: valor negativo e.g. -0.05
+        case "happinessBase": sumHappiness += value; break;
+        case "unlockWeaponSteel": unlockedWeapons.push("acero"); break;
+        case "unlockWeaponAdvancedSteel": unlockedWeapons.push("aceroAvanzado"); break;
+        case "unlockArmorSteel": unlockedArmors.push("acero"); break;
+        case "combatAttack": sumCombatAttack += value; break;
+        case "combatDefense": sumCombatDefense += value; break;
+        case "marchSpeed": sumMarchSpeed += value; break;
+        case "marchFatigue": sumMarchFatigue += Math.abs(value); break;
+        case "foodConsumption": sumFoodCons += Math.abs(value); break; // Convención: e.g. -0.04 -> 0.04
+        case "woodProduction": sumWoodProd += value; break;
+        case "stoneProduction": sumStoneProd += value; break;
+        case "ironProduction": sumIronProd += value; break;
+        case "goldProduction": sumGoldProd += value; break;
+        case "researchDuration": sumResearchDuration += value; break; // Convención: valor negativo e.g. -0.08
+        case "constructionCost": sumConstructionCost += value; break; // Convención: valor negativo e.g. -0.06
+        case "housingCapacity": sumHousingCapacity += value; break;
+        case "taxTolerance": sumTaxTolerance += Math.abs(value); break; // Convención: e.g. -0.50 -> 0.50
+        case "moraleBase": sumMorale += value; break;
+        case "unitEfficiencyInf": sumEffInf += value; break;
+        case "unitEfficiencyArc": sumEffArc += value; break;
+        case "unitEfficiencyCav": sumEffCav += value; break;
+        case "unitEfficiencyAll": sumEffInf += value; sumEffArc += value; sumEffCav += value; break;
+        case "mercenaryCost": sumMercCost += Math.abs(value); break;
+        case "woundedRate": sumWoundedRate += value; break;
+        case "fatigueAccrual": sumFatigueAccrual += Math.abs(value); break;
+        case "counterEspionage": sumCounterEspionage += value; break;
+        case "explorationSpeed": sumExplorationSpeed += value; break;
+      }
     }
   }
 
@@ -256,6 +263,7 @@ export function computeTechnologyModifiers(completedIds: ReadonlyArray<string>):
     woundedRateBonus: Math.min(TECH_EFFECT_CAPS.woundedRate, Math.max(0, sumWoundedRate)),
     fatigueAccrualReduction: Math.min(TECH_EFFECT_CAPS.fatigueAccrual, Math.max(0, sumFatigueAccrual)),
     counterEspionage: Math.min(TECH_EFFECT_CAPS.counterEspionage, Math.max(0, sumCounterEspionage)),
+    explorationSpeedBonus: Math.max(0, sumExplorationSpeed),
   };
 }
 

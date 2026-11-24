@@ -24,6 +24,11 @@ import {
   getVisibleTechnologyForCivilization,
   normalizeTechnologyId,
 } from "./technologyRules";
+import {
+  calculateExplorationDurationMs,
+  computeExplorationPlan,
+  MIN_EXPLORATION_DURATION_MS,
+} from "./explorationRules";
 import { armyMarchMultiplier, marchFatigue, marchTimeSeconds } from "./territoryRules";
 import { getAllActiveBots } from "./botConfig";
 import { createBotBattleSide, estimateBotArmy } from "./botRules";
@@ -777,5 +782,201 @@ describe("§5 — Aislamiento estricto por civilizationRequirement para las 12 c
         "japoneses"
       )
     ).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// §6 CORRECCIÓN QUIRÚRGICA DE EXPLORACIÓN EN "spy_2"
+// ============================================================================
+describe("§6 — Bonificación centralizada de exploración (+10 % velocidad) de spy_2", () => {
+  test("cálculos puros: 3.600.000 ms y 7.200.000 ms, mínimo global, aplicación única y conservación de marchSpeedBonus", () => {
+    const modSinSpy2 = computeTechnologyModifiers(["espionage_1"]);
+    const modConSpy2 = computeTechnologyModifiers(["espionage_1", "spy_2"]);
+    const modDuplicada = computeTechnologyModifiers(["espionage_1", "spy_2", "spy_2"]);
+
+    expect(modSinSpy2.explorationSpeedBonus).toBe(0);
+    expect(modConSpy2.explorationSpeedBonus).toBeCloseTo(0.10, 10);
+    expect(modDuplicada.explorationSpeedBonus).toBeCloseTo(0.10, 10);
+    // marchSpeedBonus de spy_2 (+5 %) permanece intacto
+    expect(modConSpy2.marchSpeedBonus).toBeCloseTo(0.05, 10);
+
+    // Casos numéricos exactos
+    expect(calculateExplorationDurationMs(3_600_000, modSinSpy2.explorationSpeedBonus)).toBe(3_600_000);
+    expect(calculateExplorationDurationMs(3_600_000, modConSpy2.explorationSpeedBonus)).toBe(3_272_728);
+    expect(calculateExplorationDurationMs(7_200_000, modSinSpy2.explorationSpeedBonus)).toBe(7_200_000);
+    expect(calculateExplorationDurationMs(7_200_000, modConSpy2.explorationSpeedBonus)).toBe(6_545_455);
+
+    // Piso mínimo global respetado
+    expect(calculateExplorationDurationMs(15_000, modConSpy2.explorationSpeedBonus)).toBe(MIN_EXPLORATION_DURATION_MS);
+
+    // Otras tecnologías (sin spy_2) no alteran la exploración
+    const modOtrasTech = computeTechnologyModifiers(["agri_1", "mining_1", "logistics_2", "spy_1"]);
+    expect(modOtrasTech.explorationSpeedBonus).toBe(0);
+    expect(calculateExplorationDurationMs(3_600_000, modOtrasTech.explorationSpeedBonus)).toBe(3_600_000);
+
+    // Plan compartido con civilizaciones (Vikingos 0.85, Navajos 0.80 costes)
+    const planVikingo = computeExplorationPlan({
+      distance: 2,
+      civilization: "vikingos",
+      explorationSpeedBonus: modConSpy2.explorationSpeedBonus,
+    });
+    expect(planVikingo.durationMs).toBe(Math.ceil((3_600_000 * 0.85) / 1.10));
+    expect(planVikingo.durationMs).toBe(2_781_819);
+    expect(planVikingo.durationSeconds).toBe(2_782);
+
+    const planNavajo = computeExplorationPlan({
+      distance: 2,
+      civilization: "navajos",
+      explorationSpeedBonus: modConSpy2.explorationSpeedBonus,
+    });
+    expect(planNavajo.costs).toEqual({ gold: 24, food: 32 });
+    expect(planNavajo.durationMs).toBe(3_272_728);
+  });
+
+  test("integración convex-test: completar spy_2, consultar mapa (getWorldMap + getWorldMapCompact) e iniciar expedición persiste exactamente durationMs y completesAt sin alterar expediciones previas", async () => {
+    const t = createTestBackend();
+    const { asUser, kingdomId } = await foundKingdom(t, "u-spy2-exp", "Reino Explorador Spy2", "romanos");
+    await seedBuildings(t, kingdomId, { castillo: 3, universidad: 3, cuartel: 2 });
+    const homeRes = await asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId });
+    const [hq, hr] = homeRes.homeTerritoryId!.split(",").map(Number);
+
+    await patchResources(t, kingdomId, {
+      gold: 50_000,
+      wood: 50_000,
+      stone: 50_000,
+      iron: 50_000,
+      food: 50_000,
+    });
+    await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+
+    // Reclutar espías y añadir celdas conocidas para probar d=2 (3.600.000 ms) y d=4 (7.200.000 ms)
+    const stepQ = hq >= 0 ? -1 : 1;
+    const cellD2Before = `${hq + stepQ * 2},${hr}`;
+    const cellD2After = `${hq},${hr >= 0 ? hr - 2 : hr + 2}`;
+    const cellD3Known = `${hq + stepQ * 3},${hr}`;
+    const cellD4After = `${hq + stepQ * 4},${hr}`;
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", {
+        kingdomId,
+        unitType: "espia",
+        level: 1,
+        count: 10,
+        isSpy: true,
+      });
+      await ctx.db.insert("exploredTerritories", {
+        kingdomId,
+        cellId: cellD3Known,
+        discoveredAt: T0 - 1_000,
+      });
+    });
+
+    // 1. Antes de spy_2: d=2 en mapa compacto y completo muestra 3.600s y startExploration persiste 3.600.000 ms
+    const mapBefore = await asUser.query(api.territories.getWorldMap, { kingdomId });
+    const compactBefore = await asUser.query(api.territories.getWorldMapCompact, { kingdomId });
+    const planFullD2Before = mapBefore.cells.find((c: any) => c.cellId === cellD2Before)?.explorationPlan;
+    const planCompactD2Before = compactBefore.visibleCells.find((c: any) => c.cellId === cellD2Before)?.explorationPlan;
+    expect(planFullD2Before?.durationSeconds).toBe(3600);
+    expect(planCompactD2Before?.durationSeconds).toBe(3600);
+
+    const expPre = await asUser.mutation(api.territories.startExploration, {
+      kingdomId,
+      cellId: cellD2Before,
+      spiesCount: 1,
+    });
+    expect(expPre.durationMs).toBe(3_600_000);
+    expect(expPre.completesAt).toBe(T0 + 3_600_000);
+
+    // 2. Completar prerequisito espionage_1 e investigar + completar spy_2 a través de las mutaciones reales
+    await seedCompletedTechs(t, kingdomId, ["espionage_1"]);
+    const startedSpy2 = await asUser.mutation(api.technologies.researchTechnology, {
+      kingdomId,
+      techType: "spy_2",
+    });
+    const spy2Progress = await t.run(async (ctx) =>
+      ctx.db
+        .query("technologyProgress")
+        .withIndex("by_kingdom", (q) => q.eq("kingdomId", kingdomId))
+        .filter((q) => q.eq(q.field("technologyId"), "spy_2"))
+        .first()
+    );
+    expect(spy2Progress).toBeTruthy();
+    vi.setSystemTime(startedSpy2.completesAt + 1000);
+    await t.mutation(internal.technologies.completeResearch, { progressId: spy2Progress!._id });
+
+    // Confirmar que getTechnologies expone explorationSpeedBonus = 0.10 y marchSpeedBonus = 0.05
+    const techState = await asUser.query(api.technologies.getTechnologies, { kingdomId });
+    expect(techState.modifiers.explorationSpeedBonus).toBeCloseTo(0.10, 10);
+    expect(techState.modifiers.marchSpeedBonus).toBeCloseTo(0.05, 10);
+
+    // Confirmar que la expedición en curso iniciada antes de spy_2 NO cambia retroactivamente
+    const preQueueDoc = await t.run(async (ctx) => ctx.db.get(expPre.expeditionId));
+    expect(preQueueDoc?.durationMs).toBe(3_600_000);
+    expect(preQueueDoc?.completesAt).toBe(T0 + 3_600_000);
+
+    // 3. Tras spy_2: d=2 (3.600.000 / 1.10 = 3.272.728 ms -> 3.273 s) y d=4 (7.200.000 / 1.10 = 6.545.455 ms -> 6.546 s)
+    const mapAfter = await asUser.query(api.territories.getWorldMap, { kingdomId });
+    const compactAfter = await asUser.query(api.territories.getWorldMapCompact, { kingdomId });
+
+    const planFullD2 = mapAfter.cells.find((c: any) => c.cellId === cellD2After)?.explorationPlan;
+    const planCompactD2 = compactAfter.visibleCells.find((c: any) => c.cellId === cellD2After)?.explorationPlan;
+    const planFullD4 = mapAfter.cells.find((c: any) => c.cellId === cellD4After)?.explorationPlan;
+    const planCompactD4 = compactAfter.visibleCells.find((c: any) => c.cellId === cellD4After)?.explorationPlan;
+
+    expect(planFullD2).toEqual(planCompactD2);
+    expect(planFullD2?.distance).toBe(2);
+    expect(planFullD2?.durationSeconds).toBe(3273);
+
+    expect(planFullD4).toEqual(planCompactD4);
+    expect(planFullD4?.distance).toBe(4);
+    expect(planFullD4?.durationSeconds).toBe(6546);
+
+    const tLaunch = Date.now();
+    const expD2 = await asUser.mutation(api.territories.startExploration, {
+      kingdomId,
+      cellId: cellD2After,
+      spiesCount: 1,
+    });
+    const expD2Doc = await t.run(async (ctx) => ctx.db.get(expD2.expeditionId));
+    expect(expD2.durationMs).toBe(3_272_728);
+    expect(expD2.durationSeconds).toBe(planCompactD2?.durationSeconds);
+    expect(expD2Doc?.durationMs).toBe(3_272_728);
+    expect(expD2Doc?.completesAt).toBe(tLaunch + 3_272_728);
+    expect(expD2Doc!.completesAt - expD2Doc!.startedAt).toBe(3_272_728);
+
+    const expD4 = await asUser.mutation(api.territories.startExploration, {
+      kingdomId,
+      cellId: cellD4After,
+      spiesCount: 1,
+    });
+    const expD4Doc = await t.run(async (ctx) => ctx.db.get(expD4.expeditionId));
+    expect(expD4.durationMs).toBe(6_545_455);
+    expect(expD4.durationSeconds).toBe(planCompactD4?.durationSeconds);
+    expect(expD4Doc?.durationMs).toBe(6_545_455);
+    expect(expD4Doc?.completesAt).toBe(tLaunch + 6_545_455);
+
+    // 4. Reino Vikingo con spy_2: paridad entre mostrado, validado y persistido (0.85 cultural / 1.10 tech)
+    const vik = await foundKingdom(t, "u-spy2-vik", "Reino Vikingo Spy2", "vikingos");
+    await seedBuildings(t, vik.kingdomId, { castillo: 3, universidad: 3, cuartel: 2 });
+    const vikHome = await vik.asUser.mutation(api.territories.ensureMyHomeTerritory, { kingdomId: vik.kingdomId });
+    const [vq, vr] = vikHome.homeTerritoryId!.split(",").map(Number);
+    const vikTargetD2 = `${vq + (vq >= 0 ? -2 : 2)},${vr}`;
+    await patchResources(t, vik.kingdomId, { gold: 10_000, wood: 10_000, stone: 10_000, iron: 10_000, food: 10_000 });
+    await seedCompletedTechs(t, vik.kingdomId, ["espionage_1", "spy_2"]);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("armyUnits", { kingdomId: vik.kingdomId, unitType: "espia", level: 1, count: 3, isSpy: true });
+    });
+
+    const vikCompact = await vik.asUser.query(api.territories.getWorldMapCompact, { kingdomId: vik.kingdomId });
+    const vikPlanCompact = vikCompact.visibleCells.find((c: any) => c.cellId === vikTargetD2)?.explorationPlan;
+    expect(vikPlanCompact?.durationSeconds).toBe(2782);
+
+    const vikStart = await vik.asUser.mutation(api.territories.startExploration, {
+      kingdomId: vik.kingdomId,
+      cellId: vikTargetD2,
+      spiesCount: 1,
+    });
+    expect(vikStart.durationMs).toBe(2_781_819);
+    expect(vikStart.durationSeconds).toBe(vikPlanCompact?.durationSeconds);
   });
 });

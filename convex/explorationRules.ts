@@ -77,6 +77,57 @@ export function calculateBaseExplorationCosts(distance: number): ExplorationCost
   };
 }
 
+export const MIN_EXPLORATION_DURATION_MS = EXPLORATION.MIN_DURATION_MS;
+
+/**
+ * Calcula la duración de exploración en milisegundos dividiendo por (1 + explorationSpeedBonus)
+ * y respetando el mínimo global de exploración.
+ */
+export function calculateExplorationDurationMs(
+  baseDurationMs: number,
+  explorationSpeedBonus = 0
+): number {
+  const safeBaseDurationMs = Math.max(0, Number.isFinite(baseDurationMs) ? baseDurationMs : 0);
+  const safeBonus = Math.max(0, Number.isFinite(explorationSpeedBonus) ? explorationSpeedBonus : 0);
+  const explorationSpeedMultiplier = 1 + safeBonus;
+  return Math.max(
+    MIN_EXPLORATION_DURATION_MS,
+    Math.ceil(safeBaseDurationMs / explorationSpeedMultiplier)
+  );
+}
+
+/**
+ * Fuente única de cálculo del plan de exploración (distancia, costes, bonificación cultural
+ * y bonificación tecnológica centralizada explorationSpeedBonus).
+ */
+export function computeExplorationPlan(input: {
+  distance: number;
+  civilization?: string;
+  explorationSpeedBonus?: number;
+}): ExplorationPlan {
+  const distance = Math.max(1, input.distance);
+  const baseCosts = calculateBaseExplorationCosts(distance);
+  const baseDurationMs = EXPLORATION.SECONDS_PER_HEX * distance * 1000;
+
+  // Aplicar bonificaciones pasivas culturales (Navajos: Math.floor(costeBase * 0.80), Vikingos: duration * 0.85)
+  const civExploration = applyCivilizationExploration(baseCosts, baseDurationMs, input.civilization);
+
+  // Aplicar bonificación tecnológica centralizada de velocidad de exploración
+  const durationMs = calculateExplorationDurationMs(
+    civExploration.durationMs,
+    input.explorationSpeedBonus ?? 0
+  );
+  const durationSeconds = Math.ceil(durationMs / 1000);
+
+  return {
+    distance,
+    durationSeconds,
+    durationMs,
+    costs: civExploration.costs,
+    scoutsRequired: EXPLORATION.SCOUTS_REQUIRED,
+  };
+}
+
 /**
  * Valida si una celda puede ser explorada por el reino.
  * Exige:
@@ -99,7 +150,7 @@ export function canStartExploration(input: {
   activeExpeditionsCount: number;
   worldRadius?: number;
   civilization?: string;
-  hasSpy2Tech?: boolean;
+  explorationSpeedBonus?: number;
 }): { success: true; plan: ExplorationPlan } | { success: false; error: string } {
   const worldRadius = input.worldRadius ?? MAP.RADIUS;
 
@@ -138,21 +189,12 @@ export function canStartExploration(input: {
     distance = Math.max(1, Math.min(...input.ownedCoords.map((c) => hexDistance(c, input.targetCoord))));
   }
 
-  // Costes base según la distancia logística (P22 / FASE 2)
-  const baseCosts = calculateBaseExplorationCosts(distance);
-
-  // Duración base: 1.800 s/hex × distancia logística (30 min por hexágono)
-  const baseDurationSeconds = 1800 * distance;
-  const baseDurationMs = baseDurationSeconds * 1000;
-
-  // Aplicar bonificaciones pasivas culturales (Navajos: Math.floor(costeBase * 0.80), Vikingos: duration * 0.85)
-  const civExploration = applyCivilizationExploration(baseCosts, baseDurationMs, input.civilization);
-
-  // Aplicar bonificación tecnológica 'spy_2' (Exploradores y atalayas): -10 % duración (multiplicador 0.90)
-  const techDurationMultiplier = input.hasSpy2Tech ? 0.90 : 1.0;
-  const durationMs = Math.ceil(civExploration.durationMs * techDurationMultiplier);
-  const durationSeconds = Math.ceil(durationMs / 1000);
-  const costs: ExplorationCosts = civExploration.costs;
+  const plan = computeExplorationPlan({
+    distance,
+    civilization: input.civilization,
+    explorationSpeedBonus: input.explorationSpeedBonus,
+  });
+  const costs: ExplorationCosts = plan.costs;
 
   const spiesCount = (input as any).availableSpies ?? input.availableCivil ?? 0;
   if (spiesCount < EXPLORATION.SCOUTS_REQUIRED) {
@@ -178,13 +220,7 @@ export function canStartExploration(input: {
 
   return {
     success: true,
-    plan: {
-      distance,
-      durationSeconds,
-      durationMs,
-      costs,
-      scoutsRequired: EXPLORATION.SCOUTS_REQUIRED,
-    },
+    plan,
   };
 }
 

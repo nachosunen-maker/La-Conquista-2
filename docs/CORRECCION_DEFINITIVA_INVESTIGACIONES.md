@@ -267,3 +267,51 @@ Los seis comandos fueron ejecutados en la raíz del proyecto (`/app/applet`) en 
 ## 8. CONCLUSIÓN Y CIERRE FORMAL
 
 Todas las investigaciones del catálogo producen exactamente los efectos cuantitativos y cualitativos que prometen sus definiciones en todos los subsistemas (movimiento, proyecciones, almacenamiento, construcción, duración de colas, moral, espionaje y combate), se mantiene intacto el equilibrio histórico, el mapa canónico de 7.651 hexágonos y el catálogo estricto de 135 tecnologías sin invenciones improvisadas.
+
+---
+
+## 9. CORRECCIÓN QUIRÚRGICA — BONIFICACIÓN DE EXPLORACIÓN DE `spy_2`
+
+### 9.1 Defecto diagnosticado y alcance
+- En `convex/balanceConfig.ts`, la investigación `spy_2` (*Exploradores y atalayas*) declara `+5 % velocidad de marcha y +10 % velocidad en expediciones de exploración`.
+- En `convex/territories.ts` (`executeWorldMapCompactQuery`), existía una comprobación manual directa `completedTech.includes("spy_2")` acompañada del multiplicador `const spySpeedMult = hasSpy2Tech ? 0.75 : 1;` (reducción de duración del 25 %, equivalente a +33,33 % de velocidad en lugar del +10 % prometido) y una fórmula de costes/tiempos desconectada de `convex/explorationRules.ts`.
+- En `convex/explorationRules.ts` (`canStartExploration`), existía el multiplicador `hasSpy2Tech ? 0.90 : 1.0` (descuento directo del 10 % sobre duración en vez de división por velocidad `1 + explorationSpeedBonus`), alimentado también por comprobaciones manuales `completedTech.includes("spy_2")` en `getWorldMap` y `executeExplorationStart` (`convex/territories.ts`).
+
+### 9.2 Implementación centralizada y fórmula matemática
+1. **Centralización tecnológica (`convex/balanceConfig.ts` y `convex/technologyRules.ts`)**:
+   - Se añadió la clave `"explorationSpeed"` a `TechnologyEffectKey` y el soporte opcional `secondaryEffects` en `TechnologyBalance`.
+   - `spy_2` mantiene intactos sus costes, requisitos, duración, `effect: { key: "marchSpeed", value: 0.05, ... }` y añade `secondaryEffects: [{ key: "explorationSpeed", value: 0.10 }]` (sin modificar `TECH_EFFECT_CAPS` ni otras tecnologías).
+   - `TechnologyModifiers` expone `explorationSpeedBonus: number`, calculado únicamente en `computeTechnologyModifiers(completedIds)` (idempotente, valor `0` sin `spy_2` y `0.10` con `spy_2` completada).
+2. **Fórmula única de duración (`convex/explorationRules.ts`)**:
+   - Se exportan `MIN_EXPLORATION_DURATION_MS = EXPLORATION.MIN_DURATION_MS` (`60_000` ms), `calculateExplorationDurationMs(baseDurationMs, explorationSpeedBonus)` y `computeExplorationPlan`:
+     ```ts
+     const explorationSpeedMultiplier = 1 + explorationSpeedBonus;
+     const durationMs = Math.max(
+       MIN_EXPLORATION_DURATION_MS,
+       Math.ceil(baseDurationMs / explorationSpeedMultiplier)
+     );
+     ```
+   - Valores verificados exactos:
+     - `3_600_000 ms` sin `spy_2` → `3_600_000 ms` (`3.600 s`)
+     - `3_600_000 ms` con `spy_2` → `3_272_728 ms` (`3.273 s`)
+     - `7_200_000 ms` sin `spy_2` → `7_200_000 ms` (`7.200 s`)
+     - `7_200_000 ms` con `spy_2` → `6_545_455 ms` (`6.546 s`)
+3. **Consumidores unificados en `convex/territories.ts`**:
+   - Se eliminaron todas las comprobaciones manuales `completedTech.includes("spy_2")` y `spySpeedMult = hasSpy2Tech ? 0.75 : 1`.
+   - `getWorldMap`, `executeWorldMapCompactQuery` (`getWorldMapCompact`) y `executeExplorationStart` (`startExploration` / `startSpyExploration`) utilizan ahora `computeTechnologyModifiers(completedTech).explorationSpeedBonus` y la misma función `computeExplorationPlan`, garantizando paridad exacta entre el plan mostrado al jugador, la validación y los campos persistidos `durationMs` / `completesAt` en `explorationQueue`, sin alterar expediciones ya en curso ni romper bonificaciones culturales (Vikingos `0.85`, Navajos `0.80` costes).
+
+### 9.3 Archivos modificados
+- `convex/balanceConfig.ts`
+- `convex/technologyRules.ts`
+- `convex/explorationRules.ts`
+- `convex/territories.ts`
+- `convex/explorationPureTests.ts`
+- `convex/researchFixes.test.ts`
+
+### 9.4 Registro de verificación tras la corrección quirúrgica
+- `npx vitest run convex/researchFixes.test.ts`: **código de salida `0`** — `1 passed (1)`, **`12 passed (12)`** (`7.56s`), incluyendo las nuevas pruebas unitarias y de integración `convex-test` en `§6`.
+- `npm run test:integration` (`vitest run`): **código de salida `0`** — **`21 passed (21)`**, **`326 passed (326)`**, `0 failed`, `0 skipped` (`64.91s`).
+- `npm run test` (`tsx scripts/runEconomicTests.ts`): **código de salida `0`** — **`263 passed`**, `0 failed` (`233 ms`).
+- `npm run lint` (`tsc --noEmit && tsc --noEmit -p convex`): **código de salida `0`** (`0` errores).
+- `npm run build` (`tsc && vite build`): **código de salida `0`**, `built in 1.30s` (`dist/assets/index-miMHf4kO.js`: `1,034.33 kB`).
+
