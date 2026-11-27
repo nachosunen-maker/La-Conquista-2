@@ -291,9 +291,11 @@ describe("Investigación (Bloque C)", () => {
 });
 
 describe("Liquidación económica (Bloque D)", () => {
-  test("tras un día real produce los cinco recursos, recauda impuestos y no crece sin viviendas libres", async () => {
+  test("tras un día real produce los cinco recursos, recauda impuestos y no crece cuando las viviendas están llenas", async () => {
     const t = createTestBackend();
     const { asUser, kingdomId } = await foundKingdom(t, "user-a", "Reino A");
+    // Con viviendas en nivel 2 (2.000 plazas) y población inicial de 2.000, no hay plazas libres
+    await setBuildingLevel(t, kingdomId, "viviendas", 2);
     const before = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-a" });
     const territories = await asUser.query(api.territories.getKingdomTerritories, { kingdomId });
     const homeTerrain = territories.territories.find((cell) => cell.isHome)?.terrain as keyof typeof TERRAINS | undefined;
@@ -331,10 +333,27 @@ describe("Liquidación económica (Bloque D)", () => {
 
   test("desbloqueo de población por ampliación de viviendas sin nacimientos retroactivos (Bloque 25)", async () => {
     const t = createTestBackend();
-    // 1. Fundar reino de prueba con 2.000 habitantes y 2.000 plazas (Viviendas 20, Castillo 1)
+    // 1. Fundar reino de prueba con 2.000 habitantes y Viviendas nivel 20 -> 20.000 plazas (1.000/nivel)
     const { asUser, kingdomId } = await foundKingdom(t, "user-demografia", "Reino Demografía");
     const full0 = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-demografia" });
     expect(full0?.population?.total).toBe(2000);
+    const constStateInit = await asUser.query(api.buildings.getConstructionState, { kingdomId });
+    expect(constStateInit.residentialCapacity).toBe(20_000);
+
+    // Verificar bloqueo de Castillo en Viviendas 20 -> 21 (requiere Castillo 3) y capacidad 21.000 al subirlo
+    await expect(
+      asUser.mutation(api.kingdoms.startConstruction, { kingdomId, buildingType: "viviendas" })
+    ).rejects.toThrow(/Castillo/);
+
+    await setBuildingLevel(t, kingdomId, "castillo", 3);
+    await setBuildingLevel(t, kingdomId, "viviendas", 21);
+    const constState21 = await asUser.query(api.kingdoms.getConstructionState, { kingdomId });
+    expect(constState21.residentialCapacity).toBe(21_000);
+    expect(constState21.buildingLevels.castillo).toBe(3);
+    expect(constState21.buildingLevels.viviendas).toBe(21);
+
+    // Ajustar viviendas a nivel 2 (2.000 plazas) para probar tope lleno en 2.000 hab y desbloqueo hacia nivel 3 (3.000 plazas)
+    await setBuildingLevel(t, kingdomId, "viviendas", 2);
     const constState0 = await asUser.query(api.kingdoms.getConstructionState, { kingdomId });
     expect(constState0.residentialCapacity).toBe(2000);
 
@@ -350,44 +369,36 @@ describe("Liquidación económica (Bloque D)", () => {
     expect(full1?.population?.available).toBe(250);
     expect(full1?.population?.birthFraction ?? 0).toBe(0);
 
-    // 4. Mejorar Castillo y Viviendas respetando restricciones (Viviendas 21 requiere Castillo 21)
-    await expect(
-      asUser.mutation(api.kingdoms.startConstruction, { kingdomId, buildingType: "viviendas" })
-    ).rejects.toThrow(/Castillo/);
-
-    await setBuildingLevel(t, kingdomId, "castillo", 21);
-    await setBuildingLevel(t, kingdomId, "viviendas", 21);
-
-    // 5. Completar ampliación y comprobar que la capacidad aumenta a 2.100 (100 plazas libres)
+    // 4. Ampliar viviendas de nivel 2 a nivel 3 (3.000 plazas -> 1.000 plazas libres)
+    await setBuildingLevel(t, kingdomId, "viviendas", 3);
     const constState1 = await asUser.query(api.kingdoms.getConstructionState, { kingdomId });
-    expect(constState1.residentialCapacity).toBe(2100);
-    expect(constState1.buildingLevels.castillo).toBe(21);
-    expect(constState1.buildingLevels.viviendas).toBe(21);
+    expect(constState1.residentialCapacity).toBe(3000);
+    expect(constState1.buildingLevels.viviendas).toBe(3);
 
     // Liquidación inmediata (deltaT = 0 tras la ampliación): no hay nacimientos retroactivos
     const settledImmediate = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
     expect(settledImmediate.population?.births).toBe(0);
 
-    // 6. Avanzar 1 hora tras la ampliación: el crecimiento se reanuda a futuro
+    // 5. Avanzar 1 hora tras la ampliación: el crecimiento se reanuda a futuro
     const ONE_HOUR = 3600 * 1000;
     vi.setSystemTime(T0 + DAY + ONE_HOUR);
     const settled1h = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
 
-    // 7. Confirmar nacimientos correspondientes estrictamente a 1 hora (21 hab), sin retroactividad del día anterior
+    // 6. Confirmar nacimientos correspondientes estrictamente a 1 hora (21 hab), sin retroactividad del día anterior
     expect(settled1h.population?.births).toBe(21);
     expect(settled1h.population?.growthCappedByHousing).toBe(false);
     const full1h = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-demografia" });
     expect(full1h?.population?.total).toBe(2021);
     expect(full1h?.population?.available).toBe(271);
 
-    // Avanzar hasta completar el segundo día: llega al tope de 2.100 (+79 hab)
-    vi.setSystemTime(T0 + 2 * DAY);
-    const settled2d = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
-    expect(settled2d.population?.births).toBe(79);
-    expect(settled2d.population?.growthCappedByHousing).toBe(true);
-    const full2d = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-demografia" });
-    expect(full2d?.population?.total).toBe(2100);
-    expect(full2d?.population?.available).toBe(350);
+    // Avanzar hasta superar la capacidad de 3.000 (+979 hab): llega exactamente al tope de 3.000
+    vi.setSystemTime(T0 + 4 * DAY);
+    const settledCap = await asUser.mutation(api.economy.settleKingdomEconomy, { kingdomId });
+    expect(settledCap.population?.births).toBe(979);
+    expect(settledCap.population?.growthCappedByHousing).toBe(true);
+    const fullCap = await asUser.query(api.kingdoms.getKingdomFull, { userId: "user-demografia" });
+    expect(fullCap?.population?.total).toBe(3000);
+    expect(fullCap?.population?.available).toBe(1250);
   });
 
   test("capacidad de almacén: no supera el tope, descarta excedente, conserva reservas previas y amplía con Mercado (M-06)", async () => {
@@ -432,6 +443,9 @@ describe("Liquidación económica (Bloque D)", () => {
   test("inanición prolongada en base de datos: transiciones de fase, bajas civiles, deserción militar e idempotencia (D-48)", async () => {
     const t = createTestBackend();
     const { asUser, kingdomId } = await foundKingdom(t, "user-starve", "Reino Inanición");
+
+    // Ajustar viviendas a nivel 2 (2.000 plazas) para mantener fijo el censo en 2.000 durante el ensayo de inanición
+    await setBuildingLevel(t, kingdomId, "viviendas", 2);
 
     // Preparar estado de hambruna total:
     // - Comida en 0

@@ -2167,7 +2167,7 @@ function KingdomOverviewContent() {
                   {capacityPop !== null ? capacityPop.toLocaleString('es-ES') : 'Sin dato'}
                 </span>
                 <span className="text-[10px] text-[#695d4c] block mt-0.5">
-                  plazas en viviendas (100 por nivel)
+                  plazas en viviendas ({(constructionState?.catalog?.viviendas?.residentialCapacityPerLevel ?? BUILDINGS.viviendas.residentialCapacityPerLevel).toLocaleString('es-ES')} por nivel)
                 </span>
               </div>
               <div className="bg-[#19150f] p-3 rounded-lg border border-[#2c2419]">
@@ -2611,7 +2611,7 @@ function KingdomOverviewContent() {
                   const professionJob = staticConfig?.professionJob;
                   const effect = entry
                     ? entry.residentialCapacityPerLevel > 0
-                      ? `+${entry.residentialCapacityPerLevel} plazas de vivienda por nivel`
+                      ? `+${entry.residentialCapacityPerLevel.toLocaleString('es-ES')} plazas de vivienda por nivel`
                       : type !== 'mercado' && entry.workerCapacityPerLevel > 0 && (entry.jobType || professionJob)
                         ? `+${entry.workerCapacityPerLevel} trabajadores por nivel${entry.jobType ? ` (${jobNames[entry.jobType] ?? entry.jobType})` : professionJob ? ` (${professionNames[professionJob] ?? professionJob})` : ''}`
                         : entry.role

@@ -179,7 +179,7 @@ export interface BuildingBalance {
 
 export const BUILDINGS: Readonly<Record<string, BuildingBalance>> = {
   castillo: { label: "Castillo", baseCosts: { gold: 500, wood: 800, stone: 800, iron: 100, food: 0 }, baseDurationSeconds: 180, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 0, jobType: null, requirements: {}, role: "Desbloqueos y administración" },
-  viviendas: { label: "Viviendas", baseCosts: { gold: 40, wood: 100, stone: 20, iron: 0, food: 0 }, baseDurationSeconds: 5, residentialCapacityPerLevel: 100, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 1 }, role: "Capacidad residencial" },
+  viviendas: { label: "Viviendas", baseCosts: { gold: 40, wood: 100, stone: 20, iron: 0, food: 0 }, baseDurationSeconds: 5, residentialCapacityPerLevel: 1000, workerCapacityPerLevel: 0, jobType: null, requirements: { castillo: 1 }, role: "Capacidad residencial" },
   granja: { label: "Granja", baseCosts: { gold: 30, wood: 80, stone: 20, iron: 0, food: 0 }, baseDurationSeconds: 10, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 100, jobType: "agriculture", requirements: { castillo: 1 }, role: "Agricultura" },
   aserradero: { label: "Aserradero", baseCosts: { gold: 40, wood: 100, stone: 30, iron: 0, food: 0 }, baseDurationSeconds: 10, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 80, jobType: "wood", requirements: { castillo: 1 }, role: "Madera" },
   cantera: { label: "Cantera", baseCosts: { gold: 50, wood: 80, stone: 80, iron: 0, food: 0 }, baseDurationSeconds: 15, residentialCapacityPerLevel: 0, workerCapacityPerLevel: 80, jobType: "stone", requirements: { castillo: 1 }, role: "Piedra" },
@@ -229,7 +229,7 @@ export const CONSTRUCTION = {
  */
 export const INITIAL_BUILDINGS: Readonly<Record<string, number>> = {
   castillo: 1,
-  viviendas: 20, // 2.000 habitantes / 100 por nivel
+  viviendas: 20, // 20 niveles × 1.000 plazas/nivel = 20.000 plazas residenciales (censo inicial 2.000)
   granja: 11, // 1.100 agricultores / 100 por nivel
   aserradero: 4, // 250 leñadores / 80 por nivel
   cantera: 4, // 250 canteros / 80 por nivel

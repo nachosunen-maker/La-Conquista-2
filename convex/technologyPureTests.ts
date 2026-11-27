@@ -971,8 +971,8 @@ export function runTechnologyTests(): TechnologyTestResult[] {
       TECHNOLOGIES.length === 191 &&
       housingNodes.length === 4 &&
       Math.abs(modHousing.housingCapacityBonus - 0.24) < 1e-9 &&
-      capNoTech === 200 &&
-      capWithBonus === 248;
+      capNoTech === 2000 &&
+      capWithBonus === 2480;
     results.push({
       category: "INTEGRIDAD DEL CATÁLOGO (AMPLIACIÓN 191)",
       test: "30. Exactamente 191 tecnologías; housingCapacity tiene 4 nodos universales (+24 %) y escala capacidad residencial",

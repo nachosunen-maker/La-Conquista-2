@@ -1069,11 +1069,11 @@ describe("§7 — Ampliación de 56 tecnologías (191 totales), niveles 6–8, 3
     const kHousing = await foundKingdom(t, "u-housing", "Reino Residencial", "romanos");
     await seedBuildings(t, kHousing.kingdomId, { castillo: 8, universidad: 8, viviendas: 20 });
     const baseState = await kHousing.asUser.query(api.buildings.getConstructionState, { kingdomId: kHousing.kingdomId });
-    expect(baseState.residentialCapacity).toBe(2000);
+    expect(baseState.residentialCapacity).toBe(20_000);
 
     await seedCompletedTechs(t, kHousing.kingdomId, ["housing_1", "housing_2", "housing_3", "housing_4"]);
     const boostedState = await kHousing.asUser.query(api.buildings.getConstructionState, { kingdomId: kHousing.kingdomId });
-    expect(boostedState.residentialCapacity).toBe(2480); // 2000 * 1.24 = 2480
+    expect(boostedState.residentialCapacity).toBe(24_800); // 20000 * 1.24 = 24800
 
     // 2) unitEfficiencySiege real en batalla (tactics_all NO altera asedio; siege_1 + siege_2 + tech_civ_romanos_e sí)
     const siegeComp = { ...emptyComposition(), asedio: 30, trabuchet_traccion: 15 };

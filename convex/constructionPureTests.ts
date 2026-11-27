@@ -317,8 +317,26 @@ export function runConstructionValidationTests(): ConstructionTestResult[] {
     },
     {
       test: "Los edificios fundacionales alojan el censo inicial (P10/P19) y emplean la distribución inicial de trabajadores",
-      passed: initialResidential >= POPULATION.INITIAL && initialWorkersCovered,
-      details: `Capacidad residencial inicial ${initialResidential} ≥ ${POPULATION.INITIAL}: ${initialResidential >= POPULATION.INITIAL}; capacidades laborales cubren la distribución inicial: ${initialWorkersCovered}`,
+      passed: initialResidential === 20_000 && initialResidential >= POPULATION.INITIAL && initialWorkersCovered,
+      details: `Capacidad residencial inicial ${initialResidential} (viviendas nv.20 × 1.000) ≥ ${POPULATION.INITIAL}: ${initialResidential >= POPULATION.INITIAL}; capacidades laborales cubren la distribución inicial: ${initialWorkersCovered}`,
+    },
+    {
+      test: "Regla de capacidad residencial de 1.000 habitantes por nivel de viviendas (1..200, suma múltiple y validación)",
+      passed:
+        BUILDINGS.viviendas.residentialCapacityPerLevel === 1000 &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 1 }]) === 1000 &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 2 }]) === 2000 &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 5 }]) === 5000 &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 10 }]) === 10_000 &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 20 }]) === 20_000 &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 50 }]) === 50_000 &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 100 }]) === 100_000 &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 200 }]) === 200_000 &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 3 }, { buildingType: "viviendas", level: 5 }]) === 8000 &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 0 }]) === null &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 201 }]) === null &&
+        calculateResidentialCapacity([{ buildingType: "viviendas", level: 2.5 }]) === null,
+      details: `Por nivel: ${BUILDINGS.viviendas.residentialCapacityPerLevel}; nv.20=${calculateResidentialCapacity([{ buildingType: "viviendas", level: 20 }])}; nv.200=${calculateResidentialCapacity([{ buildingType: "viviendas", level: 200 }])}`,
     },
     {
       test: "Finalización conserva edificios y sólo permite crear nivel 1 o subir un nivel existente hasta 200",

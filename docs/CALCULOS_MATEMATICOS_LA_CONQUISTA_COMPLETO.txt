@@ -82,11 +82,10 @@ y validados mediante la batería completa de pruebas automatizadas (200/200 supe
       M_civ = 0.90 para Romanos (-10 % duración); 1.0 para el resto
       M_prof = 1.0 - (0.01 * floor(constructores / 10)), mínimo 0.80
 - Capacidad residencial (calculateResidentialCapacity):
-    * Casas:    100 habitantes / nivel
-    * Castillo:  50 habitantes / nivel
-    * Choza:     20 habitantes / nivel
+    * Viviendas (viviendas): 1.000 habitantes / nivel (BUILDINGS.viviendas.residentialCapacityPerLevel = 1000)
+    * Fórmula: Cap_base = suma(niveles_viviendas) * 1.000; Cap_con_tec = round(Cap_base * (1 + housingCapacityBonus)); Cap_efectiva = ceil(Cap_con_tec * M_civ_residencial)
 - Archivos fuente: convex/buildingRules.ts, convex/balanceConfig.ts.
-- Pruebas: convex/constructionPureTests.ts.
+- Pruebas: convex/constructionPureTests.ts, convex/residentialCapacity1000.test.ts.
 
 --------------------------------------------------------------------------------
 5. INVESTIGACIÓN Y TECNOLOGÍAS

@@ -75,11 +75,10 @@ Este documento recopila las fórmulas matemáticas, constantes numéricas y par�
   - Romanos: $M_{\text{civ}} = 0.90$ (−10 % duración).
   - Profesión constructores: hasta −20 % de duración adicional.
 - **Vivienda / Capacidad residencial (`calculateResidentialCapacity`)**:
-  - Casas: 100 habitantes / nivel.
-  - Castillo: 50 habitantes / nivel.
-  - Choza: 20 habitantes / nivel.
+  - Viviendas (`viviendas`): 1.000 habitantes / nivel (`BUILDINGS.viviendas.residentialCapacityPerLevel = 1000`).
+  - Fórmula: $\text{Cap}_{\text{base}} = \sum \text{niveles}_{\text{viviendas}} \times 1.000$; $\text{Cap}_{\text{tec}} = \text{round}(\text{Cap}_{\text{base}} \times (1 + \text{housingCapacityBonus}))$; $\text{Cap}_{\text{efectiva}} = \lceil \text{Cap}_{\text{tec}} \times M_{\text{civ\_residencial}} \rceil$.
 - **Archivos**: `convex/buildingRules.ts`, `convex/balanceConfig.ts`.
-- **Prueba**: `convex/constructionPureTests.ts`.
+- **Pruebas**: `convex/constructionPureTests.ts`, `convex/residentialCapacity1000.test.ts`.
 
 ---
 

@@ -310,9 +310,9 @@ describe("Punto 5 — Escalado funcional real de todos los edificios en niveles 
     for (let level = 1; level <= 200; level++) {
       // 1. Viviendas: capacidad residencial lineal + impacto real en sobrecupo y crecimiento de población
       const baseBeds = calculateResidentialCapacity([{ buildingType: "viviendas", level }], 0)!;
-      expect(baseBeds).toBe(level * 100);
+      expect(baseBeds).toBe(level * 1000);
       expect(calculateResidentialCapacity([{ buildingType: "viviendas", level }], TECH_EFFECT_CAPS.housingCapacity)).toBe(
-        Math.round(level * 100 * 1.3)
+        Math.round(level * 1000 * 1.3)
       );
 
       const simAtCap = simulateExtendedEconomy(
@@ -390,14 +390,14 @@ describe("Punto 5 — Escalado funcional real de todos los edificios en niveles 
     // Valores exactos de Viviendas con pasiva de Chinos en nivel 200 y descarte por almacén si Mercado es bajo
     const simChinos = simulateExtendedEconomy(
       makeEconomyInput({
-        population: 27_300,
-        unassignedCivil: 27_300,
+        population: 273_000,
+        unassignedCivil: 273_000,
         residentialCapacity: calculateResidentialCapacity([{ buildingType: "viviendas", level: 200 }], TECH_EFFECT_CAPS.housingCapacity),
         civilization: "chinos",
         buildingLevels: { castillo: 200, viviendas: 200, mercado: 200 },
       })
     );
-    expect(simChinos.happiness.dailyDelta).toBe(0); // 26.000 * 1,05 = 27.300 -> sin hacinamiento
+    expect(simChinos.happiness.dailyDelta).toBe(0); // 260.000 * 1,05 = 273.000 -> sin hacinamiento
 
     const aserradero200Jobs = calculateJobCapacities([{ buildingType: "aserradero", level: 200 }])!;
     const simCappedByMercado1 = simulateExtendedEconomy(
@@ -931,7 +931,7 @@ describe("Punto 5 — Integración completa en backend Convex (199 -> 200 y rech
     expect(state.buildingLevels.castillo).toBe(200);
     expect(state.buildingLevels.mercado).toBe(200);
     expect(state.buildingLevels.viviendas).toBe(200);
-    expect(state.residentialCapacity).toBe(20_000);
+    expect(state.residentialCapacity).toBe(200_000);
     expect(state.catalogForLevels.castillo.nextLevel).toBeNull();
     expect(state.catalogForLevels.castillo.castleCapSatisfied).toBe(true);
     expect(state.catalogForLevels.viviendas.nextLevel).toBeNull();
